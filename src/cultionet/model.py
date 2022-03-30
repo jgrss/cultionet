@@ -38,6 +38,25 @@ def fit(
     stochastic_weight_avg: T.Optional[bool] = False
 ):
     """Fits a model
+
+    Args:
+        dataset (EdgeDataset): The dataset to fit on.
+        ckpt_file (str | Path): The checkpoint file path.
+        val_frac (Optional[float]): The fraction of data to use for model validation.
+        batch_size (Optional[int]): The data batch size.
+        filters (Optional[int]): The number of initial model filters.
+        learning_rate (Optional[float]): The model learning rate.
+        epochs (Optional[int]): The number of epochs.
+        save_top_k (Optional[int]): The number of top-k model checkpoints to save.
+        early_stopping_patience (Optional[int]): The patience (epochs) before early stopping.
+        early_stopping_min_delta (Optional[float]): The minimum change threshold before early stopping.
+        gradient_clip_val (Optional[float]): A gradient clip limit.
+        random_seed (Optional[int]): A random seed.
+        reset_model (Optional[bool]): Whether to reset an existing model. Otherwise, pick up from last epoch of
+            an existing model.
+        auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
+        device (Optional[str]): The device to train on. Choices are ['cpu', 'gpu'].
+        stochastic_weight_avg (Optional[bool]): Whether to use stochastically weighted averaging.
     """
     ckpt_file = Path(ckpt_file)
 
@@ -129,7 +148,7 @@ def fit(
 
 
 def predict(
-    predict_ds: EdgeDataset,
+    dataset: EdgeDataset,
     ckpt_file: T.Union[str, Path],
     filters: T.Optional[int] = 32,
     device: T.Union[str, bytes] = 'gpu',
@@ -138,11 +157,21 @@ def predict(
     lit_model: T.Optional[CultioLitModel] = None
 ) -> T.Tuple[np.ndarray, CultioLitModel]:
     """Applies a model to predict image labels|values
+
+    Args:
+        dataset (EdgeDataset): The dataset to predict on.
+        ckpt_file (str | Path): The checkpoint file path.
+        filters (Optional[int]): The number of initial model filters.
+        device (Optional[str]): The device to predict on. Choices are ['cpu', 'gpu'].
+        w (Optional[int]): The ``rasterio.windows.Window`` to write to.
+        w_pad (Optional[int]): The ``rasterio.windows.Window`` to predict on.
+        lit_model (Optional[CultioLitModel]): A model to predict with. If not given, the model is loaded
+            from the checkpoint file.
     """
     ckpt_file = Path(ckpt_file)
 
     data_module = EdgeDataModule(
-        predict_ds=predict_ds, batch_size=1, num_workers=0
+        predict_ds=dataset, batch_size=1, num_workers=0
     )
 
     trainer_kwargs = dict(
@@ -158,8 +187,8 @@ def predict(
     )
 
     lit_kwargs = dict(
-        num_features=predict_ds.num_features,
-        num_time_features=predict_ds.num_time_features,
+        num_features=dataset.num_features,
+        num_time_features=dataset.num_time_features,
         filters=filters
     )
 

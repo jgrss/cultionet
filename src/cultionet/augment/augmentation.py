@@ -11,10 +11,57 @@ from tsaug import AddNoise, Drift, TimeWarp
 from torch_geometric.data import Data
 
 
+def feature_stack_to_tsaug(
+    x: np.ndarray, ntime: int, nbands: int, nrows: int, ncols: int
+) -> np.ndarray:
+    """Reshape from (T*C x H x W) -> (H*W x T X C)
+    where,
+        T = time
+        C = channels / bands / variables
+        H = height
+        W = width
+
+    Args:
+        x: The array to reshape. The input shape is (T*C x H x W).
+        ntime: The number of array time periods (T).
+        nbands: The number of array bands/channels (C).
+        nrows: The number of array rows (H).
+        ncols: The number of array columns (W).
+    """
+    return (
+        x
+        .transpose(1, 2, 0)
+        .reshape(nrows * ncols, ntime*nbands)
+        .reshape(nrows * ncols, ntime, nbands)
+    )
+
+
+def tsaug_to_feature_stack(x: np.ndarray, nfeas: int, nrows: int, ncols: int) -> np.ndarray:
+    """Reshape from (H*W x T X C) -> (T*C x H x W)
+        where,
+            T = time
+            C = channels / bands / variables
+            H = height
+            W = width
+
+        Args:
+            x: The array to reshape. The input shape is (H*W x T X C).
+            nfeas: The number of array features (time x channels).
+            nrows: The number of array rows (height).
+            ncols: The number of array columns (width).
+        """
+    return (
+        x
+        .reshape(nrows * ncols, nfeas)
+        .T.reshape(nfeas, nrows, ncols)
+    )
+
+
 def augment_time(
     ldata: LabeledData,
     p: T.Any,
     xaug: np.ndarray,
+    ntime: int,
     nbands: int,
     add_noise: bool,
     warper: T.Union[AddNoise, Drift, TimeWarp]
@@ -26,29 +73,30 @@ def augment_time(
     xseg = xaug[:, min_row:max_row, min_col:max_col].copy()
     seg = ldata.segments[min_row:max_row, min_col:max_col].copy()
     mask = np.uint8(seg == p.label)[np.newaxis]
-    
-    ntime, nrows, ncols = xseg.shape
-    # Reshape from (T x H x W) -> (H*W x T X C)
-    xseg = (xseg.transpose(1, 2, 0)
-            .reshape(nrows*ncols, ntime)
-            .reshape(nrows*ncols, int(ntime/nbands), nbands))
 
-    # if xseg.shape[1] < VegetationIndices().n_vis:
-    #     raise ValueError('The time series stack should have 3 layers.')
+    # xseg shape = (ntime*nbands x nrows x ncols)
+    xseg_original = xseg.copy()
+    nfeas, nrows, ncols = xseg.shape
+    assert nfeas == int(ntime*nbands), 'The array feature dimensions do not match the expected shape.'
+    xseg = feature_stack_to_tsaug(xseg, ntime, nbands, nrows, ncols)
+
     # Warp the segment
     xseg_warped = warper.augment(xseg)
     if add_noise:
         noise_warper = AddNoise(scale=np.random.uniform(low=0.01, high=0.05))
         xseg_warped = noise_warper.augment(xseg_warped)
-    # Reshape back from (H*W x T x C) -> (T x H x W)
-    xseg_warped = (xseg_warped.transpose(0, 2, 1)
-                   .reshape(nrows*ncols, ntime)
-                   .T.reshape(ntime, nrows, ncols)
-                   .clip(0, 1))
-    xseg = xseg.reshape(nrows*ncols, ntime).T.reshape(ntime, nrows, ncols)
+    # Reshape back from (H*W x T x C) -> (T*C x H x W)
+    xseg_warped = tsaug_to_feature_stack(
+        xseg_warped, nfeas, nrows, ncols
+    ).clip(0, 1)
+    
+    # Ensure reshaping back to original values
+    # assert np.allclose(xseg_original, tsaug_to_feature_stack(xseg, nfeas, nrows, ncols))
 
     # Insert back into full array
-    xaug[:, min_row:max_row, min_col:max_col] = np.where(mask == 1, xseg_warped, xseg)
+    xaug[:, min_row:max_row, min_col:max_col] = np.where(
+        mask == 1, xseg_warped, xseg_original
+    )
 
     return xaug
 
@@ -56,6 +104,7 @@ def augment_time(
 def augment(
     ldata: LabeledData,
     aug: str,
+    ntime: int,
     nbands: int,
     k: int = 3,
     **kwargs
@@ -65,8 +114,6 @@ def augment(
     x = ldata.x
     y = ldata.y
     bdist = ldata.bdist
-    ntime_features = x.shape[0]
-
     xaug = x.copy()
 
     label_dtype = 'float' if 'float' in y.dtype.name else 'int'
@@ -79,7 +126,7 @@ def augment(
         # Warp each segment
         for p in ldata.props:
             xaug = augment_time(
-                ldata, p, xaug, nbands, True,
+                ldata, p, xaug, ntime, nbands, True,
                 TimeWarp(
                     n_speed_change=np.random.randint(low=1, high=3),
                     max_speed_ratio=np.random.uniform(low=1.1, high=3.0),
@@ -93,7 +140,7 @@ def augment(
         # Warp each segment
         for p in ldata.props:
             xaug = augment_time(
-                ldata, p, xaug, nbands, False,
+                ldata, p, xaug, ntime, nbands, False,
                 AddNoise(scale=np.random.uniform(low=0.01, high=0.05))
             )
         yaug = y.copy()
@@ -103,7 +150,7 @@ def augment(
         # Warp each segment
         for p in ldata.props:
             xaug = augment_time(
-                ldata, p, xaug, nbands, True,
+                ldata, p, xaug, ntime, nbands, True,
                 Drift(
                     max_drift=np.random.uniform(low=0.05, high=0.1),
                     n_drift_points=int(xaug.shape[0] / 2.0),
@@ -116,9 +163,11 @@ def augment(
     elif 'rot' in aug:
         deg = int(aug.replace('rot', ''))
 
-        deg_dict = {90: cv2.ROTATE_90_CLOCKWISE,
-                    180: cv2.ROTATE_180,
-                    270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+        deg_dict = {
+            90: cv2.ROTATE_90_CLOCKWISE,
+            180: cv2.ROTATE_180,
+            270: cv2.ROTATE_90_COUNTERCLOCKWISE
+        }
 
         xaug = np.zeros((xaug.shape[0], *cv2.rotate(np.float32(x[0]), deg_dict[deg]).shape), dtype=xaug.dtype)
 
@@ -140,8 +189,9 @@ def augment(
     elif 'flip' in aug:
         if aug == 'flipfb':
             # Reverse the channels
-            for b in range(0, xaug.shape[0], nbands):
-                xaug[b:b+nbands] = xaug[b:b+nbands][::-1]
+            for b in range(0, xaug.shape[0], ntime):
+                # Get the slice for the current band, n time steps
+                xaug[b:b+ntime] = xaug[b:b+ntime][::-1]
             yaug = y.copy()
             bdist_aug = bdist.copy()
         else:
@@ -209,6 +259,7 @@ def augment(
         edge_indices,
         edge_attrs,
         xy,
+        ntime=ntime,
         nbands=nbands,
         height=height,
         width=width,

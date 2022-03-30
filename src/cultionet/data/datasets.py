@@ -45,7 +45,7 @@ class EdgeDataset(Dataset):
         """Get the number of time features
         """
         data = self[0]
-        return int(data.nbands)
+        return int(data.ntime)
 
     @property
     def raw_file_names(self):
