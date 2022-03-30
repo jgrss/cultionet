@@ -259,6 +259,7 @@ def persist_dataset(args):
             # Get the centroid coordinates of the grid
             lon, lat = get_centroid_coords(df_grids.centroid, dst_crs='epsg:4326')
 
+            # TODO: allow user to specify start/end dates
             if lat > 0:
                 start_date = '01-01'
                 end_date = '01-01'

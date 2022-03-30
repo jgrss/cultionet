@@ -5,8 +5,8 @@ image_vis:
 
 # The regions to process (start, end)
 regions:
-  - 153
-  - 153
+  - 1
+  - 1
 
 # End years (i.e., 2020 = 2019 planting/harvest year)
 # 2019 = 2018 CDL
