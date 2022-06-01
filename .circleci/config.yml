@@ -23,12 +23,14 @@ jobs:
             pip install torch torchvision torchaudio
             pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric torch-geometric-temporal
             # Install GDAL
-            sudo add-apt-repository ppa:ubuntugis/ppa
-            sudo apt install build-essential -y
-            sudo apt update -y
-            sudo apt install libspatialindex-dev libgdal-dev gdal-bin -y
+            sudo apt install software-properties-common -y 
+            sudo add-apt-repository ppa:ubuntugis/ppa 
+            sudo apt update && sudo apt install -y
+            sudo apt install libmysqlclient-dev default-libmysqlclient-dev -y 
+            sudo apt install gdal-bin libgdal-dev libspatialindex-dev g++ -y
             export CPLUS_INCLUDE_PATH=/usr/include/gdal
             export C_INCLUDE_PATH=/usr/include/gdal
+            export LD_LIBRARY_PATH=/usr/local/lib 
             # Install Python GDAL
             GVAR=$(gdalinfo --version)
             GVAR2=$(echo $GVAR | sed 's/GDAL //')
