@@ -1,0 +1,84 @@
+version: 2.1
+
+orbs:
+  python: circleci/python@2.0.3
+
+jobs:
+  build_and_test:
+    docker:
+      - image: cimg/python:3.8.12
+    steps:
+      - checkout
+      - python/install-packages:
+          pkg-manager: pip
+      - run:
+          name: Install dependencies
+          command: |
+            # Create and activate a virtual environment
+            python3 -m venv venv.cultionet
+            . venv.cultionet/bin/activate
+            # Install Python packages
+            pip install -U pip setuptools wheel "cython>=0.29.*" "numpy<=1.21.0"
+            pip install --upgrade --no-cache-dir "setuptools<=58.*"
+            pip install torch torchvision torchaudio
+            pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric torch-geometric-temporal
+            # Install GDAL
+            sudo add-apt-repository ppa:ubuntugis/ppa
+            sudo apt install build-essential -y
+            sudo apt update -y
+            sudo apt install libspatialindex-dev libgdal-dev gdal-bin -y
+            export CPLUS_INCLUDE_PATH=/usr/include/gdal
+            export C_INCLUDE_PATH=/usr/include/gdal
+            # Install Python GDAL
+            GVAR=$(gdalinfo --version)
+            GVAR2=$(echo $GVAR | sed 's/GDAL //')
+            COMMA_POS=$(echo $GVAR2 | grep -b -o , | awk 'BEGIN {FS=":"}{print $1}')
+            GDAL_VERSION=$(echo ${GVAR2:0:$COMMA_POS})
+            pip install GDAL==$GDAL_VERSION
+            # Install cultionet
+            pip install .
+      - save_cache:
+          key: deps1-{{ .Branch }}-{{ checksum "setup.cfg" }}
+          paths:
+              - venv.cultionet
+      - restore_cache:
+          key: deps1-{{ .Branch }}-{{ checksum "setup.cfg" }}
+      - run:
+          name: Run tests
+          working_directory: ~/project/tests/
+          command: |
+              . /home/circleci/project/venv.cultionet/bin/activate
+              pytest
+  new_release:
+    docker:
+      - image: cimg/python:3.8.12
+    steps:
+      - checkout
+      - add_ssh_keys:
+          fingerprints:
+              - "1c:2f:26:72:77:69:09:fe:53:14:49:0d:9c:42:0f:7c"
+      - restore_cache:
+          key: deps1-{{ .Branch }}-{{ checksum "setup.cfg" }}
+      - run:
+          name: Release new version
+          command: |
+            . /home/circleci/project/venv.cultionet/bin/activate
+            pip install python-semantic-release
+            # Add credentials
+            git config user.email "jgrss@users.noreply.github.com"
+            git config user.name "CircleCI"
+            # Bump version
+            semantic-release publish
+
+workflows:
+  version: 2
+  build_workflow:
+    jobs:
+      - build_and_test
+      - new_release:
+          context: GITHUB_CREDENTIALS
+          requires:
+            - build_and_test
+          filters:
+            branches:
+              only: main
