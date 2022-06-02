@@ -1,3 +1,7 @@
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![GitHub version](https://badge.fury.io/gh/jgrss%2Fcultionet.svg)](https://badge.fury.io/gh/jgrss%2Fcultionet)
+[![CircleCI](https://circleci.com/gh/jgrss/cultionet/tree/main.svg?style=shield&circle-token=:circle-token)](https://circleci.com/gh/jgrss/cultionet)
+
 **cultionet** is a library for semantic segmentation of cultivated land using graph neural networks. 
 
 The library is built on **[PyTorch Geometric](https://pytorch-geometric.readthedocs.io)** and **[PyTorch Lightning](https://www.pytorchlightning.ai/)**. The segmentation objectives (class targets and losses) were designed following the work by [Waldner _et al._](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301115). However, there are two key differences between this library and the paper above:
@@ -294,7 +298,7 @@ pyenv activate venv.seg
 9. Install PyTorch
 > See https://pytorch.org/get-started/locally/
 ```commandline
-(venv.cultionet) pip install torch==1.10.1+cu113 torchvision==0.11.2+cu113 torchaudio===0.10.1+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html
+(venv.cultionet) pip install torch==1.10.1+cu113 torchvision==0.11.2+cu113 torchaudio==0.10.1+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html
 ```
 
 ```commandline
