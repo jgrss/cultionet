@@ -6,7 +6,7 @@ orbs:
 jobs:
   build_and_test:
     docker:
-      - image: cimg/python:3.8.12
+      - image: ufoym/deepo:pytorch-py38-cpu
     steps:
       - checkout
       - python/install-packages:
@@ -20,7 +20,8 @@ jobs:
             # Install Python packages
             pip install -U pip setuptools wheel "cython>=0.29.*" "numpy<=1.21.0"
             pip install --upgrade --no-cache-dir "setuptools<=58.*"
-            pip install torch torchvision torchaudio
+            # Comes with the Docker image
+            # pip install torch torchvision torchaudio
             pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric torch-geometric-temporal
             # Install GDAL
             sudo apt install software-properties-common -y 
@@ -50,6 +51,7 @@ jobs:
           working_directory: ~/project/tests/
           command: |
               . /home/circleci/project/venv.cultionet/bin/activate
+              pip install pytest
               pytest
   new_release:
     docker:
