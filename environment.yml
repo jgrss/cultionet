@@ -1,0 +1,15 @@
+name: cnet
+channels:
+- defaults
+dependencies:
+- python=3.8.12
+- Cython>
+- numpy<=1.21.0
+- setuptools==59.5.0
+- ipython
+- libspatialindex
+- libgdal=3.0.2
+- gdal=3.0.2
+- pip
+- pip:
+  - -r file:docs/requirements.txt
