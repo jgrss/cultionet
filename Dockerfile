@@ -31,13 +31,13 @@ RUN export C_INCLUDE_PATH="/usr/include/gdal"
 RUN export LD_LIBRARY_PATH="/usr/local/lib"
 
 # RUN pip install -U --no-cache-dir cython>=0.29.*
-# RUN pip install -U --no-cache-dir numpy==1.21.0
+RUN pip install -U --no-cache-dir numpy>=1.19.0
 
 RUN GDAL_VERSION=$(gdal-config --version | awk -F'[.]' '{print $1"."$2"."$3}') && \
     pip install GDAL==$GDAL_VERSION --no-binary=gdal
 
 # Install cultionet
-RUN pip install git+https://github.com/jgrss/geowombat.git@jgrss/docker
-RUN pip install git+https://github.com/jgrss/cultionet.git
+RUN pip install -U git+https://github.com/jgrss/geowombat.git@jgrss/docker
+RUN pip install -U git+https://github.com/jgrss/cultionet.git@jgrss/docs
 
 CMD ["cultionet"]
