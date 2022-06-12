@@ -1,4 +1,4 @@
-## Build a Docker image
+## Build a Docker image with CUDA 11.3
 
 1. Clone `cultionet`
 ```commandline
@@ -8,14 +8,8 @@ cd cultionet/
 
 2. Build the image
 
-In this command, replace <image name> with the name of the new image.
 ```commandline
-docker build -t <image name> .
-```
-
-You can also add a tag. For example, 
-```commandline
-docker build -t cultionet:v0.1 .
+docker build -t cultionet .
 ```
 
 ---
@@ -24,15 +18,15 @@ docker build -t cultionet:v0.1 .
 
 3. Run `cultionet` with the new Docker image.
 ```commandline
-docker run -it <image:tag> cultionet [commands]
+docker run -it cultionet:latest cultionet [commands]
 ```
 
 For example, to run the help printout:
 ```commandline
-docker run -it cultionet:v0.1 cultionet -h
+docker run -it cultionet:latest cultionet -h
 ```
 
-If you saved the image without a tag then:
+4. Run with GPU
 ```commandline
-docker run -it cultionet:latest cultionet -h
+docker run -it --rm --gpus=all --runtime=nvidia cultionet:latest cultionet -h
 ```

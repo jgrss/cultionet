@@ -1,14 +1,4 @@
-FROM pytorch/pytorch:1.11.0-cuda11.3-cudnn8-runtime
-
-RUN pip install -U pip setuptools wheel
-RUN pip install -U --no-cache-dir "setuptools<=58.*"
-
-# Install PyTorch Geometric and its dependencies
-RUN pip install torch-scatter \
-    torch-sparse \
-    torch-cluster \
-    torch-spline-conv \
-    torch-geometric -f https://data.pyg.org/whl/torch-1.11.0+cu113.html
+FROM nvidia/cuda:11.3.0-base-ubuntu20.04
 
 # Install GDAL
 RUN apt update -y && \
@@ -18,6 +8,15 @@ RUN apt update -y && \
     apt update -y && \
     apt install \
     build-essential \
+    python3.8 \
+    python3-pip \
+    libgeos++-dev \
+    libgeos-3.8.0 \
+    libgeos-c1v5 \
+    libgeos-dev \
+    libgeos-doc \
+    libspatialindex-dev \
+    g++ \
     libgdal-dev \
     gdal-bin \
     libproj-dev \
@@ -30,14 +29,29 @@ RUN export CPLUS_INCLUDE_PATH="/usr/include/gdal"
 RUN export C_INCLUDE_PATH="/usr/include/gdal"
 RUN export LD_LIBRARY_PATH="/usr/local/lib"
 
-# RUN pip install -U --no-cache-dir cython>=0.29.*
-RUN pip install -U --no-cache-dir numpy>=1.19.0
+RUN pip install -U pip setuptools wheel
+RUN pip install -U --no-cache-dir "setuptools<=58.*"
+RUN pip install -U --no-cache-dir cython>=0.29.*
+RUN pip install -U --no-cache-dir numpy>=1.21.0
+
+# Install PyTorch Geometric and its dependencies
+RUN pip install \
+    torch \
+    torchvision \
+    torchaudio --extra-index-url https://download.pytorch.org/whl/cu113
+
+RUN pip install \
+    torch-scatter \
+    torch-sparse \
+    torch-cluster \
+    torch-spline-conv \
+    torch-geometric -f https://data.pyg.org/whl/torch-1.11.0+cu113.html
 
 RUN GDAL_VERSION=$(gdal-config --version | awk -F'[.]' '{print $1"."$2"."$3}') && \
     pip install GDAL==$GDAL_VERSION --no-binary=gdal
 
 # Install cultionet
-RUN pip install -U git+https://github.com/jgrss/geowombat.git@jgrss/docker
-RUN pip install -U git+https://github.com/jgrss/cultionet.git@jgrss/docs
+RUN pip install --user --ignore-installed git+https://github.com/jgrss/geowombat.git
+RUN pip install --user --ignore-installed git+https://github.com/jgrss/cultionet.git@jgrss/docs
 
 CMD ["cultionet"]

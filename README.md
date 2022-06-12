@@ -1,6 +1,6 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub version](https://badge.fury.io/gh/jgrss%2Fcultionet.svg)](https://badge.fury.io/gh/jgrss%2Fcultionet)
-[![CircleCI](https://circleci.com/gh/jgrss/cultionet/tree/main.svg?style=shield&circle-token=:circle-token)](https://circleci.com/gh/jgrss/cultionet)
+[![](https://github.com/jgrss/cultionet/actions/workflows/ci.yml/badge.svg)](https://github.com/jgrss/cultionet/actions?query=workflow%3ACI)
 
 **cultionet** is a library for semantic segmentation of cultivated land using graph neural networks. 
 
