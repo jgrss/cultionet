@@ -29,4 +29,6 @@ setuptools==59.5.0
 numpydoc
 sphinx
 sphinx-automodapi
+sphinxcontrib-apidoc
 sphinxcontrib-bibtex==1.0.0
+sphinxcontrib-napoleon
