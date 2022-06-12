@@ -52,6 +52,6 @@ RUN GDAL_VERSION=$(gdal-config --version | awk -F'[.]' '{print $1"."$2"."$3}') &
 
 # Install cultionet
 RUN pip install --user --ignore-installed git+https://github.com/jgrss/geowombat.git
-RUN pip install --user --ignore-installed git+https://github.com/jgrss/cultionet.git@jgrss/docs
+RUN pip install --user --ignore-installed git+https://github.com/jgrss/cultionet.git
 
 CMD ["cultionet"]
