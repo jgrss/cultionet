@@ -245,8 +245,8 @@ stack, lit_model = cultionet.predict(
 
 ## Installation
 
-If using a GPU with CUDA 11.3, see the `cultionet` [Dockerfile](https://github.com/jgrss/cultionet/Dockerfile) and 
-[dockerfiles/README.md](https://github.com/jgrss/cultionet/dockerfiles/README.md) to build a Docker image.
+If using a GPU with CUDA 11.3, see the `cultionet` [Dockerfile](https://github.com/jgrss/cultionet/blob/main/Dockerfile) 
+and [dockerfiles/README.md](https://github.com/jgrss/cultionet/blob/main/dockerfiles/README.md) to build a Docker image.
 
 If installing from scratch locally, see the instructions below.
 
