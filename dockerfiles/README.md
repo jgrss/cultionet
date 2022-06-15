@@ -30,3 +30,33 @@ docker run -it cultionet:latest cultionet -h
 ```commandline
 docker run -it --rm --gpus=all --runtime=nvidia cultionet:latest cultionet -h
 ```
+
+## Build with a different CUDA version or on the CPU
+
+### Build with CUDA 10.2
+```commandline
+git clone https://github.com/jgrss/cultionet.git
+cd cultionet/dockerfiles
+docker build -t cultionet -f Dockerfile_cuda102 .
+```
+
+### Build with CUDA 11.3
+```commandline
+git clone https://github.com/jgrss/cultionet.git
+cd cultionet/dockerfiles
+docker build -t cultionet -f Dockerfile_cuda113 .
+```
+
+### Build with CUDA 11.5
+```commandline
+git clone https://github.com/jgrss/cultionet.git
+cd cultionet/dockerfiles
+docker build -t cultionet -f Dockerfile_cuda115 .
+```
+
+### Build with a CPU installation
+```commandline
+git clone https://github.com/jgrss/cultionet.git
+cd cultionet/dockerfiles
+docker build -t cultionet -f Dockerfile_cpu .
+```
