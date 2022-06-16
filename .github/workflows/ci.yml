@@ -9,7 +9,6 @@ on:
     branches: [ main ]
 
 jobs:
-
   Tests:
     runs-on: ubuntu-latest
     steps:
@@ -79,7 +78,7 @@ jobs:
         env:
           GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
-   https://github.com/fnkr/github-action-ghr
+  # https://github.com/fnkr/github-action-ghr
   Release:
     needs: Version
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'chore(release):')
