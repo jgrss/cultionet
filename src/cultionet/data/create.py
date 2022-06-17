@@ -320,15 +320,17 @@ def create_image_vars(
     # Open the image variables
     with gw.config.update(ref_bounds=bounds, ref_res=ref_res):
         with gw.open(
-                image,
-                stack_dim='band',
-                band_names=list(range(1, len(image) + 1)),
-                resampling=resampling
+            image,
+            stack_dim='band',
+            band_names=list(range(1, len(image) + 1)),
+            resampling=resampling
         ) as src_ts:
             # X variables
-            time_series = ((src_ts.gw.compute(num_workers=num_workers) * gain + offset)
-                           .astype('float64')
-                           .clip(0, 1))
+            time_series = (
+                (src_ts.gw.compute(num_workers=num_workers) * gain + offset)
+                .astype('float64')
+                .clip(0, 1)
+            )
 
             # Get the band count per index
             nbands = int(src_ts.gw.nbands / len(list(set([Path(fn).parent.name for fn in image]))))
