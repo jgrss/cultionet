@@ -45,12 +45,14 @@ def get_centroid_coords_from_image(vi_path: Path, dst_crs: T.Optional[str] = Non
     return float(centroid.x), float(centroid.y)
 
 
-def get_image_list(ppaths, region, config):
+def get_image_list(ppaths, region, config, image_path):
     image_list = []
     for image_vi in model_preprocessing.VegetationIndices(image_vis=config['image_vis']).image_vis:
         # Set the full path to the images
-        if str(ppaths.image_path).endswith('time_series_vars'):
-            vi_path = ppaths.image_path / region / image_vi
+        if image_path is not None:
+            vi_path = Path(image_path) / region / image_vi
+        elif str(ppaths.image_path).endswith('time_series_vars'):
+            vi_path = ppaths.image_path/region/image_vi
         else:
             vi_path = ppaths.image_path / region / 'brdf_ts' / 'ms' / image_vi
 
@@ -111,7 +113,7 @@ def predict_image(args):
         region = args.grid_id
 
     # Get the image list
-    image_list = get_image_list(ppaths, region, config)
+    image_list = get_image_list(ppaths, region, config, args.image_path)
 
     with gw.open(
             image_list,
@@ -227,6 +229,11 @@ def persist_dataset(args):
     ):
         ppaths = setup_paths(project_path, append_ts=True if args.append_ts == 'y' else False)
 
+        # if save path is specified use that, otherwise use default
+        if args.save_to_path is not None:
+            save_to_dir = Path(args.save_to_path)
+        else:
+            save_to_dir = ppaths.process_path
         try:
             tmp = int(region)
             region = f'{tmp:06d}'
@@ -292,7 +299,7 @@ def persist_dataset(args):
                 df_grids,
                 df_edges,
                 group_id=f'{region}_{image_year}',
-                process_path=ppaths.process_path,
+                process_path=save_to_dir,
                 transforms=args.transforms,
                 ref_res=ref_res,
                 resampling=args.resampling,
@@ -399,6 +406,11 @@ def main():
                      'is taken from the upper left coordinate of the grid vector.) (default: %(default)s)',
                 default=None, nargs='+', type=int
             )
+            subparser.add_argument(
+                '--save-directory', dest='save_to_path',
+                help='Provides and alternate directory to save the training data. (default: None)',
+                default=None
+            )
         elif process == 'train':
             subparser.add_argument(
                 '--val-frac', dest='val_frac', help='The validation fraction (default: %(default)s)',
@@ -457,6 +469,12 @@ def main():
             )
             subparser.add_argument(
                 '--offset', dest='offset', help='The image offset (default: %(default)s)', default=0.0, type=float
+            )
+            subparser.add_argument(
+                '--image_directory_path', dest='image_path',
+                    help='The path to a directory with time series data. Only required ' 
+                         'if the data is outside of the default directory. (default: None)',
+                    default=None
             )
         if process in ['create', 'predict']:
             subparser.add_argument(
