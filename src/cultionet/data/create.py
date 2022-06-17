@@ -331,7 +331,7 @@ def create_image_vars(
                            .clip(0, 1))
 
             # Get the band count per index
-            nbands = int(src_ts.gw.nbands / len(list(set([Path(fn).parent.name for fn in image]))))
+            nbands = len(list(set([Path(fn).parent.name for fn in image])))
 
             if grid_edges is not None:
                 # Get the training edges
