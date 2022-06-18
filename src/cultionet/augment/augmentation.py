@@ -12,7 +12,7 @@ from torch_geometric.data import Data
 
 
 def feature_stack_to_tsaug(
-    x: np.ndarray, nfeas: int, nrows: int, ncols: int
+    x: np.ndarray, ntime: int, nbands: int, nrows: int, ncols: int
 ) -> np.ndarray:
     """Reshape from (T*C x H x W) -> (H*W x T X C)
     where,
@@ -23,15 +23,16 @@ def feature_stack_to_tsaug(
 
     Args:
         x: The array to reshape. The input shape is (T*C x H x W).
-        nfeas: The number of array features (time x channels).
-        nrows: The number of array rows (height).
-        ncols: The number of array columns (width).
+        ntime: The number of array time periods (T).
+        nbands: The number of array bands/channels (C).
+        nrows: The number of array rows (H).
+        ncols: The number of array columns (W).
     """
     return (
         x
         .transpose(1, 2, 0)
-        .reshape(nrows * ncols, nfeas)
-        .reshape(nrows * ncols, int(nfeas / nbands), nbands)
+        .reshape(nrows * ncols, ntime*nbands)
+        .reshape(nrows * ncols, ntime, nbands)
     )
 
 
@@ -60,6 +61,7 @@ def augment_time(
     ldata: LabeledData,
     p: T.Any,
     xaug: np.ndarray,
+    ntime: int,
     nbands: int,
     add_noise: bool,
     warper: T.Union[AddNoise, Drift, TimeWarp]
@@ -75,7 +77,8 @@ def augment_time(
     # xseg shape = (ntime*nbands x nrows x ncols)
     xseg_original = xseg.copy()
     nfeas, nrows, ncols = xseg.shape
-    xseg = feature_stack_to_tsaug(xseg, nfeas, nrows, ncols)
+    assert nfeas == int(ntime*nbands), 'The array feature dimensions do not match the expected shape.'
+    xseg = feature_stack_to_tsaug(xseg, ntime, nbands, nrows, ncols)
 
     # Warp the segment
     xseg_warped = warper.augment(xseg)
@@ -86,6 +89,9 @@ def augment_time(
     xseg_warped = tsaug_to_feature_stack(
         xseg_warped, nfeas, nrows, ncols
     ).clip(0, 1)
+    
+    # Ensure reshaping back to original values
+    # assert np.allclose(xseg_original, tsaug_to_feature_stack(xseg, nfeas, nrows, ncols))
 
     # Insert back into full array
     xaug[:, min_row:max_row, min_col:max_col] = np.where(
@@ -98,6 +104,7 @@ def augment_time(
 def augment(
     ldata: LabeledData,
     aug: str,
+    ntime: int,
     nbands: int,
     k: int = 3,
     **kwargs
@@ -119,7 +126,7 @@ def augment(
         # Warp each segment
         for p in ldata.props:
             xaug = augment_time(
-                ldata, p, xaug, nbands, True,
+                ldata, p, xaug, ntime, nbands, True,
                 TimeWarp(
                     n_speed_change=np.random.randint(low=1, high=3),
                     max_speed_ratio=np.random.uniform(low=1.1, high=3.0),
@@ -133,7 +140,7 @@ def augment(
         # Warp each segment
         for p in ldata.props:
             xaug = augment_time(
-                ldata, p, xaug, nbands, False,
+                ldata, p, xaug, ntime, nbands, False,
                 AddNoise(scale=np.random.uniform(low=0.01, high=0.05))
             )
         yaug = y.copy()
@@ -143,7 +150,7 @@ def augment(
         # Warp each segment
         for p in ldata.props:
             xaug = augment_time(
-                ldata, p, xaug, nbands, True,
+                ldata, p, xaug, ntime, nbands, True,
                 Drift(
                     max_drift=np.random.uniform(low=0.05, high=0.1),
                     n_drift_points=int(xaug.shape[0] / 2.0),
@@ -156,9 +163,11 @@ def augment(
     elif 'rot' in aug:
         deg = int(aug.replace('rot', ''))
 
-        deg_dict = {90: cv2.ROTATE_90_CLOCKWISE,
-                    180: cv2.ROTATE_180,
-                    270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+        deg_dict = {
+            90: cv2.ROTATE_90_CLOCKWISE,
+            180: cv2.ROTATE_180,
+            270: cv2.ROTATE_90_COUNTERCLOCKWISE
+        }
 
         xaug = np.zeros((xaug.shape[0], *cv2.rotate(np.float32(x[0]), deg_dict[deg]).shape), dtype=xaug.dtype)
 
@@ -180,8 +189,9 @@ def augment(
     elif 'flip' in aug:
         if aug == 'flipfb':
             # Reverse the channels
-            for b in range(0, xaug.shape[0], nbands):
-                xaug[b:b+nbands] = xaug[b:b+nbands][::-1]
+            for b in range(0, xaug.shape[0], ntime):
+                # Get the slice for the current band, n time steps
+                xaug[b:b+ntime] = xaug[b:b+ntime][::-1]
             yaug = y.copy()
             bdist_aug = bdist.copy()
         else:
@@ -249,6 +259,7 @@ def augment(
         edge_indices,
         edge_attrs,
         xy,
+        ntime=ntime,
         nbands=nbands,
         height=height,
         width=width,
