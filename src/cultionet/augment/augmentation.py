@@ -227,14 +227,12 @@ def augment(
 
         for i in range(0, x.shape[0]):
             xaug[i] = sk_util.random_noise(x[i], mode='gaussian', clip=True, mean=0, var=var)
-
         yaug = y.copy()
         bdist_aug = bdist.copy()
 
     elif 's&p' in aug:
         for i in range(0, x.shape[0]):
             xaug[i] = sk_util.random_noise(x[i], mode='s&p', clip=True)
-
         yaug = y.copy()
         bdist_aug = bdist.copy()
 
