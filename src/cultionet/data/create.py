@@ -311,7 +311,7 @@ def create_image_vars(
     grid_edges: T.Optional[gpd.GeoDataFrame] = None,
     ref_res: T.Optional[float] = 10.0,
     resampling: T.Optional[str] = 'nearest'
-) -> T.Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
+) -> T.Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int]:
     """Creates the initial image training data
     """
     if isinstance(image, list):
@@ -332,8 +332,10 @@ def create_image_vars(
                 .clip(0, 1)
             )
 
-            # Get the band count per index
-            nbands = int(src_ts.gw.nbands / len(list(set([Path(fn).parent.name for fn in image]))))
+            # Get the band count using the unique set of band/variable names
+            nbands = len(list(set([Path(fn).parent.name for fn in image])))
+            # Get the time count (.gw.nbands = number of total features)
+            ntime = int(src_ts.gw.nbands / nbands)
 
             if grid_edges is not None:
                 # Get the training edges
@@ -386,7 +388,7 @@ def create_image_vars(
                 bdist = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype=time_series.dtype)
                 edges = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='uint8')
 
-    return time_series, labels_array, edges, bdist, nbands
+    return time_series, labels_array, edges, bdist, ntime, nbands
 
 
 def create_dataset(
@@ -482,7 +484,7 @@ def create_dataset(
                     ref_bounds = [left, top-ref_res*height, left+ref_res*width, top]
 
                 # Data for graph network
-                xvars, labels_array, edges, bdist, nbands = create_image_vars(
+                xvars, labels_array, edges, bdist, ntime, nbands = create_image_vars(
                     image_list,
                     bounds=ref_bounds,
                     num_workers=num_workers,
@@ -559,7 +561,7 @@ def create_dataset(
                         for i in range(0, n_ts):
                             train_id = f'{group_id}_{row.grid}_{aug}_{i:03d}'
                             train_data = augment(
-                                ldata, aug=aug, nbands=nbands, k=3,
+                                ldata, aug=aug, ntime=ntime, nbands=nbands, k=3,
                                 start_year=start_year, end_year=end_year,
                                 left=left, bottom=bottom, right=right, top=top,
                                 res=ref_res, train_id=train_id
@@ -569,7 +571,7 @@ def create_dataset(
                     else:
                         train_id = f'{group_id}_{row.grid}_{aug}'
                         train_data = augment(
-                            ldata, aug=aug, nbands=nbands, k=3,
+                            ldata, aug=aug, ntime=ntime, nbands=nbands, k=3,
                             start_year=start_year, end_year=end_year,
                             left=left, bottom=bottom, right=right, top=top,
                             res=ref_res, train_id=train_id
