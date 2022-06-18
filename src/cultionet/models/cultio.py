@@ -30,26 +30,29 @@ class CultioGraphNet(torch.nn.Module):
     ):
         super(CultioGraphNet, self).__init__()
 
-        self.ds_features = ds_features
-        self.ds_time_features = ds_time_features
-        self.num_indices = int(self.ds_features / self.ds_time_features)
+        # Total number of features (time x bands/indices/channels)
+        self.ds_num_features = ds_features
+        # Total number of time features
+        self.ds_num_time = ds_time_features
+        # Total number of bands
+        self.ds_num_bands = int(self.ds_num_features / self.ds_num_time)
         self.filters = filters
         num_quantiles = 3
         num_index_streams = 2
-        base_in_channels = (filters * self.num_indices) * num_index_streams + self.filters
+        base_in_channels = (filters * self.ds_num_bands) * num_index_streams + self.filters
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
-        # Transformer stream (+self.filters x self.num_indices)
+        # Transformer stream (+self.filters x self.ds_num_bands)
         self.transformer = self.mid_sequence_weights(
-            nn.TransformerConv(self.ds_time_features, self.filters, heads=1, edge_dim=2, dropout=dropout)
+            nn.TransformerConv(self.ds_num_time, self.filters, heads=1, edge_dim=2, dropout=dropout)
         )
 
-        # Nested UNet (+self.filters x self.num_indices)
-        self.nunet = NestedUNet(in_channels=self.ds_time_features, out_channels=self.filters)
+        # Nested UNet (+self.filters x self.ds_num_bands)
+        self.nunet = NestedUNet(in_channels=self.ds_num_time, out_channels=self.filters)
         self.star_rnn = StarRNN(
-            input_dim=self.num_indices,
+            input_dim=self.ds_num_bands,
             hidden_dim=32,
             nclasses=self.filters,
             n_layers=4
@@ -119,18 +122,22 @@ class CultioGraphNet(torch.nn.Module):
     def forward(self, data: Data) -> T.Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # Transformer on each band time series
         transformer_stream = []
-        for band in range(0, self.ds_features, self.ds_time_features):
+        # Iterate over all data features, stepping over time chunks
+        for band in range(0, self.ds_num_features, self.ds_num_time):
+            # Get the current band through all time steps
             t = self.transformer(
-                data.x[:, band:band+self.ds_time_features], data.edge_index, data.edge_attrs
+                data.x[:, band:band+self.ds_num_time], 
+                data.edge_index, 
+                data.edge_attrs
             )
             transformer_stream.append(t)
         transformer_stream = torch.cat(transformer_stream, dim=1)
 
         # Nested UNet on each band time series
         nunet_stream = []
-        for band in range(0, self.ds_features, self.ds_time_features):
+        for band in range(0, self.ds_num_features, self.ds_num_time):
             t = self.nunet(
-                data.x[:, band:band+self.ds_time_features],
+                data.x[:, band:band+self.ds_num_time],
                 data.edge_index,
                 data.edge_attrs[:, 1],
                 data.batch,
@@ -147,7 +154,7 @@ class CultioGraphNet(torch.nn.Module):
         )
         nbatch, ntime, height, width = star_stream.shape
         star_stream = star_stream.reshape(
-            nbatch, self.num_indices, self.ds_time_features, height, width
+            nbatch, self.ds_num_bands, self.ds_num_time, height, width
         ).permute(0, 2, 1, 3, 4)
         star_stream = self.star_rnn(star_stream)
         star_stream = self.cg(star_stream)

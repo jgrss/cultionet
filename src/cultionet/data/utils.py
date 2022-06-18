@@ -28,6 +28,7 @@ def create_data_object(
     edge_indices: np.ndarray,
     edge_attrs: np.ndarray,
     xy: np.ndarray,
+    ntime: int,
     nbands: int,
     height: int,
     width: int,
@@ -51,6 +52,7 @@ def create_data_object(
             pos=xy,
             height=height,
             width=width,
+            ntime=ntime,
             nbands=nbands,
             **kwargs
         )
@@ -68,6 +70,7 @@ def create_data_object(
                 pos=xy,
                 height=height,
                 width=width,
+                ntime=ntime,
                 nbands=nbands,
                 **kwargs
             )
@@ -84,17 +87,18 @@ def create_data_object(
                 other=other_,
                 height=height,
                 width=width,
+                ntime=ntime,
                 nbands=nbands,
                 **kwargs
             )
 
     # Ensure the correct node count
     train_data.num_nodes = x.shape[0]
-
+    
     return train_data
 
 
-def create_network_data(xvars: np.ndarray, ntime: int) -> Data:
+def create_network_data(xvars: np.ndarray, ntime: int, nbands: int) -> Data:
 
     # Create the network
     nwk = SingleSensorNetwork(np.ascontiguousarray(xvars, dtype='float64'), k=3)
@@ -103,10 +107,12 @@ def create_network_data(xvars: np.ndarray, ntime: int) -> Data:
     edge_indices = np.c_[edge_indices_a, edge_indices_b]
     edge_attrs = np.c_[edge_attrs_diffs, edge_attrs_dists]
     xy = np.c_[xpos, ypos]
-    nbands, nrows, ncols = xvars.shape
-    xvars = nd_to_columns(xvars, nbands, nrows, ncols)
+    nfeas, nrows, ncols = xvars.shape
+    xvars = nd_to_columns(xvars, nfeas, nrows, ncols)
 
-    return create_data_object(xvars, edge_indices, edge_attrs, xy, nbands=ntime, height=nrows, width=ncols)
+    return create_data_object(
+        xvars, edge_indices, edge_attrs, xy, ntime=ntime, nbands=nbands, height=nrows, width=ncols
+    )
 
 
 class NetworkDataset(object):

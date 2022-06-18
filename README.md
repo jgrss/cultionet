@@ -226,7 +226,7 @@ width = 64      # number of image columns
 # Create fake data as an example of the required dimensions
 xvars = np.random.random((nfeas, height, width))
 # Create the network data
-data = create_network_data(xvars, ntime)
+data = create_network_data(xvars, ntime, nvars)
 # Load the z-score norm values
 data_values = torch.load(ppaths.norm_file)
 # Create the temporary dataset
