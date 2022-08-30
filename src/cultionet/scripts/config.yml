@@ -2,11 +2,7 @@ image_vis:
   - evi2
   - gcvi
   - kndvi
-
-# The regions to process (start, end)
-regions:
-  - 1
-  - 1
+  - green
 
 # End years (i.e., 2020 = 2019 planting/harvest year)
 # 2019 = 2018 CDL
