@@ -16,10 +16,14 @@ from cultionet.data.utils import create_network_data, NetworkDataset
 
 import torch
 import geopandas as gpd
+import pandas as pd
 import yaml
 
 
 logger = logging.getLogger(__name__)
+
+geo_id_data = pd.read_csv('~/geo_id_grid_list.csv')
+geo_id_list = geo_id_data['geo_id_grid'].unique().tolist() 
 
 DEFAULT_AUGMENTATIONS = ['none', 'fliplr', 'flipud', 'flipfb',
                          'rot90', 'rot180', 'rot270',
@@ -213,7 +217,7 @@ def persist_dataset(args):
     ref_res_lists = [args.ref_res]
 
     inputs = model_preprocessing.TrainInputs(
-        regions=config['regions'],
+        regions=geo_id_list,
         years=config['years'],
         lc_path=config['lc_path']
     )
