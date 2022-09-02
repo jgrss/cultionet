@@ -99,7 +99,7 @@ def fit(
         mode='min',
         monitor='loss',
         every_n_train_steps=0,
-        every_n_val_epochs=1
+        every_n_val_epochs=1 # this parameter will become invalid with newer version of pytorch-lightning
     )
 
     cb_val_loss = ModelCheckpoint(monitor='val_loss')
