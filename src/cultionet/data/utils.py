@@ -23,6 +23,15 @@ class LabeledData:
     props: T.List
 
 
+def get_image_list_dims(image_list: T.Sequence[T.Union[Path, str]], src) -> T.Tuple[int, int]:
+    # Get the band count using the unique set of band/variable names
+    nbands = len(list(set([Path(fn).parent.name for fn in image_list])))
+    # Get the time count (.gw.nbands = number of total features)
+    ntime = int(src.gw.nbands / nbands)
+
+    return ntime, nbands
+
+
 def create_data_object(
     x: np.ndarray,
     edge_indices: np.ndarray,
@@ -94,7 +103,7 @@ def create_data_object(
 
     # Ensure the correct node count
     train_data.num_nodes = x.shape[0]
-    
+
     return train_data
 
 
