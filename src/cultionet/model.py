@@ -34,8 +34,7 @@ def fit(
     random_seed: T.Optional[int] = 0,
     reset_model: T.Optional[bool] = False,
     auto_lr_find: T.Optional[bool] = False,
-    device: T.Optional[str] = 'gpu',
-    stochastic_weight_avg: T.Optional[bool] = False
+    device: T.Optional[str] = 'gpu'
 ):
     """Fits a model
 
@@ -56,7 +55,6 @@ def fit(
             an existing model.
         auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
         device (Optional[str]): The device to train on. Choices are ['cpu', 'gpu'].
-        stochastic_weight_avg (Optional[bool]): Whether to use stochastically weighted averaging.
     """
     ckpt_file = Path(ckpt_file)
 
@@ -99,7 +97,7 @@ def fit(
         mode='min',
         monitor='loss',
         every_n_train_steps=0,
-        every_n_val_epochs=1
+        every_n_epochs=1
     )
 
     cb_val_loss = ModelCheckpoint(monitor='val_loss')
@@ -122,7 +120,6 @@ def fit(
             cb_val_loss,
             early_stop_callback
         ],
-        stochastic_weight_avg=stochastic_weight_avg,
         enable_checkpointing=True,
         auto_lr_find=auto_lr_find,
         auto_scale_batch_size=False,
@@ -137,7 +134,6 @@ def fit(
         gpus=1 if device == 'gpu' else 0,
         num_processes=0,
         accelerator=device,
-        progress_bar_refresh_rate=10,
         log_every_n_steps=10
     )
 
@@ -185,7 +181,7 @@ def predict(
         log_every_n_steps=0,
         logger=False
     )
-
+    
     lit_kwargs = dict(
         num_features=dataset.num_features,
         num_time_features=dataset.num_time_features,
