@@ -2,8 +2,8 @@ import typing as T
 from pathlib import Path
 
 # TODO: imports
-from .lookup import CDL_CROP_LABELS, CDL_CROP_LABELS_r
-from .utils import LabeledData
+from .lookup import CDL_CROP_LABELS_r
+from .utils import LabeledData, get_image_list_dims
 from ..augment.augmentation import augment
 from ..errors import TopologyClipError
 from ..utils.geometry import bounds_to_frame, warp_by_image
@@ -331,12 +331,9 @@ def create_image_vars(
                 .astype('float64')
                 .clip(0, 1)
             )
-
-            # Get the band count using the unique set of band/variable names
-            nbands = len(list(set([Path(fn).parent.name for fn in image])))
-            # Get the time count (.gw.nbands = number of total features)
-            ntime = int(src_ts.gw.nbands / nbands)
-
+            # Get the time and band count
+            ntime, nbands = get_image_list_dims(image, src_ts)
+    
             if grid_edges is not None:
                 # Get the training edges
                 labels_array = polygon_to_array(
