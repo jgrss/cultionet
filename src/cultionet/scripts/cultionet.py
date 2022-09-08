@@ -11,7 +11,7 @@ from cultionet.data.datasets import EdgeDataset
 from cultionet.utils.project_paths import setup_paths
 from cultionet.utils.normalize import get_norm_values
 from cultionet.data.create import create_dataset
-from cultionet.utils import model_preprocessing
+from cultionet.utils import model_preprocessing, get_image_list_dims
 from cultionet.data.utils import create_network_data, NetworkDataset
 
 import torch
@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_AUGMENTATIONS = ['none', 'fliplr', 'flipud', 'flipfb',
                          'rot90', 'rot180', 'rot270',
                          'ts-warp', 'ts-noise', 'ts-drift']
+
+SCALE_FACTOR = 10_000.0
 
 
 def open_config(config_file: T.Union[str, Path, bytes]) -> dict:
@@ -87,11 +89,8 @@ def get_image_list(ppaths, region, config):
 def predict_image(args):
     import geowombat as gw
     from geowombat.core.windows import get_window_offsets
-    import numpy as np
     import rasterio as rio
-    from rasterio.windows import Window
     import torch
-    import yaml
     from tqdm.auto import tqdm
 
     logging.getLogger('pytorch_lightning').setLevel(logging.WARNING)
@@ -107,20 +106,22 @@ def predict_image(args):
     try:
         tmp = int(args.grid_id)
         region = f'{tmp:06d}'
-    except:
+    except ValueError:
         region = args.grid_id
 
     # Get the image list
     image_list = get_image_list(ppaths, region, config)
 
     with gw.open(
-            image_list,
-            stack_dim='band',
-            band_names=list(range(1, len(image_list)+1))
+        image_list,
+        stack_dim='band',
+        band_names=list(range(1, len(image_list)+1))
     ) as src_ts:
-        time_series = ((src_ts * args.gain + args.offset)
-                       .astype('float64')
-                       .clip(0, 1))
+        time_series = (
+            (src_ts * args.gain + args.offset)
+            .astype('float64')
+            .clip(0, 1)
+        )
         # Get the image dimensions
         nvars = model_preprocessing.VegetationIndices(image_vis=config['image_vis']).n_vis
         nfeas, height, width = time_series.shape
@@ -158,24 +159,31 @@ def predict_image(args):
                 slice(w_pad.row_off, w_pad.row_off+w_pad.height),
                 slice(w_pad.col_off, w_pad.col_off+w_pad.width)
             )
+            # Get the time and band count
+            ntime, nbands = get_image_list_dims(image_list, time_series)
+
             # Create the data for the chunk
-            data = create_network_data(time_series[slc].data.compute(num_workers=8), ntime)
+            data = create_network_data(
+                time_series[slc].data.compute(num_workers=8),
+                ntime=ntime,
+                nbands=nbands
+            )
             # Create the temporary dataset
             net_ds = NetworkDataset(data, ppaths.predict_path, data_values)
 
             # Apply inference on the chunk
-            stack, lit_model = cultionet.predict(
-                predict_ds=net_ds.ds,
+            stack = cultionet.predict(
+                dataset=net_ds.ds,
                 ckpt_file=ppaths.ckpt_file,
                 filters=args.filters,
                 device=args.device,
                 w=w,
                 w_pad=w_pad
-            )
+            )[0]
             # Write the prediction stack to file
             with rio.open(args.out_path, mode='r+') as dst:
                 dst.write(
-                    (stack*10000.0).clip(0, 10000).astype('uint16'),
+                    (stack*SCALE_FACTOR).clip(0, SCALE_FACTOR).astype('uint16'),
                     indexes=[1, 2, 3, 4],
                     window=w
                 )
@@ -184,16 +192,20 @@ def predict_image(args):
             net_ds.unlink()
 
 
-def cycle_data(year_lists: list,
-               regions_lists: list,
-               project_path_lists: list,
-               lc_paths_lists: list,
-               ref_res_lists: list):
-    for years, regions, project_path, lc_path, ref_res in zip(year_lists,
-                                                              regions_lists,
-                                                              project_path_lists,
-                                                              lc_paths_lists,
-                                                              ref_res_lists):
+def cycle_data(
+    year_lists: list,
+    regions_lists: list,
+    project_path_lists: list,
+    lc_paths_lists: list,
+    ref_res_lists: list
+):
+    for years, regions, project_path, lc_path, ref_res in zip(
+        year_lists,
+        regions_lists,
+        project_path_lists,
+        lc_paths_lists,
+        ref_res_lists
+    ):
         for region in regions:
             for image_year in years:
                 yield region, image_year, project_path, lc_path, ref_res
@@ -230,7 +242,7 @@ def persist_dataset(args):
         try:
             tmp = int(region)
             region = f'{tmp:06d}'
-        except:
+        except ValueError:
             pass
 
         # Read the training data
