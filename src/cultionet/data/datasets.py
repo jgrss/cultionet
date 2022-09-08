@@ -53,6 +53,7 @@ class EdgeDataset(Dataset):
         """
         if not self.data_list_:
             self.get_data_list()
+
         return self.data_list_
 
     def download(self):
@@ -128,8 +129,8 @@ class EdgeDataset(Dataset):
         Returns:
             A `torch_geometric` data object.
         """
+        batch = torch.load(self.data_list_[idx])
         if isinstance(self.data_means, torch.Tensor):
-            batch = torch.load(Path(self.processed_dir) / self.data_list_[idx])
             return self.normalize(batch)
         else:
-            return torch.load(Path(self.processed_dir) / self.data_list_[idx])
+            return batch
