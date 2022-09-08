@@ -16,14 +16,10 @@ from cultionet.data.utils import create_network_data, NetworkDataset
 
 import torch
 import geopandas as gpd
-import pandas as pd
 import yaml
 
 
 logger = logging.getLogger(__name__)
-
-geo_id_data = pd.read_csv('~/geo_id_grid_list.csv')
-geo_id_list = geo_id_data['geo_id_grid'].unique().tolist() 
 
 DEFAULT_AUGMENTATIONS = ['none', 'fliplr', 'flipud', 'flipfb',
                          'rot90', 'rot180', 'rot270',
@@ -215,9 +211,17 @@ def persist_dataset(args):
     config = open_config(args.config_file)
     project_path_lists = [args.project_path]
     ref_res_lists = [args.ref_res]
+  
+    if hasattr(args, 'region_id_file'):
+      if not Path(args.region_id_file).is_file():
+          raise IOError('The id file does not exist')
+      id_data = pd.read_csv(args.region_id_file)
+      assert "id" in id_data.columns, f"id column not found in {args.region_id_file}."
+      regions = id_data['id'].unique().tolist()  
+    
 
     inputs = model_preprocessing.TrainInputs(
-        regions=geo_id_list,
+        regions=regions,
         years=config['years'],
         lc_path=config['lc_path']
     )
