@@ -211,12 +211,13 @@ def persist_dataset(args):
     config = open_config(args.config_file)
     project_path_lists = [args.project_path]
     ref_res_lists = [args.ref_res]
-  
-    if hasattr(args, 'region_id_file'):
-      if not Path(args.region_id_file).is_file():
+    
+    if config['region_id_file'] is not None:
+      file_path = config['region_id_file']
+      if not Path(file_path).is_file():
           raise IOError('The id file does not exist')
-      id_data = pd.read_csv(args.region_id_file)
-      assert "id" in id_data.columns, f"id column not found in {args.region_id_file}."
+      id_data = pd.read_csv(file_path)
+      assert "id" in id_data.columns, f"id column not found in {file_path}."
       regions = id_data['id'].unique().tolist()  
     
 
