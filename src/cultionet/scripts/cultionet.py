@@ -222,14 +222,14 @@ def persist_dataset(args):
 
     
     if region_as_file:
-      file_path = config['region_id_file']
-      if not Path(file_path).is_file():
-          raise IOError('The id file does not exist')
-      id_data = pd.read_csv(file_path)
-      assert "id" in id_data.columns, f"id column not found in {file_path}."
-      regions = id_data['id'].unique().tolist()  
+        file_path = config['region_id_file']
+        if not Path(file_path).is_file():
+            raise IOError('The id file does not exist')
+        id_data = pd.read_csv(file_path)
+        assert "id" in id_data.columns, f"id column not found in {file_path}."
+        regions = id_data['id'].unique().tolist()
     else:
-      regions = list(range(config['regions'][0], config['regions'][1]+1))
+        regions = list(range(config['regions'][0], config['regions'][1]+1))
     
 
     inputs = model_preprocessing.TrainInputs(
