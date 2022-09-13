@@ -229,7 +229,7 @@ def persist_dataset(args):
       assert "id" in id_data.columns, f"id column not found in {file_path}."
       regions = id_data['id'].unique().tolist()  
     else:
-      regions = config['regions']
+      regions = list(range(config['regions'][0], config['regions'][1]+1))
     
 
     inputs = model_preprocessing.TrainInputs(
