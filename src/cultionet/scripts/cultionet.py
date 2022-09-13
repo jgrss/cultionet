@@ -214,14 +214,14 @@ def persist_dataset(args):
     ref_res_lists = [args.ref_res]
     
     region_as_list = config['regions'] is not None
-    region_as_file = jobs["region_id_file"] is not None
+    region_as_file = config["region_id_file"] is not None
 
     assert (
         region_as_list or region_as_file
     ), "Only submit region as a list or as a given file"
 
     
-    if config['region_id_file'] is not None:
+    if region_as_file:
       file_path = config['region_id_file']
       if not Path(file_path).is_file():
           raise IOError('The id file does not exist')
