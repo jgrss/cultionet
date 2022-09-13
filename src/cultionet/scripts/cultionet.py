@@ -213,6 +213,14 @@ def persist_dataset(args):
     project_path_lists = [args.project_path]
     ref_res_lists = [args.ref_res]
     
+    region_as_list = config['regions'] is not None
+    region_as_file = jobs["region_id_file"] is not None
+
+    assert (
+        region_as_list or region_as_file
+    ), "Only submit region as a list or as a given file"
+
+    
     if config['region_id_file'] is not None:
       file_path = config['region_id_file']
       if not Path(file_path).is_file():
@@ -220,6 +228,8 @@ def persist_dataset(args):
       id_data = pd.read_csv(file_path)
       assert "id" in id_data.columns, f"id column not found in {file_path}."
       regions = id_data['id'].unique().tolist()  
+    else:
+      regions = config['regions']
     
 
     inputs = model_preprocessing.TrainInputs(
