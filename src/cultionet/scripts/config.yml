@@ -8,6 +8,9 @@ regions:
   - 1
   - 1
 
+# The region file path
+region_id_file: !!null
+
 # End years (i.e., 2020 = 2019 planting/harvest year)
 # 2019 = 2018 CDL
 # 2020 = 2019 CDL
