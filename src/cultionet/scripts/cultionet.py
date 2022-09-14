@@ -13,6 +13,8 @@ from cultionet.utils.normalize import get_norm_values
 from cultionet.data.create import create_dataset
 from cultionet.utils import model_preprocessing
 from cultionet.data.utils import create_network_data, NetworkDataset
+from cultionet.utils.normalize import NormValues
+
 
 import torch
 import geopandas as gpd
@@ -338,6 +340,22 @@ def train_model(args):
     # Calculate the values needed to transform to z-scores, using
     # the training data
     data_values = get_norm_values(dataset=train_ds, batch_size=args.batch_size*4)
+    # Takes a weighted average between the new and old norm values.
+    # This assumes that each training loop contains the same number of images
+    # which might be a bad assumption in general, but it is how I am running my
+    # training loop.
+    if ppaths.norm_file.exists() and args.reset_model is False:
+        epochs = args.epochs
+        old_data_values = torch.load(str(ppaths.norm_file))
+        old_means = old_data_values.mean
+        old_stds = old_data_values.std
+        new_means = data_values.mean
+        new_stds = data_values.std
+        means = (old_means*epochs+new_means)/(epochs+1)
+        stds = ((epochs*old_stds**2 + new_stds**2)/(epochs+1))**.5
+        data_values = NormValues(mean=means,
+                                 std=stds,
+                                 max=data_values.max)
     torch.save(data_values, str(ppaths.norm_file))
 
     # Create the train data object again, this time passing
