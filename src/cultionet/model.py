@@ -181,7 +181,7 @@ def predict(
         log_every_n_steps=0,
         logger=False
     )
-    
+
     lit_kwargs = dict(
         num_features=dataset.num_features,
         num_time_features=dataset.num_time_features,

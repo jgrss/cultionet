@@ -11,11 +11,13 @@ from cultionet.data.datasets import EdgeDataset
 from cultionet.utils.project_paths import setup_paths
 from cultionet.utils.normalize import get_norm_values
 from cultionet.data.create import create_dataset
-from cultionet.utils import model_preprocessing, get_image_list_dims
+from cultionet.data.utils import get_image_list_dims
+from cultionet.utils import model_preprocessing
 from cultionet.data.utils import create_network_data, NetworkDataset
 
 import torch
 import geopandas as gpd
+import pandas as pd
 import yaml
 
 
@@ -224,8 +226,27 @@ def persist_dataset(args):
     project_path_lists = [args.project_path]
     ref_res_lists = [args.ref_res]
 
+    region_as_list = config['regions'] is not None
+    region_as_file = config["region_id_file"] is not None
+
+    assert (
+        region_as_list or region_as_file
+    ), "Only submit region as a list or as a given file"
+
+
+    if region_as_file:
+        file_path = config['region_id_file']
+        if not Path(file_path).is_file():
+            raise IOError('The id file does not exist')
+        id_data = pd.read_csv(file_path)
+        assert "id" in id_data.columns, f"id column not found in {file_path}."
+        regions = id_data['id'].unique().tolist()
+    else:
+        regions = list(range(config['regions'][0], config['regions'][1]+1))
+
+
     inputs = model_preprocessing.TrainInputs(
-        regions=config['regions'],
+        regions=regions,
         years=config['years'],
         lc_path=config['lc_path']
     )
