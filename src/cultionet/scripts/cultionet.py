@@ -355,6 +355,7 @@ def train_model(args):
         val_frac=args.val_frac,
         batch_size=args.batch_size,
         epochs=args.epochs,
+        accumulate_grad_batches=args.accumulate_grad_batches,
         learning_rate=args.learning_rate,
         filters=args.filters,
         random_seed=args.random_seed,
@@ -363,7 +364,8 @@ def train_model(args):
         device=args.device,
         gradient_clip_val=args.gradient_clip_val,
         early_stopping_patience=args.patience,
-        stochastic_weight_avg=args.stochastic_weight_avg
+        stochastic_weight_avg=args.stochastic_weight_avg,
+        weight_decay = args.weight_decay
     )
 
 
@@ -461,6 +463,16 @@ def main():
                 '--apply-swa', dest='stochastic_weight_avg',
                 help='Whether to apply stochastic weight averaging (default: %(default)s)',
                 action='store_true'
+            )
+            subparser.add_argument(
+                '--weight-decay', dest='weight_decay',
+                help='Sets the weight decay for Adam optimizer\'s regularization (default: %(default)s)',
+                default=1e-5, type=float
+            )
+            subparser.add_argument(
+                '-agb', '--accumulate-grad-batches', dest='accumulate_grad_batches',
+                help='Sets the number of batches to apply gradients after (default: %(default)s)',
+                default=1, type=int
             )
         elif process == 'predict':
             subparser.add_argument('-o', '--out-path', dest='out_path', help='The output path', default=None)
