@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.1.1 (2022-09-16)
+* Add argument for weight decay ([#20](https://github.com/jgrss/cultionet/pull/20))
+
 ## v1.1.0 (2022-01-14)
 * Add config argument to specify region ids as a file ([#28](https://github.com/jgrss/cultionet/pull/28))
 
