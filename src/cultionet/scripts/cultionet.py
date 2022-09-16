@@ -16,6 +16,7 @@ from cultionet.data.utils import create_network_data, NetworkDataset
 
 import torch
 import geopandas as gpd
+import pandas as pd
 import yaml
 
 
@@ -211,9 +212,28 @@ def persist_dataset(args):
     config = open_config(args.config_file)
     project_path_lists = [args.project_path]
     ref_res_lists = [args.ref_res]
+    
+    region_as_list = config['regions'] is not None
+    region_as_file = config["region_id_file"] is not None
+
+    assert (
+        region_as_list or region_as_file
+    ), "Only submit region as a list or as a given file"
+
+    
+    if region_as_file:
+        file_path = config['region_id_file']
+        if not Path(file_path).is_file():
+            raise IOError('The id file does not exist')
+        id_data = pd.read_csv(file_path)
+        assert "id" in id_data.columns, f"id column not found in {file_path}."
+        regions = id_data['id'].unique().tolist()
+    else:
+        regions = list(range(config['regions'][0], config['regions'][1]+1))
+    
 
     inputs = model_preprocessing.TrainInputs(
-        regions=config['regions'],
+        regions=regions,
         years=config['years'],
         lc_path=config['lc_path']
     )
@@ -259,6 +279,7 @@ def persist_dataset(args):
             # Get the centroid coordinates of the grid
             lon, lat = get_centroid_coords(df_grids.centroid, dst_crs='epsg:4326')
 
+            # TODO: allow user to specify start/end dates
             if lat > 0:
                 start_date = '01-01'
                 end_date = '01-01'

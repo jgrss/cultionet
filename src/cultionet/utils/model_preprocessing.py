@@ -25,9 +25,7 @@ class TrainInputs(object):
     )
 
     def __attrs_post_init__(self):
-        start_region = self.regions[0]
-        end_region = self.regions[1]
-        region_list = list(range(start_region, end_region+1))
+        region_list = self.regions
         self.regions_lists: T.List[T.List[str]] = [region_list]
         self.year_lists: T.List[T.List[int]] = [self.years]
         self.lc_paths_lists: T.List[str] = [self.lc_path]
