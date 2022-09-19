@@ -511,7 +511,6 @@ def create_dataset(
                     row_grid_id,
                     n_ts
                 )
-                import ipdb;ipdb.set_trace()
                 if batch_stored:
                     pbar.update(1)
                     pbar.set_description(f'{group_id} is already stored.')
