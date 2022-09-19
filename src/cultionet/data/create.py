@@ -333,7 +333,7 @@ def create_image_vars(
             )
             # Get the time and band count
             ntime, nbands = get_image_list_dims(image, src_ts)
-    
+
             if grid_edges is not None:
                 # Get the training edges
                 labels_array = polygon_to_array(
