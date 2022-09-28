@@ -181,10 +181,12 @@ def predict(
         gpus=1 if device == 'gpu' else 0,
         accelerator=device,
         num_processes=0,
-        progress_bar_refresh_rate=0,
         log_every_n_steps=0,
         logger=False
     )
+    if trainer_kwargs['accelerator'] == 'cpu':
+        del trainer_kwargs['devices']
+        del trainer_kwargs['gpus']
 
     lit_kwargs = dict(
         num_features=dataset.num_features,
