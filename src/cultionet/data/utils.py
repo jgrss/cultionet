@@ -10,6 +10,7 @@ from ..utils.reshape import nd_to_columns
 from ..utils.normalize import NormValues
 
 import numpy as np
+import xarray as xr
 import torch
 from torch_geometric.data import Data
 
@@ -23,7 +24,12 @@ class LabeledData:
     props: T.List
 
 
-def get_image_list_dims(image_list: T.Sequence[T.Union[Path, str]], src) -> T.Tuple[int, int]:
+def get_image_list_dims(
+    image_list: T.Sequence[T.Union[Path, str]],
+    src: xr.DataArray
+) -> T.Tuple[int, int]:
+    """Gets the dimensions of the time series
+    """
     # Get the band count using the unique set of band/variable names
     nbands = len(list(set([Path(fn).parent.name for fn in image_list])))
     # Get the time count (.gw.nbands = number of total features)
@@ -129,22 +135,24 @@ class NetworkDataset(object):
         self.data_values = data_values
         self.data_path = data_path
 
-        processed_path = self.data_path / 'processed'
-        if processed_path.is_dir():
-            shutil.rmtree(str(processed_path))
-        processed_path.mkdir(parents=True, exist_ok=True)
+        self.processed_path = self.data_path / 'processed'
+        self.processed_path.mkdir(parents=True, exist_ok=True)
 
         # Create a random filename so that the processed
         # directory can be used by other processes
         filename = str(uuid.uuid4()).replace('-', '')
         pt_name = f'{filename}_.pt'
         self.pattern = f'{filename}*.pt'
-        self.pt_file = processed_path / pt_name
+        self.pt_file = self.processed_path / pt_name
 
         self._save(data)
 
     def _save(self, data: Data) -> None:
         torch.save(data, self.pt_file)
+
+    def clear(self) -> None:
+        if self.processed_path.is_dir():
+            shutil.rmtree(str(self.processed_path))
 
     def unlink(self) -> None:
         self.pt_file.unlink()
