@@ -120,14 +120,17 @@ class CultioGraphNet(torch.nn.Module):
         return self.forward(*args, **kwargs)
 
     def forward(self, data: Data) -> T.Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        height = int(data.height) if data.batch is None else int(data.height[0])
+        width = int(data.width) if data.batch is None else int(data.width[0])
+        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
         # Transformer on each band time series
         transformer_stream = []
         # Iterate over all data features, stepping over time chunks
         for band in range(0, self.ds_num_features, self.ds_num_time):
             # Get the current band through all time steps
             t = self.transformer(
-                data.x[:, band:band+self.ds_num_time], 
-                data.edge_index, 
+                data.x[:, band:band+self.ds_num_time],
+                data.edge_index,
                 data.edge_attrs
             )
             transformer_stream.append(t)
@@ -141,8 +144,8 @@ class CultioGraphNet(torch.nn.Module):
                 data.edge_index,
                 data.edge_attrs[:, 1],
                 data.batch,
-                int(data.height[0]),
-                int(data.width[0])
+                height,
+                width
             )
             nunet_stream.append(t)
         nunet_stream = torch.cat(nunet_stream, dim=1)
@@ -150,7 +153,7 @@ class CultioGraphNet(torch.nn.Module):
         # RNN ConvStar
         # Reshape from (B x C x H x W) -> (B x T x C x H x W)
         star_stream = self.gc(
-            data.x, data.batch.unique().size(0), int(data.height[0]), int(data.width[0])
+            data.x, batch_size, height, width
         )
         nbatch, ntime, height, width = star_stream.shape
         star_stream = star_stream.reshape(
