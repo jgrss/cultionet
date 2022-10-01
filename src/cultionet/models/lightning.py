@@ -77,14 +77,17 @@ class CultioLitModel(pl.LightningModule):
             crop_r: Probability of refined crop [0,1].
         """
         distance, edge, crop = self.model(batch)
+        height = int(batch.height) if batch.batch is None else int(batch.height[0])
+        width = int(batch.width) if batch.batch is None else int(batch.width[0])
+        batch_size = 1 if batch.batch is None else batch.batch.unique().size(0)
 
         crop_r = self.refine(
             torch.cat([
                 distance, F.log_softmax(edge, dim=1), F.log_softmax(crop, dim=1)
             ], dim=1),
-            batch.batch.unique().size(0),
-            int(batch.height[0]),
-            int(batch.width[0])
+            batch_size,
+            height,
+            width
         )
 
         # Transform edge and crop logits to probabilities
@@ -104,8 +107,7 @@ class CultioLitModel(pl.LightningModule):
     def predict_step(
         self,
         batch: Data,
-        batch_idx: int = None,
-        dataloader_idx: T.Optional[int] = None
+        batch_idx: int = None
     ) -> T.Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """A prediction step for Lightning
         """
