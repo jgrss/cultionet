@@ -31,7 +31,12 @@ class TrainInputs(object):
         self.lc_paths_lists: T.List[str] = [self.lc_path]
 
 
-def get_time_series_list(vi_path: Path, image_year: int, start_date: str, end_date: str) -> T.List[str]:
+def get_time_series_list(
+    vi_path: Path,
+    image_year: int,
+    start_date: str,
+    end_date: str
+) -> T.List[str]:
     """Gets a list of time series paths
     """
     # Get the requested time slice
@@ -39,7 +44,11 @@ def get_time_series_list(vi_path: Path, image_year: int, start_date: str, end_da
         vi_path, "*.tif", date_pos=0, date_start=0, date_end=7, date_format='%Y%j'
     )
     # Create a DataFrame with paths and dates
-    df = pd.DataFrame(data=list(image_dict.keys()), columns=['name'], index=list(image_dict.values()))
+    df = pd.DataFrame(
+        data=list(image_dict.keys()),
+        columns=['name'],
+        index=list(image_dict.values())
+    )
     # Slice the requested time series from the dataFrame
     ts_list = df.loc[f'{image_year-1}-{start_date}':f'{image_year}-{end_date}'].name.values.tolist()
 
