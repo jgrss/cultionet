@@ -164,7 +164,7 @@ class NestedUNet(torch.nn.Module):
         nrows: int,
         ncols: int
     ) -> torch.Tensor:
-        nbatch = batch.unique().size(0)
+        nbatch = 1 if batch is None else batch.unique().size(0)
 
         x0_0 = self.conv0_0(x, edge_index, edge_weight)
         # Reshape to CNN 4d
