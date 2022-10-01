@@ -1,16 +1,20 @@
 import typing as T
 from pathlib import Path
 import logging
+import tempfile
+import filelock
 
 import numpy as np
 
-from .data.datasets import EdgeDataset
+from .data.datasets import EdgeDataset, zscores
 from .data.modules import EdgeDataModule
 from .models.lightning import CultioLitModel
 from .utils.reshape import ModelOutputs
 
 from rasterio.windows import Window
+import torch
 from torch_geometric import seed_everything
+from torch_geometric.data import Data
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -147,32 +151,27 @@ def fit(
         trainer.fit(model=lit_model, datamodule=data_module, ckpt_path=ckpt_path)
 
 
-def predict(
-    dataset: EdgeDataset,
+def load_model(
+    num_features: int,
+    num_time_features: int,
     ckpt_file: T.Union[str, Path],
     filters: T.Optional[int] = 32,
     device: T.Union[str, bytes] = 'gpu',
-    w: Window = None,
-    w_pad: Window = None,
-    lit_model: T.Optional[CultioLitModel] = None
-) -> T.Tuple[np.ndarray, CultioLitModel]:
-    """Applies a model to predict image labels|values
+    lit_model: T.Optional[CultioLitModel] = None,
+    enable_progress_bar: T.Optional[bool] = True
+) -> T.Tuple[pl.Trainer, CultioLitModel]:
+    """Loads a model from file
 
     Args:
-        dataset (EdgeDataset): The dataset to predict on.
-        ckpt_file (str | Path): The checkpoint file path.
-        filters (Optional[int]): The number of initial model filters.
-        device (Optional[str]): The device to predict on. Choices are ['cpu', 'gpu'].
-        w (Optional[int]): The ``rasterio.windows.Window`` to write to.
-        w_pad (Optional[int]): The ``rasterio.windows.Window`` to predict on.
-        lit_model (Optional[CultioLitModel]): A model to predict with. If not given, the model is loaded
-            from the checkpoint file.
+        ckpt_file (str | Path): The model checkpoint file.
+        filters (int): The model input filters.
+        device (str): The device to apply inference on.
+        trainer (pl.Trainer): The `pytorch_lightning` trainer.
+        lit_model (CultioLitModel): A model to predict with. If `None`, the model
+            is loaded from file.
+        enable_progress_bar (Optional[bool]): Whether to use the progress bar.
     """
     ckpt_file = Path(ckpt_file)
-
-    data_module = EdgeDataModule(
-        predict_ds=dataset, batch_size=1, num_workers=0
-    )
 
     trainer_kwargs = dict(
         default_root_dir=str(ckpt_file.parent),
@@ -182,27 +181,58 @@ def predict(
         accelerator=device,
         num_processes=0,
         log_every_n_steps=0,
-        logger=False
+        logger=False,
+        enable_progress_bar=enable_progress_bar
     )
     if trainer_kwargs['accelerator'] == 'cpu':
         del trainer_kwargs['devices']
         del trainer_kwargs['gpus']
 
-    lit_kwargs = dict(
-        num_features=dataset.num_features,
-        num_time_features=dataset.num_time_features,
-        filters=filters
-    )
+    # lit_kwargs = dict(
+    #     num_features=num_features,
+    #     num_time_features=num_time_features,
+    #     filters=filters
+    # )
 
     trainer = pl.Trainer(**trainer_kwargs)
     if lit_model is None:
         assert ckpt_file.is_file(), 'The checkpoint file does not exist.'
-        lit_model = CultioLitModel(**lit_kwargs).load_from_checkpoint(checkpoint_path=str(ckpt_file))
+        lit_model = CultioLitModel.load_from_checkpoint(
+            checkpoint_path=str(ckpt_file)
+        )
         lit_model.eval()
         lit_model.freeze()
 
-    # Make predictions
-    distance, edge, crop, crop_r = trainer.predict(model=lit_model, datamodule=data_module)[0]
+    return trainer, lit_model
+
+
+def predict(
+    lit_model: CultioLitModel,
+    data: Data,
+    data_values: torch.Tensor,
+    w: Window = None,
+    w_pad: Window = None
+) -> np.ndarray:
+    """Applies a model to predict image labels|values
+
+    Args:
+        lit_model (CultioLitModel): A model to predict with.
+        data (Data): The data to predict on.
+        w (Optional[int]): The ``rasterio.windows.Window`` to write to.
+        w_pad (Optional[int]): The ``rasterio.windows.Window`` to predict on.
+    """
+    # with filelock.FileLock('./predict.lock'):
+        # with tempfile.TemporaryDirectory() as tmp:
+        #     net_ds = NetworkDataset(data, Path(tmp), data_values)
+        #     data_module = EdgeDataModule(
+        #         predict_ds=net_ds.ds, batch_size=1, num_workers=0
+        #     )
+    #         distance, edge, crop, crop_r = trainer.predict(
+    #             model=lit_model, datamodule=data_module
+    #         )[0]
+    norm_batch = zscores(data, data_values.mean, data_values.std)
+    with torch.no_grad():
+        distance, edge, crop, crop_r = lit_model(norm_batch)
 
     mo = ModelOutputs(
         distance=distance,
@@ -213,4 +243,4 @@ def predict(
     )
     stack = mo.stack_outputs(w, w_pad)
 
-    return stack, lit_model
+    return stack
