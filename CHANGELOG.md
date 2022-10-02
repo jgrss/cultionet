@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.2.1 (2022-10-01)
+* Add concurrent predictions over image windows ([#20](https://github.com/jgrss/cultionet/pull/29))
+
 ## v1.1.1 (2022-09-16)
 * Add argument for weight decay ([#20](https://github.com/jgrss/cultionet/pull/20))
 
