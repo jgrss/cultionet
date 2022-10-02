@@ -244,7 +244,7 @@ conda activate venv.cnet
 (venv.cnet) mamba install pytorch==1.11.0 torchvision==0.12.0 torchaudio==0.11.0 -c pytorch
 (venv.cnet) mamba install pyg -c pyg
 (venv.cnet) pip install -U pip setuptools wheel
-(venv.cnet) pip install cultionet@git+https://github.com/jgrss/cultionet.git@jgrss/network_args
+(venv.cnet) pip install cultionet@git+https://github.com/jgrss/cultionet.git@v1.2.1
 (venv.cnet) pip install -U threadpoolctl
 ```
 
@@ -262,7 +262,7 @@ pyenv activate venv.cnet
 (venv.cnet) pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cpu
 (venv.cnet) TORCH_VERSION=$(python -c "import torch;print(torch.__version__)")
 (venv.cnet) pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
-(venv.cnet) pip install cultionet@git+https://github.com/jgrss/cultionet.git@jgrss/network_args
+(venv.cnet) pip install cultionet@git+https://github.com/jgrss/cultionet.git@v1.2.1
 ```
 
 ### (Option 4) Install CUDA and built GPU packages
