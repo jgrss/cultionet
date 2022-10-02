@@ -388,7 +388,8 @@ def predict_image(args):
                         indexes=[1, 2, 3, 4],
                         window=w
                     )
-                pba.update.remote(1)
+                if pba is not None:
+                    pba.update.remote(1)
 
         if ray.is_initialized():
             logger.warning('The Ray cluster is already running.')
@@ -412,24 +413,25 @@ def predict_image(args):
             device=args.device,
             scale_factor=SCALE_FACTOR
         )
+        actor_chunksize = args.processes * 8
         try:
-            with tqdm(total=32, desc='Predicting windows', position=0) as pbar:
-                for wchunk in range(0, 32+args.processes, args.processes):
-                    chunk_windows = windows[wchunk:wchunk+args.processes]
-                    pb = ProgressBar(
-                        total=len(chunk_windows),
-                        desc=f'Chunks {wchunk}-{wchunk+len(chunk_windows)}',
-                        position=1,
-                        leave=False
-                    )
-                    tqdm_actor = pb.actor
+            with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
+                for wchunk in range(0, len(windows)+actor_chunksize, actor_chunksize):
+                    chunk_windows = windows[wchunk:wchunk+actor_chunksize]
+                    # pb = ProgressBar(
+                    #     total=len(chunk_windows),
+                    #     desc=f'Chunks {wchunk}-{wchunk+len(chunk_windows)}',
+                    #     position=1,
+                    #     leave=False
+                    # )
+                    # tqdm_actor = pb.actor
                     # Write each window concurrently
                     results = [
-                        remote_writer.write_predictions.remote(w, w_pad, pba=tqdm_actor)
+                        remote_writer.write_predictions.remote(w, w_pad)
                         for w, w_pad in chunk_windows
                     ]
                     # Initiate the processing
-                    pb.print_until_done()
+                    # pb.print_until_done()
                     ray.get(results)
                     # Close the file
                     ray.get(remote_writer.close_open.remote())
