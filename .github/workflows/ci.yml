@@ -26,9 +26,9 @@ jobs:
         run: |
           # Install GDAL
           sudo apt update && sudo apt upgrade -y && sudo apt install -y
-          sudo apt install software-properties-common -y 
-          sudo add-apt-repository ppa:ubuntugis/ppa 
-          sudo apt install libmysqlclient-dev default-libmysqlclient-dev -y 
+          sudo apt install software-properties-common -y
+          sudo add-apt-repository ppa:ubuntugis/ppa
+          sudo apt install libmysqlclient-dev default-libmysqlclient-dev -y
           sudo apt install gdal-bin libgdal-dev libgl1 libspatialindex-dev g++ -y
           export CPLUS_INCLUDE_PATH=/usr/include/gdal
           export C_INCLUDE_PATH=/usr/include/gdal
@@ -42,13 +42,17 @@ jobs:
           pip install GDAL==$GDAL_VERSION --no-binary=gdal
       - name: Install PyTorch
         run: |
-          pip install --upgrade --no-cache-dir "setuptools<=58.*"
-          pip install torch torchvision torchaudio
-          pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric torch-geometric-temporal
+          TORCH_CPU="https://download.pytorch.org/whl/cpu"
+          PYG_TORCH_CPU="https://data.pyg.org/whl/torch-1.12.0+cpu.html"
+          pip install --upgrade --no-cache-dir setuptools>=0.59.0
+          pip install torch torchvision torchaudio --extra-index-url $TORCH_CPU
+          pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f $PYG_TORCH_CPU
+          pip install torch-geometric-temporal>=0.54.0
+          pip install torchmetrics>=0.7.0
+        if: steps.cnetenv.outputs.cache-hit != 'true'
       - name: Install cultionet
         run: |
           pip install .
-        if: steps.cnetenv.outputs.cache-hit != 'true'
       - name: Pytest
         run: |
           pip install pytest

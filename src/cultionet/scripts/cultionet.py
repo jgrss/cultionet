@@ -5,19 +5,28 @@ import typing as T
 import logging
 from pathlib import Path
 from datetime import datetime
+import asyncio
+import filelock
 
 import cultionet
 from cultionet.data.datasets import EdgeDataset
-from cultionet.utils.project_paths import setup_paths
+from cultionet.utils.project_paths import setup_paths, ProjectPaths
 from cultionet.utils.normalize import get_norm_values
 from cultionet.data.create import create_dataset
+from cultionet.data.utils import get_image_list_dims
 from cultionet.utils import model_preprocessing
 from cultionet.data.utils import create_network_data, NetworkDataset
+from cultionet.models.lightning import CultioLitModel
 
 import torch
 import geopandas as gpd
 import pandas as pd
 import yaml
+from rasterio.windows import Window
+import ray
+from ray.actor import ActorHandle
+from tqdm import tqdm
+import xarray as xr
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +34,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_AUGMENTATIONS = ['none', 'fliplr', 'flipud', 'flipfb',
                          'rot90', 'rot180', 'rot270',
                          'ts-warp', 'ts-noise', 'ts-drift']
+
+SCALE_FACTOR = 10_000.0
 
 
 def open_config(config_file: T.Union[str, Path, bytes]) -> dict:
@@ -34,7 +45,10 @@ def open_config(config_file: T.Union[str, Path, bytes]) -> dict:
     return config
 
 
-def get_centroid_coords_from_image(vi_path: Path, dst_crs: T.Optional[str] = None) -> T.Tuple[float, float]:
+def get_centroid_coords_from_image(
+    vi_path: Path,
+    dst_crs: T.Optional[str] = None
+) -> T.Tuple[float, float]:
     """Gets the lon/lat or x/y coordinates of a centroid
     """
     import geowombat as gw
@@ -46,7 +60,13 @@ def get_centroid_coords_from_image(vi_path: Path, dst_crs: T.Optional[str] = Non
     return float(centroid.x), float(centroid.y)
 
 
-def get_image_list(ppaths, region, config):
+def get_image_list(
+    ppaths: ProjectPaths,
+    region: str,
+    config: dict
+):
+    """Gets a list of the time series images
+    """
     image_list = []
     for image_vi in model_preprocessing.VegetationIndices(image_vis=config['image_vis']).image_vis:
         # Set the full path to the images
@@ -59,18 +79,34 @@ def get_image_list(ppaths, region, config):
             logger.warning(f'{str(vi_path)} does not exist')
             continue
 
-        # Get the centroid coordinates of the grid
-        lon, lat = get_centroid_coords_from_image(vi_path, dst_crs='epsg:4326')
         # Get the image year
-        file = list(vi_path.glob('*.tif'))[0]
-        image_year = int(datetime.strptime(file.stem, '%Y%j').strftime('%Y')) + 1
+        filename = list(vi_path.glob(f"{config['predict_year']}*.tif"))[0]
+        file_dt = datetime.strptime(filename.stem, '%Y%j')
 
-        if lat > 0:
-            start_date = '01-01'
-            end_date = '01-01'
+        if config['start_date'] is not None:
+            start_date = config['start_date']
         else:
-            start_date = '07-01'
-            end_date = '07-01'
+            start_date = file_dt.strftime('%m-%d')
+        if config['end_date'] is not None:
+            end_date = config['end_date']
+        else:
+            end_date = file_dt.strftime('%m-%d')
+        image_year = file_dt.year + 1
+
+        # Get the centroid coordinates of the grid
+        lat = get_centroid_coords_from_image(vi_path, dst_crs='epsg:4326')[1]
+        if lat > 0:
+            # Expected time series start in northern hemisphere winter
+            if (file_dt.month > 2) or (file_dt.month < 11):
+                logger.warning(
+                    f"The time series start date is {file_dt.strftime('%Y-%m-%d')} but the time series is in the Northern hemisphere."
+                )
+        else:
+            # Expected time series start in northern southern winter
+            if (file_dt.month < 5) or (file_dt.month > 9):
+                logger.warning(
+                    f"The time series start date is {file_dt.strftime('%Y-%m-%d')} but the time series is in the Southern hemisphere."
+                )
 
         # Get the requested time slice
         ts_list = model_preprocessing.get_time_series_list(
@@ -85,43 +121,146 @@ def get_image_list(ppaths, region, config):
     return image_list
 
 
+@ray.remote
+class ProgressBarActor:
+    """
+    Reference:
+        https://docs.ray.io/en/releases-1.11.1/ray-core/examples/progress_bar.html
+    """
+    counter: int
+    delta: int
+    event: asyncio.Event
+
+    def __init__(self) -> None:
+        self.counter = 0
+        self.delta = 0
+        self.event = asyncio.Event()
+
+    def update(self, num_items_completed: int) -> None:
+        """Updates the ProgressBar with the incremental
+        number of items that were just completed.
+        """
+        self.counter += num_items_completed
+        self.delta += num_items_completed
+        self.event.set()
+
+    async def wait_for_update(self) -> T.Tuple[int, int]:
+        """Blocking call.
+
+        Waits until somebody calls `update`, then returns a tuple of
+        the number of updates since the last call to
+        `wait_for_update`, and the total number of completed items.
+        """
+        await self.event.wait()
+        self.event.clear()
+        saved_delta = self.delta
+        self.delta = 0
+
+        return saved_delta, self.counter
+
+    def get_counter(self) -> int:
+        """Returns the total number of complete items.
+        """
+        return self.counter
+
+
+class ProgressBar:
+    """
+    Reference:
+        https://docs.ray.io/en/releases-1.11.1/ray-core/examples/progress_bar.html
+    """
+    progress_actor: ActorHandle
+    total: int
+    desc: str
+    position: int
+    leave: bool
+    pbar: tqdm
+
+    def __init__(
+        self,
+        total: int,
+        desc: str = "",
+        position: int = 0,
+        leave: bool = True
+    ):
+        # Ray actors don't seem to play nice with mypy, generating
+        # a spurious warning for the following line,
+        # which we need to suppress. The code is fine.
+        self.progress_actor = ProgressBarActor.remote()  # type: ignore
+        self.total = total
+        self.desc = desc
+        self.position = position
+        self.leave = leave
+
+    @property
+    def actor(self) -> ActorHandle:
+        """Returns a reference to the remote `ProgressBarActor`.
+
+        When you complete tasks, call `update` on the actor.
+        """
+        return self.progress_actor
+
+    def print_until_done(self) -> None:
+        """Blocking call.
+
+        Do this after starting a series of remote Ray tasks, to which you've
+        passed the actor handle. Each of them calls `update` on the actor.
+        When the progress meter reaches 100%, this method returns.
+        """
+        pbar = tqdm(
+            desc=self.desc,
+            position=self.position,
+            total=self.total,
+            leave=self.leave
+        )
+        while True:
+            delta, counter = ray.get(self.actor.wait_for_update.remote())
+            pbar.update(delta)
+            if counter >= self.total:
+                pbar.close()
+                return
+
+
 def predict_image(args):
     import geowombat as gw
     from geowombat.core.windows import get_window_offsets
-    import numpy as np
     import rasterio as rio
-    from rasterio.windows import Window
     import torch
-    import yaml
-    from tqdm.auto import tqdm
+    from tqdm.dask import TqdmCallback
 
     logging.getLogger('pytorch_lightning').setLevel(logging.WARNING)
 
     config = open_config(args.config_file)
 
     # This is a helper function to manage paths
-    ppaths = setup_paths(args.project_path, append_ts=True if args.append_ts == 'y' else False)
-
+    ppaths = setup_paths(
+        args.project_path, append_ts=True if args.append_ts == 'y' else False
+    )
     # Load the z-score norm values
     data_values = torch.load(ppaths.norm_file)
 
     try:
         tmp = int(args.grid_id)
         region = f'{tmp:06d}'
-    except:
+    except ValueError:
         region = args.grid_id
 
     # Get the image list
     image_list = get_image_list(ppaths, region, config)
 
     with gw.open(
-            image_list,
-            stack_dim='band',
-            band_names=list(range(1, len(image_list)+1))
+        image_list,
+        stack_dim='band',
+        band_names=list(range(1, len(image_list)+1))
     ) as src_ts:
-        time_series = ((src_ts * args.gain + args.offset)
-                       .astype('float64')
-                       .clip(0, 1))
+        time_series = (
+            (src_ts * args.gain + args.offset)
+            .astype('float64')
+            .clip(0, 1)
+        )
+        if args.preload_data:
+            with TqdmCallback(desc='Loading data'):
+                time_series.load(num_workers=args.processes)
         # Get the image dimensions
         nvars = model_preprocessing.VegetationIndices(image_vis=config['image_vis']).n_vis
         nfeas, height, width = time_series.shape
@@ -146,55 +285,179 @@ def predict_image(args):
             'dtype': 'uint16',
             'blockxsize': 64 if 64 < width else width,
             'blockysize': 64 if 64 < height else height,
-            'driver': 'GTiff'
+            'driver': 'GTiff',
+            'sharing': True
         }
+        profile['tiled'] = True if max(profile['blockxsize'], profile['blockysize']) >= 16 else False
 
-        # Create the output file
-        with rio.open(args.out_path, mode='w', **profile) as dst:
-            pass
+        # Get the time and band count
+        ntime, nbands = get_image_list_dims(image_list, time_series)
 
-        for w, w_pad in tqdm(windows, total=len(windows)):
-            slc = (
-                slice(0, None),
-                slice(w_pad.row_off, w_pad.row_off+w_pad.height),
-                slice(w_pad.col_off, w_pad.col_off+w_pad.width)
-            )
-            # Create the data for the chunk
-            data = create_network_data(time_series[slc].data.compute(num_workers=8), ntime)
-            # Create the temporary dataset
-            net_ds = NetworkDataset(data, ppaths.predict_path, data_values)
+        @ray.remote
+        class Writer(object):
+            def __init__(
+                self,
+                window: Window,
+                out_path: T.Union[str, Path],
+                mode: str,
+                profile: dict,
+                ntime: int,
+                nbands: int,
+                ts: xr.DataArray,
+                data_values: torch.Tensor,
+                ppaths: ProjectPaths,
+                filters: int,
+                device: str,
+                scale_factor: float
+            ) -> None:
+                self.out_path = out_path
+                # Create the output file
+                if mode == 'w':
+                    with rio.open(self.out_path, mode=mode, **profile):
+                        pass
 
-            # Apply inference on the chunk
-            stack, lit_model = cultionet.predict(
-                predict_ds=net_ds.ds,
-                ckpt_file=ppaths.ckpt_file,
-                filters=args.filters,
-                device=args.device,
-                w=w,
-                w_pad=w_pad
-            )
-            # Write the prediction stack to file
-            with rio.open(args.out_path, mode='r+') as dst:
-                dst.write(
-                    (stack*10000.0).clip(0, 10000).astype('uint16'),
-                    indexes=[1, 2, 3, 4],
-                    window=w
+                self.dst = rio.open(self.out_path, mode='r+')
+
+                self.ntime = ntime
+                self.nbands = nbands
+                self.ts = ts
+                self.data_values = data_values
+                self.ppaths = ppaths
+                self.filters = filters
+                self.device = device
+                self.scale_factor = scale_factor
+
+                slc = self._build_slice(window)
+                data = create_network_data(
+                    self.ts[slc].data.compute(num_workers=1),
+                    ntime=self.ntime,
+                    nbands=self.nbands
+                )
+                self.lit_model = cultionet.load_model(
+                    num_features=data.x.shape[1],
+                    num_time_features=data.ntime,
+                    ckpt_file=self.ppaths.ckpt_file,
+                    filters=self.filters,
+                    device=self.device,
+                    enable_progress_bar=False
+                )[1]
+
+            def _build_slice(self, window: Window) -> tuple:
+                return (
+                    slice(0, None),
+                    slice(window.row_off, window.row_off+window.height),
+                    slice(window.col_off, window.col_off+window.width)
                 )
 
-            # Remove the temporary dataset
-            net_ds.unlink()
+            def close_open(self):
+                self.close()
+                self.dst = rio.open(self.out_path, mode='r+')
+
+            def close(self):
+                self.dst.close()
+
+            def write_predictions(
+                self,
+                w: Window,
+                w_pad: Window,
+                pba: ActorHandle = None
+            ):
+                slc = self._build_slice(w_pad)
+                # Create the data for the chunk
+                data = create_network_data(
+                    self.ts[slc].data.compute(num_workers=1),
+                    ntime=self.ntime,
+                    nbands=self.nbands
+                )
+                # Apply inference on the chunk
+                stack = cultionet.predict(
+                    lit_model=self.lit_model,
+                    data=data,
+                    data_values=self.data_values,
+                    w=w,
+                    w_pad=w_pad
+                )
+                # Write the prediction stack to file
+                with filelock.FileLock('./dst.lock'):
+                    self.dst.write(
+                        (
+                            (stack*self.scale_factor)
+                            .clip(0, self.scale_factor)
+                            .astype('uint16')
+                        ),
+                        indexes=[1, 2, 3, 4],
+                        window=w
+                    )
+                if pba is not None:
+                    pba.update.remote(1)
+
+        if ray.is_initialized():
+            logger.warning('The Ray cluster is already running.')
+        else:
+            ray.init(num_cpus=args.processes)
+        assert ray.is_initialized(), 'The Ray cluster is not running.'
+        # Setup the remote ray writer
+        remote_writer = Writer.options(
+            max_concurrency=args.processes
+        ).remote(
+            window=windows[0][1],
+            out_path=args.out_path,
+            mode=args.mode,
+            profile=profile,
+            ntime=ntime,
+            nbands=nbands,
+            ts=ray.put(time_series),
+            data_values=data_values,
+            ppaths=ppaths,
+            filters=args.filters,
+            device=args.device,
+            scale_factor=SCALE_FACTOR
+        )
+        actor_chunksize = args.processes * 8
+        try:
+            with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
+                for wchunk in range(0, len(windows)+actor_chunksize, actor_chunksize):
+                    chunk_windows = windows[wchunk:wchunk+actor_chunksize]
+                    # pb = ProgressBar(
+                    #     total=len(chunk_windows),
+                    #     desc=f'Chunks {wchunk}-{wchunk+len(chunk_windows)}',
+                    #     position=1,
+                    #     leave=False
+                    # )
+                    # tqdm_actor = pb.actor
+                    # Write each window concurrently
+                    results = [
+                        remote_writer.write_predictions.remote(w, w_pad)
+                        for w, w_pad in chunk_windows
+                    ]
+                    # Initiate the processing
+                    # pb.print_until_done()
+                    ray.get(results)
+                    # Close the file
+                    ray.get(remote_writer.close_open.remote())
+                    pbar.update(len(chunk_windows))
+            ray.get(remote_writer.close.remote())
+            ray.shutdown()
+        except Exception as e:
+            ray.get(remote_writer.close.remote())
+            ray.shutdown()
+            logger.exception(f"The predictions failed because {e}.")
 
 
-def cycle_data(year_lists: list,
-               regions_lists: list,
-               project_path_lists: list,
-               lc_paths_lists: list,
-               ref_res_lists: list):
-    for years, regions, project_path, lc_path, ref_res in zip(year_lists,
-                                                              regions_lists,
-                                                              project_path_lists,
-                                                              lc_paths_lists,
-                                                              ref_res_lists):
+def cycle_data(
+    year_lists: list,
+    regions_lists: list,
+    project_path_lists: list,
+    lc_paths_lists: list,
+    ref_res_lists: list
+):
+    for years, regions, project_path, lc_path, ref_res in zip(
+        year_lists,
+        regions_lists,
+        project_path_lists,
+        lc_paths_lists,
+        ref_res_lists
+    ):
         for region in regions:
             for image_year in years:
                 yield region, image_year, project_path, lc_path, ref_res
@@ -212,7 +475,7 @@ def persist_dataset(args):
     config = open_config(args.config_file)
     project_path_lists = [args.project_path]
     ref_res_lists = [args.ref_res]
-    
+
     region_as_list = config['regions'] is not None
     region_as_file = config["region_id_file"] is not None
 
@@ -220,7 +483,7 @@ def persist_dataset(args):
         region_as_list or region_as_file
     ), "Only submit region as a list or as a given file"
 
-    
+
     if region_as_file:
         file_path = config['region_id_file']
         if not Path(file_path).is_file():
@@ -230,7 +493,7 @@ def persist_dataset(args):
         regions = id_data['id'].unique().tolist()
     else:
         regions = list(range(config['regions'][0], config['regions'][1]+1))
-    
+
 
     inputs = model_preprocessing.TrainInputs(
         regions=regions,
@@ -250,7 +513,7 @@ def persist_dataset(args):
         try:
             tmp = int(region)
             region = f'{tmp:06d}'
-        except:
+        except ValueError:
             pass
 
         # Read the training data
@@ -513,6 +776,20 @@ def main():
             subparser.add_argument(
                 '--device', dest='device', help='The device to train on (default: %(default)s)',
                 default='gpu', choices=['cpu', 'gpu']
+            )
+            subparser.add_argument(
+                '--processes', dest='processes', help='The number of concurrent processes (default: %(default)s)',
+                default=1, type=int
+            )
+            subparser.add_argument(
+                '--mode', dest='mode', help='The file open() mode (default: %(default)s)',
+                default='w', choices=['w', 'r+']
+            )
+            subparser.add_argument(
+                '--preload-data',
+                dest='preload_data',
+                help='Whether to preload the time series data into memory (default: %(default)s)',
+                action='store_true'
             )
 
     args = parser.parse_args()

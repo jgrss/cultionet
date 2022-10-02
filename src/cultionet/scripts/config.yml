@@ -21,4 +21,9 @@ years:
   - 2021
   - 2022
 
+predict_year: 2020
+
+start_date: 07-01
+end_date: 07-01
+
 lc_path: !!null

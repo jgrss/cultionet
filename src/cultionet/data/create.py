@@ -2,8 +2,8 @@ import typing as T
 from pathlib import Path
 
 # TODO: imports
-from .lookup import CDL_CROP_LABELS, CDL_CROP_LABELS_r
-from .utils import LabeledData
+from .lookup import CDL_CROP_LABELS_r
+from .utils import LabeledData, get_image_list_dims
 from ..augment.augmentation import augment
 from ..errors import TopologyClipError
 from ..utils.geometry import bounds_to_frame, warp_by_image
@@ -327,16 +327,12 @@ def create_image_vars(
         ) as src_ts:
             # X variables
             time_series = (
-                (src_ts.gw.compute(num_workers=num_workers) * gain + offset)
-                .astype('float64')
+                (src_ts.astype('float64') * gain + offset)
+                .gw.compute(num_workers=num_workers)
                 .clip(0, 1)
             )
-
-            # Get the band count using the unique set of band/variable names
-            nbands = len(list(set([Path(fn).parent.name for fn in image])))
-            # Get the time count (.gw.nbands = number of total features)
-            ntime = int(src_ts.gw.nbands / nbands)
-
+            # Get the time and band count
+            ntime, nbands = get_image_list_dims(image, src_ts)
             if grid_edges is not None:
                 # Get the training edges
                 labels_array = polygon_to_array(
@@ -501,17 +497,32 @@ def create_dataset(
                     continue
 
                 # Check if the grid has already been saved
-                batch_stored = is_grid_processed(process_path, transforms, group_id, row.grid, n_ts)
+                if hasattr(row, 'grid'):
+                    row_grid_id = row.grid
+                elif hasattr(row, 'region'):
+                    row_grid_id = row.region
+                else:
+                    raise AttributeError("The grid id should be given as 'grid' or 'region'.")
+
+                batch_stored = is_grid_processed(
+                    process_path,
+                    transforms,
+                    group_id,
+                    row_grid_id,
+                    n_ts
+                )
                 if batch_stored:
                     pbar.update(1)
                     pbar.set_description(f'{group_id} is already stored.')
                     continue
 
                 # Get the upper left lat/lon
-                left, bottom, right, top = (df_grids.iloc[int_idx]
-                                            .to_crs('epsg:4326')
-                                            .total_bounds
-                                            .tolist())
+                left, bottom, right, top = (
+                    df_grids.iloc[int_idx]
+                    .to_crs('epsg:4326')
+                    .total_bounds
+                    .tolist()
+                )
 
                 if isinstance(group_id, str):
                     end_year = int(group_id.split('_')[-1])
@@ -527,7 +538,7 @@ def create_dataset(
 
                     # Open the projected land cover
                     with gw.config.update(
-                            ref_bounds=df_latlon.total_bounds.tolist(), ref_crs=ref_crs, ref_res=ref_res
+                        ref_bounds=df_latlon.total_bounds.tolist(), ref_crs=ref_crs, ref_res=ref_res
                     ):
                         with gw.open(lc_path, chunks=2048) as src:
                             lc_labels = src.squeeze()[:labels_array.shape[0], :labels_array.shape[1]].data.compute()
@@ -559,7 +570,7 @@ def create_dataset(
                 for aug in transforms:
                     if aug.startswith('ts-'):
                         for i in range(0, n_ts):
-                            train_id = f'{group_id}_{row.grid}_{aug}_{i:03d}'
+                            train_id = f'{group_id}_{row_grid_id}_{aug}_{i:03d}'
                             train_data = augment(
                                 ldata, aug=aug, ntime=ntime, nbands=nbands, k=3,
                                 start_year=start_year, end_year=end_year,
@@ -569,7 +580,7 @@ def create_dataset(
 
                             save_and_update(train_data)
                     else:
-                        train_id = f'{group_id}_{row.grid}_{aug}'
+                        train_id = f'{group_id}_{row_grid_id}_{aug}'
                         train_data = augment(
                             ldata, aug=aug, ntime=ntime, nbands=nbands, k=3,
                             start_year=start_year, end_year=end_year,

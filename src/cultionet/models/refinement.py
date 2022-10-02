@@ -28,7 +28,13 @@ class RefineConv(torch.nn.Module):
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
-    def forward(self, x: torch.Tensor, batch_size: torch.Tensor, height: int, width: int) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        batch_size: torch.Tensor,
+        height: int,
+        width: int
+    ) -> torch.Tensor:
         x = self.gc(
             x,
             batch_size,

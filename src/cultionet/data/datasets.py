@@ -14,6 +14,32 @@ ATTRVIN = attr.validators.in_
 ATTRVOPTIONAL = attr.validators.optional
 
 
+def add_dims(d: torch.Tensor) -> torch.Tensor:
+    return d.unsqueeze(0)
+
+
+def zscores(
+    batch: Data,
+    data_means: torch.Tensor,
+    data_stds: torch.Tensor
+) -> Data:
+    """Normalizes data to z-scores
+
+    Args:
+        batch (Data): A `torch_geometric` data object.
+        data_means (Tensor)
+        data_stds (TEnsor)
+
+    z = (x - μ) / σ
+    """
+    x = torch.cat([
+        (batch.x[:, :-1] - add_dims(data_means)) / add_dims(data_stds),
+        batch.x[:, -1][:, None]
+    ], dim=1)
+
+    return Data(x=x, **{k: getattr(batch, k) for k in batch.keys if k != 'x'})
+
+
 @attr.s
 class EdgeDataset(Dataset):
     """An edge dataset
@@ -53,6 +79,7 @@ class EdgeDataset(Dataset):
         """
         if not self.data_list_:
             self.get_data_list()
+
         return self.data_list_
 
     def download(self):
@@ -94,31 +121,6 @@ class EdgeDataset(Dataset):
 
         return train_ds, val_ds
 
-    def normalize(self, batch: Data) -> Data:
-        """Normalizes data to z-scores
-
-        Args:
-            batch (Data): A `torch_geometric` data object.
-
-        z-scores:
-            z = (x - mean) / std
-
-        Returns:
-            A `torch_geometric` data object.
-        """
-
-        def add_dims(d: torch.Tensor) -> torch.Tensor:
-            return d.unsqueeze(0)
-
-        x = torch.cat([
-            (batch.x[:, :-1] - add_dims(self.data_means)) / add_dims(self.data_stds),
-            batch.x[:, -1][:, None]
-        ], dim=1)
-
-        norm_batch = Data(x=x, **{k: getattr(batch, k) for k in batch.keys if k != 'x'})
-
-        return norm_batch
-
     def get(self, idx):
         """Gets an individual data object from the dataset
 
@@ -128,8 +130,8 @@ class EdgeDataset(Dataset):
         Returns:
             A `torch_geometric` data object.
         """
+        batch = torch.load(self.data_list_[idx])
         if isinstance(self.data_means, torch.Tensor):
-            batch = torch.load(Path(self.processed_dir) / self.data_list_[idx])
-            return self.normalize(batch)
+            return zscores(batch, self.data_means, self.data_stds)
         else:
-            return torch.load(Path(self.processed_dir) / self.data_list_[idx])
+            return batch

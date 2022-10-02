@@ -32,9 +32,14 @@ class GraphToConv(torch.nn.Module):
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
-    def forward(self, x: torch.Tensor, nbatch: int, nrows: int, ncols: int) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        nbatch: int,
+        nrows: int,
+        ncols: int
+    ) -> torch.Tensor:
         n_channels = x.shape[1]
-
         return x.reshape(nbatch, nrows, ncols, n_channels).permute(0, 3, 1, 2)
 
 
