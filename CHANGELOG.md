@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.2.2 (2022-10-03)
+* Updated geowombat version ([#30](https://github.com/jgrss/cultionet/pull/30))
+
 ## v1.2.1 (2022-10-01)
 * Add concurrent predictions over image windows ([#29](https://github.com/jgrss/cultionet/pull/29))
 
