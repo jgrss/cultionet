@@ -286,7 +286,8 @@ def predict_image(args):
             'blockxsize': 64 if 64 < width else width,
             'blockysize': 64 if 64 < height else height,
             'driver': 'GTiff',
-            'sharing': True
+            'sharing': False,
+            'compress': args.compression
         }
         profile['tiled'] = True if max(profile['blockxsize'], profile['blockysize']) >= 16 else False
 
@@ -790,6 +791,12 @@ def main():
                 dest='preload_data',
                 help='Whether to preload the time series data into memory (default: %(default)s)',
                 action='store_true'
+            )
+            subparser.add_argument(
+                '--compression',
+                dest='compression',
+                help='The compression algorithm to use (default: %(default)s)',
+                default='lzw'
             )
 
     args = parser.parse_args()
