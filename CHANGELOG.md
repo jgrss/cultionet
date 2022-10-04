@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.2.3 (2022-10-04)
+* Added user argument to specify raster compression method ([#32](https://github.com/jgrss/cultionet/pull/32))
+
 ## v1.2.2 (2022-10-03)
 * Updated geowombat version ([#30](https://github.com/jgrss/cultionet/pull/30))
 
