@@ -32,8 +32,8 @@ class TrainInputs(object):
 
 
 def get_time_series_list(
-    vi_path: Path,
-    image_year: int,
+    feature_path: Path,
+    start_year: int,
     start_date: str,
     end_date: str
 ) -> T.List[str]:
@@ -41,7 +41,12 @@ def get_time_series_list(
     """
     # Get the requested time slice
     image_dict = sort_images_by_date(
-        vi_path, "*.tif", date_pos=0, date_start=0, date_end=7, date_format='%Y%j'
+        feature_path,
+        '*.tif',
+        date_pos=0,
+        date_start=0,
+        date_end=7,
+        date_format='%Y%j'
     )
     # Create a DataFrame with paths and dates
     df = pd.DataFrame(
@@ -50,6 +55,8 @@ def get_time_series_list(
         index=list(image_dict.values())
     )
     # Slice the requested time series from the dataFrame
-    ts_list = df.loc[f'{image_year-1}-{start_date}':f'{image_year}-{end_date}'].name.values.tolist()
+    ts_list = df.loc[
+        f'{start_year}-{start_date}':f'{start_year+1}-{end_date}'
+    ].name.values.tolist()
 
     return ts_list
