@@ -174,7 +174,7 @@ class CultioLitModel(pl.LightningModule):
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
         loss = self.calc_loss(batch)
 
-        __, edge_ypred, class_ypred, class_ypred_r = self.predict_labels(batch)
+        __, edge_ypred, __, class_ypred_r = self.predict_labels(batch)
 
         # F1-score
         edge_score = self.scorer(edge_ypred, batch.y.eq(self.edge_value).long())
@@ -224,10 +224,10 @@ class CultioLitModel(pl.LightningModule):
 
         metrics = {
             'test_loss': eval_metrics['loss'],
-            'crop_r_loss': eval_metrics['crop_r_loss'],
-            'tf1': eval_metrics['class_score'],
-            'temcc': eval_metrics['emcc'],
-            'tcmcc': eval_metrics['cmcc']
+            'vef1': eval_metrics['edge_score'],
+            'vcf1': eval_metrics['class_score'],
+            'vemcc': eval_metrics['emcc'],
+            'vcmcc': eval_metrics['cmcc']
         }
 
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
