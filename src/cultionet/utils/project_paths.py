@@ -2,6 +2,12 @@ from pathlib import Path
 from dataclasses import dataclass
 import shutil
 import typing as T
+import enum
+
+
+class Destinations(enum.Enum):
+    train = 'train'
+    test = 'test'
 
 
 @dataclass
@@ -13,8 +19,10 @@ class ProjectPaths:
     figure_path: Path
     data_path: Path
     process_path: Path
+    test_process_path: Path
     ckpt_path: Path
     train_path: Path
+    test_path: Path
     predict_path: Path
     edge_training_path: Path
     ckpt_file: Path
@@ -28,6 +36,9 @@ class ProjectPaths:
             shutil.rmtree(str(self.process_path))
         self.process_path.mkdir(exist_ok=True, parents=True)
 
+    def get_process_path(self, destination: str) -> Path:
+        return self.process_path if destination == Destinations.train.name else self.test_process_path
+
 
 def setup_paths(project_path: T.Union[str, Path, bytes], append_ts: T.Optional[bool] = True) -> ProjectPaths:
     project_path = Path(project_path)
@@ -38,14 +49,23 @@ def setup_paths(project_path: T.Union[str, Path, bytes], append_ts: T.Optional[b
     data_path = project_path / 'data'
     ckpt_path = project_path / 'ckpt'
     train_path = data_path / 'train'
+    test_path = data_path / 'test'
     process_path = train_path / 'processed'
+    test_process_path = test_path / 'processed'
     predict_path = data_path / 'predict'
     edge_training_path = project_path / 'user_train'
     ckpt_file = ckpt_path / 'last.ckpt'
     loss_file = ckpt_path / 'losses.npy'
     norm_file = ckpt_path / 'last.norm'
 
-    for p in [proba_path, figure_path, data_path, process_path, ckpt_path, train_path, edge_training_path]:
+    for p in [
+        proba_path,
+        figure_path,
+        data_path,
+        process_path,
+        test_process_path,
+        ckpt_path
+    ]:
         p.mkdir(exist_ok=True, parents=True)
 
     return ProjectPaths(
@@ -56,8 +76,10 @@ def setup_paths(project_path: T.Union[str, Path, bytes], append_ts: T.Optional[b
         figure_path=figure_path,
         data_path=data_path,
         process_path=process_path,
+        test_process_path=test_process_path,
         ckpt_path=ckpt_path,
         train_path=train_path,
+        test_path=test_path,
         predict_path=predict_path,
         edge_training_path=edge_training_path,
         ckpt_file=ckpt_file,
