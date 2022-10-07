@@ -714,14 +714,6 @@ def main():
         )
 
         process_dict = args_config[process]
-        if process in ('create', 'predict'):
-            subparser.add_argument(
-                '--config-file',
-                dest='config_file',
-                help='The configuration YAML file (default: %(default)s)',
-                default=(Path(__file__).parent / 'config.yml').absolute()
-            )
-
         for process_key, process_values in process_dict.items():
             kwargs = process_values['kwargs']
             for key, value in kwargs.items():
@@ -737,6 +729,14 @@ def main():
                 dest=process_key,
                 help=f"{process_values['help']} (default: %(default)s)",
                 **process_values['kwargs']
+            )
+
+        if process in ('create', 'predict'):
+            subparser.add_argument(
+                '--config-file',
+                dest='config_file',
+                help='The configuration YAML file (default: %(default)s)',
+                default=(Path(__file__).parent / 'config.yml').absolute()
             )
 
     args = parser.parse_args()
