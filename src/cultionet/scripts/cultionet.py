@@ -713,13 +713,8 @@ def main():
             help='The project path (the directory that contains the grid ids)'
         )
 
-        if process == 'create':
-            process_dict = args_config['create']
-        elif process == 'train':
-            process_dict = args_config['train']
-        elif process == 'predict':
-            process = args_config['predict']
-        if process in ['create', 'predict']:
+        process_dict = args_config[process]
+        if process in ('create', 'predict'):
             subparser.add_argument(
                 '--config-file',
                 dest='config_file',
