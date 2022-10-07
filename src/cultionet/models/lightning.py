@@ -224,10 +224,10 @@ class CultioLitModel(pl.LightningModule):
 
         metrics = {
             'test_loss': eval_metrics['loss'],
-            'vef1': eval_metrics['edge_score'],
-            'vcf1': eval_metrics['class_score'],
-            'vemcc': eval_metrics['emcc'],
-            'vcmcc': eval_metrics['cmcc']
+            'tef1': eval_metrics['edge_score'],
+            'tcf1': eval_metrics['class_score'],
+            'temcc': eval_metrics['emcc'],
+            'tcmcc': eval_metrics['cmcc']
         }
 
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
