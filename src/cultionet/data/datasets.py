@@ -40,10 +40,7 @@ def zscores(
 
     z = (x - μ) / σ
     """
-    x = torch.cat([
-        (batch.x - add_dims(data_means)) / add_dims(data_stds),
-        batch.x[:, None]
-    ], dim=1)
+    x = ((batch.x - add_dims(data_means)) / add_dims(data_stds))
 
     return Data(x=x, **{k: getattr(batch, k) for k in batch.keys if k != 'x'})
 
