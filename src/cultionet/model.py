@@ -16,7 +16,11 @@ import torch
 from torch_geometric import seed_everything
 from torch_geometric.data import Data
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
+from pytorch_lightning.callbacks import (
+    ModelCheckpoint,
+    LearningRateMonitor,
+    StochasticWeightAveraging
+)
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
 logging.getLogger('lightning').addHandler(logging.NullHandler())
@@ -42,7 +46,8 @@ def fit(
     auto_lr_find: T.Optional[bool] = False,
     device: T.Optional[str] = 'gpu',
     weight_decay: T.Optional[float] = 1e-5,
-    precision: T.Optional[int] = 32
+    precision: T.Optional[int] = 32,
+    stochastic_weight_averaging: T.Optional[bool] = False
 ):
     """Fits a model
 
@@ -67,6 +72,8 @@ def fit(
         device (Optional[str]): The device to train on. Choices are ['cpu', 'gpu'].
         weight_decay (Optional[float]): The weight decay passed to the optimizer. Default is 1e-5.
         precision (Optional[int]): The data precision. Default is 32.
+        stochastic_weight_averaging (Optional[bool]): Whether to use stochastic weight averaging.
+            Default is False.
     """
     ckpt_file = Path(ckpt_file)
 
@@ -115,10 +122,9 @@ def fit(
     )
     # Validation and test loss
     cb_val_loss = ModelCheckpoint(monitor='val_loss')
-    cb_test_loss = ModelCheckpoint(monitor='test_loss')
     # Early stopping
     early_stop_callback = EarlyStopping(
-        monitor='val_loss' if test_dataset is None else 'test_loss',
+        monitor='val_loss',
         min_delta=early_stopping_min_delta,
         patience=early_stopping_patience,
         mode='min',
@@ -132,8 +138,8 @@ def fit(
         cb_val_loss,
         early_stop_callback
     ]
-    if test_dataset is not None:
-        callbacks.append(cb_test_loss)
+    if stochastic_weight_averaging:
+        callbacks.append(StochasticWeightAveraging(swa_lrs=learning_rate))
 
     trainer = pl.Trainer(
         default_root_dir=str(ckpt_file.parent),
@@ -158,7 +164,17 @@ def fit(
     if auto_lr_find:
         trainer.tune(model=lit_model, datamodule=data_module)
     else:
-        trainer.fit(model=lit_model, datamodule=data_module, ckpt_path=ckpt_path)
+        trainer.fit(
+            model=lit_model,
+            datamodule=data_module,
+            ckpt_path=ckpt_path
+        )
+        if test_dataset is not None:
+            trainer.test(
+                model=lit_model,
+                dataloaders=data_module.test_dataloader(),
+                ckpt_path='last'
+            )
 
 
 def load_model(
