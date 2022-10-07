@@ -7,11 +7,12 @@ from pathlib import Path
 from datetime import datetime
 import asyncio
 import filelock
+import builtins
 
 import cultionet
 from cultionet.data.datasets import EdgeDataset
 from cultionet.utils.project_paths import (
-    setup_paths, ProjectPaths, Destinations
+    setup_paths, ProjectPaths
 )
 from cultionet.errors import TensorShapeError
 from cultionet.utils.normalize import get_norm_values
@@ -35,18 +36,12 @@ import xarray as xr
 
 logger = set_color_logger(__name__)
 
-DEFAULT_AUGMENTATIONS = [
-    'none', 'fliplr', 'flipud', 'flipfb',
-    'rot90', 'rot180', 'rot270',
-    'ts-warp', 'ts-noise', 'ts-drift'
-]
-
 SCALE_FACTOR = 10_000.0
 
 
 def open_config(config_file: T.Union[str, Path, bytes]) -> dict:
     with open(config_file, 'r') as pf:
-        config = yaml.load(pf, Loader=yaml.FullLoader)
+        config = yaml.safe_load(pf)
 
     return config
 
@@ -670,7 +665,7 @@ def train_model(args):
                 )
             except TensorShapeError as e:
                 raise ValueError(e)
-    import ipdb; ipdb.set_trace()
+
     # Fit the model
     cultionet.fit(
         dataset=ds,
@@ -689,23 +684,18 @@ def train_model(args):
         gradient_clip_val=args.gradient_clip_val,
         early_stopping_patience=args.patience,
         weight_decay = args.weight_decay,
-        precision=args.precision
+        precision=args.precision,
+        stochastic_weight_averaging=args.stochastic_weight_averaging
     )
 
 
 def main():
+    args_config = open_config((Path(__file__).parent / 'args.yml').absolute())
+
     parser = argparse.ArgumentParser(
         description='Cultionet models',
         formatter_class=argparse.RawTextHelpFormatter,
-        epilog="########\n"
-               "Examples\n"
-               "########\n\n"
-               "# Create training data\n"
-               "cultionet create --project-path /projects/data \n\n"
-               "# Train a model\n"
-               "cultionet train --project-path /projects/data \n\n"
-               "# Apply inference over an image\n"
-               "cultionet predict --project-path /projects/data -o estimates.tif \n\n"
+        epilog=args_config['epilog']
     )
 
     subparsers = parser.add_subparsers(dest='process')
@@ -716,180 +706,42 @@ def main():
         if process == 'version':
             continue
 
-        subparser.add_argument('-p', '--project-path', dest='project_path', help='The project path', default=None)
+        subparser.add_argument(
+            '-p',
+            '--project-path',
+            dest='project_path',
+            help='The project path (the directory that contains the grid ids)'
+        )
 
         if process == 'create':
-            subparser.add_argument(
-                '-n', '--num-workers', dest='num_workers',
-                help='The number of CPUs for data creation (default: %(default)s)',
-                default=4, type=int
-            )
-            subparser.add_argument(
-                '-t', '--transforms', dest='transforms', help='Augmentation transforms (default: %(default)s)',
-                default=DEFAULT_AUGMENTATIONS, choices=DEFAULT_AUGMENTATIONS, nargs='+'
-            )
-            subparser.add_argument(
-                '--n-ts', dest='n_ts', help='The number of temporal augmentations (default: %(default)s)',
-                default=6, type=int
-            )
-            subparser.add_argument(
-                '-r', '--res', dest='ref_res', help='The cell resolution (default: %(default)s)', default=10.0,
-                type=float
-            )
-            subparser.add_argument(
-                '-rm', '--resampling', dest='resampling', help='The resampling method (default: %(default)s)',
-                default='nearest'
-            )
-            subparser.add_argument(
-                '-gs', '--grid-size', dest='grid_size',
-                help='The grid size (*If not given, grid size is taken from the the grid vector. If given, grid size '
-                     'is taken from the upper left coordinate of the grid vector.) (default: %(default)s)',
-                default=None, nargs='+', type=int
-            )
-            subparser.add_argument(
-                '--destination', dest='destination',
-                help='The data destination (default: %(default)s)',
-                default='train', choices=[dest.name for dest in Destinations]
-            )
+            process_dict = args_config['create']
         elif process == 'train':
-            subparser.add_argument(
-                '--val-frac', dest='val_frac', help='The validation fraction (default: %(default)s)',
-                default=0.2, type=float
-            )
-            subparser.add_argument(
-                '--random-seed', dest='random_seed', help='The random seed (default: %(default)s)',
-                default=42, type=int
-            )
-            subparser.add_argument(
-                '--batch-size', dest='batch_size', help='The batch size (default: %(default)s)',
-                default=4, type=int
-            )
-            subparser.add_argument(
-                '--epochs', dest='epochs', help='The number of training epochs (default: %(default)s)',
-                default=30, type=int
-            )
-            subparser.add_argument(
-                '--learning-rate', dest='learning_rate', help='The learning rate (default: %(default)s)',
-                default=0.001, type=float
-            )
-            subparser.add_argument(
-                '--reset-model', dest='reset_model', help='Whether to reset the model (default: %(default)s)',
-                action='store_true'
-            )
-            subparser.add_argument(
-                '--check-dims', dest='check_dims',
-                help='Whether to check the dimensions of the training data (default: %(default)s)',
-                action='store_true'
-            )
-            subparser.add_argument(
-                '--delete-mismatches', dest='delete_mismatches',
-                help='Whether to delete .pt data with dimensions that do not match the reference (default: %(default)s)',
-                action='store_true'
-            )
-            subparser.add_argument(
-                '--recalc-zscores', dest='recalc_zscores',
-                help='Whether to re-calculate z-scores if they exist (default: %(default)s)',
-                action='store_true'
-            )
-            subparser.add_argument(
-                '--dim-color', dest='dim_color',
-                help='The progress bar color for dimension checks (default: %(default)s)',
-                default='ffffff'
-            )
-            subparser.add_argument(
-                '--mean-color', dest='mean_color',
-                help='The progress bar color for means (default: %(default)s)',
-                default='ffffff'
-            )
-            subparser.add_argument(
-                '--sse-color', dest='sse_color',
-                help='The progress bar color for sum of squared errors (default: %(default)s)',
-                default='ffffff'
-            )
-            subparser.add_argument(
-                '--lr-find', dest='auto_lr_find', help='Whether to tune the learning rate (default: %(default)s)',
-                action='store_true'
-            )
-            subparser.add_argument(
-                '--gradient-clip-val', dest='gradient_clip_val', help='The gradient clip value (default: %(default)s)',
-                default=0.1, type=float
-            )
-            subparser.add_argument(
-                '--patience', dest='patience', help='The early stopping patience (default: %(default)s)',
-                default=7, type=int
-            )
-            subparser.add_argument(
-                '--weight-decay', dest='weight_decay',
-                help='Sets the weight decay for Adam optimizer\'s regularization (default: %(default)s)',
-                default=1e-5, type=float
-            )
-            subparser.add_argument(
-                '-agb', '--accumulate-grad-batches', dest='accumulate_grad_batches',
-                help='Sets the number of batches to apply gradients after (default: %(default)s)',
-                default=1, type=int
-            )
-            subparser.add_argument(
-                '--precision', dest='precision',
-                help='The model data precision (default: %(default)s)',
-                default=32, type=int
-            )
-            subparser.add_argument(
-                '--threads', dest='threads', help='The number of threads per process worker (default: %(default)s)',
-                default=1, type=int
-            )
+            process_dict = args_config['train']
         elif process == 'predict':
-            subparser.add_argument('-o', '--out-path', dest='out_path', help='The output path', default=None)
-            subparser.add_argument('-g', '--grid-id', dest='grid_id', help='The grid id to process', default=None)
-            subparser.add_argument(
-                '-w', '--window-size', dest='window_size', help='The window size (default: %(default)s)',
-                default=256, type=int
-            )
-            subparser.add_argument(
-                '--padding', dest='padding', help='The window size (default: %(default)s)',
-                default=5, type=int
-            )
-            subparser.add_argument(
-                '--gain', dest='gain', help='The image gain (default: %(default)s)', default=0.0001, type=float
-            )
-            subparser.add_argument(
-                '--offset', dest='offset', help='The image offset (default: %(default)s)', default=0.0, type=float
-            )
-            subparser.add_argument(
-                '--mode', dest='mode', help='The file open() mode (default: %(default)s)',
-                default='w', choices=['w', 'r+']
-            )
-            subparser.add_argument(
-                '--preload-data',
-                dest='preload_data',
-                help='Whether to preload the time series data into memory (default: %(default)s)',
-                action='store_true'
-            )
+            process = args_config['predict']
         if process in ['create', 'predict']:
-            subparser.add_argument(
-                '--append-ts',
-                dest='append_ts',
-                help='Whether to append time_series_vars to the image path (default: %(default)s)',
-                default='y',
-                choices=['y', 'n']
-            )
             subparser.add_argument(
                 '--config-file',
                 dest='config_file',
                 help='The configuration YAML file (default: %(default)s)',
-                default=(Path('.') / 'config.yml').resolve()
+                default=(Path(__file__).parent / 'config.yml').absolute()
             )
-        if process in ['train', 'predict']:
+
+        for process_key, process_values in process_dict.items():
+            kwargs = process_values['kwargs']
+            for key, value in kwargs.items():
+                if isinstance(value, str) and value.startswith('&'):
+                    kwargs[key] = getattr(builtins, value.replace('&', ''))
+            key_args = ()
+            if len(process_values['short']) > 0:
+                key_args += (f"-{process_values['short']}",)
+            if len(process_values['long']) > 0:
+                key_args += (f"--{process_values['long']}",)
             subparser.add_argument(
-                '--filters', dest='filters', help='The number of base filters (default: %(default)s)', default=32,
-                type=int
-            )
-            subparser.add_argument(
-                '--device', dest='device', help='The device to train on (default: %(default)s)',
-                default='gpu', choices=['cpu', 'gpu']
-            )
-            subparser.add_argument(
-                '--processes', dest='processes', help='The number of concurrent processes (default: %(default)s)',
-                default=1, type=int
+                *key_args,
+                dest=process_key,
+                help=f"{process_values['help']} (default: %(default)s)",
+                **process_values['kwargs']
             )
 
     args = parser.parse_args()
