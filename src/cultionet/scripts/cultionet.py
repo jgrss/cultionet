@@ -607,22 +607,26 @@ def train_model(args):
     # This is a helper function to manage paths
     ppaths = setup_paths(args.project_path)
 
-    if args.check_dims or not ppaths.norm_file.is_file() or (ppaths.norm_file.is_file() and args.recalc_zscores):
+    if (
+        (args.expected_dim is not None)
+        or not ppaths.norm_file.is_file()
+        or (ppaths.norm_file.is_file() and args.recalc_zscores)
+    ):
         ds = EdgeDataset(
             ppaths.train_path,
             processes=args.processes,
             threads_per_worker=args.threads
         )
     # Check dimensions
-    if args.check_dims:
+    if args.expected_dim is not None:
         try:
             ds.check_dims(
+                args.expected_dim,
                 args.delete_mismatches,
                 args.dim_color
             )
         except TensorShapeError as e:
             raise ValueError(e)
-
     # Get the normalization means and std. deviations on the train data
     cultionet.model.seed_everything(args.random_seed)
     # Calculate the values needed to transform to z-scores, using
@@ -634,7 +638,7 @@ def train_model(args):
         train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
         data_values = get_norm_values(
             dataset=train_ds,
-            batch_size=args.batch_size*4,
+            batch_size=args.batch_size*8,
             mean_color=args.mean_color,
             sse_color=args.sse_color
         )
@@ -657,9 +661,10 @@ def train_model(args):
             data_means=data_values.mean,
             data_stds=data_values.std
         )
-        if args.check_dims:
+        if args.expected_dim is not None:
             try:
                 test_ds.check_dims(
+                    args.expected_dim,
                     args.delete_mismatches,
                     args.dim_color
                 )
@@ -685,7 +690,8 @@ def train_model(args):
         early_stopping_patience=args.patience,
         weight_decay = args.weight_decay,
         precision=args.precision,
-        stochastic_weight_averaging=args.stochastic_weight_averaging
+        stochastic_weight_averaging=args.stochastic_weight_averaging,
+        model_pruning=args.model_pruning
     )
 
 
@@ -715,10 +721,13 @@ def main():
 
         process_dict = args_config[process]
         for process_key, process_values in process_dict.items():
-            kwargs = process_values['kwargs']
-            for key, value in kwargs.items():
-                if isinstance(value, str) and value.startswith('&'):
-                    kwargs[key] = getattr(builtins, value.replace('&', ''))
+            if 'kwargs' in process_values:
+                kwargs = process_values['kwargs']
+                for key, value in kwargs.items():
+                    if isinstance(value, str) and value.startswith('&'):
+                        kwargs[key] = getattr(builtins, value.replace('&', ''))
+            else:
+                process_values['kwargs'] = {}
             key_args = ()
             if len(process_values['short']) > 0:
                 key_args += (f"-{process_values['short']}",)
