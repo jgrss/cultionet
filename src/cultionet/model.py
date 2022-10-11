@@ -19,7 +19,8 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
-    StochasticWeightAveraging
+    StochasticWeightAveraging,
+    ModelPruning
 )
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
@@ -47,7 +48,8 @@ def fit(
     device: T.Optional[str] = 'gpu',
     weight_decay: T.Optional[float] = 1e-5,
     precision: T.Optional[int] = 32,
-    stochastic_weight_averaging: T.Optional[bool] = False
+    stochastic_weight_averaging: T.Optional[bool] = False,
+    model_pruning: T.Optional[bool] = False
 ):
     """Fits a model
 
@@ -74,6 +76,7 @@ def fit(
         precision (Optional[int]): The data precision. Default is 32.
         stochastic_weight_averaging (Optional[bool]): Whether to use stochastic weight averaging.
             Default is False.
+        model_pruning (Optional[bool]): Whether to prune the model. Default is False.
     """
     ckpt_file = Path(ckpt_file)
 
@@ -140,6 +143,10 @@ def fit(
     ]
     if stochastic_weight_averaging:
         callbacks.append(StochasticWeightAveraging(swa_lrs=learning_rate))
+    if 0 < model_pruning <= 1:
+        callbacks.append(
+            ModelPruning('l1_unstructured', amount=model_pruning)
+        )
 
     trainer = pl.Trainer(
         default_root_dir=str(ckpt_file.parent),
@@ -158,7 +165,8 @@ def fit(
         gpus=1 if device == 'gpu' else None,
         num_processes=0,
         accelerator=device,
-        log_every_n_steps=10
+        log_every_n_steps=10,
+        profiler=None
     )
 
     if auto_lr_find:
