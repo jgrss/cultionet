@@ -50,7 +50,7 @@ create:
       nargs: '+'
   n_ts:
     short: ''
-    long: n_ts
+    long: n-ts
     help: The number of temporal augmentations
     kwargs:
       default: 6
@@ -150,18 +150,26 @@ train:
     kwargs:
       default: 1
       type: '&int'
+  threads:
+    short: ''
+    long: threads
+    help: The number of threads per process worker
+    kwargs:
+      default: 1
+      type: '&int'
   reset_model:
     short: ''
     long: reset-model
     help: Whether to reset the model
     kwargs:
       action: store_true
-  check_dims:
+  expected_dim:
     short: ''
-    long: check-dims
-    help: Whether to check the dimensions of the training data
+    long: expected-dim
+    help: The expected X dimension of the training data
     kwargs:
-      action: store_true
+      default: !!null
+      type: '&int'
   delete_mismatches:
     short: ''
     long: delete-mismatches
@@ -239,13 +247,13 @@ train:
     help: Whether to use stochastic weight averaging
     kwargs:
       action: store_true
-  threads:
+  model_pruning:
     short: ''
-    long: threads
-    help: The number of threads per process worker
+    long: model-pruning
+    help: A fraction to prune the model by
     kwargs:
-      default: 1
-      type: '&int'
+      default: 0
+      type: '&float'
 
 predict:
   out_path:
