@@ -2,16 +2,24 @@ import typing as T
 from pathlib import Path
 import random
 import logging
+from functools import partial
 
 from ..errors import TensorShapeError
+from ..utils.logging import set_color_logger
 
+import numpy as np
 import attr
 import torch
 from torch_geometric.data import Data, Dataset
+import psutil
+from tqdm.auto import tqdm
+from joblib import Parallel, delayed, parallel_backend
 
 ATTRVINSTANCE = attr.validators.instance_of
 ATTRVIN = attr.validators.in_
 ATTRVOPTIONAL = attr.validators.optional
+
+logger = set_color_logger(__name__)
 
 
 def add_dims(d: torch.Tensor) -> torch.Tensor:
@@ -32,12 +40,34 @@ def zscores(
 
     z = (x - μ) / σ
     """
-    x = torch.cat([
-        (batch.x[:, :-1] - add_dims(data_means)) / add_dims(data_stds),
-        batch.x[:, -1][:, None]
-    ], dim=1)
+    x = ((batch.x - add_dims(data_means)) / add_dims(data_stds))
 
     return Data(x=x, **{k: getattr(batch, k) for k in batch.keys if k != 'x'})
+
+
+def _check_shape(d1: tuple, d2: tuple, index: int, uid: str) -> T.Tuple[bool, int, str]:
+    if d1 != d2:
+        return False, index, uid
+    return True, index, uid
+
+
+class TqdmParallel(Parallel):
+    """A tqdm progress bar for joblib Parallel tasks
+
+    Reference:
+        https://stackoverflow.com/questions/37804279/how-can-we-use-tqdm-in-a-parallel-execution-with-joblib
+    """
+    def __init__(self, tqdm_kwargs: dict):
+        self.tqdm_kwargs = tqdm_kwargs
+        super().__init__()
+
+    def __call__(self, *args, **kwargs):
+        with tqdm(**self.tqdm_kwargs) as self._pbar:
+            return Parallel.__call__(self, *args, **kwargs)
+
+    def print_progress(self):
+        self._pbar.n = self.n_completed_tasks
+        self._pbar.refresh()
 
 
 @attr.s
@@ -50,6 +80,8 @@ class EdgeDataset(Dataset):
     data_means: T.Optional[torch.Tensor] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None)
     data_stds: T.Optional[torch.Tensor] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None)
     pattern: T.Optional[str] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(str)), default='data*.pt')
+    processes: T.Optional[int] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=psutil.cpu_count())
+    threads_per_worker: T.Optional[int] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=1)
 
     data_list_ = None
 
@@ -93,13 +125,41 @@ class EdgeDataset(Dataset):
         """Get a list of processed files"""
         return self.data_list_
 
-    def check_dims(self):
+    def check_dims(self, delete_mismatches: bool = False, tqdm_color: str = 'ffffff'):
         """Checks if all tensors in the dataset match in shape dimensions
         """
-        ref_dim = self[0].x.shape
-        for i in range(1, len(self)):
-            if self[i].x.shape != ref_dim:
-                raise TensorShapeError(f'{Path(self.data_list_[i]).name} does not match the reference.')
+        ref_dim = tuple(self[0].x.shape)
+        check_partial = partial(_check_shape, ref_dim)
+
+        with parallel_backend(
+            backend='loky',
+            n_jobs=self.processes,
+            inner_max_num_threads=self.threads_per_worker
+        ):
+            with TqdmParallel(
+                tqdm_kwargs={
+                    'total': len(self),
+                    'desc': 'Checking dimensions',
+                    'colour': tqdm_color
+                }
+            ) as pool:
+                results = pool(
+                    delayed(check_partial)(
+                        tuple(self[i].x.shape), i, self[i].train_id
+                    ) for i in range(1, len(self))
+                )
+        matches, indices, ids = list(map(list, zip(*results)))
+        if not all(matches):
+            null_indices = np.array(indices)[~np.array(matches)]
+            null_ids = np.array(ids)[null_indices].tolist()
+            logger.warning(','.join(null_ids))
+            logger.warning(f'{null_indices.shape[0]:,d} ids did not match the reference dimensions.')
+
+            if delete_mismatches:
+                logger.warning(f'Removing {null_indices.shape[0]:,d} .pt files.')
+                [self.data_list_[i].unlink() for i in null_indices]
+            else:
+                raise TensorShapeError
 
     def len(self):
         """Returns the dataset length"""

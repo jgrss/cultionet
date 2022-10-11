@@ -16,7 +16,12 @@ import torch
 from torch_geometric import seed_everything
 from torch_geometric.data import Data
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
+from pytorch_lightning.callbacks import (
+    ModelCheckpoint,
+    LearningRateMonitor,
+    StochasticWeightAveraging,
+    ModelPruning
+)
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
 logging.getLogger('lightning').addHandler(logging.NullHandler())
@@ -26,6 +31,7 @@ logging.getLogger('lightning').propagate = False
 def fit(
     dataset: EdgeDataset,
     ckpt_file: T.Union[str, Path],
+    test_dataset: T.Optional[EdgeDataset] = None,
     val_frac: T.Optional[float] = 0.2,
     batch_size: T.Optional[int] = 4,
     accumulate_grad_batches: T.Optional[int] = 1,
@@ -40,14 +46,18 @@ def fit(
     reset_model: T.Optional[bool] = False,
     auto_lr_find: T.Optional[bool] = False,
     device: T.Optional[str] = 'gpu',
-    stochastic_weight_avg: T.Optional[bool] = False,
     weight_decay: T.Optional[float] = 1e-5,
+    precision: T.Optional[int] = 32,
+    stochastic_weight_averaging: T.Optional[bool] = False,
+    model_pruning: T.Optional[bool] = False
 ):
     """Fits a model
 
     Args:
         dataset (EdgeDataset): The dataset to fit on.
         ckpt_file (str | Path): The checkpoint file path.
+        test_dataset (Optional[EdgeDataset]): A test dataset to evaluate on. If given, early stopping
+            will switch from the validation dataset to the test dataset.
         val_frac (Optional[float]): The fraction of data to use for model validation.
         batch_size (Optional[int]): The data batch size.
         filters (Optional[int]): The number of initial model filters.
@@ -62,6 +72,11 @@ def fit(
             an existing model.
         auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
         device (Optional[str]): The device to train on. Choices are ['cpu', 'gpu'].
+        weight_decay (Optional[float]): The weight decay passed to the optimizer. Default is 1e-5.
+        precision (Optional[int]): The data precision. Default is 32.
+        stochastic_weight_averaging (Optional[bool]): Whether to use stochastic weight averaging.
+            Default is False.
+        model_pruning (Optional[bool]): Whether to prune the model. Default is False.
     """
     ckpt_file = Path(ckpt_file)
 
@@ -73,6 +88,7 @@ def fit(
     data_module = EdgeDataModule(
         train_ds=train_ds,
         val_ds=val_ds,
+        test_ds=test_dataset,
         batch_size=batch_size,
         num_workers=0,
         shuffle=True
@@ -96,7 +112,7 @@ def fit(
     else:
         ckpt_path = None
 
-    # Callbacks
+    # Checkpoint
     cb_train_loss = ModelCheckpoint(
         dirpath=ckpt_file.parent,
         filename=ckpt_file.name,
@@ -107,9 +123,9 @@ def fit(
         every_n_train_steps=0,
         every_n_epochs=1
     )
-
+    # Validation and test loss
     cb_val_loss = ModelCheckpoint(monitor='val_loss')
-
+    # Early stopping
     early_stop_callback = EarlyStopping(
         monitor='val_loss',
         min_delta=early_stopping_min_delta,
@@ -117,17 +133,24 @@ def fit(
         mode='min',
         check_on_train_epoch_end=False
     )
-
+    # Learning rate
     lr_monitor = LearningRateMonitor(logging_interval='step')
+    callbacks = [
+        lr_monitor,
+        cb_train_loss,
+        cb_val_loss,
+        early_stop_callback
+    ]
+    if stochastic_weight_averaging:
+        callbacks.append(StochasticWeightAveraging(swa_lrs=learning_rate))
+    if 0 < model_pruning <= 1:
+        callbacks.append(
+            ModelPruning('l1_unstructured', amount=model_pruning)
+        )
 
     trainer = pl.Trainer(
         default_root_dir=str(ckpt_file.parent),
-        callbacks=[
-            lr_monitor,
-            cb_train_loss,
-            cb_val_loss,
-            early_stop_callback
-        ],
+        callbacks=callbacks,
         enable_checkpointing=True,
         auto_lr_find=auto_lr_find,
         auto_scale_batch_size=False,
@@ -137,25 +160,33 @@ def fit(
         check_val_every_n_epoch=1,
         min_epochs=5 if epochs >= 5 else epochs,
         max_epochs=epochs,
-        precision=32,
-        devices=1 if device == 'gpu' else 0,
-        gpus=1 if device == 'gpu' else 0,
+        precision=precision,
+        devices=1 if device == 'gpu' else None,
+        gpus=1 if device == 'gpu' else None,
         num_processes=0,
         accelerator=device,
-        log_every_n_steps=10
+        log_every_n_steps=10,
+        profiler=None
     )
 
     if auto_lr_find:
         trainer.tune(model=lit_model, datamodule=data_module)
     else:
-        trainer.fit(model=lit_model, datamodule=data_module, ckpt_path=ckpt_path)
+        trainer.fit(
+            model=lit_model,
+            datamodule=data_module,
+            ckpt_path=ckpt_path
+        )
+        if test_dataset is not None:
+            trainer.test(
+                model=lit_model,
+                dataloaders=data_module.test_dataloader(),
+                ckpt_path='last'
+            )
 
 
 def load_model(
-    num_features: int,
-    num_time_features: int,
     ckpt_file: T.Union[str, Path],
-    filters: T.Optional[int] = 32,
     device: T.Union[str, bytes] = 'gpu',
     lit_model: T.Optional[CultioLitModel] = None,
     enable_progress_bar: T.Optional[bool] = True
@@ -164,9 +195,7 @@ def load_model(
 
     Args:
         ckpt_file (str | Path): The model checkpoint file.
-        filters (int): The model input filters.
         device (str): The device to apply inference on.
-        trainer (pl.Trainer): The `pytorch_lightning` trainer.
         lit_model (CultioLitModel): A model to predict with. If `None`, the model
             is loaded from file.
         enable_progress_bar (Optional[bool]): Whether to use the progress bar.
@@ -176,8 +205,8 @@ def load_model(
     trainer_kwargs = dict(
         default_root_dir=str(ckpt_file.parent),
         precision=32,
-        devices=1 if device == 'gpu' else 0,
-        gpus=1 if device == 'gpu' else 0,
+        devices=1 if device == 'gpu' else None,
+        gpus=1 if device == 'gpu' else None,
         accelerator=device,
         num_processes=0,
         log_every_n_steps=0,

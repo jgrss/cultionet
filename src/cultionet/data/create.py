@@ -228,7 +228,11 @@ def close_edge_ends(labels_array: np.ndarray) -> np.ndarray:
 
 
 def is_grid_processed(
-    process_path: Path, transforms: T.List[str], group_id: str, grid: T.Union[str, int], n_ts: int
+    process_path: Path,
+    transforms: T.List[str],
+    group_id: str,
+    grid: T.Union[str, int],
+    n_ts: int
 ) -> bool:
     """Checks if a grid is already processed
     """
@@ -538,7 +542,9 @@ def create_dataset(
 
                     # Open the projected land cover
                     with gw.config.update(
-                        ref_bounds=df_latlon.total_bounds.tolist(), ref_crs=ref_crs, ref_res=ref_res
+                        ref_bounds=df_latlon.total_bounds.tolist(),
+                        ref_crs=ref_crs,
+                        ref_res=ref_res
                     ):
                         with gw.open(lc_path, chunks=2048) as src:
                             lc_labels = src.squeeze()[:labels_array.shape[0], :labels_array.shape[1]].data.compute()
@@ -560,9 +566,12 @@ def create_dataset(
                     props = regionprops(segments)
 
                 ldata = LabeledData(
-                    x=xvars, y=labels_array, bdist=bdist, segments=segments, props=props
+                    x=xvars,
+                    y=labels_array,
+                    bdist=bdist,
+                    segments=segments,
+                    props=props
                 )
-
                 def save_and_update(train_data: Data) -> None:
                     train_path = process_path / f'data_{train_data.train_id}.pt'
                     torch.save(train_data, train_path)

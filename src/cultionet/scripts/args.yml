@@ -1,0 +1,322 @@
+epilog: |
+  ########
+  Examples
+  ########
+
+  # Create training data
+  cultionet create --project-path /projects/data
+
+  # Train a model
+  cultionet train --project-path /projects/data
+
+  # Apply inference over an image
+  cultionet predict --project-path /projects/data -o estimates.tif
+
+create:
+  num_workers:
+    short: n
+    long: num-workers
+    help: The number of CPUs for data creation
+    kwargs:
+      default: 4
+      type: '&int'
+  transforms:
+    short: t
+    long: transforms
+    help: Augmentation transforms to apply
+    kwargs:
+      default:
+        - none
+        - fliplr
+        - flipud
+        - flipfb
+        - rot90
+        - rot180
+        - rot270
+        - ts-warp
+        - ts-noise
+        - ts-drift
+      choices:
+        - none
+        - fliplr
+        - flipud
+        - flipfb
+        - rot90
+        - rot180
+        - rot270
+        - ts-warp
+        - ts-noise
+        - ts-drift
+      nargs: '+'
+  n_ts:
+    short: ''
+    long: n-ts
+    help: The number of temporal augmentations
+    kwargs:
+      default: 6
+      type: '&int'
+  ref_res:
+    short: r
+    long: res
+    help: The cell resolution
+    kwargs:
+      default: 10.0
+      type: '&float'
+  resampling:
+    short: rm
+    long: resampling
+    help: The resampling method
+    kwargs:
+      default: nearest
+  grid_size:
+    short: gs
+    long: grid-size
+    help: >
+      The grid size (*If not given, grid size is taken from the the grid vector.
+      If given, grid size is taken from the upper left coordinate of the grid vector.)
+    kwargs:
+      default: !!null
+      nargs: '+'
+      type: '&int'
+  destination:
+    short: ''
+    long: destination
+    help: The data destination
+    kwargs:
+      default: train
+      choices: ['train', 'test']
+  append_ts:
+    short: ''
+    long: append-ts
+    help: Whether to append time_series_vars to the image path
+    kwargs:
+      default: y
+      choices: ['y', 'n']
+
+train:
+  val_frac:
+    short: ''
+    long: val-frac
+    help: the validation fraction
+    kwargs:
+      default: 0.2
+      type: '&float'
+  random_seed:
+    short: ''
+    long: random-seed
+    help: The random seed
+    kwargs:
+      default: 42
+      type: '&int'
+  filters:
+    short: ''
+    long: filters
+    help: The number of model input filters
+    kwargs:
+      default: 32
+      type: '&int'
+  batch_size:
+    short: ''
+    long: batch-size
+    help: The batch size
+    kwargs:
+      default: 4
+      type: '&int'
+  epochs:
+    short: ''
+    long: epochs
+    help: The number of training epochs
+    kwargs:
+      default: 30
+      type: '&int'
+  learning_rate:
+    short: ''
+    long: learning-rate
+    help: The learning rate
+    kwargs:
+      default: 0.001
+      type: '&float'
+  device:
+    short: ''
+    long: device
+    help: The device to train on
+    kwargs:
+      default: gpu
+      choices: ['cpu', 'gpu']
+  processes:
+    short: ''
+    long: processes
+    help: The number of concurrent processes for loading data
+    kwargs:
+      default: 1
+      type: '&int'
+  threads:
+    short: ''
+    long: threads
+    help: The number of threads per process worker
+    kwargs:
+      default: 1
+      type: '&int'
+  reset_model:
+    short: ''
+    long: reset-model
+    help: Whether to reset the model
+    kwargs:
+      action: store_true
+  expected_dim:
+    short: ''
+    long: expected-dim
+    help: The expected X dimension of the training data
+    kwargs:
+      default: !!null
+      type: '&int'
+  delete_mismatches:
+    short: ''
+    long: delete-mismatches
+    help: Whether to delete .pt data with dimensions that do not match the reference
+    kwargs:
+      action: store_true
+  recalc_zscores:
+    short: ''
+    long: recalc-zscores
+    help: Whether to re-calculate z-scores if they exist
+    kwargs:
+      action: store_true
+  dim_color:
+    short: ''
+    long: dim-color
+    help: The progress bar color for dimension checks
+    kwargs:
+      default: ffffff
+  mean_color:
+    short: ''
+    long: mean-color
+    help: The progress bar color for means
+    kwargs:
+      default: ffffff
+  sse_color:
+    short: ''
+    long: sse-color
+    help: The progress bar color for sum of squared errors
+    kwargs:
+      default: ffffff
+  auto_lr_find:
+    short: ''
+    long: lr-find
+    help: Whether to tune the learning rate
+    kwargs:
+      action: store_true
+  gradient_clip_val:
+    short: ''
+    long: gradient-clip-val
+    help: The gradient clip value
+    kwargs:
+      default: 0.1
+      type: '&float'
+  patience:
+    short: ''
+    long: patience
+    help: The early stopping patience
+    kwargs:
+      default: 7
+      type: '&int'
+  weight_decay:
+    short: ''
+    long: weight-decay
+    help: Sets the weight decay for Adam optimizer\'s regularization
+    kwargs:
+      default: 1e-5
+      type: '&float'
+  accumulate_grad_batches:
+    short: agb
+    long: accumulate-grad-batches
+    help: Sets the number of batches to apply gradients after
+    kwargs:
+      default: 1
+      type: '&int'
+  precision:
+    short: ''
+    long: precision
+    help: The model data precision
+    kwargs:
+      default: 32
+      type: '&int'
+  stochastic_weight_averaging:
+    short: ''
+    long: swa
+    help: Whether to use stochastic weight averaging
+    kwargs:
+      action: store_true
+  model_pruning:
+    short: ''
+    long: model-pruning
+    help: A fraction to prune the model by
+    kwargs:
+      default: 0
+      type: '&float'
+
+predict:
+  out_path:
+    short: o
+    long: out-path
+    help: The output raster path and filename to be created
+  grid_id:
+    short: g
+    long: grid-id
+    help: The grid id to process (the grid id should be a sub-directory of --project-path)
+  window_size:
+    short: w
+    long: window-size
+    help: The processing windows size at which to apply inference in-memory
+    kwargs:
+      default: 100
+      type: '&int'
+  padding:
+    short: ''
+    long: padding
+    help: The read padding around the in-memory window (padding is slice off before writing)
+    kwargs:
+      default: 100
+      type: '&int'
+  gain:
+    short: ''
+    long: gain
+    help: The image gain, or scale, factor
+  offset:
+    short: ''
+    long: offset
+    help: The image offset to add to the scaling
+  mode:
+    short: ''
+    long: mode
+    help: The file open mode
+    kwargs:
+      default: w
+      choices: ['w', 'r+']
+  preload_data:
+    short: ''
+    long: preload_data
+    help: Whether to preload the full image data into memory
+    kwargs:
+      action: store_true
+  device:
+    short: ''
+    long: device
+    help: The device to predict on
+    kwargs:
+      default: gpu
+      choices: ['cpu', 'gpu']
+  processes:
+    short: ''
+    long: processes
+    help: The number of concurrent windows to predict on
+    kwargs:
+      default: 1
+      type: '&int'
+  append_ts:
+    short: ''
+    long: append-ts
+    help: Whether to append time_series_vars to the image path
+    kwargs:
+      default: y
+      choices: ['y', 'n']

@@ -21,8 +21,11 @@ years:
   - 2021
   - 2022
 
-predict_year: 2020
-
+# End year for prediction
+predict_year: 2021
+# Start and end date for prediction
+# Set as !!null to use dates from filenames. However, it is recommended
+# to set these dates to avoid unexpected date inclusions.
 start_date: 07-01
 end_date: 07-01
 
