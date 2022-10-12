@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.3.1 (2022-10-12)
+* Added YAML files to distributed package data
+
 ## v1.3.0 (2022-10-11)
 * Added a test dataset CLI option, additional model callbacks, and faster pre-model dimension checking ([#33](https://github.com/jgrss/cultionet/pull/33))
 
