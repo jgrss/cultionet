@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.3.2 (2022-10-12)
+* Added default values for gain and offset
+
 ## v1.3.1 (2022-10-12)
 * Added YAML files to distributed package data
 
