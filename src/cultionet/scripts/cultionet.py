@@ -748,12 +748,6 @@ def main():
                 help='The configuration YAML file (default: %(default)s)',
                 default=(Path(__file__).parent / 'config.yml').absolute()
             )
-            subparser.add_argument(
-                '--compression',
-                dest='compression',
-                help='The compression algorithm to use (default: %(default)s)',
-                default='lzw'
-            )
 
     args = parser.parse_args()
 

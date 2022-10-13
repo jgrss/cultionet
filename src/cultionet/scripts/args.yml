@@ -326,3 +326,9 @@ predict:
     kwargs:
       default: y
       choices: ['y', 'n']
+  compression:
+    short: ''
+    long: compression
+    help: The compression algorithm to use
+    kwargs:
+      default: lzw
