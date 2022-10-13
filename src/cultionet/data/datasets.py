@@ -45,7 +45,9 @@ def zscores(
     return Data(x=x, **{k: getattr(batch, k) for k in batch.keys if k != 'x'})
 
 
-def _check_shape(d1: tuple, d2: tuple, index: int, uid: str) -> T.Tuple[bool, int, str]:
+def _check_shape(
+    d1: int, d2: int, index: int, uid: str
+) -> T.Tuple[bool, int, str]:
     if d1 != d2:
         return False, index, uid
     return True, index, uid
@@ -125,11 +127,15 @@ class EdgeDataset(Dataset):
         """Get a list of processed files"""
         return self.data_list_
 
-    def check_dims(self, delete_mismatches: bool = False, tqdm_color: str = 'ffffff'):
+    def check_dims(
+        self,
+        expected_dim: int,
+        delete_mismatches: bool = False,
+        tqdm_color: str = 'ffffff'
+    ):
         """Checks if all tensors in the dataset match in shape dimensions
         """
-        ref_dim = tuple(self[0].x.shape)
-        check_partial = partial(_check_shape, ref_dim)
+        check_partial = partial(_check_shape, expected_dim)
 
         with parallel_backend(
             backend='loky',
@@ -145,19 +151,21 @@ class EdgeDataset(Dataset):
             ) as pool:
                 results = pool(
                     delayed(check_partial)(
-                        tuple(self[i].x.shape), i, self[i].train_id
-                    ) for i in range(1, len(self))
+                        self[i].x.shape[1], i, self[i].train_id
+                    ) for i in range(0, len(self))
                 )
         matches, indices, ids = list(map(list, zip(*results)))
         if not all(matches):
-            null_indices = np.array(indices)[~np.array(matches)]
+            indices = np.array(indices)
+            null_indices = indices[~np.array(matches)]
             null_ids = np.array(ids)[null_indices].tolist()
             logger.warning(','.join(null_ids))
             logger.warning(f'{null_indices.shape[0]:,d} ids did not match the reference dimensions.')
 
             if delete_mismatches:
                 logger.warning(f'Removing {null_indices.shape[0]:,d} .pt files.')
-                [self.data_list_[i].unlink() for i in null_indices]
+                for i in null_indices:
+                    self.data_list_[i].unlink()
             else:
                 raise TensorShapeError
 
