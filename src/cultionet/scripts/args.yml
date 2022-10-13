@@ -274,9 +274,9 @@ predict:
   padding:
     short: ''
     long: padding
-    help: The read padding around the in-memory window (padding is slice off before writing)
+    help: The read padding around the in-memory window (padding is sliced off before writing)
     kwargs:
-      default: 100
+      default: 101
       type: '&int'
   gain:
     short: ''
