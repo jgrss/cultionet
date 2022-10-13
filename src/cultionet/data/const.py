@@ -1,0 +1,2 @@
+CROP_CLASS = 1
+EDGE_CLASS = 2
