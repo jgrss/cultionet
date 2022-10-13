@@ -178,8 +178,11 @@ def fit(
         lit_model = CultioLitModel.load_from_checkpoint(
             checkpoint_path=str(ckpt_file)
         )
+        model_file = ckpt_file.parent / 'cultionet.pt'
+        if model_file.is_file():
+            model_file.unlink()
         torch.save(
-            lit_model.state_dict(), ckpt_file.parent / 'cultionet.pt'
+            lit_model.state_dict(), model_file
         )
         if test_dataset is not None:
             trainer.test(
