@@ -10,6 +10,7 @@ import filelock
 import builtins
 
 import cultionet
+from cultionet.data.const import SCALE_FACTOR
 from cultionet.data.datasets import EdgeDataset
 from cultionet.utils.project_paths import (
     setup_paths, ProjectPaths
@@ -39,8 +40,6 @@ from tqdm.dask import TqdmCallback
 
 
 logger = set_color_logger(__name__)
-
-SCALE_FACTOR = 10_000.0
 
 
 def open_config(config_file: T.Union[str, Path, bytes]) -> dict:
