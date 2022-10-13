@@ -1,19 +1,17 @@
 import os
 from pathlib import Path
 
-from .data import load_data
-
+from .data import batch_file
 from cultionet.data.datasets import EdgeDataset
 from cultionet.utils.project_paths import setup_paths
 import torch
-import pytest
 
 
 project_path = Path(os.path.abspath(os.path.dirname(__file__)))
 ppaths = setup_paths(project_path)
 ds = EdgeDataset(ppaths.train_path)
 data = next(iter(ds))
-loaded_data = load_data()
+loaded_data = torch.load(batch_file)
 
 
 def test_load():
@@ -41,10 +39,8 @@ def test_y_shape():
     assert data.y.shape == (10000,)
 
 
-def test_nbands_attr():
-    assert data.nbands == 13
-
-
-def test_image_shape():
+def test_dims_attr():
+    assert data.nbands == 3
+    assert data.ntime == 13
     assert data.height == 100
     assert data.width == 100
