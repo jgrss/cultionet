@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import os
+from abc import abstractmethod
 import argparse
 import typing as T
 import logging
@@ -250,47 +252,7 @@ class ProgressBar:
                 return
 
 
-@ray.remote
-class Writer(object):
-    """A concurrent writer with Ray
-    """
-    def __init__(
-        self,
-        out_path: T.Union[str, Path],
-        mode: str,
-        profile: dict,
-        ntime: int,
-        nbands: int,
-        ts: xr.DataArray,
-        data_values: torch.Tensor,
-        ppaths: ProjectPaths,
-        filters: int,
-        device: str,
-        scale_factor: float
-    ) -> None:
-        self.out_path = out_path
-        # Create the output file
-        if mode == 'w':
-            with rio.open(self.out_path, mode=mode, **profile):
-                pass
-
-        self.dst = rio.open(self.out_path, mode='r+')
-
-        self.ntime = ntime
-        self.nbands = nbands
-        self.ts = ts
-        self.data_values = data_values
-        self.ppaths = ppaths
-        self.filters = filters
-        self.device = device
-        self.scale_factor = scale_factor
-
-        self.lit_model = cultionet.load_model(
-            ckpt_file=self.ppaths.ckpt_file,
-            device=self.device,
-            enable_progress_bar=False
-        )[1]
-
+class BlockWriter(object):
     def _build_slice(self, window: Window) -> tuple:
         return (
             slice(0, None),
@@ -298,19 +260,7 @@ class Writer(object):
             slice(window.col_off, window.col_off+window.width)
         )
 
-    def close_open(self):
-        self.close()
-        self.dst = rio.open(self.out_path, mode='r+')
-
-    def close(self):
-        self.dst.close()
-
-    def write_predictions(
-        self,
-        w: Window,
-        w_pad: Window,
-        pba: ActorHandle = None
-    ):
+    def predict_write_block(self, w: Window, w_pad: Window):
         slc = self._build_slice(w_pad)
         # Create the data for the chunk
         data = create_network_data(
@@ -337,8 +287,137 @@ class Writer(object):
                 indexes=[1, 2, 3, 4],
                 window=w
             )
+
+
+class WriterModule(BlockWriter):
+    def __init__(
+        self,
+        out_path: T.Union[str, Path],
+        mode: str,
+        profile: dict,
+        ntime: int,
+        nbands: int,
+        ts: xr.DataArray,
+        data_values: torch.Tensor,
+        ppaths: ProjectPaths,
+        device: str,
+        scale_factor: float
+    ) -> None:
+        self.out_path = out_path
+        # Create the output file
+        if mode == 'w':
+            with rio.open(self.out_path, mode=mode, **profile):
+                pass
+
+        self.dst = rio.open(self.out_path, mode='r+')
+
+        self.ntime = ntime
+        self.nbands = nbands
+        self.ts = ts
+        self.data_values = data_values
+        self.ppaths = ppaths
+        self.device = device
+        self.scale_factor = scale_factor
+
+        self.lit_model = cultionet.load_model(
+            ckpt_file=self.ppaths.ckpt_file,
+            device=self.device,
+            enable_progress_bar=False
+        )[1]
+
+    def close_open(self):
+        self.close()
+        self.dst = rio.open(self.out_path, mode='r+')
+
+    def close(self):
+        self.dst.close()
+
+    @abstractmethod
+    def write(
+        self,
+        w: Window,
+        w_pad: Window,
+        pba: ActorHandle = None
+    ):
+        raise NotImplementedError
+
+
+@ray.remote
+class RemoteWriter(WriterModule):
+    """A concurrent writer with Ray
+    """
+    def __init__(
+        self,
+        out_path: T.Union[str, Path],
+        mode: str,
+        profile: dict,
+        ntime: int,
+        nbands: int,
+        ts: xr.DataArray,
+        data_values: torch.Tensor,
+        ppaths: ProjectPaths,
+        device: str,
+        scale_factor: float
+    ) -> None:
+        super().__init__(
+            out_path=out_path,
+            mode=mode,
+            profile=profile,
+            ntime=ntime,
+            nbands=nbands,
+            ts=ts,
+            data_values=data_values,
+            ppaths=ppaths,
+            device=device,
+            scale_factor=scale_factor
+        )
+
+    def write(
+        self,
+        w: Window,
+        w_pad: Window,
+        pba: ActorHandle = None
+    ):
+        self.predict_write_block(w, w_pad)
         if pba is not None:
             pba.update.remote(1)
+
+
+class SerialWriter(WriterModule):
+    """A serial writer
+    """
+    def __init__(
+        self,
+        out_path: T.Union[str, Path],
+        mode: str,
+        profile: dict,
+        ntime: int,
+        nbands: int,
+        ts: xr.DataArray,
+        data_values: torch.Tensor,
+        ppaths: ProjectPaths,
+        device: str,
+        scale_factor: float
+    ) -> None:
+        super().__init__(
+            out_path=out_path,
+            mode=mode,
+            profile=profile,
+            ntime=ntime,
+            nbands=nbands,
+            ts=ts,
+            data_values=data_values,
+            ppaths=ppaths,
+            device=device,
+            scale_factor=scale_factor
+        )
+
+    def write(
+        self,
+        w: Window,
+        w_pad: Window
+    ):
+        self.predict_write_block(w, w_pad)
 
 
 def predict_image(args):
@@ -407,56 +486,86 @@ def predict_image(args):
         # Get the time and band count
         ntime, nbands = get_image_list_dims(image_list, time_series)
 
-        if ray.is_initialized():
-            logger.warning('The Ray cluster is already running.')
-        else:
-            ray.init(num_cpus=args.processes)
-        assert ray.is_initialized(), 'The Ray cluster is not running.'
-        # Setup the remote ray writer
-        remote_writer = Writer.options(
-            max_concurrency=args.processes
-        ).remote(
-            out_path=args.out_path,
-            mode=args.mode,
-            profile=profile,
-            ntime=ntime,
-            nbands=nbands,
-            ts=ray.put(time_series),
-            data_values=data_values,
-            ppaths=ppaths,
-            filters=args.filters,
-            device=args.device,
-            scale_factor=SCALE_FACTOR
-        )
-        actor_chunksize = args.processes * 8
-        try:
-            with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
-                for wchunk in range(0, len(windows)+actor_chunksize, actor_chunksize):
-                    chunk_windows = windows[wchunk:wchunk+actor_chunksize]
-                    # pb = ProgressBar(
-                    #     total=len(chunk_windows),
-                    #     desc=f'Chunks {wchunk}-{wchunk+len(chunk_windows)}',
-                    #     position=1,
-                    #     leave=False
-                    # )
-                    # tqdm_actor = pb.actor
-                    # Write each window concurrently
+        if args.processes == 1:
+            serial_writer = SerialWriter(
+                out_path=args.out_path,
+                mode=args.mode,
+                profile=profile,
+                ntime=ntime,
+                nbands=nbands,
+                ts=time_series,
+                data_values=data_values,
+                ppaths=ppaths,
+                device=args.device,
+                scale_factor=SCALE_FACTOR
+            )
+            try:
+                with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
                     results = [
-                        remote_writer.write_predictions.remote(w, w_pad)
-                        for w, w_pad in chunk_windows
+                        serial_writer.write(w, w_pad) for w, w_pad in windows
                     ]
-                    # Initiate the processing
-                    # pb.print_until_done()
-                    ray.get(results)
-                    # Close the file
-                    ray.get(remote_writer.close_open.remote())
-                    pbar.update(len(chunk_windows))
-            ray.get(remote_writer.close.remote())
-            ray.shutdown()
-        except Exception as e:
-            ray.get(remote_writer.close.remote())
-            ray.shutdown()
-            logger.exception(f"The predictions failed because {e}.")
+                    pbar.update(1)
+                serial_writer.close()
+            except Exception as e:
+                serial_writer.close()
+                logger.exception(f"The predictions failed because {e}.")
+        else:
+            if ray.is_initialized():
+                logger.warning('The Ray cluster is already running.')
+            else:
+                if args.device == 'gpu':
+                    # TODO: support multiple GPUs through CLI
+                    try:
+                        ray.init(num_cpus=args.processes, num_gpus=1)
+                    except KeyError as e:
+                        logger.exception(f"Ray could not be instantiated with a GPU because {e}.")
+                else:
+                    ray.init(num_cpus=args.processes)
+            assert ray.is_initialized(), 'The Ray cluster is not running.'
+            # Setup the remote ray writer
+            remote_writer = RemoteWriter.options(
+                max_concurrency=args.processes
+            ).remote(
+                out_path=args.out_path,
+                mode=args.mode,
+                profile=profile,
+                ntime=ntime,
+                nbands=nbands,
+                ts=ray.put(time_series),
+                data_values=data_values,
+                ppaths=ppaths,
+                device=args.device,
+                scale_factor=SCALE_FACTOR
+            )
+            actor_chunksize = args.processes * 8
+            try:
+                with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
+                    for wchunk in range(0, len(windows)+actor_chunksize, actor_chunksize):
+                        chunk_windows = windows[wchunk:wchunk+actor_chunksize]
+                        # pb = ProgressBar(
+                        #     total=len(chunk_windows),
+                        #     desc=f'Chunks {wchunk}-{wchunk+len(chunk_windows)}',
+                        #     position=1,
+                        #     leave=False
+                        # )
+                        # tqdm_actor = pb.actor
+                        # Write each window concurrently
+                        results = [
+                            remote_writer.write.remote(w, w_pad)
+                            for w, w_pad in chunk_windows
+                        ]
+                        # Initiate the processing
+                        # pb.print_until_done()
+                        ray.get(results)
+                        # Close the file
+                        ray.get(remote_writer.close_open.remote())
+                        pbar.update(len(chunk_windows))
+                ray.get(remote_writer.close.remote())
+                ray.shutdown()
+            except Exception as e:
+                ray.get(remote_writer.close.remote())
+                ray.shutdown()
+                logger.exception(f"The predictions failed because {e}.")
 
 
 def cycle_data(
