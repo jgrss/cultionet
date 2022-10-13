@@ -23,15 +23,19 @@ from cultionet.data.utils import (
 from cultionet.utils import model_preprocessing
 from cultionet.utils.logging import set_color_logger
 
-import torch
+import geowombat as gw
+from geowombat.core.windows import get_window_offsets
 import geopandas as gpd
 import pandas as pd
 import yaml
+import rasterio as rio
 from rasterio.windows import Window
+import torch
+import xarray as xr
 import ray
 from ray.actor import ActorHandle
 from tqdm import tqdm
-import xarray as xr
+from tqdm.dask import TqdmCallback
 
 
 logger = set_color_logger(__name__)
@@ -247,13 +251,98 @@ class ProgressBar:
                 return
 
 
-def predict_image(args):
-    import geowombat as gw
-    from geowombat.core.windows import get_window_offsets
-    import rasterio as rio
-    import torch
-    from tqdm.dask import TqdmCallback
+@ray.remote
+class Writer(object):
+    """A concurrent writer with Ray
+    """
+    def __init__(
+        self,
+        out_path: T.Union[str, Path],
+        mode: str,
+        profile: dict,
+        ntime: int,
+        nbands: int,
+        ts: xr.DataArray,
+        data_values: torch.Tensor,
+        ppaths: ProjectPaths,
+        filters: int,
+        device: str,
+        scale_factor: float
+    ) -> None:
+        self.out_path = out_path
+        # Create the output file
+        if mode == 'w':
+            with rio.open(self.out_path, mode=mode, **profile):
+                pass
 
+        self.dst = rio.open(self.out_path, mode='r+')
+
+        self.ntime = ntime
+        self.nbands = nbands
+        self.ts = ts
+        self.data_values = data_values
+        self.ppaths = ppaths
+        self.filters = filters
+        self.device = device
+        self.scale_factor = scale_factor
+
+        self.lit_model = cultionet.load_model(
+            ckpt_file=self.ppaths.ckpt_file,
+            device=self.device,
+            enable_progress_bar=False
+        )[1]
+
+    def _build_slice(self, window: Window) -> tuple:
+        return (
+            slice(0, None),
+            slice(window.row_off, window.row_off+window.height),
+            slice(window.col_off, window.col_off+window.width)
+        )
+
+    def close_open(self):
+        self.close()
+        self.dst = rio.open(self.out_path, mode='r+')
+
+    def close(self):
+        self.dst.close()
+
+    def write_predictions(
+        self,
+        w: Window,
+        w_pad: Window,
+        pba: ActorHandle = None
+    ):
+        slc = self._build_slice(w_pad)
+        # Create the data for the chunk
+        data = create_network_data(
+            self.ts[slc].data.compute(num_workers=1),
+            ntime=self.ntime,
+            nbands=self.nbands
+        )
+        # Apply inference on the chunk
+        stack = cultionet.predict(
+            lit_model=self.lit_model,
+            data=data,
+            data_values=self.data_values,
+            w=w,
+            w_pad=w_pad
+        )
+        # Write the prediction stack to file
+        with filelock.FileLock('./dst.lock'):
+            self.dst.write(
+                (
+                    (stack*self.scale_factor)
+                    .clip(0, self.scale_factor)
+                    .astype('uint16')
+                ),
+                indexes=[1, 2, 3, 4],
+                window=w
+            )
+        if pba is not None:
+            pba.update.remote(1)
+
+
+def predict_image(args):
     logging.getLogger('pytorch_lightning').setLevel(logging.WARNING)
 
     config = open_config(args.config_file)
@@ -318,94 +407,6 @@ def predict_image(args):
 
         # Get the time and band count
         ntime, nbands = get_image_list_dims(image_list, time_series)
-
-        @ray.remote
-        class Writer(object):
-            def __init__(
-                self,
-                out_path: T.Union[str, Path],
-                mode: str,
-                profile: dict,
-                ntime: int,
-                nbands: int,
-                ts: xr.DataArray,
-                data_values: torch.Tensor,
-                ppaths: ProjectPaths,
-                filters: int,
-                device: str,
-                scale_factor: float
-            ) -> None:
-                self.out_path = out_path
-                # Create the output file
-                if mode == 'w':
-                    with rio.open(self.out_path, mode=mode, **profile):
-                        pass
-
-                self.dst = rio.open(self.out_path, mode='r+')
-
-                self.ntime = ntime
-                self.nbands = nbands
-                self.ts = ts
-                self.data_values = data_values
-                self.ppaths = ppaths
-                self.filters = filters
-                self.device = device
-                self.scale_factor = scale_factor
-
-                self.lit_model = cultionet.load_model(
-                    ckpt_file=self.ppaths.ckpt_file,
-                    device=self.device,
-                    enable_progress_bar=False
-                )[1]
-
-            def _build_slice(self, window: Window) -> tuple:
-                return (
-                    slice(0, None),
-                    slice(window.row_off, window.row_off+window.height),
-                    slice(window.col_off, window.col_off+window.width)
-                )
-
-            def close_open(self):
-                self.close()
-                self.dst = rio.open(self.out_path, mode='r+')
-
-            def close(self):
-                self.dst.close()
-
-            def write_predictions(
-                self,
-                w: Window,
-                w_pad: Window,
-                pba: ActorHandle = None
-            ):
-                slc = self._build_slice(w_pad)
-                # Create the data for the chunk
-                data = create_network_data(
-                    self.ts[slc].data.compute(num_workers=1),
-                    ntime=self.ntime,
-                    nbands=self.nbands
-                )
-                # Apply inference on the chunk
-                stack = cultionet.predict(
-                    lit_model=self.lit_model,
-                    data=data,
-                    data_values=self.data_values,
-                    w=w,
-                    w_pad=w_pad
-                )
-                # Write the prediction stack to file
-                with filelock.FileLock('./dst.lock'):
-                    self.dst.write(
-                        (
-                            (stack*self.scale_factor)
-                            .clip(0, self.scale_factor)
-                            .astype('uint16')
-                        ),
-                        indexes=[1, 2, 3, 4],
-                        window=w
-                    )
-                if pba is not None:
-                    pba.update.remote(1)
 
         if ray.is_initialized():
             logger.warning('The Ray cluster is already running.')
