@@ -544,6 +544,9 @@ def predict_image(args):
                 with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
                     for wchunk in range(0, len(windows)+actor_chunksize, actor_chunksize):
                         chunk_windows = windows[wchunk:wchunk+actor_chunksize]
+                        pbar.set_description(
+                            f"Windows {wchunk:,d}--{wchunk+len(chunk_windows):,d}"
+                        )
                         # pb = ProgressBar(
                         #     total=len(chunk_windows),
                         #     desc=f'Chunks {wchunk}-{wchunk+len(chunk_windows)}',
