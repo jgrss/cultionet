@@ -264,7 +264,7 @@ class BlockWriter(object):
         slc = self._build_slice(w_pad)
         # Create the data for the chunk
         data = create_network_data(
-            self.ts[slc].data.compute(num_workers=1),
+            self.ts[slc].gw.compute(num_workers=1),
             ntime=self.ntime,
             nbands=self.nbands
         )
@@ -337,7 +337,7 @@ class WriterModule(BlockWriter):
         self,
         w: Window,
         w_pad: Window,
-        pba: ActorHandle = None
+        pba: T.Optional[T.Union[ActorHandle, int]] = None
     ):
         raise NotImplementedError
 
@@ -415,9 +415,12 @@ class SerialWriter(WriterModule):
     def write(
         self,
         w: Window,
-        w_pad: Window
+        w_pad: Window,
+        pba: int = None
     ):
         self.predict_write_block(w, w_pad)
+        if pba is not None:
+            pba.update(1)
 
 
 def predict_image(args):
@@ -502,9 +505,8 @@ def predict_image(args):
             try:
                 with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
                     results = [
-                        serial_writer.write(w, w_pad) for w, w_pad in windows
+                        serial_writer.write(w, w_pad, pba=pbar) for w, w_pad in windows
                     ]
-                    pbar.update(1)
                 serial_writer.close()
             except Exception as e:
                 serial_writer.close()
