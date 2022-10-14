@@ -301,7 +301,7 @@ predict:
       choices: ['w', 'r+']
   preload_data:
     short: ''
-    long: preload_data
+    long: preload-data
     help: Whether to preload the full image data into memory
     kwargs:
       action: store_true
