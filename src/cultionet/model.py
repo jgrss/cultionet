@@ -263,7 +263,8 @@ def predict(
     data: Data,
     data_values: torch.Tensor,
     w: Window = None,
-    w_pad: Window = None
+    w_pad: Window = None,
+    device: str = 'cpu'
 ) -> np.ndarray:
     """Applies a model to predict image labels|values
 
@@ -272,17 +273,12 @@ def predict(
         data (Data): The data to predict on.
         w (Optional[int]): The ``rasterio.windows.Window`` to write to.
         w_pad (Optional[int]): The ``rasterio.windows.Window`` to predict on.
+        device (Optional[str]): The device to predict on.
     """
-    # with filelock.FileLock('./predict.lock'):
-        # with tempfile.TemporaryDirectory() as tmp:
-        #     net_ds = NetworkDataset(data, Path(tmp), data_values)
-        #     data_module = EdgeDataModule(
-        #         predict_ds=net_ds.ds, batch_size=1, num_workers=0
-        #     )
-    #         distance, edge, crop, crop_r = trainer.predict(
-    #             model=lit_model, datamodule=data_module
-    #         )[0]
     norm_batch = zscores(data, data_values.mean, data_values.std)
+    if device == 'gpu':
+        norm_batch = norm_batch.to('cuda')
+        lit_model = lit_model.to('cuda')
     with torch.no_grad():
         distance, edge, crop, crop_r = lit_model(norm_batch)
 

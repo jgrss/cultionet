@@ -274,7 +274,8 @@ class BlockWriter(object):
             data=data,
             data_values=self.data_values,
             w=w,
-            w_pad=w_pad
+            w_pad=w_pad,
+            device=self.device
         )
         # Write the prediction stack to file
         with filelock.FileLock('./dst.lock'):
