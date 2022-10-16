@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.3.0-base-ubuntu20.04
+FROM nvidia/cuda:11.6.0-base-ubuntu20.04
 
 # Install GDAL
 RUN apt update -y && \
@@ -25,20 +25,21 @@ RUN apt update -y && \
     libgl1 \
     git -y
 
-RUN export CPLUS_INCLUDE_PATH="/usr/include/gdal"
-RUN export C_INCLUDE_PATH="/usr/include/gdal"
-RUN export LD_LIBRARY_PATH="/usr/local/lib"
+ENV CPLUS_INCLUDE_PATH="/usr/include/gdal"
+ENV C_INCLUDE_PATH="/usr/include/gdal"
+ENV LD_LIBRARY_PATH="/usr/local/lib"
+ENV PATH="/root/.local/bin:$PATH"
 
 RUN pip install -U pip setuptools wheel
-RUN pip install -U --no-cache-dir "setuptools<=58.*"
-RUN pip install -U --no-cache-dir cython>=0.29.*
-RUN pip install -U --no-cache-dir numpy>=1.21.0
-
+RUN pip install -U --no-cache-dir "setuptools>=59.5.0"
+RUN pip install -U cython>=0.29.*
+RUN pip install -U numpy>=1.22.0
+RUN pip install intel-openmp
 # Install PyTorch Geometric and its dependencies
 RUN pip install \
     torch \
     torchvision \
-    torchaudio --extra-index-url https://download.pytorch.org/whl/cu113
+    torchaudio --extra-index-url https://download.pytorch.org/whl/cu116
 
 RUN TORCH_VERSION=`(python -c "import torch;print(torch.__version__)")` &&
     pip install \

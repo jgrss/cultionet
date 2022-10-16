@@ -205,7 +205,7 @@ After a model has been fit, the last checkpoint file can be found at `/project_d
 ## Predicting on an image with a trained model
 
 ```commandline
-(venv.cultionet) cultionet predict --project-path /project_dir --out-path predictions.tif --grid-id 1 --window-size 100 --config-file project_config.yml --device cpu --processes 4 
+(venv.cultionet) cultionet predict --project-path /project_dir --out-path predictions.tif --grid-id 1 --window-size 100 --config-file project_config.yml --device cpu --processes 4
 ```
 
 ## Installation
@@ -239,13 +239,13 @@ dependencies:
 
 ```commandline
 conda install -c conda-forge mamba
+conda config --add channels conda-forge
 mamba env create --file environment.yml
 conda activate venv.cnet
-(venv.cnet) mamba install pytorch==1.11.0 torchvision==0.12.0 torchaudio==0.11.0 -c pytorch
+(venv.cnet) mamba install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
 (venv.cnet) mamba install pyg -c pyg
 (venv.cnet) pip install -U pip setuptools wheel
-(venv.cnet) pip install cultionet@git+https://github.com/jgrss/cultionet.git@v1.2.1
-(venv.cnet) pip install -U threadpoolctl
+(venv.cnet) pip install cultionet@git+https://github.com/jgrss/cultionet.git
 ```
 
 ### (Option 3) Install with pip on a CPU
@@ -262,7 +262,7 @@ pyenv activate venv.cnet
 (venv.cnet) pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cpu
 (venv.cnet) TORCH_VERSION=$(python -c "import torch;print(torch.__version__)")
 (venv.cnet) pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
-(venv.cnet) pip install cultionet@git+https://github.com/jgrss/cultionet.git@v1.2.1
+(venv.cnet) pip install cultionet@git+https://github.com/jgrss/cultionet.git
 ```
 
 ### (Option 4) Install CUDA and built GPU packages
