@@ -29,10 +29,12 @@ def columns_to_nd(data, layers, rows, columns):
 class ModelOutputs(object):
     """A class for reshaping of the model output estimates
     """
+    distance_ori: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     distance: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     edge: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     crop: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     crop_r: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
+    masks: np.ndarray = attr.ib(validator=attr.validators.instance_of(np.ndarray))
     apply_softmax: T.Optional[bool] = attr.ib(default=False, validator=attr.validators.instance_of(bool))
 
     def stack_outputs(self, w: Window, w_pad: Window) -> np.ndarray:
@@ -40,21 +42,32 @@ class ModelOutputs(object):
         self.nan_to_num()
 
         return np.stack((
-            self.edge_dist, self.edge_probas, self.crop_probas, self.crop_probas_r
+            self.edge_dist_ori,
+            self.edge_dist,
+            self.edge_probas,
+            self.crop_probas,
+            self.crop_probas_r,
+            self.masks
         ))
 
     @staticmethod
     def _clip_and_reshape(tarray: torch.Tensor, window_obj: Window) -> np.ndarray:
-        return (tarray
-                .contiguous()
-                .view(-1)
-                .detach().cpu().numpy()
-                .clip(0, 1)
-                .reshape(window_obj.height, window_obj.width))
+        return (
+            tarray
+            .contiguous()
+            .view(-1)
+            .detach()
+            .cpu()
+            .numpy()
+            .clip(0, 1)
+            .reshape(window_obj.height, window_obj.width)
+        )
 
     def reshape(self, w: Window, w_pad: Window) -> None:
-        # Get the distance from edges (1 = 0.1, 2 = 0.5, 3 = 0.9 quantiles)
-        self.edge_dist = self._clip_and_reshape(self.distance[:, 1], w_pad)
+        # Get the distance orientations
+        self.edge_dist_ori = self._clip_and_reshape(self.distance_ori, w_pad)
+        # Get the distance from edges
+        self.edge_dist = self._clip_and_reshape(self.distance, w_pad)
 
         # Get the edge probabilities
         if self.apply_softmax:
@@ -76,36 +89,60 @@ class ModelOutputs(object):
             self.crop_probas_r = self.crop_r[:, 1]
         self.crop_probas_r = self._clip_and_reshape(self.crop_probas_r, w_pad)
 
+        self.masks = self.masks.reshape(w_pad.height, w_pad.width)
+
         # Reshape the window chunk and slice off padding
         i = abs(w.row_off - w_pad.row_off)
         j = abs(w.col_off - w_pad.col_off)
+        self.edge_dist_ori = self.edge_dist_ori[i:i+w.height, j:j+w.width]
         self.edge_dist = self.edge_dist[i:i+w.height, j:j+w.width]
         self.edge_probas = self.edge_probas[i:i+w.height, j:j+w.width]
         self.crop_probas = self.crop_probas[i:i+w.height, j:j+w.width]
         self.crop_probas_r = self.crop_probas_r[i:i+w.height, j:j+w.width]
+        self.masks = self.masks[i:i+w.height, j:j+w.width]
 
     def nan_to_num(self):
         # Convert the data type to integer and set 'no data' values
-        self.edge_dist = (np.nan_to_num(self.edge_dist,
-                                        nan=-1.0,
-                                        neginf=-1.0,
-                                        posinf=-1.0)
-                          .astype('float32'))
+        self.edge_dist_ori = (
+            np.nan_to_num(
+                self.edge_dist_ori,
+                nan=-1.0,
+                neginf=-1.0,
+                posinf=-1.0
+            ).astype('float32')
+        )
+        self.edge_dist = (
+            np.nan_to_num(
+                self.edge_dist,
+                nan=-1.0,
+                neginf=-1.0,
+                posinf=-1.0
+            ).astype('float32')
+        )
 
-        self.edge_probas = (np.nan_to_num(self.edge_probas,
-                                          nan=-1.0,
-                                          neginf=-1.0,
-                                          posinf=-1.0)
-                            .astype('float32'))
+        self.edge_probas = (
+            np.nan_to_num(
+                self.edge_probas,
+                nan=-1.0,
+                neginf=-1.0,
+                posinf=-1.0
+            ).astype('float32')
+        )
 
-        self.crop_probas = (np.nan_to_num(self.crop_probas,
-                                          nan=-1.0,
-                                          neginf=-1.0,
-                                          posinf=-1.0)
-                            .astype('float32'))
+        self.crop_probas = (
+            np.nan_to_num(
+                self.crop_probas,
+                nan=-1.0,
+                neginf=-1.0,
+                posinf=-1.0
+            ).astype('float32')
+        )
 
-        self.crop_probas_r = (np.nan_to_num(self.crop_probas_r,
-                                            nan=-1.0,
-                                            neginf=-1.0,
-                                            posinf=-1.0)
-                            .astype('float32'))
+        self.crop_probas_r = (
+            np.nan_to_num(
+                self.crop_probas_r,
+                nan=-1.0,
+                neginf=-1.0,
+                posinf=-1.0
+            ).astype('float32')
+        )
