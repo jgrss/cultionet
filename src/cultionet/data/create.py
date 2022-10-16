@@ -1,7 +1,9 @@
+from dataclasses import dataclass
+from re import S
 import typing as T
 from pathlib import Path
 
-# TODO: imports
+from .const import EDGE_CLASS, CROP_CLASS
 from .lookup import CDL_CROP_LABELS_r
 from .utils import LabeledData, get_image_list_dims
 from ..augment.augmentation import augment
@@ -15,17 +17,12 @@ from scipy.ndimage.measurements import label as nd_label, sum as nd_sum
 from scipy import stats as sci_stats
 import cv2
 import geopandas as gpd
-from shapely.geometry import box
 from skimage.measure import regionprops
 from skimage.morphology import thin as sk_thin
 import xarray as xr
 from tqdm.auto import tqdm
 import torch
 from torch_geometric.data import Data
-
-
-CROP_CLASS = 1
-EDGE_CLASS = 2
 
 
 def remove_noncrop(xvars: np.ndarray, labels_array: np.ndarray) -> T.Tuple[np.ndarray, np.ndarray]:
@@ -260,7 +257,7 @@ def is_grid_processed(
 
 def create_boundary_distances(
     labels_array: np.ndarray, train_type: str, src_ts: xr.DataArray
-) -> T.Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> T.Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Creates distances from boundaries
     """
     if train_type.lower() == 'polygon':
@@ -268,42 +265,66 @@ def create_boundary_distances(
     else:
         mask = np.uint8(1 - labels_array)
     # Get unique segments
-    segments, num_segments = nd_label(mask)
+    segments = nd_label(mask)[0]
     # Get the distance from edges
-    bdist = cv2.distanceTransform(mask, cv2.DIST_L2, 3) * src_ts.gw.celly
+    bdist = cv2.distanceTransform(
+        mask,
+        cv2.DIST_L2,
+        3
+    )
+    bdist *= src_ts.gw.celly
 
-    return mask, segments, bdist
+    grad_x = cv2.Sobel(
+        np.pad(bdist, 5, mode='edge'),
+        cv2.CV_32F,
+        dx=1,
+        dy=0,
+        ksize=5
+    )
+    grad_y = cv2.Sobel(
+        np.pad(bdist, 5, mode='edge'),
+        cv2.CV_32F,
+        dx=0,
+        dy=1,
+        ksize=5
+    )
+    ori = cv2.phase(grad_x, grad_y, angleInDegrees=False)
+    ori = ori[5:-5, 5:-5] / np.deg2rad(360)
+    ori[labels_array == 0] = 0
+
+    return mask, segments, bdist, ori
 
 
 def normalize_boundary_distances(
     labels_array: np.ndarray, train_type: str, src_ts: xr.DataArray
-) -> np.ndarray:
+) -> T.Tuple[np.ndarray, np.ndarray]:
     """Normalizes boundary distances
     """
     # Create the boundary distances
-    mask, segments, bdist = create_boundary_distances(labels_array, train_type, src_ts)
+    __, segments, bdist, ori = create_boundary_distances(labels_array, train_type, src_ts)
     # Normalize each segment by the local max distance
     props = regionprops(segments, intensity_image=bdist)
     for p in props:
         if p.label > 0:
-            # Get the bounding box for the current label
-            min_row, min_col, max_row, max_col = p.bbox
-            label_slice = (
-                slice(min_row, max_row), slice(min_col, max_col)
+            bdist = np.where(
+                segments == p.label,
+                bdist / p.max_intensity,
+                bdist
             )
-            # Get the window around the current segment
-            seg_label = segments[label_slice]
-            bdist_label = bdist[label_slice]
-            # Normalize the distance from edges
-            if (max_row - min_row <= 1) or (max_col - min_col <= 1):
-                bdist_label = np.where(seg_label == p.label, 0.1, bdist_label)
-            else:
-                bdist_label = np.where(seg_label == p.label, bdist_label / p.max_intensity, bdist_label)
-            # Update the segment
-            bdist[label_slice] = bdist_label
-    bdist = np.nan_to_num(bdist.clip(0, 1), nan=1.0, neginf=1.0, posinf=1.0)
+    bdist = np.nan_to_num(
+        bdist.clip(0, 1),
+        nan=1.0,
+        neginf=1.0,
+        posinf=1.0
+    )
+    ori = np.nan_to_num(
+        ori.clip(0, 1),
+        nan=1.0,
+        neginf=1.0,
+        posinf=1.0
+    )
 
-    return bdist
+    return bdist, ori
 
 
 def create_image_vars(
@@ -315,7 +336,9 @@ def create_image_vars(
     grid_edges: T.Optional[gpd.GeoDataFrame] = None,
     ref_res: T.Optional[float] = 10.0,
     resampling: T.Optional[str] = 'nearest'
-) -> T.Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int]:
+) -> T.Tuple[
+    np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int
+]:
     """Creates the initial image training data
     """
     if isinstance(image, list):
@@ -380,15 +403,18 @@ def create_image_vars(
                 # labels_array = fill_field_gaps(labels_array, reset_edges=True)
 
                 # Normalize the boundary distances for each segment
-                bdist = normalize_boundary_distances(
-                    np.uint8(labels_array == 1), grid_edges.geom_type.values[0], src_ts
+                bdist, ori = normalize_boundary_distances(
+                    np.uint8(labels_array == 1),
+                    grid_edges.geom_type.values[0],
+                    src_ts
                 )
             else:
                 labels_array = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='uint8')
-                bdist = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype=time_series.dtype)
+                bdist = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='float64')
+                ori = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='float64')
                 edges = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='uint8')
 
-    return time_series, labels_array, edges, bdist, ntime, nbands
+    return time_series, labels_array, edges, bdist, ori, ntime, nbands
 
 
 def create_dataset(
@@ -406,7 +432,8 @@ def create_dataset(
     grid_size: T.Optional[T.Union[T.Tuple[int, int], T.List[int], None]] = None,
     lc_path: T.Optional[T.Union[str, None]] = None,
     n_ts: T.Optional[int] = 2,
-    data_type: T.Optional[str] = 'boundaries'
+    data_type: T.Optional[str] = 'boundaries',
+    instance_seg: T.Optional[bool] = False
 ) -> None:
     """Creates a dataset for training
 
@@ -426,6 +453,7 @@ def create_dataset(
         lc_path: The land cover image path.
         n_ts: The number of temporal augmentations.
         data_type: The target data type.
+        instance_seg: Whether to get instance segmentation mask targets.
     """
     if transforms is None:
         transforms = ['none']
@@ -484,7 +512,7 @@ def create_dataset(
                     ref_bounds = [left, top-ref_res*height, left+ref_res*width, top]
 
                 # Data for graph network
-                xvars, labels_array, edges, bdist, ntime, nbands = create_image_vars(
+                xvars, labels_array, edges, bdist, ori, ntime, nbands = create_image_vars(
                     image_list,
                     bounds=ref_bounds,
                     num_workers=num_workers,
@@ -562,13 +590,14 @@ def create_dataset(
                     # Remove non-crop edges
                     xvars, labels_array = remove_noncrop(xvars, labels_array)
                 else:
-                    segments, num_objects = nd_label(labels_array)
+                    segments = nd_label(labels_array)[0]
                     props = regionprops(segments)
 
                 ldata = LabeledData(
                     x=xvars,
                     y=labels_array,
                     bdist=bdist,
+                    ori=ori,
                     segments=segments,
                     props=props
                 )
@@ -581,23 +610,50 @@ def create_dataset(
                         for i in range(0, n_ts):
                             train_id = f'{group_id}_{row_grid_id}_{aug}_{i:03d}'
                             train_data = augment(
-                                ldata, aug=aug, ntime=ntime, nbands=nbands, k=3,
-                                start_year=start_year, end_year=end_year,
-                                left=left, bottom=bottom, right=right, top=top,
-                                res=ref_res, train_id=train_id
+                                ldata,
+                                aug=aug,
+                                ntime=ntime,
+                                nbands=nbands,
+                                k=3,
+                                instance_seg=instance_seg,
+                                start_year=start_year,
+                                end_year=end_year,
+                                left=left, bottom=bottom,
+                                right=right,
+                                top=top,
+                                res=ref_res,
+                                train_id=train_id
                             )
-
-                            save_and_update(train_data)
+                            if instance_seg:
+                                if hasattr(train_data, 'boxes') and train_data.boxes is not None:
+                                    save_and_update(train_data)
+                            else:
+                                save_and_update(train_data)
                     else:
                         train_id = f'{group_id}_{row_grid_id}_{aug}'
                         train_data = augment(
-                            ldata, aug=aug, ntime=ntime, nbands=nbands, k=3,
-                            start_year=start_year, end_year=end_year,
-                            left=left, bottom=bottom, right=right, top=top,
-                            res=ref_res, train_id=train_id
+                            ldata,
+                            aug=aug,
+                            ntime=ntime,
+                            nbands=nbands,
+                            k=3,
+                            instance_seg=instance_seg,
+                            start_year=start_year,
+                            end_year=end_year,
+                            left=left,
+                            bottom=bottom,
+                            right=right,
+                            top=top,
+                            res=ref_res,
+                            train_id=train_id
                         )
-
-                        save_and_update(train_data)
+                        if instance_seg:
+                            # Grids without boxes are set as None, and Data() does not
+                            # keep None types.
+                            if hasattr(train_data, 'boxes') and train_data.boxes is not None:
+                                save_and_update(train_data)
+                        else:
+                            save_and_update(train_data)
 
             pbar.update(1)
             pbar.set_description(group_id)
