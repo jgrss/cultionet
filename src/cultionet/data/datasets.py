@@ -26,10 +26,37 @@ def add_dims(d: torch.Tensor) -> torch.Tensor:
     return d.unsqueeze(0)
 
 
+def update_data(
+    batch: Data,
+    idx: T.Optional[int] = None,
+    x: T.Optional[torch.Tensor] = None
+) -> Data:
+    if x is not None:
+        exclusion = ('x',)
+    image_id = None
+    if idx is not None:
+        if hasattr(batch, 'boxes'):
+            if batch.boxes is not None:
+                image_id = torch.zeros_like(batch.box_labels, dtype=torch.int64) + idx
+
+    if x is not None:
+        return Data(
+            x=x,
+            image_id=image_id,
+            **{k: getattr(batch, k) for k in batch.keys if k not in exclusion}
+        )
+    else:
+        return Data(
+            image_id=image_id,
+            **{k: getattr(batch, k) for k in batch.keys}
+        )
+
+
 def zscores(
     batch: Data,
     data_means: torch.Tensor,
-    data_stds: torch.Tensor
+    data_stds: torch.Tensor,
+    idx: T.Optional[int] = None
 ) -> Data:
     """Normalizes data to z-scores
 
@@ -42,10 +69,43 @@ def zscores(
     """
     x = ((batch.x - add_dims(data_means)) / add_dims(data_stds))
 
-    return Data(x=x, **{k: getattr(batch, k) for k in batch.keys if k != 'x'})
+    return update_data(
+        batch=batch,
+        idx=idx,
+        x=x
+    )
 
 
-def _check_shape(d1: tuple, d2: tuple, index: int, uid: str) -> T.Tuple[bool, int, str]:
+def _check_shape(
+    d1: int, d2: int, index: int, uid: str
+) -> T.Tuple[bool, int, str]:
+    if d1 != d2:
+        return False, index, uid
+    return True, index, uid
+
+
+class TqdmParallel(Parallel):
+    """A tqdm progress bar for joblib Parallel tasks
+
+    Reference:
+        https://stackoverflow.com/questions/37804279/how-can-we-use-tqdm-in-a-parallel-execution-with-joblib
+    """
+    def __init__(self, tqdm_kwargs: dict):
+        self.tqdm_kwargs = tqdm_kwargs
+        super().__init__()
+
+    def __call__(self, *args, **kwargs):
+        with tqdm(**self.tqdm_kwargs) as self._pbar:
+            return Parallel.__call__(self, *args, **kwargs)
+
+    def print_progress(self):
+        self._pbar.n = self.n_completed_tasks
+        self._pbar.refresh()
+
+
+def _check_shape(
+    d1: int, d2: int, index: int, uid: str
+) -> T.Tuple[bool, int, str]:
     if d1 != d2:
         return False, index, uid
     return True, index, uid
@@ -125,11 +185,15 @@ class EdgeDataset(Dataset):
         """Get a list of processed files"""
         return self.data_list_
 
-    def check_dims(self, delete_mismatches: bool = False, tqdm_color: str = 'ffffff'):
+    def check_dims(
+        self,
+        expected_dim: int,
+        delete_mismatches: bool = False,
+        tqdm_color: str = 'ffffff'
+    ):
         """Checks if all tensors in the dataset match in shape dimensions
         """
-        ref_dim = tuple(self[0].x.shape)
-        check_partial = partial(_check_shape, ref_dim)
+        check_partial = partial(_check_shape, expected_dim)
 
         with parallel_backend(
             backend='loky',
@@ -145,19 +209,21 @@ class EdgeDataset(Dataset):
             ) as pool:
                 results = pool(
                     delayed(check_partial)(
-                        tuple(self[i].x.shape), i, self[i].train_id
-                    ) for i in range(1, len(self))
+                        self[i].x.shape[1], i, self[i].train_id
+                    ) for i in range(0, len(self))
                 )
         matches, indices, ids = list(map(list, zip(*results)))
         if not all(matches):
-            null_indices = np.array(indices)[~np.array(matches)]
+            indices = np.array(indices)
+            null_indices = indices[~np.array(matches)]
             null_ids = np.array(ids)[null_indices].tolist()
             logger.warning(','.join(null_ids))
             logger.warning(f'{null_indices.shape[0]:,d} ids did not match the reference dimensions.')
 
             if delete_mismatches:
                 logger.warning(f'Removing {null_indices.shape[0]:,d} .pt files.')
-                [self.data_list_[i].unlink() for i in null_indices]
+                for i in null_indices:
+                    self.data_list_[i].unlink()
             else:
                 raise TensorShapeError
 
@@ -192,6 +258,11 @@ class EdgeDataset(Dataset):
         """
         batch = torch.load(self.data_list_[idx])
         if isinstance(self.data_means, torch.Tensor):
-            return zscores(batch, self.data_means, self.data_stds)
+            batch = zscores(batch, self.data_means, self.data_stds, idx=idx)
         else:
-            return batch
+            batch = update_data(
+                batch=batch,
+                idx=idx
+            )
+
+        return batch
