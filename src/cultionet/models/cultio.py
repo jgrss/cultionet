@@ -37,7 +37,7 @@ class CultioGraphNet(torch.nn.Module):
         # Total number of bands
         self.ds_num_bands = int(self.ds_num_features / self.ds_num_time)
         self.filters = filters
-        num_quantiles = 3
+        num_distances = 2
         num_index_streams = 2
         base_in_channels = (filters * self.ds_num_bands) * num_index_streams + self.filters
 
@@ -58,23 +58,27 @@ class CultioGraphNet(torch.nn.Module):
             n_layers=4
         )
 
-        # Boundary distances (+num_quantiles) (0.1, 0.5, 0.9)
-        self.dist_layer = self.final_sequence_weights(
+        # Boundary distance orientations (+1)
+        self.dist_layer_ori = self.final_sequence_weights(
             nn.GCNConv(base_in_channels, self.filters, improved=True),
             nn.TransformerConv(self.filters, self.filters, heads=1, edge_dim=2, dropout=0.1),
-            self.filters, num_quantiles
+            self.filters, 1
         )
-
+        # Boundary distances (+1)
+        self.dist_layer = self.final_sequence_weights(
+            nn.GCNConv(base_in_channels+1, self.filters, improved=True),
+            nn.TransformerConv(self.filters, self.filters, heads=1, edge_dim=2, dropout=0.1),
+            self.filters, 1
+        )
         # Edges (+num_classes)
         self.edge_layer = self.final_sequence_weights_logits(
-            nn.GCNConv(base_in_channels+num_quantiles, self.filters, improved=True),
+            nn.GCNConv(base_in_channels+num_distances, self.filters, improved=True),
             nn.TransformerConv(self.filters, num_classes, heads=1, edge_dim=2, dropout=0.1),
             self.filters, num_classes
         )
-
         # Classes (+num_classes)
         self.class_layer = self.final_sequence_weights_logits(
-            nn.GCNConv(base_in_channels+num_quantiles+num_classes, self.filters, improved=True),
+            nn.GCNConv(base_in_channels+num_distances+num_classes, self.filters, improved=True),
             nn.TransformerConv(
                 self.filters, num_classes, heads=1, edge_dim=2, dropout=0.1
             ),
@@ -119,7 +123,9 @@ class CultioGraphNet(torch.nn.Module):
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
-    def forward(self, data: Data) -> T.Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, data: Data
+    ) -> T.Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
@@ -161,9 +167,25 @@ class CultioGraphNet(torch.nn.Module):
         ).permute(0, 2, 1, 3, 4)
         star_stream = self.star_rnn(star_stream)
         star_stream = self.cg(star_stream)
-
         # Concatenate streams
-        h = torch.cat([transformer_stream, nunet_stream, star_stream], dim=1)
+        h = torch.cat(
+            [
+                transformer_stream,
+                nunet_stream,
+                star_stream
+            ],
+            dim=1
+        )
+
+        # Estimate distance orientations
+        logits_distances_ori = self.dist_layer_ori(
+            h,
+            data.edge_index,
+            data.edge_attrs[:, 1],
+            data.edge_attrs
+        )
+        # Concatenate streams + distance orientations
+        h = torch.cat([h, logits_distances_ori], dim=1)
 
         # Estimate distance from edges
         logits_distances = self.dist_layer(
@@ -172,8 +194,7 @@ class CultioGraphNet(torch.nn.Module):
             data.edge_attrs[:, 1],
             data.edge_attrs
         )
-
-        # Concatenate streams + distances
+        # Concatenate streams + distance orientations + distances
         h = torch.cat([h, logits_distances], dim=1)
 
         # Estimate edges
@@ -183,8 +204,7 @@ class CultioGraphNet(torch.nn.Module):
             data.edge_attrs[:, 1],
             data.edge_attrs
         )
-
-        # Concatenate streams + distances + edges
+        # Concatenate streams + distance orientations + distances + edges
         h = torch.cat([h, logits_edges], dim=1)
 
         # Estimate all classes
@@ -195,4 +215,4 @@ class CultioGraphNet(torch.nn.Module):
             data.edge_attrs
         )
 
-        return logits_distances, logits_edges, logits_labels
+        return logits_distances_ori, logits_distances, logits_edges, logits_labels
