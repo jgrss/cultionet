@@ -83,7 +83,6 @@ def get_norm_values(
         data_sums = torch.zeros(dataset[0].x.shape[1], dtype=torch.float)
         sse = torch.zeros(dataset[0].x.shape[1], dtype=torch.float)
         pix_count = 0.0
-
         with tqdm(
             total=int(len(dataset)/batch_size),
             desc='Calculating means',
