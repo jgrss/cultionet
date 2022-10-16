@@ -6,7 +6,13 @@ import torch
 class RefineConv(torch.nn.Module):
     """A refinement convolution layer
     """
-    def __init__(self, in_channels: int, mid_channels: int, out_channels: int, dropout: float = 0.1):
+    def __init__(
+        self,
+        in_channels: int,
+        mid_channels: int,
+        out_channels: int,
+        dropout: float = 0.1
+    ):
         super(RefineConv, self).__init__()
 
         self.gc = model_utils.GraphToConv()
