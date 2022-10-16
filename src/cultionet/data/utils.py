@@ -20,6 +20,7 @@ class LabeledData:
     x: np.ndarray
     y: np.ndarray
     bdist: np.ndarray
+    ori: np.ndarray
     segments: np.ndarray
     props: T.List
 
@@ -48,7 +49,9 @@ def create_data_object(
     height: int,
     width: int,
     y: T.Optional[np.ndarray] = None,
+    mask_y: T.Optional[np.ndarray] = None,
     bdist: T.Optional[np.ndarray] = None,
+    ori: T.Optional[np.ndarray] = None,
     other: T.Optional[np.ndarray] = None,
     **kwargs
 ) -> Data:
@@ -58,6 +61,14 @@ def create_data_object(
     edge_attrs_ = torch.tensor(edge_attrs, dtype=torch.float)
     x = torch.tensor(x, dtype=torch.float)
     xy = torch.tensor(xy, dtype=torch.float)
+
+    boxes = None
+    box_labels = None
+    box_masks = None
+    if mask_y is not None:
+        boxes = mask_y['boxes']
+        box_labels = mask_y['labels']
+        box_masks = mask_y['masks']
 
     if y is None:
         train_data = Data(
@@ -69,24 +80,32 @@ def create_data_object(
             width=width,
             ntime=ntime,
             nbands=nbands,
+            boxes=boxes,
+            box_labels=box_labels,
+            box_masks=box_masks,
             **kwargs
         )
     else:
-        y_ = torch.tensor(y.flatten(), dtype=torch.float if 'float' in y.dtype.name else torch.long)
+        y = torch.tensor(y.flatten(), dtype=torch.float if 'float' in y.dtype.name else torch.long)
         bdist_ = torch.tensor(bdist.flatten(), dtype=torch.float)
+        ori_ = torch.tensor(ori.flatten(), dtype=torch.float)
 
         if other is None:
             train_data = Data(
                 x=x,
                 edge_index=edge_indices_,
                 edge_attrs=edge_attrs_,
-                y=y_,
+                y=y,
                 bdist=bdist_,
+                ori=ori_,
                 pos=xy,
                 height=height,
                 width=width,
                 ntime=ntime,
                 nbands=nbands,
+                boxes=boxes,
+                box_labels=box_labels,
+                box_masks=box_masks,
                 **kwargs
             )
         else:
@@ -96,14 +115,18 @@ def create_data_object(
                 x=x,
                 edge_index=edge_indices_,
                 edge_attrs=edge_attrs_,
-                y=y_,
+                y=y,
                 bdist=bdist_,
+                ori=ori_,
                 pos=xy,
                 other=other_,
                 height=height,
                 width=width,
                 ntime=ntime,
                 nbands=nbands,
+                boxes=boxes,
+                box_labels=box_labels,
+                box_masks=box_masks,
                 **kwargs
             )
 
