@@ -192,3 +192,51 @@ class QuantileLoss(object):
         loss = torch.cat(losses, dim=1).sum(dim=1).mean()
 
         return loss
+
+
+@attr.s
+class MSELoss(object):
+    """Mean squared error loss
+    """
+    def __attrs_post_init__(self):
+        super(MSELoss, self).__init__()
+        self.loss_func = torch.nn.MSELoss()
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Performs a single forward pass
+
+        Args:
+            inputs: Predictions from model.
+            targets: Ground truth values.
+
+        Returns:
+            Loss (float)
+        """
+        return self.loss_func(inputs, targets)
+
+
+@attr.s
+class HuberLoss(object):
+    """Huber loss
+    """
+    def __attrs_post_init__(self):
+        super(HuberLoss, self).__init__()
+        self.loss_func = torch.nn.HuberLoss()
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Performs a single forward pass
+
+        Args:
+            inputs: Predictions from model.
+            targets: Ground truth values.
+
+        Returns:
+            Loss (float)
+        """
+        return self.loss_func(inputs, targets)
