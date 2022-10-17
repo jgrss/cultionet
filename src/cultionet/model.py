@@ -28,6 +28,10 @@ logging.getLogger('lightning').addHandler(logging.NullHandler())
 logging.getLogger('lightning').propagate = False
 
 
+def spatial_kfoldcv():
+    pass
+
+
 def fit(
     dataset: EdgeDataset,
     ckpt_file: T.Union[str, Path],

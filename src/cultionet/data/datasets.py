@@ -14,6 +14,8 @@ from torch_geometric.data import Data, Dataset
 import psutil
 from tqdm.auto import tqdm
 from joblib import Parallel, delayed, parallel_backend
+import rtree
+import geopandas as gpd
 
 ATTRVINSTANCE = attr.validators.instance_of
 ATTRVIN = attr.validators.in_
@@ -113,6 +115,50 @@ class EdgeDataset(Dataset):
             self.get_data_list()
 
         return self.data_list_
+
+    def spatial_kfoldcv(
+        self,
+        spatial_partitions: T.Union[str, Path, gpd.GeoDataFrame],
+        k_folds: int = 0
+    ) -> None:
+        from geosample import QuadTree
+
+        self.create_rtree()
+        if not isinstance(spatial_partitions, gpd.GeoDataFrame):
+            spatial_partitions = gpd.read_file(spatial_partitions)
+
+        if k_folds > 0:
+            qt = QuadTree(spatial_partitions)
+            for s in range(k_folds):
+                qt.split()
+            spatial_partitions = qt.to_frame()
+
+        spatial_partitions = self.spatial_partitions
+
+    def spatial_kfoldcv_iter(self) -> T.Tuple['EdgeDataset', 'EdgeDataset']:
+        for kfold in self.spatial_partitions.itertuples():
+            # Bounding box and indices of validation fold
+            bbox = kfold.geometry.bounds
+            kfold_indices = list(self.rtree_index.intersection(**bbox))
+            train_ds = []
+            val_ds = []
+            for i in range(0, len(self)):
+                if i in kfold_indices:
+                    val_ds.append(self[i])
+                else:
+                    train_ds.append(self[i])
+
+            yield train_ds, val_ds
+
+    def create_rtree(self):
+        self.rtree_index = rtree.index.Index()
+        for idx, fn in enumerate(self.data_list_):
+            data = torch.load(fn)
+            left = data.left
+            bottom = data.bottom
+            right = data.right
+            top = data.top
+            self.rtree_index.insert(idx, (left, bottom, right, top))
 
     def download(self):
         pass

@@ -93,6 +93,12 @@ create:
       default: y
       choices: ['y', 'n']
 
+skfoldcv:
+  spatial_partitions:
+    short: ''
+    long: spatial-partitions
+    help: The spatial partitions for spatil k-fold cross-validation
+
 train:
   val_frac:
     short: ''
