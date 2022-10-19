@@ -52,6 +52,8 @@ def fit(
     weight_decay: T.Optional[float] = 1e-5,
     precision: T.Optional[int] = 32,
     stochastic_weight_averaging: T.Optional[bool] = False,
+    stochastic_weight_averaging_lr: T.Optional[float] = 0.05,
+    stochastic_weight_averaging_start: T.Optional[float] = 0.8,
     model_pruning: T.Optional[bool] = False
 ):
     """Fits a model
@@ -79,6 +81,10 @@ def fit(
         precision (Optional[int]): The data precision. Default is 32.
         stochastic_weight_averaging (Optional[bool]): Whether to use stochastic weight averaging.
             Default is False.
+        stochastic_weight_averaging_lr (Optional[float]): The stochastic weight averaging learning rate.
+            Default is 0.05.
+        stochastic_weight_averaging_start (Optional[float]): The stochastic weight averaging epoch start.
+            Default is 0.8.
         model_pruning (Optional[bool]): Whether to prune the model. Default is False.
     """
     ckpt_file = Path(ckpt_file)
@@ -145,7 +151,10 @@ def fit(
         early_stop_callback
     ]
     if stochastic_weight_averaging:
-        callbacks.append(StochasticWeightAveraging(swa_lrs=0.05))
+        callbacks.append(StochasticWeightAveraging(
+            swa_lrs=stochastic_weight_averaging_lr,
+            swa_epoch_start=stochastic_weight_averaging_start
+        ))
     if 0 < model_pruning <= 1:
         callbacks.append(
             ModelPruning('l1_unstructured', amount=model_pruning)
