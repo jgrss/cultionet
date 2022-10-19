@@ -3,6 +3,7 @@ from pathlib import Path
 import logging
 import tempfile
 import filelock
+import json
 
 import numpy as np
 
@@ -187,6 +188,8 @@ def fit(
                 dataloaders=data_module.test_dataloader(),
                 ckpt_path='last'
             )
+            with open(Path(trainer.logger.save_dir) / 'last.test', mode='w') as f:
+                f.write(json.dumps(trainer.logged_metrics))
 
 
 def load_model(
