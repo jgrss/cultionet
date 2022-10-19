@@ -20,6 +20,7 @@ class BFasterRCNN(torch.nn.Module):
         num_classes: int,
         sizes: T.Optional[T.Sequence[int]] = None,
         aspect_ratios: T.Optional[T.Sequence[int]] = None,
+        trainable_backbone_layers: T.Optional[int] = 3,
         min_image_size: int = 800,
         max_image_size: int = 1333
     ) -> None:
@@ -44,7 +45,7 @@ class BFasterRCNN(torch.nn.Module):
         # Load a pretrained model
         self.model = maskrcnn_resnet50_fpn_v2(
             weights='DEFAULT',
-            trainable_backbone_layers=3
+            trainable_backbone_layers=trainable_backbone_layers
         )
         # Remove image normalization and add custom resizing
         self.model.transform = GeneralizedRCNNTransform(
