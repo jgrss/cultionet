@@ -28,6 +28,7 @@ from cultionet.utils.logging import set_color_logger
 
 import geowombat as gw
 from geowombat.core.windows import get_window_offsets
+import numpy as np
 import geopandas as gpd
 import pandas as pd
 import yaml
@@ -147,7 +148,7 @@ def get_image_list(
         if len(ts_list) <= 1:
             continue
 
-        image_list += ts_list
+        image_list += ts_list#[::2]
 
     return image_list
 
@@ -272,6 +273,7 @@ class BlockWriter(object):
         stack = cultionet.predict(
             lit_model=self.lit_model,
             data=data,
+            written=self.dst.read(self.bands[-1], window=w_pad),
             data_values=self.data_values,
             w=w,
             w_pad=w_pad,
@@ -285,7 +287,7 @@ class BlockWriter(object):
                     .clip(0, self.scale_factor)
                     .astype('uint16')
                 ),
-                indexes=[1, 2, 3, 4, 5, 6],
+                indexes=self.bands,
                 window=w
             )
 
@@ -298,6 +300,7 @@ class WriterModule(BlockWriter):
         profile: dict,
         ntime: int,
         nbands: int,
+        filters: int,
         ts: xr.DataArray,
         data_values: torch.Tensor,
         ppaths: ProjectPaths,
@@ -319,9 +322,14 @@ class WriterModule(BlockWriter):
         self.ppaths = ppaths
         self.device = device
         self.scale_factor = scale_factor
+        self.bands = [1, 2, 3, 4, 5, 6]
 
         self.lit_model = cultionet.load_model(
             ckpt_file=self.ppaths.ckpt_file,
+            model_file=self.ppaths.ckpt_file.parent / 'cultionet.pt',
+            num_features=ntime*nbands,
+            num_time_features=ntime,
+            filters=filters,
             device=self.device,
             enable_progress_bar=False
         )[1]
@@ -354,6 +362,7 @@ class RemoteWriter(WriterModule):
         profile: dict,
         ntime: int,
         nbands: int,
+        filters: int,
         ts: xr.DataArray,
         data_values: torch.Tensor,
         ppaths: ProjectPaths,
@@ -366,6 +375,7 @@ class RemoteWriter(WriterModule):
             profile=profile,
             ntime=ntime,
             nbands=nbands,
+            filters=filters,
             ts=ts,
             data_values=data_values,
             ppaths=ppaths,
@@ -394,6 +404,7 @@ class SerialWriter(WriterModule):
         profile: dict,
         ntime: int,
         nbands: int,
+        filters: int,
         ts: xr.DataArray,
         data_values: torch.Tensor,
         ppaths: ProjectPaths,
@@ -406,6 +417,7 @@ class SerialWriter(WriterModule):
             profile=profile,
             ntime=ntime,
             nbands=nbands,
+            filters=filters,
             ts=ts,
             data_values=data_values,
             ppaths=ppaths,
@@ -420,6 +432,7 @@ class SerialWriter(WriterModule):
         pba: int = None
     ):
         self.predict_write_block(w, w_pad)
+        self.close_open()
         if pba is not None:
             pba.update(1)
 
@@ -497,6 +510,7 @@ def predict_image(args):
                 profile=profile,
                 ntime=ntime,
                 nbands=nbands,
+                filters=args.filters,
                 ts=time_series,
                 data_values=data_values,
                 ppaths=ppaths,
@@ -534,6 +548,7 @@ def predict_image(args):
                 profile=profile,
                 ntime=ntime,
                 nbands=nbands,
+                filters=args.filters,
                 ts=ray.put(time_series),
                 data_values=data_values,
                 ppaths=ppaths,
