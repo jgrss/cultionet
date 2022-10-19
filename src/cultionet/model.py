@@ -188,8 +188,11 @@ def fit(
                 dataloaders=data_module.test_dataloader(),
                 ckpt_path='last'
             )
+            logged_metrics = trainer.logged_metrics
+            for k, v in logged_metrics.items():
+                logged_metrics[k] = float(v)
             with open(Path(trainer.logger.save_dir) / 'last.test', mode='w') as f:
-                f.write(json.dumps(trainer.logged_metrics))
+                f.write(json.dumps(logged_metrics))
 
 
 def load_model(
