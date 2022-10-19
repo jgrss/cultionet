@@ -80,7 +80,7 @@ class CultioLitModel(pl.LightningModule):
             aspect_ratios=(0.5, 1.0, 3.0),
             trainable_backbone_layers=3,
             min_image_size=100,
-            max_image_size=400
+            max_image_size=500
         )
 
         self.configure_loss()
