@@ -136,21 +136,23 @@ class StarRNN(torch.nn.Module):
         self.nstage = nstage
         self.cell = cell
 
-        if self.cell == 'gru':
-            self.rnn = ConvGRU(input_size=input_dim,
-                               hidden_sizes=hidden_dim,
-                               kernel_sizes=kernel_size[0],
-                               n_layers=n_layers)
-        elif self.cell == 'star_res':
-            self.rnn = ConvSTAR_Res(input_size=input_dim,
-                                    hidden_sizes=hidden_dim,
-                                    kernel_sizes=kernel_size[0],
-                                    n_layers=n_layers)
-        else:
-            self.rnn = ConvSTAR(input_size=input_dim,
-                                hidden_sizes=hidden_dim,
-                                kernel_sizes=kernel_size[0],
-                                n_layers=n_layers)
+        # if self.cell == 'gru':
+        #     self.rnn = ConvGRU(input_size=input_dim,
+        #                        hidden_sizes=hidden_dim,
+        #                        kernel_sizes=kernel_size[0],
+        #                        n_layers=n_layers)
+        # elif self.cell == 'star_res':
+        #     self.rnn = ConvSTAR_Res(input_size=input_dim,
+        #                             hidden_sizes=hidden_dim,
+        #                             kernel_sizes=kernel_size[0],
+        #                             n_layers=n_layers)
+        # else:
+        self.rnn = ConvSTAR(
+            input_size=input_dim,
+            hidden_sizes=hidden_dim,
+            kernel_sizes=kernel_size[0],
+            n_layers=n_layers
+        )
 
         self.final = torch.nn.Conv2d(hidden_dim, nclasses, (3, 3), padding=1)
 
