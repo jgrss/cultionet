@@ -19,16 +19,24 @@ class RefineConv(torch.nn.Module):
         self.cg = model_utils.ConvToGraph()
 
         self.seq = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels, mid_channels, kernel_size=1, padding=0, bias=False, padding_mode='replicate'),
+            torch.nn.Conv2d(
+                in_channels, mid_channels, kernel_size=1, padding=0, bias=False, padding_mode='replicate'
+            ),
             torch.nn.BatchNorm2d(mid_channels),
             torch.nn.ELU(alpha=0.1, inplace=False),
-            torch.nn.Conv2d(mid_channels, mid_channels, kernel_size=3, padding=1, bias=False, padding_mode='replicate'),
+            torch.nn.Conv2d(
+                mid_channels, mid_channels, kernel_size=3, padding=1, bias=False, padding_mode='replicate'
+            ),
             torch.nn.BatchNorm2d(mid_channels),
             torch.nn.Dropout(dropout),
-            torch.nn.Conv2d(mid_channels, mid_channels, kernel_size=3, padding=1, bias=False, padding_mode='replicate'),
+            torch.nn.Conv2d(
+                mid_channels, mid_channels, kernel_size=3, padding=1, bias=False, padding_mode='replicate'
+            ),
             torch.nn.BatchNorm2d(mid_channels),
             torch.nn.Dropout(dropout),
-            torch.nn.Conv2d(mid_channels, out_channels, kernel_size=1, padding=0, bias=False, padding_mode='replicate')
+            torch.nn.Conv2d(
+                mid_channels, out_channels, kernel_size=1, padding=0, bias=False, padding_mode='replicate'
+            )
         )
 
     def __call__(self, *args, **kwargs):
