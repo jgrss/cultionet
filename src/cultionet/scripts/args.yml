@@ -6,6 +6,9 @@ epilog: |
   # Create training data
   cultionet create --project-path /projects/data
 
+  # Spatial k-fold cross-validation using quadrant partitions on the dataset
+  cultionet skfoldcv -p . --splits 2 --val-frac 0.5 --processes 8 --epochs 1 --batch-size 4 --precision 16
+
   # Train a model
   cultionet train --project-path /projects/data
 
@@ -98,6 +101,13 @@ skfoldcv:
     short: ''
     long: spatial-partitions
     help: The spatial partitions for spatil k-fold cross-validation
+  splits:
+    short: ''
+    long: splits
+    help: The number of quadrant splits (Only applies if the partition file is not passed).
+    kwargs:
+      default: 0
+      type: '&int'
 
 train:
   val_frac:
