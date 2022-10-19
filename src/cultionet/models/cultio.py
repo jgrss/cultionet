@@ -62,7 +62,7 @@ class CultioGraphNet(torch.nn.Module):
             input_dim=self.ds_num_bands,
             hidden_dim=32,
             nclasses=self.filters,
-            n_layers=4
+            n_layers=3
         )
         # Boundary distance orientations (+1)
         self.dist_layer_ori = GraphRegressionLayer(
