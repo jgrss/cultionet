@@ -16,6 +16,7 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch_geometric.data import Data
 import pytorch_lightning as pl
+from torchvision import transforms
 
 import warnings
 import logging
@@ -33,7 +34,9 @@ class CultioLitModel(pl.LightningModule):
         num_time_features: int = None,
         filters: int = 32,
         learning_rate: float = 0.001,
-        weight_decay: float = 1e-5
+        weight_decay: float = 1e-5,
+        rheight: int = 201,
+        rwidth: int = 201
     ):
         """Lightning model
 
@@ -53,12 +56,16 @@ class CultioLitModel(pl.LightningModule):
         self.edge_value = 2
         self.crop_value = 1
         self.num_time_features = num_time_features
+        self.rheight= rheight
+        self.rwidth = rwidth
 
         self.model = CultioGraphNet(
             ds_features=num_features,
             ds_time_features=num_time_features,
             filters=filters,
-            num_classes=self.num_classes
+            num_classes=self.num_classes,
+            rheight=self.rheight,
+            rwidth=self.rwidth
         )
         self.refine = RefineConv(
             in_channels=1+self.num_classes*2,
@@ -66,13 +73,13 @@ class CultioLitModel(pl.LightningModule):
             out_channels=self.num_classes
         )
         self.maskrcnn = BFasterRCNN(
-            in_channels=3,
+            in_channels=4,
             out_channels=256,
             num_classes=self.num_classes,
             sizes=(16, 32, 64, 128, 256),
             aspect_ratios=(0.5, 1.0, 3.0),
-            min_image_size=200,
-            max_image_size=600
+            min_image_size=100,
+            max_image_size=400
         )
 
         self.configure_loss()
@@ -83,6 +90,7 @@ class CultioLitModel(pl.LightningModule):
 
     def mask_forward(
         self,
+        distance_ori: torch.Tensor,
         distance: torch.Tensor,
         edge: torch.Tensor,
         crop_r: torch.Tensor,
@@ -96,6 +104,7 @@ class CultioLitModel(pl.LightningModule):
         batch_size = 1 if batch is None else batch.unique().size(0)
         x = torch.cat(
             (
+                distance_ori,
                 distance,
                 edge[:, 1][:, None],
                 crop_r[:, 1][:, None]
@@ -106,14 +115,27 @@ class CultioLitModel(pl.LightningModule):
         # new x = (B x C x H x W)
         gc = model_utils.GraphToConv()
         x = gc(x, batch_size, height, width)
-        images = [bidx for bidx in x]
+        scale = self.rheight / height
+        resizer = transforms.Resize((self.rheight, self.rwidth))
+        x = [resizer(image) for image in x]
         targets = None
         if y is not None:
-            targets = [
-                {k: y[k][y['image_id'] == bidx] for k in y.keys()}
-                for bidx in y['image_id'].unique()
-            ]
-        outputs = self.maskrcnn(images, targets)
+            targets = []
+            for bidx in y['image_id'].unique():
+                batch_dict = {}
+                batch_slice = y['image_id'] == bidx
+                for k in y.keys():
+                    if k == 'masks':
+                        batch_dict[k] = resizer(
+                            y[k][batch_slice]
+                        )
+                    elif k == 'boxes':
+                        # [xmin, ymin, xmax, ymax]
+                        batch_dict[k] = y[k][batch_slice] * scale
+                    else:
+                        batch_dict[k] = y[k][batch_slice]
+                    targets.append(batch_dict)
+        outputs = self.maskrcnn(x, targets)
 
         return outputs
 
@@ -215,14 +237,8 @@ class CultioLitModel(pl.LightningModule):
 
         distance_ori, distance, edge, crop, crop_r = self(batch)
 
-        oloss = self.dloss(
-            distance_ori.contiguous().view(-1),
-            batch.ori.contiguous().view(-1)
-        )
-        dloss = self.dloss(
-            distance.contiguous().view(-1),
-            batch.bdist.contiguous().view(-1)
-        )
+        oloss = self.dloss(distance_ori, batch.ori)
+        dloss = self.dloss(distance, batch.bdist)
         eloss = self.eloss(edge, (batch.y == 2).long())
         closs = self.closs(crop, (batch.y == 1).long())
         crop_r_loss = self.closs(crop_r, (batch.y == 1).long())
@@ -238,6 +254,7 @@ class CultioLitModel(pl.LightningModule):
                     'image_id': batch.image_id
                 }
                 masks_losses = self.mask_forward(
+                    distance_ori,
                     distance,
                     edge,
                     crop_r,
@@ -271,11 +288,12 @@ class CultioLitModel(pl.LightningModule):
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
         loss = self.calc_loss(batch, include_mask=False)
 
-        __, distance, edge, __, crop_r = self(batch)
+        distance_ori, distance, edge, __, crop_r = self(batch)
 
         box_score = torch.tensor(0.0, device=self.device)
         if hasattr(batch, 'boxes'):
             masks = self.mask_forward(
+                distance_ori,
                 distance,
                 edge,
                 crop_r,
