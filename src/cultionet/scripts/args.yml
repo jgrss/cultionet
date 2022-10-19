@@ -253,6 +253,20 @@ train:
     help: Whether to use stochastic weight averaging
     kwargs:
       action: store_true
+  stochastic_weight_averaging_lr:
+    short: ''
+    long: swa-lr
+    help: The stochastic weight averaging learning rate
+    kwargs:
+      default: 0.05
+      type: '&float'
+  stochastic_weight_averaging_start:
+    short: ''
+    long: swa-start
+    help: The stochastic weight averaging epoch start
+    kwargs:
+      default: 0.8
+      type: '&float'
   model_pruning:
     short: ''
     long: model-pruning
