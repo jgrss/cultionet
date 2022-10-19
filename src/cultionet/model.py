@@ -1,8 +1,6 @@
 import typing as T
 from pathlib import Path
 import logging
-import tempfile
-import filelock
 import json
 
 import numpy as np
@@ -182,6 +180,15 @@ def fit(
             datamodule=data_module,
             ckpt_path=ckpt_path
         )
+        lit_model = CultioLitModel.load_from_checkpoint(
+            checkpoint_path=str(ckpt_file)
+        )
+        model_file = ckpt_file.parent / 'cultionet.pt'
+        if model_file.is_file():
+            model_file.unlink()
+        torch.save(
+            lit_model.state_dict(), model_file
+        )
         if test_dataset is not None:
             trainer.test(
                 model=lit_model,
@@ -196,49 +203,65 @@ def fit(
 
 
 def load_model(
-    ckpt_file: T.Union[str, Path],
+    ckpt_file: T.Union[str, Path] = None,
+    model_file: T.Union[str, Path] = None,
+    num_features: T.Optional[int] = None,
+    num_time_features: T.Optional[int] = None,
     device: T.Union[str, bytes] = 'gpu',
     lit_model: T.Optional[CultioLitModel] = None,
-    enable_progress_bar: T.Optional[bool] = True
-) -> T.Tuple[pl.Trainer, CultioLitModel]:
+    enable_progress_bar: T.Optional[bool] = True,
+    return_trainer: T.Optional[bool] = False
+) -> T.Tuple[T.Union[None, pl.Trainer], CultioLitModel]:
     """Loads a model from file
 
     Args:
         ckpt_file (str | Path): The model checkpoint file.
+        model_file (str | Path): The model file.
         device (str): The device to apply inference on.
         lit_model (CultioLitModel): A model to predict with. If `None`, the model
             is loaded from file.
         enable_progress_bar (Optional[bool]): Whether to use the progress bar.
+        return_trainer (Optional[bool]): Whether to return the `pytorch_lightning` `Trainer`.
     """
-    ckpt_file = Path(ckpt_file)
+    if ckpt_file is not None:
+        ckpt_file = Path(ckpt_file)
+    if model_file is not None:
+        model_file = Path(model_file)
 
-    trainer_kwargs = dict(
-        default_root_dir=str(ckpt_file.parent),
-        precision=32,
-        devices=1 if device == 'gpu' else None,
-        gpus=1 if device == 'gpu' else None,
-        accelerator=device,
-        num_processes=0,
-        log_every_n_steps=0,
-        logger=False,
-        enable_progress_bar=enable_progress_bar
-    )
-    if trainer_kwargs['accelerator'] == 'cpu':
-        del trainer_kwargs['devices']
-        del trainer_kwargs['gpus']
-
-    # lit_kwargs = dict(
-    #     num_features=num_features,
-    #     num_time_features=num_time_features,
-    #     filters=filters
-    # )
-
-    trainer = pl.Trainer(**trainer_kwargs)
-    if lit_model is None:
-        assert ckpt_file.is_file(), 'The checkpoint file does not exist.'
-        lit_model = CultioLitModel.load_from_checkpoint(
-            checkpoint_path=str(ckpt_file)
+    trainer = None
+    if return_trainer:
+        trainer_kwargs = dict(
+            default_root_dir=str(ckpt_file.parent),
+            precision=32,
+            devices=1 if device == 'gpu' else None,
+            gpus=1 if device == 'gpu' else None,
+            accelerator=device,
+            num_processes=0,
+            log_every_n_steps=0,
+            logger=False,
+            enable_progress_bar=enable_progress_bar
         )
+        if trainer_kwargs['accelerator'] == 'cpu':
+            del trainer_kwargs['devices']
+            del trainer_kwargs['gpus']
+
+        trainer = pl.Trainer(**trainer_kwargs)
+
+    if lit_model is None:
+        if model_file is not None:
+            assert model_file.is_file(), 'The model file does not exist.'
+            if not isinstance(num_features, int) or not isinstance(num_time_features, int):
+                raise TypeError('The features must be given to load the model file.')
+            lit_model = CultioLitModel(
+                num_features=num_features,
+                num_time_features=num_time_features
+            )
+            lit_model.load_state_dict(state_dict=torch.load(model_file))
+        else:
+            assert ckpt_file.is_file(), 'The checkpoint file does not exist.'
+            lit_model = CultioLitModel.load_from_checkpoint(
+                checkpoint_path=str(ckpt_file)
+            )
         lit_model.eval()
         lit_model.freeze()
 
@@ -250,7 +273,8 @@ def predict(
     data: Data,
     data_values: torch.Tensor,
     w: Window = None,
-    w_pad: Window = None
+    w_pad: Window = None,
+    device: str = 'cpu'
 ) -> np.ndarray:
     """Applies a model to predict image labels|values
 
@@ -259,17 +283,12 @@ def predict(
         data (Data): The data to predict on.
         w (Optional[int]): The ``rasterio.windows.Window`` to write to.
         w_pad (Optional[int]): The ``rasterio.windows.Window`` to predict on.
+        device (Optional[str]): The device to predict on.
     """
-    # with filelock.FileLock('./predict.lock'):
-        # with tempfile.TemporaryDirectory() as tmp:
-        #     net_ds = NetworkDataset(data, Path(tmp), data_values)
-        #     data_module = EdgeDataModule(
-        #         predict_ds=net_ds.ds, batch_size=1, num_workers=0
-        #     )
-    #         distance, edge, crop, crop_r = trainer.predict(
-    #             model=lit_model, datamodule=data_module
-    #         )[0]
     norm_batch = zscores(data, data_values.mean, data_values.std)
+    if device == 'gpu':
+        norm_batch = norm_batch.to('cuda')
+        lit_model = lit_model.to('cuda')
     with torch.no_grad():
         distance, edge, crop, crop_r = lit_model(norm_batch)
 

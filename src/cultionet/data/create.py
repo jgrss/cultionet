@@ -1,7 +1,7 @@
 import typing as T
 from pathlib import Path
 
-# TODO: imports
+from .const import EDGE_CLASS, CROP_CLASS
 from .lookup import CDL_CROP_LABELS_r
 from .utils import LabeledData, get_image_list_dims
 from ..augment.augmentation import augment
@@ -22,10 +22,6 @@ import xarray as xr
 from tqdm.auto import tqdm
 import torch
 from torch_geometric.data import Data
-
-
-CROP_CLASS = 1
-EDGE_CLASS = 2
 
 
 def remove_noncrop(xvars: np.ndarray, labels_array: np.ndarray) -> T.Tuple[np.ndarray, np.ndarray]:

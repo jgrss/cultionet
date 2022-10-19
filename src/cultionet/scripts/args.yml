@@ -290,9 +290,9 @@ predict:
   padding:
     short: ''
     long: padding
-    help: The read padding around the in-memory window (padding is slice off before writing)
+    help: The read padding around the in-memory window (padding is sliced off before writing)
     kwargs:
-      default: 100
+      default: 101
       type: '&int'
   gain:
     short: ''
@@ -317,7 +317,7 @@ predict:
       choices: ['w', 'r+']
   preload_data:
     short: ''
-    long: preload_data
+    long: preload-data
     help: Whether to preload the full image data into memory
     kwargs:
       action: store_true
@@ -342,3 +342,9 @@ predict:
     kwargs:
       default: y
       choices: ['y', 'n']
+  compression:
+    short: ''
+    long: compression
+    help: The compression algorithm to use
+    kwargs:
+      default: lzw
