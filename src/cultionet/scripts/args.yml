@@ -270,6 +270,13 @@ predict:
     short: g
     long: grid-id
     help: The grid id to process (the grid id should be a sub-directory of --project-path)
+  filters:
+    short: ''
+    long: filters
+    help: The number of model input filters
+    kwargs:
+      default: 32
+      type: '&int'
   window_size:
     short: w
     long: window-size
