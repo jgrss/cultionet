@@ -612,11 +612,14 @@ def spatial_kfoldcv(args):
         processes=args.processes,
         threads_per_worker=args.threads
     )
-    ds.spatial_kfoldcv(
+    # Read or create the spatial partitions (folds)
+    ds.get_skfoldcv_partitions(
         spatial_partitions=args.spatial_partitions,
-        k_folds=args.k_folds
+        splits=args.splits,
+        processes=args.processes
     )
-    for train_ds, test_ds in ds.spatial_kfoldcv_iter():
+    for k, (train_ds, test_ds) in enumerate(ds.spatial_kfoldcv_iter()):
+        logger.info(f"Fold {k} of {len(ds.spatial_partitions.index)}...")
         # Normalize the partition
         temp_ds = train_ds.split_train_val(val_frac=args.val_frac)[0]
         data_values = get_norm_values(
@@ -634,7 +637,6 @@ def spatial_kfoldcv(args):
         cultionet.fit(
             dataset=train_ds,
             ckpt_file=ppaths.ckpt_file,
-            # TODO: handle test dataset
             test_dataset=test_ds,
             val_frac=args.val_frac,
             batch_size=args.batch_size,
@@ -643,8 +645,8 @@ def spatial_kfoldcv(args):
             learning_rate=args.learning_rate,
             filters=args.filters,
             random_seed=args.random_seed,
-            reset_model=args.reset_model,
-            auto_lr_find=args.auto_lr_find,
+            reset_model=True,
+            auto_lr_find=False,
             device=args.device,
             gradient_clip_val=args.gradient_clip_val,
             early_stopping_patience=args.patience,
@@ -653,6 +655,7 @@ def spatial_kfoldcv(args):
             stochastic_weight_averaging=args.stochastic_weight_averaging,
             model_pruning=args.model_pruning
         )
+        (ppaths.ckpt_path / 'last.test').rename(ppaths.ckpt_path / f'fold-{k}.test')
 
 
 def train_model(args):
@@ -757,7 +760,7 @@ def main():
     )
 
     subparsers = parser.add_subparsers(dest='process')
-    available_processes = ['create', 'train', 'predict', 'version']
+    available_processes = ['create', 'skfoldcv', 'train', 'predict', 'version']
     for process in available_processes:
         subparser = subparsers.add_parser(process)
 
@@ -772,6 +775,8 @@ def main():
         )
 
         process_dict = args_config[process]
+        if process == 'skfoldcv':
+            process_dict.update(args_config['train'])
         for process_key, process_values in process_dict.items():
             if 'kwargs' in process_values:
                 kwargs = process_values['kwargs']
@@ -814,6 +819,8 @@ def main():
 
     if args.process == 'create':
         create_datasets(args)
+    elif args.process == 'skfoldcv':
+        spatial_kfoldcv(args)
     elif args.process == 'train':
         train_model(args)
     elif args.process == 'predict':
