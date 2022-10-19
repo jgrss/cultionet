@@ -23,6 +23,7 @@ from pytorch_lightning.callbacks import (
     ModelPruning
 )
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from torchvision import transforms
 
 logging.getLogger('lightning').addHandler(logging.NullHandler())
 logging.getLogger('lightning').propagate = False
@@ -201,6 +202,7 @@ def load_model(
     model_file: T.Union[str, Path] = None,
     num_features: T.Optional[int] = None,
     num_time_features: T.Optional[int] = None,
+    filters: T.Optional[int] = None,
     device: T.Union[str, bytes] = 'gpu',
     lit_model: T.Optional[CultioLitModel] = None,
     enable_progress_bar: T.Optional[bool] = True,
@@ -248,7 +250,8 @@ def load_model(
                 raise TypeError('The features must be given to load the model file.')
             lit_model = CultioLitModel(
                 num_features=num_features,
-                num_time_features=num_time_features
+                num_time_features=num_time_features,
+                filters=filters
             )
             lit_model.load_state_dict(state_dict=torch.load(model_file))
         else:
@@ -265,6 +268,7 @@ def load_model(
 def predict(
     lit_model: CultioLitModel,
     data: Data,
+    written: np.ndarray,
     data_values: torch.Tensor,
     w: Window = None,
     w_pad: Window = None,
@@ -275,8 +279,11 @@ def predict(
     Args:
         lit_model (CultioLitModel): A model to predict with.
         data (Data): The data to predict on.
+        written (ndarray)
+        data_values (Tensor)
         w (Optional[int]): The ``rasterio.windows.Window`` to write to.
         w_pad (Optional[int]): The ``rasterio.windows.Window`` to predict on.
+        device (Optional[str])
     """
     norm_batch = zscores(data, data_values.mean, data_values.std)
     if device == 'gpu':
@@ -285,6 +292,7 @@ def predict(
     with torch.no_grad():
         distance_ori, distance, edge, crop, crop_r = lit_model(norm_batch)
         predictions = lit_model.mask_forward(
+            distance_ori=distance_ori,
             distance=distance,
             edge=edge,
             crop_r=crop_r,
@@ -294,8 +302,11 @@ def predict(
         )
     scores = predictions[0]['scores'].squeeze()
     masks = predictions[0]['masks'].squeeze()
+    resizer = transforms.Resize((norm_batch.height, norm_batch.width))
+    masks = resizer(masks)
     # Filter by box scores
     masks = masks[scores > 0.5]
+    scores = scores[scores > 0.5]
     # Filter by pixel scores
     masks = torch.where(masks > 0.5, masks, 0)
     masks = masks.detach().cpu().numpy()
@@ -322,16 +333,32 @@ def predict(
             .reshape(norm_batch.height, norm_batch.width)
         )
         instances = np.zeros((norm_batch.height, norm_batch.width), dtype='float64')
-        uid = 1
-        for lyr in masks:
+        uid = written.max() + 1 if written.max() > 0 else 1
+        def iou(reference, targets):
+            tp = ((reference > 0.5) & (targets > 0.5)).sum()
+            fp = ((reference <= 0.5) & (targets > 0.5)).sum()
+            fn = ((reference > 0.5) & (targets <= 0.5)).sum()
+
+            return tp / (tp + fp + fn)
+
+        for lyr_idx_ref, lyr_ref in enumerate(masks):
+            lyr = None
+            for lyr_idx_targ, lyr_targ in enumerate(masks):
+                if lyr_idx_targ != lyr_idx_ref:
+                    if iou(lyr_ref, lyr_targ) > 0.5:
+                        lyr = lyr_ref if scores[lyr_idx_ref] > scores[lyr_idx_targ] else lyr_targ
+            if lyr is None:
+                lyr = lyr_ref
+            conditional = (
+                (lyr > 0.5)
+                & (distance_mask > 0.1)
+                & (edge_mask < 0.5)
+                & (crop_r_mask > 0.5)
+            )
+            if written[lyr > 0.5].sum() > 0:
+                uid = written[conditional].max()
             instances = np.where(
-                (
-                    (lyr > 0.5)
-                    & (instances == 0)
-                    & (distance_mask > 0.1)
-                    & (edge_mask < 0.5)
-                    & (crop_r_mask > 0.5)
-                ),
+                ((instances == 0) & conditional),
                 uid,
                 instances
             )
