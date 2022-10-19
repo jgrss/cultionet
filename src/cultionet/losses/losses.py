@@ -239,4 +239,7 @@ class HuberLoss(object):
         Returns:
             Loss (float)
         """
-        return self.loss_func(inputs, targets)
+        return self.loss_func(
+            inputs.contiguous().view(-1),
+            targets.contiguous().view(-1)
+        )
