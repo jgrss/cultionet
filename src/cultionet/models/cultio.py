@@ -1,10 +1,11 @@
 import typing as T
 
 from . import model_utils
-from .nunet import NestedUNet
+from .nunet import NestedUNet2
 from .convstar import StarRNN
+from .graph import GraphMid, GraphFinal
+from .regression import GraphRegressionLayer
 
-import numpy as np
 import torch
 from torch_geometric.data import Data
 from torch_geometric import nn
@@ -26,7 +27,9 @@ class CultioGraphNet(torch.nn.Module):
         ds_time_features: int,
         filters: int = 32,
         num_classes: int = 2,
-        dropout: T.Optional[float] = 0.1
+        dropout: T.Optional[float] = 0.1,
+        rheight: int = 201,
+        rwidth: int = 201
     ):
         super(CultioGraphNet, self).__init__()
 
@@ -45,80 +48,48 @@ class CultioGraphNet(torch.nn.Module):
         self.cg = model_utils.ConvToGraph()
 
         # Transformer stream (+self.filters x self.ds_num_bands)
-        self.transformer = self.mid_sequence_weights(
-            nn.TransformerConv(self.ds_num_time, self.filters, heads=1, edge_dim=2, dropout=dropout)
+        self.transformer = GraphMid(
+            nn.TransformerConv(
+                self.ds_num_time, self.filters, heads=1, edge_dim=2, dropout=dropout
+            )
         )
-
         # Nested UNet (+self.filters x self.ds_num_bands)
-        self.nunet = NestedUNet(in_channels=self.ds_num_time, out_channels=self.filters)
+        self.nunet = NestedUNet2(
+            in_channels=self.ds_num_time, out_channels=self.filters
+        )
+        # Star RNN layer
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
             hidden_dim=32,
             nclasses=self.filters,
             n_layers=4
         )
-
         # Boundary distance orientations (+1)
-        self.dist_layer_ori = self.final_sequence_weights(
-            nn.GCNConv(base_in_channels, self.filters, improved=True),
-            nn.TransformerConv(self.filters, self.filters, heads=1, edge_dim=2, dropout=0.1),
-            self.filters, 1
+        self.dist_layer_ori = GraphRegressionLayer(
+            in_channels=base_in_channels,
+            mid_channels=self.filters,
+            out_channels=1
         )
         # Boundary distances (+1)
-        self.dist_layer = self.final_sequence_weights(
-            nn.GCNConv(base_in_channels+1, self.filters, improved=True),
-            nn.TransformerConv(self.filters, self.filters, heads=1, edge_dim=2, dropout=0.1),
-            self.filters, 1
+        self.dist_layer = GraphRegressionLayer(
+            in_channels=base_in_channels+1,
+            mid_channels=self.filters,
+            out_channels=1
         )
         # Edges (+num_classes)
-        self.edge_layer = self.final_sequence_weights_logits(
+        self.edge_layer = GraphFinal(
             nn.GCNConv(base_in_channels+num_distances, self.filters, improved=True),
             nn.TransformerConv(self.filters, num_classes, heads=1, edge_dim=2, dropout=0.1),
             self.filters, num_classes
         )
         # Classes (+num_classes)
-        self.class_layer = self.final_sequence_weights_logits(
+        self.class_layer = GraphFinal(
             nn.GCNConv(base_in_channels+num_distances+num_classes, self.filters, improved=True),
             nn.TransformerConv(
                 self.filters, num_classes, heads=1, edge_dim=2, dropout=0.1
             ),
             self.filters, num_classes
         )
-
-    @staticmethod
-    def mid_sequence_weights(conv: T.Callable) -> nn.Sequential:
-        return nn.Sequential('x, edge_index, edge_weight',
-                             [
-                                 (conv, 'x, edge_index, edge_weight -> x'),
-                                 (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x')
-                             ])
-
-    @staticmethod
-    def final_sequence_weights(
-        conv1: T.Callable, conv2: T.Callable, mid_channels: int, out_channels: int
-    ) -> nn.Sequential:
-        return nn.Sequential('x, edge_index, edge_weight, edge_weight2d',
-                             [
-                                 (conv1, 'x, edge_index, edge_weight -> x'),
-                                 (nn.BatchNorm(in_channels=mid_channels), 'x -> x'),
-                                 (conv2, 'x, edge_index, edge_weight2d -> x'),
-                                 (nn.BatchNorm(in_channels=mid_channels), 'x -> x'),
-                                 (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x'),
-                                 (torch.nn.Linear(mid_channels, out_channels), 'x -> x')
-                             ])
-
-    @staticmethod
-    def final_sequence_weights_logits(
-        conv1: T.Callable, conv2: T.Callable, mid_channels: int, out_channels: int
-    ) -> nn.Sequential:
-        return nn.Sequential('x, edge_index, edge_weight, edge_weight2d',
-                             [
-                                 (conv1, 'x, edge_index, edge_weight -> x'),
-                                 (nn.BatchNorm(in_channels=mid_channels), 'x -> x'),
-                                 (conv2, 'x, edge_index, edge_weight2d -> x'),
-                                 (nn.BatchNorm(in_channels=out_channels), 'x -> x'),
-                                 (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x')
-                             ])
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -155,19 +126,19 @@ class CultioGraphNet(torch.nn.Module):
             )
             nunet_stream.append(t)
         nunet_stream = torch.cat(nunet_stream, dim=1)
-
         # RNN ConvStar
         # Reshape from (B x C x H x W) -> (B x T x C x H x W)
         star_stream = self.gc(
             data.x, batch_size, height, width
         )
-        nbatch, ntime, height, width = star_stream.shape
+        # nbatch, ntime, height, width
+        nbatch, __, height, width = star_stream.shape
         star_stream = star_stream.reshape(
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         ).permute(0, 2, 1, 3, 4)
         star_stream = self.star_rnn(star_stream)
         star_stream = self.cg(star_stream)
-        # Concatenate streams
+        # Concatenate time series streams
         h = torch.cat(
             [
                 transformer_stream,
@@ -181,8 +152,10 @@ class CultioGraphNet(torch.nn.Module):
         logits_distances_ori = self.dist_layer_ori(
             h,
             data.edge_index,
-            data.edge_attrs[:, 1],
-            data.edge_attrs
+            data.edge_attrs,
+            data.batch,
+            height,
+            width
         )
         # Concatenate streams + distance orientations
         h = torch.cat([h, logits_distances_ori], dim=1)
@@ -191,8 +164,10 @@ class CultioGraphNet(torch.nn.Module):
         logits_distances = self.dist_layer(
             h,
             data.edge_index,
-            data.edge_attrs[:, 1],
-            data.edge_attrs
+            data.edge_attrs,
+            data.batch,
+            height,
+            width
         )
         # Concatenate streams + distance orientations + distances
         h = torch.cat([h, logits_distances], dim=1)
@@ -201,7 +176,6 @@ class CultioGraphNet(torch.nn.Module):
         logits_edges = self.edge_layer(
             h,
             data.edge_index,
-            data.edge_attrs[:, 1],
             data.edge_attrs
         )
         # Concatenate streams + distance orientations + distances + edges
@@ -211,7 +185,6 @@ class CultioGraphNet(torch.nn.Module):
         logits_labels = self.class_layer(
             h,
             data.edge_index,
-            data.edge_attrs[:, 1],
             data.edge_attrs
         )
 
