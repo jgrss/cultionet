@@ -823,6 +823,8 @@ def train_model(args):
         weight_decay = args.weight_decay,
         precision=args.precision,
         stochastic_weight_averaging=args.stochastic_weight_averaging,
+        stochastic_weight_averaging_lr=args.stochastic_weight_averaging_lr,
+        stochastic_weight_averaging_start=args.stochastic_weight_averaging_start,
         model_pruning=args.model_pruning
     )
 
