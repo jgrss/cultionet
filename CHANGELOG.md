@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.3.3 (2022-10-19)
+* Re-added serial predictions over CPU or GPU ([#34](https://github.com/jgrss/cultionet/pull/34))
+
 ## v1.3.2 (2022-10-12)
 * Added default values for gain and offset
 
