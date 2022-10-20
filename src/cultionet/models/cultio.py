@@ -27,9 +27,7 @@ class CultioGraphNet(torch.nn.Module):
         ds_time_features: int,
         filters: int = 32,
         num_classes: int = 2,
-        dropout: T.Optional[float] = 0.1,
-        rheight: int = 201,
-        rwidth: int = 201
+        dropout: T.Optional[float] = 0.1
     ):
         super(CultioGraphNet, self).__init__()
 
@@ -76,19 +74,17 @@ class CultioGraphNet(torch.nn.Module):
             mid_channels=self.filters,
             out_channels=1
         )
-        # Edges (+num_classes)
+        # Edges (+2)
         self.edge_layer = GraphFinal(
-            nn.GCNConv(base_in_channels+num_distances, self.filters, improved=True),
-            nn.TransformerConv(self.filters, num_classes, heads=1, edge_dim=2, dropout=0.1),
-            self.filters, num_classes
+            in_channels=base_in_channels+num_distances,
+            mid_channels=self.filters,
+            out_channels=2
         )
         # Classes (+num_classes)
         self.class_layer = GraphFinal(
-            nn.GCNConv(base_in_channels+num_distances+num_classes, self.filters, improved=True),
-            nn.TransformerConv(
-                self.filters, num_classes, heads=1, edge_dim=2, dropout=0.1
-            ),
-            self.filters, num_classes
+            in_channels=base_in_channels+num_distances+2,
+            mid_channels=self.filters,
+            out_channels=num_classes
         )
 
     def __call__(self, *args, **kwargs):
@@ -176,7 +172,10 @@ class CultioGraphNet(torch.nn.Module):
         logits_edges = self.edge_layer(
             h,
             data.edge_index,
-            data.edge_attrs
+            data.edge_attrs,
+            data.batch,
+            height,
+            width
         )
         # Concatenate streams + distance orientations + distances + edges
         h = torch.cat([h, logits_edges], dim=1)
@@ -185,7 +184,10 @@ class CultioGraphNet(torch.nn.Module):
         logits_labels = self.class_layer(
             h,
             data.edge_index,
-            data.edge_attrs
+            data.edge_attrs,
+            data.batch,
+            height,
+            width
         )
 
         return logits_distances_ori, logits_distances, logits_edges, logits_labels
