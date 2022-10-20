@@ -277,16 +277,13 @@ class BlockWriter(object):
             data_values=self.data_values,
             w=w,
             w_pad=w_pad,
-            device=self.device
+            device=self.device,
+            include_maskrcnn=self.include_maskrcnn
         )
         # Write the prediction stack to file
         with filelock.FileLock('./dst.lock'):
             self.dst.write(
-                (
-                    (stack*self.scale_factor)
-                    .clip(0, self.scale_factor)
-                    .astype('uint16')
-                ),
+                stack,
                 indexes=self.bands,
                 window=w
             )
@@ -305,7 +302,8 @@ class WriterModule(BlockWriter):
         data_values: torch.Tensor,
         ppaths: ProjectPaths,
         device: str,
-        scale_factor: float
+        scale_factor: float,
+        include_maskrcnn: bool
     ) -> None:
         self.out_path = out_path
         # Create the output file
@@ -322,7 +320,10 @@ class WriterModule(BlockWriter):
         self.ppaths = ppaths
         self.device = device
         self.scale_factor = scale_factor
-        self.bands = [1, 2, 3, 4, 5, 6]
+        self.include_maskrcnn = include_maskrcnn
+        self.bands = [1, 2, 3, 4, 5]
+        if self.include_maskrcnn:
+            self.bands.append(6)
 
         self.lit_model = cultionet.load_model(
             ckpt_file=self.ppaths.ckpt_file,
@@ -367,7 +368,8 @@ class RemoteWriter(WriterModule):
         data_values: torch.Tensor,
         ppaths: ProjectPaths,
         device: str,
-        scale_factor: float
+        scale_factor: float,
+        include_maskrcnn: bool
     ) -> None:
         super().__init__(
             out_path=out_path,
@@ -380,7 +382,8 @@ class RemoteWriter(WriterModule):
             data_values=data_values,
             ppaths=ppaths,
             device=device,
-            scale_factor=scale_factor
+            scale_factor=scale_factor,
+            include_maskrcnn=include_maskrcnn
         )
 
     def write(
@@ -409,7 +412,8 @@ class SerialWriter(WriterModule):
         data_values: torch.Tensor,
         ppaths: ProjectPaths,
         device: str,
-        scale_factor: float
+        scale_factor: float,
+        include_maskrcnn: bool
     ) -> None:
         super().__init__(
             out_path=out_path,
@@ -422,7 +426,8 @@ class SerialWriter(WriterModule):
             data_values=data_values,
             ppaths=ppaths,
             device=device,
-            scale_factor=scale_factor
+            scale_factor=scale_factor,
+            include_maskrcnn=include_maskrcnn
         )
 
     def write(
@@ -490,7 +495,7 @@ def predict_image(args):
             'transform': src_ts.gw.transform,
             'height': height,
             'width': width,
-            'count': 6,
+            'count': 6 if args.include_maskrcnn else 5,
             'dtype': 'uint16',
             'blockxsize': 64 if 64 < width else width,
             'blockysize': 64 if 64 < height else height,
@@ -515,7 +520,8 @@ def predict_image(args):
                 data_values=data_values,
                 ppaths=ppaths,
                 device=args.device,
-                scale_factor=SCALE_FACTOR
+                scale_factor=SCALE_FACTOR,
+                include_maskrcnn=args.include_maskrcnn
             )
             try:
                 with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
@@ -553,7 +559,8 @@ def predict_image(args):
                 data_values=data_values,
                 ppaths=ppaths,
                 device=args.device,
-                scale_factor=SCALE_FACTOR
+                scale_factor=SCALE_FACTOR,
+                include_maskrcnn=args.include_maskrcnn
             )
             actor_chunksize = args.processes * 8
             try:
@@ -735,6 +742,105 @@ def create_datasets(args):
             )
 
 
+def train_maskrcnn(args):
+    # This is a helper function to manage paths
+    ppaths = setup_paths(args.project_path, ckpt_name='maskrcnn.ckpt')
+
+    if (
+        (args.expected_dim is not None)
+        or not ppaths.norm_file.is_file()
+        or (ppaths.norm_file.is_file() and args.recalc_zscores)
+    ):
+        ds = EdgeDataset(
+            ppaths.train_path,
+            processes=args.processes,
+            threads_per_worker=args.threads
+        )
+    # Check dimensions
+    if args.expected_dim is not None:
+        try:
+            ds.check_dims(
+                args.expected_dim,
+                args.delete_mismatches,
+                args.dim_color
+            )
+        except TensorShapeError as e:
+            raise ValueError(e)
+    # Get the normalization means and std. deviations on the train data
+    cultionet.model.seed_everything(args.random_seed, workers=True)
+    # Calculate the values needed to transform to z-scores, using
+    # the training data
+    if ppaths.norm_file.is_file():
+        if args.recalc_zscores:
+            ppaths.norm_file.unlink()
+    if not ppaths.norm_file.is_file():
+        train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
+        data_values = get_norm_values(
+            dataset=train_ds,
+            batch_size=args.batch_size*8,
+            mean_color=args.mean_color,
+            sse_color=args.sse_color
+        )
+        torch.save(data_values, str(ppaths.norm_file))
+    else:
+        data_values = torch.load(str(ppaths.norm_file))
+
+    # Create the train data object again, this time passing
+    # the means and standard deviation tensors
+    ds = EdgeDataset(
+        ppaths.train_path,
+        data_means=data_values.mean,
+        data_stds=data_values.std
+    )
+    # Check for a test dataset
+    test_ds = None
+    if list((ppaths.test_process_path).glob('*.pt')):
+        test_ds = EdgeDataset(
+            ppaths.test_path,
+            data_means=data_values.mean,
+            data_stds=data_values.std
+        )
+        if args.expected_dim is not None:
+            try:
+                test_ds.check_dims(
+                    args.expected_dim,
+                    args.delete_mismatches,
+                    args.dim_color
+                )
+            except TensorShapeError as e:
+                raise ValueError(e)
+
+    # Fit the model
+    cultionet.fit_maskrcnn(
+        dataset=ds,
+        ckpt_file=ppaths.ckpt_file,
+        test_dataset=test_ds,
+        val_frac=args.val_frac,
+        batch_size=args.batch_size,
+        epochs=args.epochs,
+        accumulate_grad_batches=args.accumulate_grad_batches,
+        learning_rate=args.learning_rate,
+        filters=args.filters,
+        random_seed=args.random_seed,
+        reset_model=args.reset_model,
+        auto_lr_find=args.auto_lr_find,
+        device=args.device,
+        gradient_clip_val=args.gradient_clip_val,
+        early_stopping_patience=args.patience,
+        weight_decay = args.weight_decay,
+        precision=args.precision,
+        stochastic_weight_averaging=args.stochastic_weight_averaging,
+        stochastic_weight_averaging_lr=args.stochastic_weight_averaging_lr,
+        stochastic_weight_averaging_start=args.stochastic_weight_averaging_start,
+        model_pruning=args.model_pruning,
+        resize_height=args.resize_height,
+        resize_width=args.resize_width,
+        min_image_size=args.min_image_size,
+        max_image_size=args.max_image_size,
+        trainable_backbone_layers=args.trainable_backbone_layers
+    )
+
+
 def train_model(args):
     # This is a helper function to manage paths
     ppaths = setup_paths(args.project_path)
@@ -760,7 +866,7 @@ def train_model(args):
         except TensorShapeError as e:
             raise ValueError(e)
     # Get the normalization means and std. deviations on the train data
-    cultionet.model.seed_everything(args.random_seed)
+    cultionet.model.seed_everything(args.random_seed, workers=True)
     # Calculate the values needed to transform to z-scores, using
     # the training data
     if ppaths.norm_file.is_file():
@@ -839,7 +945,7 @@ def main():
     )
 
     subparsers = parser.add_subparsers(dest='process')
-    available_processes = ['create', 'train', 'predict', 'version']
+    available_processes = ['create', 'train', 'maskrcnn', 'predict', 'version']
     for process in available_processes:
         subparser = subparsers.add_parser(process)
 
@@ -854,6 +960,10 @@ def main():
         )
 
         process_dict = args_config[process]
+        if process == 'maskrcnn':
+            process_dict.update(args_config['train'])
+        if process in ('train', 'maskrcnn', 'predict'):
+            process_dict.update(args_config['train_predict'])
         for process_key, process_values in process_dict.items():
             if 'kwargs' in process_values:
                 kwargs = process_values['kwargs']
@@ -892,6 +1002,8 @@ def main():
         create_datasets(args)
     elif args.process == 'train':
         train_model(args)
+    elif args.process == 'maskrcnn':
+        train_maskrcnn(args)
     elif args.process == 'predict':
         predict_image(args)
 

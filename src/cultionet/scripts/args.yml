@@ -99,6 +99,66 @@ create:
     kwargs:
       action: store_true
 
+train_predict:
+  filters:
+    short: ''
+    long: filters
+    help: The number of model input filters
+    kwargs:
+      default: 64
+      type: '&int'
+  device:
+    short: ''
+    long: device
+    help: The device to train on
+    kwargs:
+      default: gpu
+      choices: ['cpu', 'gpu']
+  processes:
+    short: ''
+    long: processes
+    help: The number of concurrent processes for loading data
+    kwargs:
+      default: 1
+      type: '&int'
+
+maskrcnn:
+  resize_height:
+    short: ''
+    long: resize-height
+    help: The image resize height
+    kwargs:
+      default: 201
+      type: '&int'
+  resize_width:
+    short: ''
+    long: resize-width
+    help: The image resize width
+    kwargs:
+      default: 201
+      type: '&int'
+  min_image_size:
+    short: ''
+    long: min-image-size
+    help: The minimum image size
+    kwargs:
+      default: 100
+      type: '&int'
+  max_image_size:
+    short: ''
+    long: max-image-size
+    help: The maximum image size
+    kwargs:
+      default: 600
+      type: '&int'
+  trainable_backbone_layers:
+    short: ''
+    long: trainable-layers
+    help: The number of trainable backbone layers
+    kwargs:
+      default: 3
+      type: '&int'
+
 train:
   val_frac:
     short: ''
@@ -113,13 +173,6 @@ train:
     help: The random seed
     kwargs:
       default: 42
-      type: '&int'
-  filters:
-    short: ''
-    long: filters
-    help: The number of model input filters
-    kwargs:
-      default: 32
       type: '&int'
   batch_size:
     short: ''
@@ -142,20 +195,6 @@ train:
     kwargs:
       default: 0.001
       type: '&float'
-  device:
-    short: ''
-    long: device
-    help: The device to train on
-    kwargs:
-      default: gpu
-      choices: ['cpu', 'gpu']
-  processes:
-    short: ''
-    long: processes
-    help: The number of concurrent processes for loading data
-    kwargs:
-      default: 1
-      type: '&int'
   threads:
     short: ''
     long: threads
@@ -245,7 +284,7 @@ train:
     long: precision
     help: The model data precision
     kwargs:
-      default: 32
+      default: 16
       type: '&int'
   stochastic_weight_averaging:
     short: ''
@@ -284,13 +323,6 @@ predict:
     short: g
     long: grid-id
     help: The grid id to process (the grid id should be a sub-directory of --project-path)
-  filters:
-    short: ''
-    long: filters
-    help: The number of model input filters
-    kwargs:
-      default: 32
-      type: '&int'
   window_size:
     short: w
     long: window-size
@@ -332,20 +364,6 @@ predict:
     help: Whether to preload the full image data into memory
     kwargs:
       action: store_true
-  device:
-    short: ''
-    long: device
-    help: The device to predict on
-    kwargs:
-      default: gpu
-      choices: ['cpu', 'gpu']
-  processes:
-    short: ''
-    long: processes
-    help: The number of concurrent windows to predict on
-    kwargs:
-      default: 1
-      type: '&int'
   append_ts:
     short: ''
     long: append-ts
