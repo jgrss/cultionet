@@ -385,6 +385,7 @@ def create_image_vars(
                     ), max_num_iter=2))[1:-1, 1:-1]
                 # Make the fields binary
                 labels_array[labels_array > 0] = CROP_CLASS
+                # NOTE: add fallow class here?
                 # Set edges
                 labels_array[edges == 1] = EDGE_CLASS
                 # Clean-up the thinning outputs
@@ -563,7 +564,7 @@ def create_dataset(
                     start_year, end_year = None, None
 
                 # Get land cover over the block sample
-                if isinstance(lc_path, str) or isinstance(lc_path, Path):
+                if isinstance(lc_path, (str, Path)):
                     # Convert the grid bounding box from lat/lon to projected coordinates
                     df_latlon = bounds_to_frame(left, bottom, right, top, crs='epsg:4326')
                     df_latlon, ref_crs = warp_by_image(df_latlon, lc_path)
@@ -618,7 +619,8 @@ def create_dataset(
                                 instance_seg=instance_seg,
                                 start_year=start_year,
                                 end_year=end_year,
-                                left=left, bottom=bottom,
+                                left=left,
+                                bottom=bottom,
                                 right=right,
                                 top=top,
                                 res=ref_res,
