@@ -40,7 +40,11 @@ class ProjectPaths:
         return self.process_path if destination == Destinations.train.name else self.test_process_path
 
 
-def setup_paths(project_path: T.Union[str, Path, bytes], append_ts: T.Optional[bool] = True) -> ProjectPaths:
+def setup_paths(
+    project_path: T.Union[str, Path, bytes],
+    append_ts: T.Optional[bool] = True,
+    ckpt_name: T.Optional[str] = 'last.ckpt'
+) -> ProjectPaths:
     project_path = Path(project_path)
     image_path = project_path / 'time_series_vars' if append_ts else project_path
     composite_path = project_path.parent / 'composites'
@@ -54,7 +58,7 @@ def setup_paths(project_path: T.Union[str, Path, bytes], append_ts: T.Optional[b
     test_process_path = test_path / 'processed'
     predict_path = data_path / 'predict'
     edge_training_path = project_path / 'user_train'
-    ckpt_file = ckpt_path / 'last.ckpt'
+    ckpt_file = ckpt_path / ckpt_name
     loss_file = ckpt_path / 'losses.npy'
     norm_file = ckpt_path / 'last.norm'
 
