@@ -13,49 +13,49 @@ class GraphRegressionLayer(torch.nn.Module):
         self,
         in_channels: int,
         mid_channels: int,
-        out_channels: int
+        out_channels: int,
+        dropout: float = 0.1
     ):
         super(GraphRegressionLayer, self).__init__()
 
-        # res_conv1 = ResConv(
-        #     in_channels=in_channels,
-        #     out_channels=mid_channels,
-        #     padding=2,
-        #     dilation=2
-        # )
-        # res_conv2 = ResConv(
-        #     in_channels=mid_channels,
-        #     out_channels=mid_channels,
-        #     padding=3,
-        #     dilation=3
-        # )
-        # conv = torch.nn.Conv2d(
-        #     in_channels,
-        #     mid_channels,
-        #     kernel_size=3,
-        #     padding=1,
-        #     bias=False
-        # )
-        conv1 = nn.GCNConv(in_channels, mid_channels, improved=True)
+        conv2d_1 = torch.nn.Conv2d(
+            in_channels,
+            mid_channels,
+            kernel_size=3,
+            padding=1,
+            bias=False
+        )
+        conv2d_2 = torch.nn.Conv2d(
+            mid_channels,
+            mid_channels,
+            kernel_size=3,
+            padding=1,
+            bias=False
+        )
+        conv1 = nn.GCNConv(mid_channels, mid_channels, improved=True)
         conv2 = nn.TransformerConv(
             mid_channels, mid_channels, heads=1, edge_dim=2, dropout=0.1
         )
-        # self.gc = model_utils.GraphToConv()
-        # self.cg = model_utils.ConvToGraph()
+        self.gc = model_utils.GraphToConv()
+        self.cg = model_utils.ConvToGraph()
 
         self.seq = nn.Sequential(
             'x, edge_index, edge_weight, edge_weight2d',
             [
-                # (conv, 'x -> x'),
-                # (torch.nn.BatchNorm2d(mid_channels), 'x -> x'),
-                # (self.cg, 'x -> x'),
+                (conv2d_1, 'x -> x'),
+                (torch.nn.BatchNorm2d(mid_channels), 'x -> x'),
+                (torch.nn.ReLU(inplace=False), 'x -> x'),
+                (conv2d_2, 'x -> x'),
+                (torch.nn.BatchNorm2d(mid_channels), 'x -> x'),
+                (torch.nn.Dropout(dropout), 'x -> x'),
+                (self.cg, 'x -> x'),
                 (conv1, 'x, edge_index, edge_weight -> x'),
                 (nn.BatchNorm(in_channels=mid_channels), 'x -> x'),
+                (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x'),
                 (conv2, 'x, edge_index, edge_weight2d -> x'),
                 (nn.BatchNorm(in_channels=mid_channels), 'x -> x'),
-                (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x'),
                 (torch.nn.Linear(mid_channels, out_channels), 'x -> x'),
-                # (torch.nn.ReLU(inplace=False), 'x -> x')
+                (torch.nn.ReLU(inplace=False), 'x -> x')
             ]
         )
 
@@ -71,8 +71,8 @@ class GraphRegressionLayer(torch.nn.Module):
         nrows: int,
         ncols: int
     ) -> torch.Tensor:
-        # nbatch = 1 if batch is None else batch.unique().size(0)
-        # x = self.gc(x, nbatch, nrows, ncols)
+        nbatch = 1 if batch is None else batch.unique().size(0)
+        x = self.gc(x, nbatch, nrows, ncols)
 
         return self.seq(
             x, edge_index, edge_attrs[:, 1], edge_attrs
