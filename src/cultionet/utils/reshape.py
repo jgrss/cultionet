@@ -34,7 +34,7 @@ class ModelOutputs(object):
     edge: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     crop: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     crop_r: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
-    masks: np.ndarray = attr.ib(validator=attr.validators.instance_of(np.ndarray))
+    instances: np.ndarray = attr.ib(validator=attr.validators.instance_of(np.ndarray))
     apply_softmax: T.Optional[bool] = attr.ib(default=False, validator=attr.validators.instance_of(bool))
 
     def stack_outputs(self, w: Window, w_pad: Window) -> np.ndarray:
@@ -47,7 +47,7 @@ class ModelOutputs(object):
             self.edge_probas,
             self.crop_probas,
             self.crop_probas_r,
-            self.masks
+            self.instances
         ))
 
     @staticmethod
@@ -89,7 +89,7 @@ class ModelOutputs(object):
             self.crop_probas_r = self.crop_r[:, 1]
         self.crop_probas_r = self._clip_and_reshape(self.crop_probas_r, w_pad)
 
-        self.masks = self.masks.reshape(w_pad.height, w_pad.width)
+        self.instances = self.instances.reshape(w_pad.height, w_pad.width)
 
         # Reshape the window chunk and slice off padding
         i = abs(w.row_off - w_pad.row_off)
@@ -99,7 +99,7 @@ class ModelOutputs(object):
         self.edge_probas = self.edge_probas[i:i+w.height, j:j+w.width]
         self.crop_probas = self.crop_probas[i:i+w.height, j:j+w.width]
         self.crop_probas_r = self.crop_probas_r[i:i+w.height, j:j+w.width]
-        self.masks = self.masks[i:i+w.height, j:j+w.width]
+        self.instances = self.instances[i:i+w.height, j:j+w.width]
 
     def nan_to_num(self):
         # Convert the data type to integer and set 'no data' values
