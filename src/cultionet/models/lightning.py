@@ -1,21 +1,24 @@
 import typing as T
+from pathlib import Path
 
-from .cultio import CultioGraphNet
-from .maskcrnn import BFasterRCNN
-from .refinement import RefineConv
-from . import model_utils
 from ..losses import (
     HuberLoss,
     TanimotoDistanceLoss,
     F1Score,
     MatthewsCorrcoef
 )
+from ..data.const import CROP_CLASS, EDGE_CLASS
+from .cultio import CultioGraphNet
+from .maskcrnn import BFasterRCNN
+from .refinement import RefineConv
+from . import model_utils
 
 import torch
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch_geometric.data import Data
 import pytorch_lightning as pl
+from torchvision.ops import box_iou
 from torchvision import transforms
 
 import warnings
@@ -27,16 +30,22 @@ logging.getLogger('lightning').propagate = False
 logging.getLogger('lightning').setLevel(logging.ERROR)
 
 
-class CultioLitModel(pl.LightningModule):
+class MaskRCNNLitModel(pl.LightningModule):
     def __init__(
         self,
-        num_features: int = None,
-        num_time_features: int = None,
-        filters: int = 32,
+        cultionet_model_file: Path,
+        cultionet_num_features: int,
+        cultionet_num_time_features: int,
+        cultionet_filters: int,
+        ckpt_name: str = 'maskrcnn',
+        model_name: str = 'maskrcnn',
         learning_rate: float = 0.001,
         weight_decay: float = 1e-5,
-        rheight: int = 201,
-        rwidth: int = 201
+        resize_height: int = 201,
+        resize_width: int = 201,
+        min_image_size: int = 100,
+        max_image_size: int = 500,
+        trainable_backbone_layers: int = 3
     ):
         """Lightning model
 
@@ -47,44 +56,37 @@ class CultioLitModel(pl.LightningModule):
             learning_rate
             weight_decay
         """
-        super(CultioLitModel, self).__init__()
-
+        super(MaskRCNNLitModel, self).__init__()
         self.save_hyperparameters()
+
+        self.ckpt_name = ckpt_name
+        self.model_name = model_name
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.num_classes = 2
-        self.edge_value = 2
-        self.crop_value = 1
-        self.num_time_features = num_time_features
-        self.rheight= rheight
-        self.rwidth = rwidth
+        self.resize_height= resize_height
+        self.resize_width = resize_width
 
-        self.model = CultioGraphNet(
-            ds_features=num_features,
-            ds_time_features=num_time_features,
-            filters=filters,
-            num_classes=self.num_classes,
-            rheight=self.rheight,
-            rwidth=self.rwidth
+        self.cultionet_model = CultioLitModel(
+            num_features=cultionet_num_features,
+            num_time_features=cultionet_num_time_features,
+            filters=cultionet_filters
         )
-        self.refine = RefineConv(
-            in_channels=1+self.num_classes*2,
-            mid_channels=256,
-            out_channels=self.num_classes
+        self.cultionet_model.load_state_dict(
+            state_dict=torch.load(cultionet_model_file)
         )
-        self.maskrcnn = BFasterRCNN(
+        self.cultionet_model.eval()
+        self.cultionet_model.freeze()
+        self.model = BFasterRCNN(
             in_channels=4,
             out_channels=256,
             num_classes=self.num_classes,
             sizes=(16, 32, 64, 128, 256),
             aspect_ratios=(0.5, 1.0, 3.0),
-            trainable_backbone_layers=3,
-            min_image_size=100,
-            max_image_size=500
+            trainable_backbone_layers=trainable_backbone_layers,
+            min_image_size=min_image_size,
+            max_image_size=max_image_size
         )
-
-        self.configure_loss()
-        self.configure_scorer()
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -116,8 +118,7 @@ class CultioLitModel(pl.LightningModule):
         # new x = (B x C x H x W)
         gc = model_utils.GraphToConv()
         x = gc(x, batch_size, height, width)
-        scale = self.rheight / height
-        resizer = transforms.Resize((self.rheight, self.rwidth))
+        resizer = transforms.Resize((self.resize_height, self.resize_width))
         x = [resizer(image) for image in x]
         targets = None
         if y is not None:
@@ -132,13 +133,230 @@ class CultioLitModel(pl.LightningModule):
                         )
                     elif k == 'boxes':
                         # [xmin, ymin, xmax, ymax]
-                        batch_dict[k] = y[k][batch_slice] * scale
+                        batch_dict[k] = self.scale_boxes(
+                            y[k][batch_slice], batch, [height]
+                        )
                     else:
                         batch_dict[k] = y[k][batch_slice]
                     targets.append(batch_dict)
-        outputs = self.maskrcnn(x, targets)
+        outputs = self.model(x, targets)
 
         return outputs
+
+    def scale_boxes(
+        self,
+        boxes: torch.Tensor,
+        batch: torch.Tensor,
+        height: T.Union[None, int, T.List[int], torch.Tensor]
+    ):
+        height = int(height) if batch is None else int(height[0])
+        scale = self.resize_height / height
+
+        return boxes * scale
+
+    def forward(
+        self, batch: Data, batch_idx: int = None, y: T.Optional[torch.Tensor] = None
+    ) -> T.Tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+    ]:
+        """Performs a single model forward pass
+        """
+        with torch.no_grad():
+            distance_ori, distance, edge, __, crop_r = self.cultionet_model(batch)
+        estimates = self.mask_forward(
+            distance_ori,
+            distance,
+            edge,
+            crop_r,
+            height=batch.height,
+            width=batch.width,
+            batch=batch.batch,
+            y=y
+        )
+
+        return estimates
+
+    def on_save_checkpoint(self, checkpoint):
+        """Save the checkpoint
+        """
+        ckpt_file = Path(self.logger.save_dir) / f'{self.ckpt_name}.ckpt'
+        if ckpt_file.is_file():
+            ckpt_file.unlink()
+        torch.save(
+            checkpoint, ckpt_file
+        )
+
+    def on_validation_epoch_end(self, *args, **kwargs):
+        """Save the model on validation end
+        """
+        model_file = Path(self.logger.save_dir) / f'{self.model_name}.pt'
+        if model_file.is_file():
+            model_file.unlink()
+        torch.save(
+            self.state_dict(), model_file
+        )
+
+    def calc_loss(self, batch: T.Union[Data, T.List], y: T.Optional[torch.Tensor] = None):
+        """Calculates the loss for each layer
+
+        Returns:
+            Average loss
+        """
+        losses = self(batch, y=y)
+        loss = sum(loss for loss in losses.values())
+
+        return loss
+
+    def training_step(self, batch: Data, batch_idx: int = None):
+        """Executes one training step
+        """
+        y = {
+            'boxes': batch.boxes,
+            'labels': batch.box_labels,
+            'masks': batch.box_masks,
+            'image_id': batch.image_id
+        }
+        loss = self.calc_loss(batch, y=y)
+        self.log('loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+
+        return loss
+
+    def _shared_eval_step(self, batch: Data) -> dict:
+        # Predictions
+        instances = self(batch)
+        # True boxes
+        true_boxes = self.scale_boxes(batch.boxes, batch, batch.height)
+
+        predict_iou_score = torch.tensor(0.0, device=self.device)
+        iou_score = torch.tensor(0.0, device=self.device)
+        box_score = torch.tensor(0.0, device=self.device)
+        for bidx, batch_value in enumerate(batch.image_id.unique()):
+            # This should be low (i.e., low overlap of predicted boxes)
+            predict_iou_score += box_iou(
+                instances[bidx]['boxes'], instances[bidx]['boxes']
+            ).mean()
+            # This should be high (i.e., high overlap of predictions and true boxes)
+            iou_score += box_iou(
+                true_boxes[batch.image_id == batch_value], instances[bidx]['boxes']
+            ).mean()
+            # This should be high (i.e., masks should be confident)
+            box_score += instances[bidx]['scores'].mean()
+        predict_iou_score /= batch.image_id.unique().size(0)
+        iou_score /= batch.image_id.unique().size(0)
+        box_score /= batch.image_id.unique().size(0)
+
+        total_iou_score = (predict_iou_score + (1.0 - iou_score)) * 0.5
+        box_score = 1.0 - box_score
+        # Minimize intersection-over-union and maximum score
+        total_score = (total_iou_score + box_score) * 0.5
+
+        metrics = {
+            'predict_iou_score': predict_iou_score,
+            'iou_score': iou_score,
+            'box_score': box_score,
+            'mean_score': total_score
+        }
+
+        return metrics
+
+    def validation_step(self, batch: Data, batch_idx: int = None) -> dict:
+        """Executes one valuation step
+        """
+        eval_metrics = self._shared_eval_step(batch)
+
+        metrics = {
+            'val_loss': eval_metrics['mean_score'],
+            'val_piou': eval_metrics['predict_iou_score'],
+            'val_iou': eval_metrics['iou_score'],
+            'val_box': eval_metrics['box_score'],
+        }
+        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
+
+        return metrics
+
+    def test_step(self, batch: Data, batch_idx: int = None) -> dict:
+        """Executes one test step
+        """
+        eval_metrics = self._shared_eval_step(batch)
+
+        metrics = {
+            'test_loss': eval_metrics['mean_score'],
+            'test_piou': eval_metrics['predict_iou_score'],
+            'test_iou': eval_metrics['iou_score'],
+            'test_box': eval_metrics['box_score'],
+        }
+        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
+
+        return metrics
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(
+            list(self.model.parameters()),
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay,
+            eps=1e-4
+        )
+        lr_scheduler = ReduceLROnPlateau(
+            optimizer,
+            factor=0.1,
+            patience=5
+        )
+
+        return {
+            'optimizer': optimizer,
+            'scheduler': lr_scheduler,
+            'monitor': 'val_loss'
+        }
+
+
+class CultioLitModel(pl.LightningModule):
+    def __init__(
+        self,
+        num_features: int = None,
+        num_time_features: int = None,
+        filters: int = 64,
+        learning_rate: float = 0.001,
+        weight_decay: float = 1e-5,
+        ckpt_name: str = 'last',
+        model_name: str = 'cultionet'
+    ):
+        """Lightning model
+
+        Args:
+            num_features
+            num_time_features
+            filters
+            learning_rate
+            weight_decay
+        """
+        super(CultioLitModel, self).__init__()
+        self.save_hyperparameters()
+
+        self.ckpt_name = ckpt_name
+        self.model_name = model_name
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.num_classes = 2
+        self.edge_value = 2
+        self.crop_value = 1
+        self.num_time_features = num_time_features
+
+        self.model = CultioGraphNet(
+            ds_features=num_features,
+            ds_time_features=num_time_features,
+            filters=filters,
+            num_classes=self.num_classes
+        )
+        self.refine = RefineConv(
+            in_channels=1+self.num_classes*2,
+            mid_channels=256,
+            out_channels=self.num_classes
+        )
+        self.configure_loss()
+        self.configure_scorer()
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
 
     def forward(
         self, batch: Data, batch_idx: int = None
@@ -212,11 +430,17 @@ class CultioLitModel(pl.LightningModule):
 
         return distance_ori, distance, edge_labels, class_labels, crop_r_labels
 
-    def calc_loss(
-        self,
-        batch: T.Union[Data, T.List],
-        include_mask: bool = True
-    ):
+    def on_validation_epoch_end(self, *args, **kwargs):
+        """Save the model on validation end
+        """
+        model_file = Path(self.logger.save_dir) / f'{self.model_name}.pt'
+        if model_file.is_file():
+            model_file.unlink()
+        torch.save(
+            self.state_dict(), model_file
+        )
+
+    def calc_loss(self, batch: T.Union[Data, T.List]):
         """Calculates the loss for each layer
 
         Returns:
@@ -240,42 +464,26 @@ class CultioLitModel(pl.LightningModule):
 
         oloss = self.dloss(distance_ori, batch.ori)
         dloss = self.dloss(distance, batch.bdist)
-        eloss = self.eloss(edge, (batch.y == 2).long())
-        closs = self.closs(crop, (batch.y == 1).long())
-        crop_r_loss = self.closs(crop_r, (batch.y == 1).long())
+        eloss = self.eloss(edge, (batch.y == EDGE_CLASS).long())
+        # Recode classes in case of multiple cases
+        classes = torch.where(batch.y == EDGE_CLASS, 0, batch.y)
+        for cidx, class_val in enumerate(
+            batch.y[(batch.y > 0) & (batch.y != EDGE_CLASS)].unique(),
+            start=1
+        ):
+            classes[batch.y == class_val] = cidx
+        closs = self.closs(crop, classes.long())
+        crop_r_loss = self.closs(crop_r, classes.long())
 
         loss = oloss + dloss + eloss + closs + crop_r_loss
-        denom = 5.0
-        if include_mask:
-            if hasattr(batch, 'boxes') and batch.boxes is not None:
-                mask_y = {
-                    'boxes': batch.boxes,
-                    'labels': batch.box_labels,
-                    'masks': batch.box_masks,
-                    'image_id': batch.image_id
-                }
-                masks_losses = self.mask_forward(
-                    distance_ori,
-                    distance,
-                    edge,
-                    crop_r,
-                    height=batch.height,
-                    width=batch.width,
-                    batch=batch.batch,
-                    y=mask_y
-                )
-                masks_losses = sum(loss for loss in masks_losses.values())
-                loss = loss + masks_losses
-                denom += 1.0
-
-        loss = loss / denom
+        loss = loss / 5.0
 
         return loss
 
     def training_step(self, batch: Data, batch_idx: int = None):
         """Executes one training step
         """
-        loss = self.calc_loss(batch, include_mask=True)
+        loss = self.calc_loss(batch)
         self.log('loss', loss, on_step=False, on_epoch=True, prog_bar=True)
 
         # print('Train')
@@ -287,25 +495,9 @@ class CultioLitModel(pl.LightningModule):
         return loss
 
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
-        loss = self.calc_loss(batch, include_mask=False)
+        loss = self.calc_loss(batch)
 
-        distance_ori, distance, edge, __, crop_r = self(batch)
-
-        box_score = torch.tensor(0.0, device=self.device)
-        if hasattr(batch, 'boxes'):
-            masks = self.mask_forward(
-                distance_ori,
-                distance,
-                edge,
-                crop_r,
-                height=batch.height,
-                width=batch.width,
-                batch=batch.batch,
-                y=None
-            )
-            for bidx in range(0, batch.batch.unique().size(0)):
-                box_score = torch.maximum(box_score, torch.nanmean(masks[bidx]['scores']))
-            # box_score /= batch.batch.unique().size(0)
+        __, __, edge, __, crop_r = self(batch)
 
         # Take the argmax of the class probabilities
         edge_ypred = edge.argmax(dim=1)
@@ -324,10 +516,8 @@ class CultioLitModel(pl.LightningModule):
             'edge_score': edge_score,
             'class_score': class_score,
             'emcc': edge_mcc,
-            'cmcc': class_mcc,
-            'box_score': box_score
+            'cmcc': class_mcc
         }
-
         # print('Eval')
         # t = torch.cuda.get_device_properties(0).total_memory
         # r = torch.cuda.memory_reserved(0)
@@ -346,8 +536,7 @@ class CultioLitModel(pl.LightningModule):
             'vef1': eval_metrics['edge_score'],
             'vcf1': eval_metrics['class_score'],
             'vemcc': eval_metrics['emcc'],
-            'vcmcc': eval_metrics['cmcc'],
-            'vboxs': eval_metrics['box_score']
+            'vcmcc': eval_metrics['cmcc']
         }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
@@ -363,17 +552,17 @@ class CultioLitModel(pl.LightningModule):
             'tef1': eval_metrics['edge_score'],
             'tcf1': eval_metrics['class_score'],
             'temcc': eval_metrics['emcc'],
-            'tcmcc': eval_metrics['cmcc'],
-            'tboxs': eval_metrics['box_score']
+            'tcmcc': eval_metrics['cmcc']
         }
-
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         return metrics
 
     def configure_scorer(self):
         self.scorer = F1Score(num_classes=self.num_classes)
-        self.mcc = MatthewsCorrcoef(num_classes=self.num_classes, inputs_are_logits=False)
+        self.mcc = MatthewsCorrcoef(
+            num_classes=self.num_classes, inputs_are_logits=False
+        )
 
     def configure_loss(self):
         self.volume = torch.ones(
@@ -388,12 +577,12 @@ class CultioLitModel(pl.LightningModule):
         )
 
     def configure_optimizers(self):
+        params_list = list(
+            list(self.model.parameters())
+            + list(self.refine.parameters())
+        )
         optimizer = torch.optim.AdamW(
-            list(
-                list(self.model.parameters())
-                + list(self.refine.parameters())
-                + list(self.maskrcnn.parameters())
-            ),
+            params_list,
             lr=self.learning_rate,
             weight_decay=self.weight_decay,
             eps=1e-4
@@ -401,7 +590,7 @@ class CultioLitModel(pl.LightningModule):
         lr_scheduler = ReduceLROnPlateau(
             optimizer,
             factor=0.1,
-            patience=10
+            patience=5
         )
 
         return {
