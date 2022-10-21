@@ -298,6 +298,7 @@ class WriterModule(BlockWriter):
         ntime: int,
         nbands: int,
         filters: int,
+        num_classes: int,
         ts: xr.DataArray,
         data_values: torch.Tensor,
         ppaths: ProjectPaths,
@@ -331,6 +332,7 @@ class WriterModule(BlockWriter):
             num_features=ntime*nbands,
             num_time_features=ntime,
             filters=filters,
+            num_classes=num_classes,
             device=self.device,
             enable_progress_bar=False
         )[1]
@@ -364,6 +366,7 @@ class RemoteWriter(WriterModule):
         ntime: int,
         nbands: int,
         filters: int,
+        num_classes: int,
         ts: xr.DataArray,
         data_values: torch.Tensor,
         ppaths: ProjectPaths,
@@ -378,6 +381,7 @@ class RemoteWriter(WriterModule):
             ntime=ntime,
             nbands=nbands,
             filters=filters,
+            num_classes=num_classes,
             ts=ts,
             data_values=data_values,
             ppaths=ppaths,
@@ -408,6 +412,7 @@ class SerialWriter(WriterModule):
         ntime: int,
         nbands: int,
         filters: int,
+        num_classes: int,
         ts: xr.DataArray,
         data_values: torch.Tensor,
         ppaths: ProjectPaths,
@@ -422,6 +427,7 @@ class SerialWriter(WriterModule):
             ntime=ntime,
             nbands=nbands,
             filters=filters,
+            num_classes=num_classes,
             ts=ts,
             data_values=data_values,
             ppaths=ppaths,
@@ -516,6 +522,7 @@ def predict_image(args):
                 ntime=ntime,
                 nbands=nbands,
                 filters=args.filters,
+                num_classes=args.num_classes,
                 ts=time_series,
                 data_values=data_values,
                 ppaths=ppaths,
@@ -555,6 +562,7 @@ def predict_image(args):
                 ntime=ntime,
                 nbands=nbands,
                 filters=args.filters,
+                num_classes=args.num_classes,
                 ts=ray.put(time_series),
                 data_values=data_values,
                 ppaths=ppaths,
@@ -738,7 +746,8 @@ def create_datasets(args):
                 lc_path=lc_image,
                 n_ts=args.n_ts,
                 data_type='boundaries',
-                instance_seg=args.instance_seg
+                instance_seg=args.instance_seg,
+                zero_padding=args.zero_padding
             )
 
 
@@ -821,6 +830,7 @@ def train_maskrcnn(args):
         accumulate_grad_batches=args.accumulate_grad_batches,
         learning_rate=args.learning_rate,
         filters=args.filters,
+        num_classes=args.num_classes,
         random_seed=args.random_seed,
         reset_model=args.reset_model,
         auto_lr_find=args.auto_lr_find,
@@ -865,6 +875,11 @@ def train_model(args):
             )
         except TensorShapeError as e:
             raise ValueError(e)
+        ds = EdgeDataset(
+            ppaths.train_path,
+            processes=args.processes,
+            threads_per_worker=args.threads
+        )
     # Get the normalization means and std. deviations on the train data
     cultionet.model.seed_everything(args.random_seed, workers=True)
     # Calculate the values needed to transform to z-scores, using
@@ -920,6 +935,7 @@ def train_model(args):
         accumulate_grad_batches=args.accumulate_grad_batches,
         learning_rate=args.learning_rate,
         filters=args.filters,
+        num_classes=args.num_classes,
         random_seed=args.random_seed,
         reset_model=args.reset_model,
         auto_lr_find=args.auto_lr_find,
