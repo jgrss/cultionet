@@ -1,9 +1,13 @@
-from dataclasses import dataclass
-from re import S
 import typing as T
 from pathlib import Path
 
-from .const import EDGE_CLASS, CROP_CLASS
+from .const import (
+    POLYGON_CROP_CLASS,
+    POLYGON_FALLOW_CLASS,
+    EDGE_CLASS,
+    CROP_CLASS,
+    FALLOW_CLASS
+)
 from .lookup import CDL_CROP_LABELS_r
 from .utils import LabeledData, get_image_list_dims
 from ..augment.augmentation import augment
@@ -331,7 +335,7 @@ def create_image_vars(
     image: T.Union[str, Path, list],
     bounds: tuple,
     num_workers: int,
-    gain: float = 0.0001,
+    gain: float = 1e-4,
     offset: float = 0.0,
     grid_edges: T.Optional[gpd.GeoDataFrame] = None,
     ref_res: T.Optional[float] = 10.0,
@@ -384,8 +388,11 @@ def create_image_vars(
                         mode='edge'
                     ), max_num_iter=2))[1:-1, 1:-1]
                 # Make the fields binary
-                labels_array[labels_array > 0] = CROP_CLASS
-                # NOTE: add fallow class here?
+                labels_array = np.where(
+                    labels_array == POLYGON_CROP_CLASS, CROP_CLASS, np.where(
+                        labels_array == POLYGON_FALLOW_CLASS, FALLOW_CLASS, 0
+                    )
+                )
                 # Set edges
                 labels_array[edges == 1] = EDGE_CLASS
                 # Clean-up the thinning outputs
@@ -393,7 +400,10 @@ def create_image_vars(
                     (labels_array_copy == 0) & (labels_array != EDGE_CLASS), 0, labels_array
                 )
                 # Clean-up small fragments
-                frag_sum = focal_stat(np.array(labels_array == CROP_CLASS), stat='sum')
+                frag_sum = focal_stat(
+                    np.uint8((labels_array == CROP_CLASS) | (labels_array == FALLOW_CLASS)),
+                    stat='sum'
+                )
                 labels_array = np.where(
                     frag_sum < 2, 0, np.where(
                         frag_sum < 4, EDGE_CLASS, labels_array
@@ -405,7 +415,7 @@ def create_image_vars(
 
                 # Normalize the boundary distances for each segment
                 bdist, ori = normalize_boundary_distances(
-                    np.uint8(labels_array == 1),
+                    np.uint8((labels_array == CROP_CLASS) | (labels_array == FALLOW_CLASS)),
                     grid_edges.geom_type.values[0],
                     src_ts
                 )
@@ -434,7 +444,8 @@ def create_dataset(
     lc_path: T.Optional[T.Union[str, None]] = None,
     n_ts: T.Optional[int] = 2,
     data_type: T.Optional[str] = 'boundaries',
-    instance_seg: T.Optional[bool] = False
+    instance_seg: T.Optional[bool] = False,
+    zero_padding: T.Optional[int] = 0
 ) -> None:
     """Creates a dataset for training
 
@@ -455,6 +466,7 @@ def create_dataset(
         n_ts: The number of temporal augmentations.
         data_type: The target data type.
         instance_seg: Whether to get instance segmentation mask targets.
+        zero_padding: Zero padding to apply.
     """
     if transforms is None:
         transforms = ['none']
@@ -617,6 +629,7 @@ def create_dataset(
                                 nbands=nbands,
                                 k=3,
                                 instance_seg=instance_seg,
+                                zero_padding=zero_padding,
                                 start_year=start_year,
                                 end_year=end_year,
                                 left=left,
@@ -640,6 +653,7 @@ def create_dataset(
                             nbands=nbands,
                             k=3,
                             instance_seg=instance_seg,
+                            zero_padding=zero_padding,
                             start_year=start_year,
                             end_year=end_year,
                             left=left,
