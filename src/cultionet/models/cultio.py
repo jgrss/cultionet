@@ -26,6 +26,8 @@ class CultioGraphNet(torch.nn.Module):
         ds_features: int,
         ds_time_features: int,
         filters: int = 32,
+        star_rnn_hidden_dim: int = 32,
+        star_rnn_n_layers: int = 3,
         num_classes: int = 2,
         dropout: T.Optional[float] = 0.1
     ):
@@ -58,9 +60,9 @@ class CultioGraphNet(torch.nn.Module):
         # Star RNN layer
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
-            hidden_dim=32,
+            hidden_dim=star_rnn_hidden_dim,
             nclasses=self.filters,
-            n_layers=3
+            n_layers=star_rnn_n_layers
         )
         # Boundary distance orientations (+1)
         self.dist_layer_ori = GraphRegressionLayer(
@@ -92,7 +94,9 @@ class CultioGraphNet(torch.nn.Module):
 
     def forward(
         self, data: Data
-    ) -> T.Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> T.Tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+    ]:
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
@@ -180,8 +184,8 @@ class CultioGraphNet(torch.nn.Module):
         # Concatenate streams + distance orientations + distances + edges
         h = torch.cat([h, logits_edges], dim=1)
 
-        # Estimate all classes
-        logits_labels = self.class_layer(
+        # Estimate crops
+        logits_crop = self.class_layer(
             h,
             data.edge_index,
             data.edge_attrs,
@@ -190,4 +194,9 @@ class CultioGraphNet(torch.nn.Module):
             width
         )
 
-        return logits_distances_ori, logits_distances, logits_edges, logits_labels
+        return (
+            logits_distances_ori,
+            logits_distances,
+            logits_edges,
+            logits_crop
+        )
