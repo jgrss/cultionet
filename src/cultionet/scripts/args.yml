@@ -47,6 +47,9 @@ create:
         - ts-warp
         - ts-noise
         - ts-drift
+        - roll
+        - gaussian
+        - s&p
       nargs: '+'
   n_ts:
     short: ''
@@ -98,6 +101,13 @@ create:
     help: Whether to create a dataset for instance segmentation
     kwargs:
       action: store_true
+  zero_padding:
+    short: ''
+    long: zero-padding
+    help: Zero padding to apply
+    kwargs:
+      default: 0
+      type: '&int'
 
 train_predict:
   filters:
@@ -106,6 +116,13 @@ train_predict:
     help: The number of model input filters
     kwargs:
       default: 64
+      type: '&int'
+  num_classes:
+    short: ''
+    long: num-classes
+    help: The number of crop classes
+    kwargs:
+      default: 2
       type: '&int'
   device:
     short: ''
