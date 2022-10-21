@@ -168,6 +168,7 @@ def augment(
     nbands: int,
     k: int = 3,
     instance_seg: bool = False,
+    zero_padding: int = 0,
     **kwargs
 ) -> Data:
     """Applies augmentation to a dataset
@@ -176,16 +177,20 @@ def augment(
     y = ldata.y
     bdist = ldata.bdist
     ori = ldata.ori
+    if zero_padding > 0:
+        zpad = torch.nn.ZeroPad2d(zero_padding)
+        x = zpad(torch.tensor(x)).numpy()
+        y = zpad(torch.tensor(y)).numpy()
+        bdist = zpad(torch.tensor(bdist)).numpy()
+        ori = zpad(torch.tensor(ori)).numpy()
     xaug = x.copy()
+    yaug = y.copy()
+    bdist_aug = bdist.copy()
+    ori_aug = ori.copy()
 
     label_dtype = 'float' if 'float' in y.dtype.name else 'int'
 
-    if 'none' in aug:
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
-        ori_aug = ori.copy()
-
-    elif 'ts-warp' in aug:
+    if 'ts-warp' in aug:
         # Warp each segment
         for p in ldata.props:
             xaug = augment_time(
@@ -196,9 +201,6 @@ def augment(
                     static_rand=True
                 )
             )
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
-        ori_aug = ori.copy()
 
     elif 'ts-noise' in aug:
         # Warp each segment
@@ -207,9 +209,6 @@ def augment(
                 ldata, p, xaug, ntime, nbands, False,
                 AddNoise(scale=np.random.uniform(low=0.01, high=0.05))
             )
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
-        ori_aug = ori.copy()
 
     elif 'ts-drift' in aug:
         # Warp each segment
@@ -222,21 +221,19 @@ def augment(
                     static_rand=True
                 )
             )
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
-        ori_aug = ori.copy()
 
     elif 'rot' in aug:
         deg = int(aug.replace('rot', ''))
-
         deg_dict = {
             90: cv2.ROTATE_90_CLOCKWISE,
             180: cv2.ROTATE_180,
             270: cv2.ROTATE_90_COUNTERCLOCKWISE
         }
 
-        xaug = np.zeros((xaug.shape[0], *cv2.rotate(np.float32(x[0]), deg_dict[deg]).shape), dtype=xaug.dtype)
-
+        xaug = np.zeros(
+            (xaug.shape[0], *cv2.rotate(np.float32(x[0]), deg_dict[deg]).shape),
+            dtype=xaug.dtype
+        )
         for i in range(0, x.shape[0]):
             xaug[i] = cv2.rotate(np.float32(x[i]), deg_dict[deg])
 
@@ -250,9 +247,6 @@ def augment(
     elif 'roll' in aug:
         shift = np.random.choice(range(1, int(xaug.shape[0]*0.75)+1), size=1)[0]
         xaug = np.roll(xaug, shift=shift, axis=0)
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
-        ori_aug = ori.copy()
 
     elif 'flip' in aug:
         if aug == 'flipfb':
@@ -260,9 +254,6 @@ def augment(
             for b in range(0, xaug.shape[0], ntime):
                 # Get the slice for the current band, n time steps
                 xaug[b:b+ntime] = xaug[b:b+ntime][::-1]
-            yaug = y.copy()
-            bdist_aug = bdist.copy()
-            ori_aug = ori.copy()
         else:
 
             for i in range(0, x.shape[0]):
@@ -279,12 +270,10 @@ def augment(
         width = int(xaug.shape[2] * scale)
 
         xaug = np.zeros((xaug.shape[0], height, width), dtype=xaug.dtype)
-
         dim = (width, height)
 
         for i in range(0, x.shape[0]):
             xaug[i] = cv2.resize(np.float32(x[i]), dim, interpolation=cv2.INTER_LINEAR)
-            # xaug[i] = sk_transform.rescale(x[i], order=1, scale=scale, preserve_range=True, mode='reflect')
 
         if label_dtype == 'float':
             yaug = cv2.resize(np.float32(y), dim, interpolation=cv2.INTER_LINEAR)
@@ -295,19 +284,12 @@ def augment(
 
     elif 'gaussian' in aug:
         var = float(aug.replace('gaussian', ''))
-
         for i in range(0, x.shape[0]):
             xaug[i] = sk_util.random_noise(x[i], mode='gaussian', clip=True, mean=0, var=var)
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
-        ori_aug = ori.copy()
 
     elif 's&p' in aug:
         for i in range(0, x.shape[0]):
             xaug[i] = sk_util.random_noise(x[i], mode='s&p', clip=True)
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
-        ori_aug = ori.copy()
 
     # Create the network
     nwk = SingleSensorNetwork(np.ascontiguousarray(xaug, dtype='float64'), k=k)
@@ -342,5 +324,6 @@ def augment(
         mask_y=mask_y,
         bdist=bdist_aug,
         ori=ori_aug,
+        zero_padding=zero_padding,
         **kwargs
     )
