@@ -474,6 +474,7 @@ def predict(
     with torch.no_grad():
         distance_ori, distance, edge, crop, crop_r = lit_model(norm_batch)
         if include_maskrcnn:
+            # TODO: fix this -- separate Mask R-CNN model
             predictions = lit_model.mask_forward(
                 distance_ori=distance_ori,
                 distance=distance,
@@ -483,75 +484,77 @@ def predict(
                 width=norm_batch.width,
                 batch=None
             )
-    instances = np.zeros((norm_batch.height, norm_batch.width), dtype='float64')
+    instances = None
     if include_maskrcnn:
-        scores = predictions[0]['scores'].squeeze()
-        masks = predictions[0]['masks'].squeeze()
-        resizer = transforms.Resize((norm_batch.height, norm_batch.width))
-        masks = resizer(masks)
-        # Filter by box scores
-        masks = masks[scores > 0.5]
-        scores = scores[scores > 0.5]
-        # Filter by pixel scores
-        masks = torch.where(masks > 0.5, masks, 0)
-        masks = masks.detach().cpu().numpy()
-        if masks.shape[0] > 0:
-            distance_mask = (
-                distance
-                .detach()
-                .cpu()
-                .numpy()
-                .reshape(norm_batch.height, norm_batch.width)
-            )
-            edge_mask = (
-                edge[:, 1]
-                .detach()
-                .cpu()
-                .numpy()
-                .reshape(norm_batch.height, norm_batch.width)
-            )
-            crop_r_mask = (
-                crop_r[:, 1]
-                .detach()
-                .cpu()
-                .numpy()
-                .reshape(norm_batch.height, norm_batch.width)
-            )
-            instances = np.zeros((norm_batch.height, norm_batch.width), dtype='float64')
-
-            uid = 1 if written.max() == 0 else written.max() + 1
-            def iou(reference, targets):
-                tp = ((reference > 0.5) & (targets > 0.5)).sum()
-                fp = ((reference <= 0.5) & (targets > 0.5)).sum()
-                fn = ((reference > 0.5) & (targets <= 0.5)).sum()
-
-                return tp / (tp + fp + fn)
-
-            for lyr_idx_ref, lyr_ref in enumerate(masks):
-                lyr = None
-                for lyr_idx_targ, lyr_targ in enumerate(masks):
-                    if lyr_idx_targ != lyr_idx_ref:
-                        if iou(lyr_ref, lyr_targ) > 0.5:
-                            lyr = lyr_ref if scores[lyr_idx_ref] > scores[lyr_idx_targ] else lyr_targ
-                if lyr is None:
-                    lyr = lyr_ref
-                conditional = (
-                    (lyr > 0.5)
-                    & (distance_mask > 0.1)
-                    & (edge_mask < 0.5)
-                    & (crop_r_mask > 0.5)
+        instances = np.zeros((norm_batch.height, norm_batch.width), dtype='float64')
+        if include_maskrcnn:
+            scores = predictions[0]['scores'].squeeze()
+            masks = predictions[0]['masks'].squeeze()
+            resizer = transforms.Resize((norm_batch.height, norm_batch.width))
+            masks = resizer(masks)
+            # Filter by box scores
+            masks = masks[scores > 0.5]
+            scores = scores[scores > 0.5]
+            # Filter by pixel scores
+            masks = torch.where(masks > 0.5, masks, 0)
+            masks = masks.detach().cpu().numpy()
+            if masks.shape[0] > 0:
+                distance_mask = (
+                    distance
+                    .detach()
+                    .cpu()
+                    .numpy()
+                    .reshape(norm_batch.height, norm_batch.width)
                 )
-                if written[conditional].max() > 0:
-                    uid = int(sci_mode(written[conditional]).mode)
-                instances = np.where(
-                    ((instances == 0) & conditional),
-                    uid,
-                    instances
+                edge_mask = (
+                    edge[:, 1]
+                    .detach()
+                    .cpu()
+                    .numpy()
+                    .reshape(norm_batch.height, norm_batch.width)
                 )
-                uid = instances.max() + 1
-            instances /= SCALE_FACTOR
-        else:
-            logger.warning('No fields were identified.')
+                crop_r_mask = (
+                    crop_r[:, 1]
+                    .detach()
+                    .cpu()
+                    .numpy()
+                    .reshape(norm_batch.height, norm_batch.width)
+                )
+                instances = np.zeros((norm_batch.height, norm_batch.width), dtype='float64')
+
+                uid = 1 if written.max() == 0 else written.max() + 1
+                def iou(reference, targets):
+                    tp = ((reference > 0.5) & (targets > 0.5)).sum()
+                    fp = ((reference <= 0.5) & (targets > 0.5)).sum()
+                    fn = ((reference > 0.5) & (targets <= 0.5)).sum()
+
+                    return tp / (tp + fp + fn)
+
+                for lyr_idx_ref, lyr_ref in enumerate(masks):
+                    lyr = None
+                    for lyr_idx_targ, lyr_targ in enumerate(masks):
+                        if lyr_idx_targ != lyr_idx_ref:
+                            if iou(lyr_ref, lyr_targ) > 0.5:
+                                lyr = lyr_ref if scores[lyr_idx_ref] > scores[lyr_idx_targ] else lyr_targ
+                    if lyr is None:
+                        lyr = lyr_ref
+                    conditional = (
+                        (lyr > 0.5)
+                        & (distance_mask > 0.1)
+                        & (edge_mask < 0.5)
+                        & (crop_r_mask > 0.5)
+                    )
+                    if written[conditional].max() > 0:
+                        uid = int(sci_mode(written[conditional]).mode)
+                    instances = np.where(
+                        ((instances == 0) & conditional),
+                        uid,
+                        instances
+                    )
+                    uid = instances.max() + 1
+                instances /= SCALE_FACTOR
+            else:
+                logger.warning('No fields were identified.')
 
     mo = ModelOutputs(
         distance_ori=distance_ori,
@@ -567,6 +570,6 @@ def predict(
         stack[:-1] = (stack[:-1] * SCALE_FACTOR).clip(0, SCALE_FACTOR)
         stack[-1] *= SCALE_FACTOR
     else:
-        stack = (stack[:-1] * SCALE_FACTOR).clip(0, SCALE_FACTOR)
+        stack = (stack * SCALE_FACTOR).clip(0, SCALE_FACTOR)
 
     return stack
