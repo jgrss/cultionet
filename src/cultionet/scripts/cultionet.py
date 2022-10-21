@@ -747,7 +747,9 @@ def create_datasets(args):
                 n_ts=args.n_ts,
                 data_type='boundaries',
                 instance_seg=args.instance_seg,
-                zero_padding=args.zero_padding
+                zero_padding=args.zero_padding,
+                crop_column=args.crop_column,
+                keep_crop_classes=args.keep_crop_classes
             )
 
 

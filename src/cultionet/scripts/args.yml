@@ -108,6 +108,18 @@ create:
     kwargs:
       default: 0
       type: '&int'
+  crop_column:
+    short: ''
+    long: crop-column
+    help: The crop column name in the polygon vector files
+    kwargs:
+      default: class
+  keep_crop_classes:
+    short: ''
+    long: keep-crop-classes
+    help: Whether to keep the crop classes as they are (True) or recode all non-zero classes to crop (False)
+    kwargs:
+      action: store_true
 
 train_predict:
   filters:
