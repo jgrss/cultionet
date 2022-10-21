@@ -51,16 +51,43 @@ def remove_noncrop(xvars: np.ndarray, labels_array: np.ndarray) -> T.Tuple[np.nd
 
 
 def roll(
-    arr_pad: np.ndarray, shift: T.Union[int, T.Tuple[int, int]], axis: T.Union[int, T.Tuple[int, int]]
+    arr_pad: np.ndarray,
+    shift: T.Union[int, T.Tuple[int, int]],
+    axis: T.Union[int, T.Tuple[int, int]]
 ) -> np.ndarray:
     """Rolls array elements along a given axis and slices off padded edges"""
     return np.roll(arr_pad, shift, axis=axis)[1:-1, 1:-1]
 
 
+def edge_gradient(array: np.ndarray, train_type: str, cell_res: float) -> np.ndarray:
+    """Calculates the morphological gradient of crop fields
+    """
+    se = np.array(
+        [
+            [1, 1],
+            [1, 1]
+        ], dtype='uint8'
+    )
+    array_shape = array.shape
+    dim = (array.shape[0] * 2, array.shape[1] * 2)
+    array = cv2.resize(array, dim, interpolation=cv2.INTER_NEAREST)
+    bdist = normalize_boundary_distances(
+        np.uint8(array > 0),
+        train_type,
+        cell_res * 0.5,
+        normalize=False
+    )[0]
+    bdist = cv2.resize(np.uint8(bdist > 0), array_shape, interpolation=cv2.INTER_CUBIC)
+    array = np.uint8(cv2.morphologyEx(np.uint8(bdist > 0), cv2.MORPH_GRADIENT, se) > 0)
+
+    return array
+
+
 def focal_compare(arr: np.ndarray) -> np.ndarray:
     """Calculates a focal comparison of neighbors and the central pixel
     """
-    out = [np.where(arr.squeeze().copy() > 0, 1, 0)]
+    # crop mask
+    out = [np.uint8(arr > 0)]
     arr_pad = np.pad(arr, pad_width=((1, 1), (1, 1)), mode='edge')
     # Direct neighbors
     out.append(np.where(roll(arr_pad, 1, axis=0) == arr, 1, 0))
@@ -201,31 +228,134 @@ def recode_crop_labels(
     return recoded_labels, edges
 
 
-def close_edge_ends(labels_array: np.ndarray) -> np.ndarray:
+def close_edge_ends(array: np.ndarray) -> np.ndarray:
     """Closes 1 pixel gaps at image edges
     """
     # Top
-    idx = np.where(labels_array[1, :] == 1)
-    z = np.zeros(labels_array.shape[1], dtype='uint8')
+    idx = np.where(array[1] == 1)
+    z = np.zeros(array.shape[1], dtype='uint8')
     z[idx] = 1
-    labels_array[0, :] = z
+    array[0] = z
     # Bottom
-    idx = np.where(labels_array[-1, :] == 1)
-    z = np.zeros(labels_array.shape[1], dtype='uint8')
+    idx = np.where(array[-2] == 1)
+    z = np.zeros(array.shape[1], dtype='uint8')
     z[idx] = 1
-    labels_array[-1, :] = z
+    array[-1] = z
     # Left
-    idx = np.where(labels_array[:, 0] == 1)
-    z = np.zeros(labels_array.shape[0], dtype='uint8')
+    idx = np.where(array[:, 1] == 1)
+    z = np.zeros(array.shape[0], dtype='uint8')
     z[idx] = 1
-    labels_array[:, 0] = z
+    array[:, 0] = z
     # Right
-    idx = np.where(labels_array[:, -1] == 1)
-    z = np.zeros(labels_array.shape[0], dtype='uint8')
+    idx = np.where(array[:, -2] == 1)
+    z = np.zeros(array.shape[0], dtype='uint8')
     z[idx] = 1
-    labels_array[:, -1] = z
+    array[:, -1] = z
 
-    return labels_array
+    return array
+
+
+def get_other_crop_count(array: np.ndarray) -> np.ndarray:
+    array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode='edge')
+
+    rarray = roll(array_pad, 1, axis=0)
+    crop_count = np.uint8((rarray > 0) & (rarray != array) & (array > 0))
+    rarray = roll(array_pad, -1, axis=0)
+    crop_count += np.uint8((rarray > 0) & (rarray != array) & (array > 0))
+    rarray = roll(array_pad, 1, axis=1)
+    crop_count += np.uint8((rarray > 0) & (rarray != array) & (array > 0))
+    rarray = roll(array_pad, -1, axis=1)
+    crop_count += np.uint8((rarray > 0) & (rarray != array) & (array > 0))
+
+    return crop_count
+
+
+def fill_edge_gaps(labels: np.ndarray, array: np.ndarray) -> np.ndarray:
+    """Fills neighboring 1-pixel edge gaps
+    """
+    # array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode='edge')
+    # hsum = roll(array_pad, 1, axis=0) + roll(array_pad, -1, axis=0)
+    # vsum = roll(array_pad, 1, axis=1) + roll(array_pad, -1, axis=1)
+    # array = np.where(
+    #     (hsum == 2) & (vsum == 0), 1, array
+    # )
+    # array = np.where(
+    #     (hsum == 0) & (vsum == 2), 1, array
+    # )
+    other_count = get_other_crop_count(np.where(array == 1, 0, labels))
+    array = np.where(
+        other_count > 0, 1, array
+    )
+
+    return array
+
+
+def get_crop_count(array: np.ndarray) -> np.ndarray:
+    array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode='edge')
+
+    rarray = roll(array_pad, 1, axis=0)
+    crop_count = np.uint8((rarray > 0) & (rarray != EDGE_CLASS))
+    rarray = roll(array_pad, -1, axis=0)
+    crop_count += np.uint8((rarray > 0) & (rarray != EDGE_CLASS))
+    rarray = roll(array_pad, 1, axis=1)
+    crop_count += np.uint8((rarray > 0) & (rarray != EDGE_CLASS))
+    rarray = roll(array_pad, -1, axis=1)
+    crop_count += np.uint8((rarray > 0) & (rarray != EDGE_CLASS))
+
+    return crop_count
+
+
+def get_edge_count(array: np.ndarray) -> np.ndarray:
+    array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode='edge')
+
+    edge_count = np.uint8(roll(array_pad, 1, axis=0) == EDGE_CLASS)
+    edge_count += np.uint8(roll(array_pad, -1, axis=0) == EDGE_CLASS)
+    edge_count += np.uint8(roll(array_pad, 1, axis=1) == EDGE_CLASS)
+    edge_count += np.uint8(roll(array_pad, -1, axis=1) == EDGE_CLASS)
+
+    return edge_count
+
+
+def get_non_count(array: np.ndarray) -> np.ndarray:
+    array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode='edge')
+
+    non_count = np.uint8(roll(array_pad, 1, axis=0) == 0)
+    non_count += np.uint8(roll(array_pad, -1, axis=0) == 0)
+    non_count += np.uint8(roll(array_pad, 1, axis=1) == 0)
+    non_count += np.uint8(roll(array_pad, -1, axis=1) == 0)
+
+    return non_count
+
+
+def cleanup_edges(array: np.ndarray, original: np.ndarray) -> np.ndarray:
+    """Removes crop pixels that border non-crop pixels
+    """
+    array_pad = np.pad(original, pad_width=((1, 1), (1, 1)), mode='edge')
+    original_zero = np.uint8(roll(array_pad, 1, axis=0) == 0)
+    original_zero += np.uint8(roll(array_pad, -1, axis=0) == 0)
+    original_zero += np.uint8(roll(array_pad, 1, axis=1) == 0)
+    original_zero += np.uint8(roll(array_pad, -1, axis=1) == 0)
+
+    # Fill edges
+    array = np.where(
+        (array == 0) & (get_crop_count(array) > 0) & (get_edge_count(array) > 0),
+        EDGE_CLASS, array
+    )
+    # Remove crops next to non-crop
+    array = np.where(
+        (array > 0) & (array != EDGE_CLASS) & (get_non_count(array) > 0) & (get_edge_count(array) > 0),
+        0, array
+    )
+    # Fill in non-cropland
+    array = np.where(
+        original_zero == 4, 0, array
+    )
+    # Remove isolated crop pixels (i.e., crop clumps with 2 or fewer pixels)
+    array = np.where(
+        (array > 0) & (array != EDGE_CLASS) & (get_crop_count(array) <= 1), 0, array
+    )
+
+    return array
 
 
 def is_grid_processed(
@@ -260,7 +390,7 @@ def is_grid_processed(
 
 
 def create_boundary_distances(
-    labels_array: np.ndarray, train_type: str, src_ts: xr.DataArray
+    labels_array: np.ndarray, train_type: str, cell_res: float
 ) -> T.Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Creates distances from boundaries
     """
@@ -276,7 +406,7 @@ def create_boundary_distances(
         cv2.DIST_L2,
         3
     )
-    bdist *= src_ts.gw.celly
+    bdist *= cell_res
 
     grad_x = cv2.Sobel(
         np.pad(bdist, 5, mode='edge'),
@@ -300,23 +430,29 @@ def create_boundary_distances(
 
 
 def normalize_boundary_distances(
-    labels_array: np.ndarray, train_type: str, src_ts: xr.DataArray
+    labels_array: np.ndarray,
+    train_type: str,
+    cell_res: float,
+    normalize: bool = True
 ) -> T.Tuple[np.ndarray, np.ndarray]:
     """Normalizes boundary distances
     """
     # Create the boundary distances
-    __, segments, bdist, ori = create_boundary_distances(labels_array, train_type, src_ts)
-    # Normalize each segment by the local max distance
-    props = regionprops(segments, intensity_image=bdist)
-    for p in props:
-        if p.label > 0:
-            bdist = np.where(
-                segments == p.label,
-                bdist / p.max_intensity,
-                bdist
-            )
+    __, segments, bdist, ori = create_boundary_distances(labels_array, train_type, cell_res)
+    dist_max = 1e9
+    if normalize:
+        dist_max = 1.0
+        # Normalize each segment by the local max distance
+        props = regionprops(segments, intensity_image=bdist)
+        for p in props:
+            if p.label > 0:
+                bdist = np.where(
+                    segments == p.label,
+                    bdist / p.max_intensity,
+                    bdist
+                )
     bdist = np.nan_to_num(
-        bdist.clip(0, 1),
+        bdist.clip(0, dist_max),
         nan=1.0,
         neginf=1.0,
         posinf=1.0
@@ -339,7 +475,9 @@ def create_image_vars(
     offset: float = 0.0,
     grid_edges: T.Optional[gpd.GeoDataFrame] = None,
     ref_res: T.Optional[float] = 10.0,
-    resampling: T.Optional[str] = 'nearest'
+    resampling: T.Optional[str] = 'nearest',
+    crop_column: T.Optional[str] = 'class',
+    keep_crop_classes: T.Optional[bool] = False
 ) -> T.Tuple[
     np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int
 ]:
@@ -365,60 +503,90 @@ def create_image_vars(
             # Get the time and band count
             ntime, nbands = get_image_list_dims(image, src_ts)
             if grid_edges is not None:
-                # Get the training edges
+                # Get the field polygons
                 labels_array = polygon_to_array(
                     grid_edges,
-                    col='class',
+                    col=crop_column,
                     data=src_ts,
                     all_touched=False
                 ).squeeze().gw.compute(num_workers=num_workers)
-
                 labels_array_copy = labels_array.copy()
-                # Calculate the focal variance
-                edge_compare_sum = focal_compare(labels_array)
                 # Get the field edges
-                edges = np.uint8(
-                    sk_thin(np.pad(
-                        # We expect edges to have < 8 neighbors that match the center pixel
-                        # edge_compare_sum = 9 -> homogenous neighbors
-                        # edge_compare_sum = 8 -> one corner
-                        # edge_compare_sum < 8 -> likely edge
-                        np.uint8((edge_compare_sum > 0) & (edge_compare_sum < 8)),
-                        pad_width=((1, 1), (1, 1)),
-                        mode='edge'
-                    ), max_num_iter=2))[1:-1, 1:-1]
-                # Make the fields binary
-                labels_array = np.where(
-                    labels_array == POLYGON_CROP_CLASS, CROP_CLASS, np.where(
-                        labels_array == POLYGON_FALLOW_CLASS, FALLOW_CLASS, 0
-                    )
-                )
+                edges = polygon_to_array(
+                    (
+                        grid_edges
+                        .boundary
+                        .to_frame(name='geometry')
+                        .reset_index()
+                        .rename(columns={'index': crop_column})
+                    ),
+                    col=crop_column,
+                    data=src_ts,
+                    all_touched=False
+                ).squeeze().gw.compute(num_workers=num_workers)
+                edges[edges > 0] = 1
+                # def save_labels(out_fig: Path):
+                #     import matplotlib.pyplot as plt
+                #     fig, axes = plt.subplots(1, 3, figsize=(6, 5), sharey=True, sharex=True, dpi=300)
+                #     axes = axes.flatten()
+                #     axes[0].imshow(labels_array, interpolation='nearest')
+                #     axes[1].imshow(edge_array, interpolation='nearest')
+                #     axes[2].imshow(test, interpolation='nearest')
+                #     for ax in axes:
+                #         ax.axis('off')
+
+                #     plt.tight_layout()
+                #     plt.savefig(out_fig, dpi=300)
+                # import uuid
+                # fig_dir = Path('figures')
+                # fig_dir.mkdir(exist_ok=True, parents=True)
+                # save_labels(
+                #     out_fig=fig_dir / f'{uuid.uuid4().hex}.png'
+                # )
+                # import ipdb; ipdb.set_trace()
+                # Recode
+                if not keep_crop_classes:
+                    if FALLOW_CLASS != -999:
+                        labels_array = np.where(
+                            labels_array == POLYGON_FALLOW_CLASS, FALLOW_CLASS, np.where(
+                                labels_array == 0, 0, CROP_CLASS
+                            )
+                        )
+                    else:
+                        labels_array = np.where(
+                            labels_array > 0, CROP_CLASS, 0
+                        )
                 # Set edges
                 labels_array[edges == 1] = EDGE_CLASS
-                # Clean-up the thinning outputs
-                labels_array = np.where(
-                    (labels_array_copy == 0) & (labels_array != EDGE_CLASS), 0, labels_array
-                )
-                # Clean-up small fragments
-                frag_sum = focal_stat(
-                    np.uint8((labels_array == CROP_CLASS) | (labels_array == FALLOW_CLASS)),
-                    stat='sum'
-                )
-                labels_array = np.where(
-                    frag_sum < 2, 0, np.where(
-                        frag_sum < 4, EDGE_CLASS, labels_array
-                    )
-                )
-                # Fill interior field gaps
-                # labels_array_binary = fill_field_gaps(labels_array.copy(), reset_edges=False)
-                # labels_array = fill_field_gaps(labels_array, reset_edges=True)
-
+                # No crop pixel should border non-crop
+                labels_array = cleanup_edges(labels_array, labels_array_copy)
                 # Normalize the boundary distances for each segment
                 bdist, ori = normalize_boundary_distances(
-                    np.uint8((labels_array == CROP_CLASS) | (labels_array == FALLOW_CLASS)),
+                    np.uint8((labels_array > 0) & (labels_array != EDGE_CLASS)),
                     grid_edges.geom_type.values[0],
-                    src_ts
+                    src_ts.gw.celly
                 )
+                # def save_labels(out_fig: Path):
+                #     import matplotlib.pyplot as plt
+                #     fig, axes = plt.subplots(2, 2, figsize=(6, 5), sharey=True, sharex=True, dpi=300)
+                #     axes = axes.flatten()
+                #     for ax, im, title in zip(
+                #         axes,
+                #         (labels_array_copy, labels_array, bdist, ori),
+                #         ('Fields', 'Edges', 'Distance', 'Orientation')
+                #     ):
+                #         ax.imshow(im, interpolation='nearest')
+                #         ax.set_title(title)
+                #         ax.axis('off')
+
+                #     plt.tight_layout()
+                #     plt.savefig(out_fig, dpi=300)
+                # import uuid
+                # fig_dir = Path('figures')
+                # fig_dir.mkdir(exist_ok=True, parents=True)
+                # save_labels(
+                #     out_fig=fig_dir / f'{uuid.uuid4().hex}.png'
+                # )
             else:
                 labels_array = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='uint8')
                 bdist = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='float64')
@@ -445,7 +613,9 @@ def create_dataset(
     n_ts: T.Optional[int] = 2,
     data_type: T.Optional[str] = 'boundaries',
     instance_seg: T.Optional[bool] = False,
-    zero_padding: T.Optional[int] = 0
+    zero_padding: T.Optional[int] = 0,
+    crop_column: T.Optional[str] = 'class',
+    keep_crop_classes: T.Optional[bool] = False
 ) -> None:
     """Creates a dataset for training
 
@@ -467,6 +637,9 @@ def create_dataset(
         data_type: The target data type.
         instance_seg: Whether to get instance segmentation mask targets.
         zero_padding: Zero padding to apply.
+        crop_column: The crop column name in the polygon vector files.
+        keep_crop_classes: Whether to keep the crop classes as they are (True) or recode all
+            non-zero classes to crop (False).
     """
     if transforms is None:
         transforms = ['none']
@@ -533,7 +706,9 @@ def create_dataset(
                     offset=offset,
                     grid_edges=grid_edges if nonzero_mask.any() else None,
                     ref_res=ref_res,
-                    resampling=resampling
+                    resampling=resampling,
+                    crop_column=crop_column,
+                    keep_crop_classes=keep_crop_classes
                 )
 
                 if (xvars.shape[1] < 5) or (xvars.shape[2] < 5):
