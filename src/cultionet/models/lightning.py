@@ -318,7 +318,9 @@ class CultioLitModel(pl.LightningModule):
         num_time_features: int = None,
         num_classes: int = 2,
         filters: int = 64,
-        learning_rate: float = 0.001,
+        star_rnn_hidden_dim: int = 64,
+        star_rnn_n_layers: int = 3,
+        learning_rate: float = 1e-3,
         weight_decay: float = 1e-5,
         ckpt_name: str = 'last',
         model_name: str = 'cultionet'
@@ -349,10 +351,12 @@ class CultioLitModel(pl.LightningModule):
             ds_features=num_features,
             ds_time_features=num_time_features,
             filters=filters,
+            star_rnn_hidden_dim=star_rnn_hidden_dim,
+            star_rnn_n_layers=star_rnn_n_layers,
             num_classes=self.num_classes
         )
         self.refine = RefineConv(
-            in_channels=1+self.num_classes*2,
+            in_channels=1+1+2+self.num_classes,
             mid_channels=256,
             out_channels=self.num_classes
         )
@@ -382,6 +386,7 @@ class CultioLitModel(pl.LightningModule):
         distance_ori, distance, edge, crop = self.model(batch)
         crop_r = self.refine(
             torch.cat([
+                distance_ori,
                 distance,
                 F.log_softmax(edge, dim=1),
                 F.log_softmax(crop, dim=1)
