@@ -52,6 +52,7 @@ def create_data_object(
     mask_y: T.Optional[np.ndarray] = None,
     bdist: T.Optional[np.ndarray] = None,
     ori: T.Optional[np.ndarray] = None,
+    zero_padding: T.Optional[int] = 0,
     other: T.Optional[np.ndarray] = None,
     **kwargs
 ) -> Data:
@@ -83,6 +84,7 @@ def create_data_object(
             boxes=boxes,
             box_labels=box_labels,
             box_masks=box_masks,
+            zero_padding=zero_padding,
             **kwargs
         )
     else:
@@ -106,6 +108,7 @@ def create_data_object(
                 boxes=boxes,
                 box_labels=box_labels,
                 box_masks=box_masks,
+                zero_padding=zero_padding,
                 **kwargs
             )
         else:
@@ -127,6 +130,7 @@ def create_data_object(
                 boxes=boxes,
                 box_labels=box_labels,
                 box_masks=box_masks,
+                zero_padding=zero_padding,
                 **kwargs
             )
 
