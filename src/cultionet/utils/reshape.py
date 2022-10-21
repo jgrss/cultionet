@@ -1,5 +1,7 @@
 import typing as T
 
+from ..data.const import CROP_CLASS, FALLOW_CLASS
+
 import numpy as np
 from rasterio.windows import Window
 import attr
@@ -34,21 +36,29 @@ class ModelOutputs(object):
     edge: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     crop: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     crop_r: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
-    instances: np.ndarray = attr.ib(validator=attr.validators.instance_of(np.ndarray))
-    apply_softmax: T.Optional[bool] = attr.ib(default=False, validator=attr.validators.instance_of(bool))
+    instances: T.Optional[T.Union[None, np.ndarray]] = attr.ib(
+        default=None,
+        validator=attr.validators.optional(attr.validators.instance_of(np.ndarray))
+    )
+    apply_softmax: T.Optional[bool] = attr.ib(
+        default=False,
+        validator=attr.validators.instance_of(bool)
+    )
 
     def stack_outputs(self, w: Window, w_pad: Window) -> np.ndarray:
         self.reshape(w, w_pad)
         self.nan_to_num()
-
-        return np.stack((
+        stack_items = (
             self.edge_dist_ori,
             self.edge_dist,
             self.edge_probas,
             self.crop_probas,
-            self.crop_probas_r,
-            self.instances
-        ))
+            self.crop_probas_r
+        )
+        if self.instances is not None:
+            stack_items += (self.instances,)
+
+        return np.stack(stack_items)
 
     @staticmethod
     def _clip_and_reshape(tarray: torch.Tensor, window_obj: Window) -> np.ndarray:
@@ -78,18 +88,18 @@ class ModelOutputs(object):
 
         # Get the crop probabilities
         if self.apply_softmax:
-            self.crop_probas = F.softmax(self.crop, dim=1)[:, 1]
+            self.crop_probas = F.softmax(self.crop, dim=1)[:, CROP_CLASS]
         else:
-            self.crop_probas = self.crop[:, 1]
+            self.crop_probas = self.crop[:, CROP_CLASS]
         self.crop_probas = self._clip_and_reshape(self.crop_probas, w_pad)
 
         if self.apply_softmax:
-            self.crop_probas_r = F.softmax(self.crop_r, dim=1)[:, 1]
+            self.crop_probas_r = F.softmax(self.crop_r, dim=1)[:, CROP_CLASS]
         else:
-            self.crop_probas_r = self.crop_r[:, 1]
+            self.crop_probas_r = self.crop_r[:, CROP_CLASS]
         self.crop_probas_r = self._clip_and_reshape(self.crop_probas_r, w_pad)
 
-        self.instances = self.instances.reshape(w_pad.height, w_pad.width)
+        # TODO: get fallow layer if it exists
 
         # Reshape the window chunk and slice off padding
         i = abs(w.row_off - w_pad.row_off)
@@ -99,7 +109,9 @@ class ModelOutputs(object):
         self.edge_probas = self.edge_probas[i:i+w.height, j:j+w.width]
         self.crop_probas = self.crop_probas[i:i+w.height, j:j+w.width]
         self.crop_probas_r = self.crop_probas_r[i:i+w.height, j:j+w.width]
-        self.instances = self.instances[i:i+w.height, j:j+w.width]
+        if self.instances is not None:
+            self.instances = self.instances.reshape(w_pad.height, w_pad.width)
+            self.instances = self.instances[i:i+w.height, j:j+w.width]
 
     def nan_to_num(self):
         # Convert the data type to integer and set 'no data' values
