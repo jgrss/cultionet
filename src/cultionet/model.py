@@ -40,7 +40,8 @@ def fit_maskrcnn(
     val_frac: T.Optional[float] = 0.2,
     batch_size: T.Optional[int] = 4,
     accumulate_grad_batches: T.Optional[int] = 1,
-    filters: T.Optional[int] = 32,
+    filters: T.Optional[int] = 64,
+    num_classes: T.Optional[int] = 2,
     learning_rate: T.Optional[float] = 0.001,
     epochs: T.Optional[int] = 30,
     save_top_k: T.Optional[int] = 1,
@@ -114,6 +115,7 @@ def fit_maskrcnn(
         cultionet_num_features=train_ds.num_features,
         cultionet_num_time_features=train_ds.num_time_features,
         cultionet_filters=filters,
+        cultionet_num_classes=num_classes,
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         resize_height=resize_height,
@@ -214,7 +216,8 @@ def fit(
     val_frac: T.Optional[float] = 0.2,
     batch_size: T.Optional[int] = 4,
     accumulate_grad_batches: T.Optional[int] = 1,
-    filters: T.Optional[int] = 32,
+    filters: T.Optional[int] = 64,
+    num_classes: T.Optional[int] = 2,
     learning_rate: T.Optional[float] = 0.001,
     epochs: T.Optional[int] = 30,
     save_top_k: T.Optional[int] = 1,
@@ -283,6 +286,7 @@ def fit(
     lit_model = CultioLitModel(
         num_features=train_ds.num_features,
         num_time_features=train_ds.num_time_features,
+        num_classes=num_classes,
         filters=filters,
         learning_rate=learning_rate,
         weight_decay=weight_decay
@@ -377,6 +381,7 @@ def load_model(
     model_file: T.Union[str, Path] = None,
     num_features: T.Optional[int] = None,
     num_time_features: T.Optional[int] = None,
+    num_classes: T.Optional[int] = None,
     filters: T.Optional[int] = None,
     device: T.Union[str, bytes] = 'gpu',
     lit_model: T.Optional[CultioLitModel] = None,
@@ -426,7 +431,8 @@ def load_model(
             lit_model = CultioLitModel(
                 num_features=num_features,
                 num_time_features=num_time_features,
-                filters=filters
+                filters=filters,
+                num_classes=num_classes
             )
             lit_model.load_state_dict(state_dict=torch.load(model_file))
         else:
