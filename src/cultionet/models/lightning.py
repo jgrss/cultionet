@@ -37,6 +37,7 @@ class MaskRCNNLitModel(pl.LightningModule):
         cultionet_num_features: int,
         cultionet_num_time_features: int,
         cultionet_filters: int,
+        cultionet_num_classes: int,
         ckpt_name: str = 'maskrcnn',
         model_name: str = 'maskrcnn',
         learning_rate: float = 0.001,
@@ -70,7 +71,8 @@ class MaskRCNNLitModel(pl.LightningModule):
         self.cultionet_model = CultioLitModel(
             num_features=cultionet_num_features,
             num_time_features=cultionet_num_time_features,
-            filters=cultionet_filters
+            filters=cultionet_filters,
+            num_classes=cultionet_num_classes
         )
         self.cultionet_model.load_state_dict(
             state_dict=torch.load(cultionet_model_file)
@@ -314,6 +316,7 @@ class CultioLitModel(pl.LightningModule):
         self,
         num_features: int = None,
         num_time_features: int = None,
+        num_classes: int = 2,
         filters: int = 64,
         learning_rate: float = 0.001,
         weight_decay: float = 1e-5,
@@ -336,9 +339,10 @@ class CultioLitModel(pl.LightningModule):
         self.model_name = model_name
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
-        self.num_classes = 2
-        self.edge_value = 2
-        self.crop_value = 1
+        # 0 = background
+        # 1 = crop
+        # 2 = [optional] fallow
+        self.num_classes = num_classes
         self.num_time_features = num_time_features
 
         self.model = CultioGraphNet(
@@ -371,11 +375,11 @@ class CultioLitModel(pl.LightningModule):
             crop: Probability of crop [0,1].
             crop_r: Probability of refined crop [0,1].
         """
-        distance_ori, distance, edge, crop = self.model(batch)
         height = int(batch.height) if batch.batch is None else int(batch.height[0])
         width = int(batch.width) if batch.batch is None else int(batch.width[0])
         batch_size = 1 if batch.batch is None else batch.batch.unique().size(0)
 
+        distance_ori, distance, edge, crop = self.model(batch)
         crop_r = self.refine(
             torch.cat([
                 distance,
@@ -448,32 +452,93 @@ class CultioLitModel(pl.LightningModule):
 
         Reference:
             @article{waldner2020deep,
-              title={Deep learning on edge: Extracting field boundaries from satellite images with a convolutional neural network},
-              author={Waldner, Fran{\c{c}}ois and Diakogiannis, Foivos I},
-              journal={Remote Sensing of Environment},
-              volume={245},
-              pages={111741},
-              year={2020},
-              publisher={Elsevier}
+                title={
+                    Deep learning on edge: Extracting field boundaries from
+                    satellite images with a convolutional neural network
+                },
+                author={Waldner, Fran{\c{c}}ois and Diakogiannis, Foivos I},
+                journal={Remote Sensing of Environment},
+                volume={245},
+                pages={111741},
+                year={2020},
+                publisher={Elsevier}
             }
         """
         if self.volume.device != self.device:
             self.configure_loss()
 
+        # height = int(batch.height) if batch.batch is None else int(batch.height[0])
+        # width = int(batch.width) if batch.batch is None else int(batch.width[0])
+
         distance_ori, distance, edge, crop, crop_r = self(batch)
+
+        # true_ori = batch.ori
+        # true_dist = batch.bdist
+        # true_y = batch.y
+        # if hasattr(batch, 'zero_padding'):
+        #     zero_padding = int(batch.zero_padding) if batch.zero_padding is None else int(batch.zero_padding[0])
+        #     if zero_padding > 0:
+        #         slicer = (
+        #             slice(zero_padding, -zero_padding),
+        #             slice(zero_padding, -zero_padding)
+        #         )
+        #         distance_ori_slice = torch.tensor([], device=self.device, dtype=distance_ori.dtype)
+        #         distance_slice = torch.tensor([], device=self.device, dtype=distance.dtype)
+        #         edge_slice = torch.tensor([], device=self.device, dtype=edge.dtype)
+        #         crop_slice = torch.tensor([], device=self.device, dtype=crop.dtype)
+        #         crop_r_slice = torch.tensor([], device=self.device, dtype=crop_r.dtype)
+
+        #         true_ori = torch.tensor([], device=self.device, dtype=distance_ori.dtype)
+        #         true_dist = torch.tensor([], device=self.device, dtype=distance.dtype)
+        #         true_y = torch.tensor([], device=self.device, dtype=crop.dtype)
+        #         for batch_val in batch.batch.unique():
+        #             distance_ori_s = distance_ori[batch.batch == batch_val].reshape((height, width))[slicer]
+        #             distance_s = distance[batch.batch == batch_val].reshape((height, width))[slicer]
+        #             edge_s = edge[batch.batch == batch_val][:, 1].reshape((height, width))[slicer]
+        #             crop_s = crop[batch.batch == batch_val][:, 1].reshape((height, width))[slicer]
+        #             crop_r_s = crop_r[batch.batch == batch_val][:, 1].reshape((height, width))[slicer]
+
+        #             distance_ori_slice = torch.cat([distance_ori_slice, distance_ori_s.contiguous().view(-1)])
+        #             distance_slice = torch.cat([distance_slice, distance_s.contiguous().view(-1)])
+        #             edge_slice = torch.cat([edge_slice, edge_s.contiguous().view(-1)])
+        #             crop_slice = torch.cat([crop_slice, crop_s.contiguous().view(-1)])
+        #             crop_r_slice = torch.cat([crop_r_slice, crop_r_s.contiguous().view(-1)])
+
+        #             true_ori = torch.cat(
+        #                 (
+        #                     true_ori,
+        #                     batch.ori[batch.batch == batch_val].half().reshape((height, width))[slicer].contiguous().view(-1)
+        #                 )
+        #             )
+        #             true_dist = torch.cat(
+        #                 (
+        #                     true_dist,
+        #                     batch.bdist[batch.batch == batch_val].half().reshape((height, width))[slicer].contiguous().view(-1)
+        #                 )
+        #             )
+        #             true_y = torch.cat(
+        #                 (
+        #                     true_y,
+        #                     batch.y[batch.batch == batch_val].half().reshape((height, width))[slicer].contiguous().view(-1)
+        #                 )
+        #             )
+
+        #         distance_ori = distance_ori_slice
+        #         distance = distance_slice
+        #         edge = edge_slice
+        #         edge = torch.stack((1-edge_slice, edge_slice), dim=1)
+        #         crop = torch.stack((1-crop_slice, crop_slice), dim=1)
+        #         crop_r = torch.stack((1-crop_r_slice, crop_r_slice), dim=1)
+
+        true_edge = (batch.y == EDGE_CLASS).long()
+        # in case of multi-class, `true_crop` = 1, 2, etc.
+        true_crop = torch.where(batch.y == EDGE_CLASS, 0, batch.y).long()
 
         oloss = self.dloss(distance_ori, batch.ori)
         dloss = self.dloss(distance, batch.bdist)
-        eloss = self.eloss(edge, (batch.y == EDGE_CLASS).long())
-        # Recode classes in case of multiple cases
-        classes = torch.where(batch.y == EDGE_CLASS, 0, batch.y)
-        for cidx, class_val in enumerate(
-            batch.y[(batch.y > 0) & (batch.y != EDGE_CLASS)].unique(),
-            start=1
-        ):
-            classes[batch.y == class_val] = cidx
-        closs = self.closs(crop, classes.long())
-        crop_r_loss = self.closs(crop_r, classes.long())
+        eloss = self.eloss(edge, true_edge)
+        closs = self.closs(crop, true_crop)
+        crop_r_loss = self.closs(crop_r, true_crop)
 
         loss = oloss + dloss + eloss + closs + crop_r_loss
         loss = loss / 5.0
@@ -502,14 +567,12 @@ class CultioLitModel(pl.LightningModule):
         # Take the argmax of the class probabilities
         edge_ypred = edge.argmax(dim=1)
         class_ypred_r = crop_r.argmax(dim=1)
-
         # F1-score
-        edge_score = self.scorer(edge_ypred, batch.y.eq(self.edge_value).long())
-        class_score = self.scorer(class_ypred_r, batch.y.eq(self.crop_value).long())
-
+        edge_score = self.scorer(edge_ypred, batch.y.eq(EDGE_CLASS).long())
+        class_score = self.scorer(class_ypred_r, batch.y.eq(CROP_CLASS).long())
         # MCC
-        edge_mcc = self.mcc(edge_ypred, batch.y.eq(self.edge_value).long())
-        class_mcc = self.mcc(class_ypred_r, batch.y.eq(self.crop_value).long())
+        edge_mcc = self.mcc(edge_ypred, batch.y.eq(EDGE_CLASS).long())
+        class_mcc = self.mcc(class_ypred_r, batch.y.eq(CROP_CLASS).long())
 
         metrics = {
             'loss': loss,
