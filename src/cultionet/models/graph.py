@@ -60,6 +60,9 @@ class GraphFinal(torch.nn.Module):
         conv2 = nn.TransformerConv(
             mid_channels, out_channels, heads=1, edge_dim=2, dropout=0.1
         )
+        batchnorm_layer = torch.nn.BatchNorm2d(mid_channels)
+        dropout_layer = torch.nn.Dropout(dropout)
+        activate_layer = torch.nn.ReLU(inplace=False)
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
@@ -68,15 +71,15 @@ class GraphFinal(torch.nn.Module):
             'x, edge_index, edge_weight, edge_weight2d',
             [
                 (conv2d_1, 'x -> h1'),
-                (torch.nn.BatchNorm2d(mid_channels), 'h1 -> h1'),
-                (torch.nn.ReLU(inplace=False), 'h1 -> h1'),
+                (batchnorm_layer, 'h1 -> h1'),
+                (activate_layer, 'h1 -> h1'),
                 (conv2d_2, 'h1 -> h'),
-                (torch.nn.BatchNorm2d(mid_channels), 'h -> h'),
-                (torch.nn.ReLU(inplace=False), 'h -> h'),
-                (torch.nn.Dropout(dropout), 'h -> h'),
+                (batchnorm_layer, 'h -> h'),
+                (activate_layer, 'h -> h'),
+                (dropout_layer, 'h -> h'),
                 (conv2d_2, 'h -> h'),
-                (torch.nn.BatchNorm2d(mid_channels), 'h -> h'),
-                (torch.nn.ReLU(inplace=False), 'h -> h'),
+                (batchnorm_layer, 'h -> h'),
+                (activate_layer, 'h -> h'),
                 (self.add_res, 'h1, h -> h'),
                 (self.cg, 'h -> h'),
                 (conv1, 'h, edge_index, edge_weight -> h'),

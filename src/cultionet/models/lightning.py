@@ -476,64 +476,6 @@ class CultioLitModel(pl.LightningModule):
 
         distance_ori, distance, edge, crop, crop_r = self(batch)
 
-        # true_ori = batch.ori
-        # true_dist = batch.bdist
-        # true_y = batch.y
-        # if hasattr(batch, 'zero_padding'):
-        #     zero_padding = int(batch.zero_padding) if batch.zero_padding is None else int(batch.zero_padding[0])
-        #     if zero_padding > 0:
-        #         slicer = (
-        #             slice(zero_padding, -zero_padding),
-        #             slice(zero_padding, -zero_padding)
-        #         )
-        #         distance_ori_slice = torch.tensor([], device=self.device, dtype=distance_ori.dtype)
-        #         distance_slice = torch.tensor([], device=self.device, dtype=distance.dtype)
-        #         edge_slice = torch.tensor([], device=self.device, dtype=edge.dtype)
-        #         crop_slice = torch.tensor([], device=self.device, dtype=crop.dtype)
-        #         crop_r_slice = torch.tensor([], device=self.device, dtype=crop_r.dtype)
-
-        #         true_ori = torch.tensor([], device=self.device, dtype=distance_ori.dtype)
-        #         true_dist = torch.tensor([], device=self.device, dtype=distance.dtype)
-        #         true_y = torch.tensor([], device=self.device, dtype=crop.dtype)
-        #         for batch_val in batch.batch.unique():
-        #             distance_ori_s = distance_ori[batch.batch == batch_val].reshape((height, width))[slicer]
-        #             distance_s = distance[batch.batch == batch_val].reshape((height, width))[slicer]
-        #             edge_s = edge[batch.batch == batch_val][:, 1].reshape((height, width))[slicer]
-        #             crop_s = crop[batch.batch == batch_val][:, 1].reshape((height, width))[slicer]
-        #             crop_r_s = crop_r[batch.batch == batch_val][:, 1].reshape((height, width))[slicer]
-
-        #             distance_ori_slice = torch.cat([distance_ori_slice, distance_ori_s.contiguous().view(-1)])
-        #             distance_slice = torch.cat([distance_slice, distance_s.contiguous().view(-1)])
-        #             edge_slice = torch.cat([edge_slice, edge_s.contiguous().view(-1)])
-        #             crop_slice = torch.cat([crop_slice, crop_s.contiguous().view(-1)])
-        #             crop_r_slice = torch.cat([crop_r_slice, crop_r_s.contiguous().view(-1)])
-
-        #             true_ori = torch.cat(
-        #                 (
-        #                     true_ori,
-        #                     batch.ori[batch.batch == batch_val].half().reshape((height, width))[slicer].contiguous().view(-1)
-        #                 )
-        #             )
-        #             true_dist = torch.cat(
-        #                 (
-        #                     true_dist,
-        #                     batch.bdist[batch.batch == batch_val].half().reshape((height, width))[slicer].contiguous().view(-1)
-        #                 )
-        #             )
-        #             true_y = torch.cat(
-        #                 (
-        #                     true_y,
-        #                     batch.y[batch.batch == batch_val].half().reshape((height, width))[slicer].contiguous().view(-1)
-        #                 )
-        #             )
-
-        #         distance_ori = distance_ori_slice
-        #         distance = distance_slice
-        #         edge = edge_slice
-        #         edge = torch.stack((1-edge_slice, edge_slice), dim=1)
-        #         crop = torch.stack((1-crop_slice, crop_slice), dim=1)
-        #         crop_r = torch.stack((1-crop_r_slice, crop_r_slice), dim=1)
-
         true_edge = (batch.y == EDGE_CLASS).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.
         true_crop = torch.where(batch.y == EDGE_CLASS, 0, batch.y).long()
