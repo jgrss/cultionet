@@ -28,24 +28,30 @@ class ResConv(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.conv(x) + x
-    
+
 
 class DoubleConv(torch.nn.Module):
     """A double convolution layer
     """
-    def __init__(self, in_channels: int, mid_channels: int, out_channels: int):
+    def __init__(
+        self,
+        in_channels: int,
+        mid_channels: int,
+        out_channels: int,
+        alpha: float = 0.1
+    ):
         super(DoubleConv, self).__init__()
 
         self.seq = torch.nn.Sequential(
             torch.nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
             torch.nn.BatchNorm2d(mid_channels),
-            torch.nn.ELU(alpha=0.1, inplace=False),
+            torch.nn.ELU(alpha=alpha, inplace=False),
             ResConv(mid_channels, mid_channels, kernel_size=3, padding=2, dilation=2),
             torch.nn.BatchNorm2d(mid_channels),
-            torch.nn.ELU(alpha=0.1, inplace=False),
+            torch.nn.ELU(alpha=alpha, inplace=False),
             ResConv(mid_channels, out_channels, kernel_size=3, padding=3, dilation=3),
             torch.nn.BatchNorm2d(out_channels),
-            torch.nn.ELU(alpha=0.1, inplace=False)
+            torch.nn.ELU(alpha=alpha, inplace=False)
         )
 
     def __call__(self, *args, **kwargs):
