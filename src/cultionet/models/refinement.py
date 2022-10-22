@@ -32,23 +32,20 @@ class RefineConv(torch.nn.Module):
         self.seq = nn.Sequential(
             'x',
             [
-                (conv2d_1, 'x -> h'),
-                (torch.nn.BatchNorm2d(mid_channels), 'h -> h'),
-                (torch.nn.ELU(alpha=0.1, inplace=False), 'h -> h'),
-                (conv2d_2, 'h -> h'),
-                (torch.nn.BatchNorm2d(mid_channels), 'h -> h'),
-                (torch.nn.ELU(alpha=0.1, inplace=False), 'h -> h'),
-                (torch.nn.Dropout(dropout), 'h -> h'),
-                (conv2d_2, 'h -> h'),
-                (torch.nn.BatchNorm2d(mid_channels), 'h -> h'),
-                (torch.nn.ReLU(inplace=False), 'h -> h'),
-                (torch.nn.Dropout(dropout), 'h -> h'),
-                (conv2d_3, 'h -> h')
+                (conv2d_1, 'x -> x'),
+                (torch.nn.BatchNorm2d(mid_channels), 'x -> x'),
+                (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x'),
+                (conv2d_2, 'x -> x'),
+                (torch.nn.BatchNorm2d(mid_channels), 'x -> x'),
+                (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x'),
+                (torch.nn.Dropout(dropout), 'x -> x'),
+                (conv2d_2, 'x -> x'),
+                (torch.nn.BatchNorm2d(mid_channels), 'x -> x'),
+                (torch.nn.ReLU(inplace=False), 'x -> x'),
+                (torch.nn.Dropout(dropout), 'x -> x'),
+                (conv2d_3, 'x -> x')
             ]
         )
-
-    def add_res(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
-        return h1 + h2
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
