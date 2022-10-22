@@ -542,10 +542,10 @@ class CultioLitModel(pl.LightningModule):
         dloss = self.dloss(distance, batch.bdist)
         eloss = self.eloss(edge, true_edge)
         closs = self.closs(crop, true_crop)
-        crop_r_loss = self.closs(crop_r, true_crop)
+        crloss = self.closs(crop_r, true_crop)
 
-        loss = oloss + dloss + eloss + closs + crop_r_loss
-        loss = loss / 5.0
+        loss = oloss*0.5 + dloss*0.75 + eloss + closs + crloss
+        loss = loss / 4.25
 
         return loss
 
