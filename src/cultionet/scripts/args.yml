@@ -406,3 +406,9 @@ predict:
     help: The compression algorithm to use
     kwargs:
       default: lzw
+  include_maskrcnn:
+    short: ''
+    long: include-maskrcnn
+    help: Whether to include Mask R-CNN
+    kwargs:
+      action: store_true
