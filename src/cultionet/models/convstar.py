@@ -136,17 +136,6 @@ class StarRNN(torch.nn.Module):
         self.nstage = nstage
         self.cell = cell
 
-        # if self.cell == 'gru':
-        #     self.rnn = ConvGRU(input_size=input_dim,
-        #                        hidden_sizes=hidden_dim,
-        #                        kernel_sizes=kernel_size[0],
-        #                        n_layers=n_layers)
-        # elif self.cell == 'star_res':
-        #     self.rnn = ConvSTAR_Res(input_size=input_dim,
-        #                             hidden_sizes=hidden_dim,
-        #                             kernel_sizes=kernel_size[0],
-        #                             n_layers=n_layers)
-        # else:
         self.rnn = ConvSTAR(
             input_size=input_dim,
             hidden_sizes=hidden_dim,
@@ -154,7 +143,8 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
 
-        self.final = torch.nn.Conv2d(hidden_dim, nclasses, (3, 3), padding=1)
+        self.reduce = torch.nn.Conv2d(hidden_dim, nclasses, (3, 3), padding=1)
+        self.final = torch.nn.Conv2d(nclasses*n_layers, nclasses, (3, 3), padding=1)
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -176,21 +166,11 @@ class StarRNN(torch.nn.Module):
         for iter in range(t):
             hidden_s = self.rnn.forward(x[:, :, iter, :, :], hidden_s)
 
-        # if self.n_layers == 3:
-        #     local_1 = hidden_s[0]
-        #     local_2 = hidden_s[1]
-        # elif self.nstage == 3:
-        #     local_1 = hidden_s[1]
-        #     local_2 = hidden_s[3]
-        # elif self.nstage == 2:
-        #     local_1 = hidden_s[1]
-        #     local_2 = hidden_s[2]
-        # elif self.nstage == 1:
-        #     local_1 = hidden_s[-1]
-        #     local_2 = hidden_s[-1]
-
-        last = hidden_s[-1]
-        last = self.final(last)
+        # last = hidden_s[-1]
+        last = []
+        for hidden_layer in hidden_s:
+            last.append(self.reduce(hidden_layer))
+        last = self.final(torch.cat(last, dim=1))
 
         # The output is (B x C x H x W)
         return last

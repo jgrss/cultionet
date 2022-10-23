@@ -32,7 +32,7 @@ class GraphMid(torch.nn.Module):
         )
 
 
-class GraphFinal(torch.nn.Module):
+class EdgeFinal(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -40,7 +40,7 @@ class GraphFinal(torch.nn.Module):
         out_channels: int,
         dropout: float = 0.1
     ):
-        super(GraphFinal, self).__init__()
+        super(EdgeFinal, self).__init__()
 
         conv2d_1 = torch.nn.Conv2d(
             in_channels,
@@ -60,7 +60,8 @@ class GraphFinal(torch.nn.Module):
         conv2 = nn.TransformerConv(
             mid_channels, out_channels, heads=1, edge_dim=2, dropout=0.1
         )
-        batchnorm_layer = torch.nn.BatchNorm2d(mid_channels)
+        batchnorm2d_layer = torch.nn.BatchNorm2d(mid_channels)
+        batchnorm_layer = nn.BatchNorm(in_channels=mid_channels)
         dropout_layer = torch.nn.Dropout(dropout)
         activate_layer = torch.nn.ReLU(inplace=False)
 
@@ -71,19 +72,20 @@ class GraphFinal(torch.nn.Module):
             'x, edge_index, edge_weight, edge_weight2d',
             [
                 (conv2d_1, 'x -> h1'),
-                (batchnorm_layer, 'h1 -> h1'),
+                (batchnorm2d_layer, 'h1 -> h1'),
                 (activate_layer, 'h1 -> h1'),
                 (conv2d_2, 'h1 -> h'),
-                (batchnorm_layer, 'h -> h'),
+                (batchnorm2d_layer, 'h -> h'),
                 (activate_layer, 'h -> h'),
                 (dropout_layer, 'h -> h'),
                 (conv2d_2, 'h -> h'),
-                (batchnorm_layer, 'h -> h'),
+                (batchnorm2d_layer, 'h -> h'),
                 (activate_layer, 'h -> h'),
                 (self.add_res, 'h1, h -> h'),
                 (self.cg, 'h -> h'),
                 (conv1, 'h, edge_index, edge_weight -> h'),
-                (nn.BatchNorm(in_channels=mid_channels), 'h -> h'),
+                (batchnorm_layer, 'h -> h'),
+                (activate_layer, 'h -> h'),
                 (conv2, 'h, edge_index, edge_weight2d -> h')
             ]
         )
@@ -106,6 +108,46 @@ class GraphFinal(torch.nn.Module):
         nbatch = 1 if batch is None else batch.unique().size(0)
         x = self.gc(x, nbatch, nrows, ncols)
 
+        return self.seq(
+            x, edge_index, edge_attrs[:, 1], edge_attrs
+        )
+
+
+class CropFinal(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        mid_channels: int,
+        out_channels: int
+    ):
+        super(CropFinal, self).__init__()
+
+        conv1 = nn.GCNConv(in_channels, mid_channels, improved=True)
+        conv2 = nn.TransformerConv(
+            mid_channels, out_channels, heads=1, edge_dim=2, dropout=0.1
+        )
+        batchnorm_layer = nn.BatchNorm(mid_channels)
+        activate_layer = torch.nn.ELU(alpha=0.1, inplace=False)
+
+        self.seq = nn.Sequential(
+            'x, edge_index, edge_weight, edge_weight2d',
+            [
+                (conv1, 'x, edge_index, edge_weight -> h'),
+                (batchnorm_layer, 'h -> h'),
+                (activate_layer, 'h -> h'),
+                (conv2, 'h, edge_index, edge_weight2d -> h')
+            ]
+        )
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_attrs: torch.Tensor
+    ) -> torch.Tensor:
         return self.seq(
             x, edge_index, edge_attrs[:, 1], edge_attrs
         )

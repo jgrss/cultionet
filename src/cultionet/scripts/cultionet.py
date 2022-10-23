@@ -148,7 +148,7 @@ def get_image_list(
         if len(ts_list) <= 1:
             continue
 
-        image_list += ts_list#[::2]
+        image_list += ts_list[::2]
 
     return image_list
 

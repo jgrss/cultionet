@@ -28,21 +28,24 @@ class RefineConv(torch.nn.Module):
         conv2d_3 = torch.nn.Conv2d(
             mid_channels, out_channels, kernel_size=1, padding=0, bias=False, padding_mode='replicate'
         )
+        batchnorm_layer = torch.nn.BatchNorm2d(mid_channels)
+        dropout_layer = torch.nn.Dropout(dropout)
+        activate_layer = torch.nn.ELU(alpha=0.1, inplace=False)
 
         self.seq = nn.Sequential(
             'x',
             [
                 (conv2d_1, 'x -> x'),
-                (torch.nn.BatchNorm2d(mid_channels), 'x -> x'),
-                (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x'),
+                (batchnorm_layer, 'x -> x'),
+                (activate_layer, 'x -> x'),
                 (conv2d_2, 'x -> x'),
-                (torch.nn.BatchNorm2d(mid_channels), 'x -> x'),
-                (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x'),
-                (torch.nn.Dropout(dropout), 'x -> x'),
+                (batchnorm_layer, 'x -> x'),
+                (activate_layer, 'x -> x'),
+                (dropout_layer, 'x -> x'),
                 (conv2d_2, 'x -> x'),
-                (torch.nn.BatchNorm2d(mid_channels), 'x -> x'),
-                (torch.nn.ReLU(inplace=False), 'x -> x'),
-                (torch.nn.Dropout(dropout), 'x -> x'),
+                (batchnorm_layer, 'x -> x'),
+                (activate_layer, 'x -> x'),
+                (dropout_layer, 'x -> x'),
                 (conv2d_3, 'x -> x')
             ]
         )

@@ -1,4 +1,5 @@
 from . import model_utils
+from .base_layers import DoubleConv
 from .nunet import ResConv
 
 import torch
@@ -14,10 +15,17 @@ class GraphRegressionLayer(torch.nn.Module):
         in_channels: int,
         mid_channels: int,
         out_channels: int,
-        dropout: float = 0.1
+        dropout: float = 0.1,
+        alpha: float = 0.1
     ):
         super(GraphRegressionLayer, self).__init__()
 
+        # conv2d = DoubleConv(
+        #     in_channels=in_channels,
+        #     mid_channels=mid_channels,
+        #     out_channels=mid_channels,
+        #     alpha=alpha
+        # )
         conv2d_1 = torch.nn.Conv2d(
             in_channels,
             mid_channels,
@@ -36,27 +44,35 @@ class GraphRegressionLayer(torch.nn.Module):
         conv2 = nn.TransformerConv(
             mid_channels, mid_channels, heads=1, edge_dim=2, dropout=0.1
         )
+        batchnorm2d_layer = torch.nn.BatchNorm2d(mid_channels)
+        batchnorm_layer = nn.BatchNorm(in_channels=mid_channels)
+        dropout_layer = torch.nn.Dropout(dropout)
+        activate_layer1 = torch.nn.ReLU(inplace=False)
+        activate_layer2 = torch.nn.ELU(alpha=alpha, inplace=False)
+        lin_layer = torch.nn.Linear(mid_channels, out_channels)
+
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
+        # Added extra dropout and converted 1d to
         self.seq = nn.Sequential(
             'x, edge_index, edge_weight, edge_weight2d',
             [
                 (conv2d_1, 'x -> x'),
-                (torch.nn.BatchNorm2d(mid_channels), 'x -> x'),
-                (torch.nn.ReLU(inplace=False), 'x -> x'),
+                (batchnorm2d_layer, 'x -> x'),
+                (activate_layer1, 'x -> x'),
                 (conv2d_2, 'x -> x'),
-                (torch.nn.BatchNorm2d(mid_channels), 'x -> x'),
-                (torch.nn.ReLU(inplace=False), 'x -> x'),
-                (torch.nn.Dropout(dropout), 'x -> x'),
+                (batchnorm2d_layer, 'x -> x'),
+                (activate_layer1, 'x -> x'),
+                (dropout_layer, 'x -> x'),
                 (self.cg, 'x -> x'),
                 (conv1, 'x, edge_index, edge_weight -> x'),
-                (nn.BatchNorm(in_channels=mid_channels), 'x -> x'),
-                (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x'),
+                (batchnorm_layer, 'x -> x'),
+                (activate_layer2, 'x -> x'),
                 (conv2, 'x, edge_index, edge_weight2d -> x'),
-                (nn.BatchNorm(in_channels=mid_channels), 'x -> x'),
-                (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x'),
-                (torch.nn.Linear(mid_channels, out_channels), 'x -> x')
+                (batchnorm_layer, 'x -> x'),
+                (activate_layer2, 'x -> x'),
+                (lin_layer, 'x -> x')
             ]
         )
 

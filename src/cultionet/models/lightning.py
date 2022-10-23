@@ -319,7 +319,7 @@ class CultioLitModel(pl.LightningModule):
         num_classes: int = 2,
         filters: int = 64,
         star_rnn_hidden_dim: int = 64,
-        star_rnn_n_layers: int = 4,
+        star_rnn_n_layers: int = 3,
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-5,
         ckpt_name: str = 'last',
@@ -388,13 +388,12 @@ class CultioLitModel(pl.LightningModule):
             torch.cat([
                 distance,
                 F.log_softmax(edge, dim=1),
-                F.log_softmax(crop, dim=1)
+                F.log_softmax(crop, dim=1),
             ], dim=1),
             batch_size,
             height,
             width
         )
-
         # Transform edge and crop logits to probabilities
         edge = F.softmax(edge, dim=1)
         crop = F.softmax(crop, dim=1)
@@ -471,9 +470,6 @@ class CultioLitModel(pl.LightningModule):
         if self.volume.device != self.device:
             self.configure_loss()
 
-        # height = int(batch.height) if batch.batch is None else int(batch.height[0])
-        # width = int(batch.width) if batch.batch is None else int(batch.width[0])
-
         distance_ori, distance, edge, crop, crop_r = self(batch)
 
         true_edge = (batch.y == EDGE_CLASS).long()
@@ -487,7 +483,6 @@ class CultioLitModel(pl.LightningModule):
         crloss = self.closs(crop_r, true_crop)
 
         loss = oloss*0.5 + dloss*0.75 + eloss + closs + crloss
-        loss = loss / 4.25
 
         return loss
 
