@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.4.0 (2022-10-24)
+* Added spatial k-fold cross-validation ([#35](https://github.com/jgrss/cultionet/pull/35))
+
 ## v1.3.3 (2022-10-19)
 * Re-added serial predictions over CPU or GPU ([#34](https://github.com/jgrss/cultionet/pull/34))
 
