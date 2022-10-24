@@ -46,7 +46,7 @@ class DoubleConv(torch.nn.Module):
         conv3 = ResConv(mid_channels, out_channels, kernel_size=3, padding=3, dilation=3)
         batchnorm_layer = torch.nn.BatchNorm2d(mid_channels)
         batchnorm_last_layer = torch.nn.BatchNorm2d(out_channels)
-        activate_layer = torch.nn.ELU(alpha=0.1, inplace=False)
+        activate_layer = torch.nn.SiLU(inplace=False)
 
         self.seq = torch.nn.Sequential(
             conv1,
