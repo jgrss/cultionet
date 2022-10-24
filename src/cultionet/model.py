@@ -2,6 +2,7 @@ from statistics import mode
 import typing as T
 from pathlib import Path
 import logging
+import json
 
 import numpy as np
 
@@ -209,6 +210,10 @@ def fit_maskrcnn(
             )
 
 
+def spatial_kfoldcv():
+    pass
+
+
 def fit(
     dataset: EdgeDataset,
     ckpt_file: T.Union[str, Path],
@@ -374,6 +379,11 @@ def fit(
                 dataloaders=data_module.test_dataloader(),
                 ckpt_path='last'
             )
+            logged_metrics = trainer.logged_metrics
+            for k, v in logged_metrics.items():
+                logged_metrics[k] = float(v)
+            with open(Path(trainer.logger.save_dir) / 'last.test', mode='w') as f:
+                f.write(json.dumps(logged_metrics))
 
 
 def load_model(

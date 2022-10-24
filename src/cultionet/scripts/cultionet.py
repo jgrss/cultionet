@@ -963,7 +963,7 @@ def main():
     )
 
     subparsers = parser.add_subparsers(dest='process')
-    available_processes = ['create', 'train', 'maskrcnn', 'predict', 'version']
+    available_processes = ['create', 'skfoldcv', 'train', 'maskrcnn', 'predict', 'version']
     for process in available_processes:
         subparser = subparsers.add_parser(process)
 
@@ -978,7 +978,7 @@ def main():
         )
 
         process_dict = args_config[process]
-        if process == 'maskrcnn':
+        if process in ('skfoldcv', 'maskrcnn'):
             process_dict.update(args_config['train'])
         if process in ('train', 'maskrcnn', 'predict'):
             process_dict.update(args_config['train_predict'])
@@ -1018,6 +1018,8 @@ def main():
 
     if args.process == 'create':
         create_datasets(args)
+    elif args.process == 'skfoldcv':
+        spatial_kfoldcv(args)
     elif args.process == 'train':
         train_model(args)
     elif args.process == 'maskrcnn':
