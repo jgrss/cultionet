@@ -273,7 +273,7 @@ class BlockWriter(object):
         stack = cultionet.predict(
             lit_model=self.lit_model,
             data=data,
-            written=self.dst.read(self.bands[-1], window=w_pad),
+            # written=self.dst.read(self.bands[-1], window=w_pad),
             data_values=self.data_values,
             w=w,
             w_pad=w_pad,
@@ -322,9 +322,9 @@ class WriterModule(BlockWriter):
         self.device = device
         self.scale_factor = scale_factor
         self.include_maskrcnn = include_maskrcnn
-        self.bands = [1, 2, 3, 4, 5]
+        self.bands = [1, 2, 3, 4]
         if self.include_maskrcnn:
-            self.bands.append(6)
+            self.bands.append(5)
 
         self.lit_model = cultionet.load_model(
             ckpt_file=self.ppaths.ckpt_file,
@@ -501,7 +501,7 @@ def predict_image(args):
             'transform': src_ts.gw.transform,
             'height': height,
             'width': width,
-            'count': 6 if args.include_maskrcnn else 5,
+            'count': 5 if args.include_maskrcnn else 4,
             'dtype': 'uint16',
             'blockxsize': 64 if 64 < width else width,
             'blockysize': 64 if 64 < height else height,

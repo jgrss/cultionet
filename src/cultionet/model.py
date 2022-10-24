@@ -478,14 +478,13 @@ def predict(
         norm_batch = norm_batch.to('cuda')
         lit_model = lit_model.to('cuda')
     with torch.no_grad():
-        distance_ori, distance, edge, crop, crop_r = lit_model(norm_batch)
+        distance_ori, distance, edge, crop = lit_model(norm_batch)
         if include_maskrcnn:
             # TODO: fix this -- separate Mask R-CNN model
             predictions = lit_model.mask_forward(
                 distance_ori=distance_ori,
                 distance=distance,
                 edge=edge,
-                crop_r=crop_r,
                 height=norm_batch.height,
                 width=norm_batch.width,
                 batch=None
@@ -519,8 +518,8 @@ def predict(
                     .numpy()
                     .reshape(norm_batch.height, norm_batch.width)
                 )
-                crop_r_mask = (
-                    crop_r[:, 1]
+                crop_mask = (
+                    crop[:, 1]
                     .detach()
                     .cpu()
                     .numpy()
@@ -548,7 +547,7 @@ def predict(
                         (lyr > 0.5)
                         & (distance_mask > 0.1)
                         & (edge_mask < 0.5)
-                        & (crop_r_mask > 0.5)
+                        & (crop_mask > 0.5)
                     )
                     if written[conditional].max() > 0:
                         uid = int(sci_mode(written[conditional]).mode)
@@ -567,7 +566,6 @@ def predict(
         distance=distance,
         edge=edge,
         crop=crop,
-        crop_r=crop_r,
         instances=instances,
         apply_softmax=False
     )
