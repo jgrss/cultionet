@@ -488,8 +488,8 @@ class CultioLitModel(pl.LightningModule):
         edge_score = self.scorer(edge_ypred, batch.y.eq(EDGE_CLASS).long())
         class_score = self.scorer(class_ypred, batch.y.eq(CROP_CLASS).long())
         # MCC
-        edge_mcc = self.mcc(edge_ypred, batch.y.eq(EDGE_CLASS).long())
-        class_mcc = self.mcc(class_ypred, batch.y.eq(CROP_CLASS).long())
+        edge_mcc = self.edge_mcc(edge_ypred, batch.y.eq(EDGE_CLASS).long())
+        class_mcc = self.crop_mcc(class_ypred, batch.y.eq(CROP_CLASS).long())
 
         metrics = {
             'loss': loss,
@@ -540,7 +540,10 @@ class CultioLitModel(pl.LightningModule):
 
     def configure_scorer(self):
         self.scorer = F1Score(num_classes=self.num_classes)
-        self.mcc = MatthewsCorrcoef(
+        self.edge_mcc = MatthewsCorrcoef(
+            num_classes=2, inputs_are_logits=False
+        )
+        self.crop_mcc = MatthewsCorrcoef(
             num_classes=self.num_classes, inputs_are_logits=False
         )
 

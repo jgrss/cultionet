@@ -273,7 +273,7 @@ class BlockWriter(object):
         stack = cultionet.predict(
             lit_model=self.lit_model,
             data=data,
-            # written=self.dst.read(self.bands[-1], window=w_pad),
+            written=None, #self.dst.read(self.bands[-1], window=w_pad),
             data_values=self.data_values,
             w=w,
             w_pad=w_pad,
