@@ -210,10 +210,6 @@ def fit_maskrcnn(
             )
 
 
-def spatial_kfoldcv():
-    pass
-
-
 def fit(
     dataset: EdgeDataset,
     ckpt_file: T.Union[str, Path],
