@@ -322,9 +322,9 @@ class WriterModule(BlockWriter):
         self.device = device
         self.scale_factor = scale_factor
         self.include_maskrcnn = include_maskrcnn
-        self.bands = [1, 2, 3, 4]
+        self.bands = [1, 2, 3] + list(range(4, 4+num_classes))
         if self.include_maskrcnn:
-            self.bands.append(5)
+            self.bands.append(self.bands[-1] + 1)
 
         self.lit_model = cultionet.load_model(
             ckpt_file=self.ppaths.ckpt_file,

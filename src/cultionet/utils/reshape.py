@@ -55,21 +55,35 @@ class ModelOutputs(object):
         )
         if self.instances is not None:
             stack_items += (self.instances,)
-
+        import ipdb; ipdb.set_trace()
         return np.stack(stack_items)
 
     @staticmethod
     def _clip_and_reshape(tarray: torch.Tensor, window_obj: Window) -> np.ndarray:
-        return (
-            tarray
-            .contiguous()
-            .view(-1)
-            .detach()
-            .cpu()
-            .numpy()
-            .clip(0, 1)
-            .reshape(window_obj.height, window_obj.width)
-        )
+        if (len(tarray.shape) == 1) or ((len(tarray.shape) > 1) and (tarray.shape[1] == 1)):
+            return (
+                tarray
+                .contiguous()
+                .view(-1)
+                .detach()
+                .cpu()
+                .numpy()
+                .clip(0, 1)
+                .reshape(window_obj.height, window_obj.width)
+            )
+        else:
+            n_layers = tarray.shape[1]
+
+            return (
+                tarray
+                .contiguous()
+                .t()
+                .detach()
+                .cpu()
+                .numpy()
+                .clip(0, 1)
+                .reshape(n_layers, window_obj.height, window_obj.width)
+            )
 
     def reshape(self, w: Window, w_pad: Window) -> None:
         # Get the distance orientations
@@ -86,23 +100,33 @@ class ModelOutputs(object):
 
         # Get the crop probabilities
         if self.apply_softmax:
-            self.crop_probas = F.softmax(self.crop, dim=1)[:, CROP_CLASS]
+            self.crop_probas = F.softmax(self.crop, dim=1)[:, 1:]
         else:
-            self.crop_probas = self.crop[:, CROP_CLASS]
+            self.crop_probas = self.crop[:, 1:]
         self.crop_probas = self._clip_and_reshape(self.crop_probas, w_pad)
-
-        # TODO: get fallow layer if it exists
 
         # Reshape the window chunk and slice off padding
         i = abs(w.row_off - w_pad.row_off)
         j = abs(w.col_off - w_pad.col_off)
-        self.edge_dist_ori = self.edge_dist_ori[i:i+w.height, j:j+w.width]
-        self.edge_dist = self.edge_dist[i:i+w.height, j:j+w.width]
-        self.edge_probas = self.edge_probas[i:i+w.height, j:j+w.width]
-        self.crop_probas = self.crop_probas[i:i+w.height, j:j+w.width]
+        slicer = (
+            slice(i, i+w.height),
+            slice(j, j+w.width)
+        )
+        slicer3d = (
+            slice(0, None),
+            slice(i, i+w.height),
+            slice(j, j+w.width)
+        )
+        self.edge_dist_ori = self.edge_dist_ori[slicer]
+        self.edge_dist = self.edge_dist[slicer]
+        self.edge_probas = self.edge_probas[slicer]
+        if len(self.crop_probas.shape) == 3:
+            self.crop_probas = self.crop_probas[slicer3d]
+        else:
+            self.crop_probas = self.crop_probas[slicer]
         if self.instances is not None:
             self.instances = self.instances.reshape(w_pad.height, w_pad.width)
-            self.instances = self.instances[i:i+w.height, j:j+w.width]
+            self.instances = self.instances[slicer]
 
     def nan_to_num(self):
         # Convert the data type to integer and set 'no data' values
