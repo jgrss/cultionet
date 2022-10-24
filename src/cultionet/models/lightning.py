@@ -319,7 +319,7 @@ class CultioLitModel(pl.LightningModule):
         num_classes: int = 2,
         filters: int = 64,
         star_rnn_hidden_dim: int = 64,
-        star_rnn_n_layers: int = 3,
+        star_rnn_n_layers: int = 4,
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-5,
         ckpt_name: str = 'last',
@@ -388,12 +388,13 @@ class CultioLitModel(pl.LightningModule):
             torch.cat([
                 distance,
                 F.log_softmax(edge, dim=1),
-                F.log_softmax(crop, dim=1),
+                F.log_softmax(crop, dim=1)
             ], dim=1),
             batch_size,
             height,
             width
         )
+
         # Transform edge and crop logits to probabilities
         edge = F.softmax(edge, dim=1)
         crop = F.softmax(crop, dim=1)

@@ -3,7 +3,7 @@ import typing as T
 from . import model_utils
 from .nunet import NestedUNet2
 from .convstar import StarRNN
-from .graph import GraphMid, EdgeFinal, CropFinal
+from .graph import GraphMid, GraphFinal
 from .regression import GraphRegressionLayer
 
 import torch
@@ -77,13 +77,13 @@ class CultioGraphNet(torch.nn.Module):
             out_channels=1
         )
         # Edges (+2)
-        self.edge_layer = EdgeFinal(
+        self.edge_layer = GraphFinal(
             in_channels=base_in_channels+num_distances,
             mid_channels=self.filters,
             out_channels=2
         )
         # Classes (+num_classes)
-        self.crop_layer = CropFinal(
+        self.crop_layer = GraphFinal(
             in_channels=base_in_channels+num_distances+2,
             mid_channels=self.filters,
             out_channels=num_classes
@@ -189,6 +189,9 @@ class CultioGraphNet(torch.nn.Module):
             h,
             data.edge_index,
             data.edge_attrs,
+            data.batch,
+            height,
+            width
         )
 
         return (

@@ -41,28 +41,22 @@ class DoubleConv(torch.nn.Module):
     ):
         super(DoubleConv, self).__init__()
 
-        conv1 = torch.nn.Conv2d(
-            in_channels, mid_channels, kernel_size=3, padding=1, bias=False
-        )
-        conv2 = ResConv(
-            mid_channels, mid_channels, kernel_size=3, padding=2, dilation=2
-        )
-        conv3 = ResConv(
-            mid_channels, out_channels, kernel_size=3, padding=3, dilation=3
-        )
+        conv1 = torch.nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False)
+        conv2 = ResConv(mid_channels, mid_channels, kernel_size=3, padding=2, dilation=2)
+        conv3 = ResConv(mid_channels, out_channels, kernel_size=3, padding=3, dilation=3)
+        batchnorm_layer = torch.nn.BatchNorm2d(mid_channels)
+        batchnorm_last_layer = torch.nn.BatchNorm2d(out_channels)
         activate_layer = torch.nn.ELU(alpha=0.1, inplace=False)
-        batchnorm_layer1 = torch.nn.BatchNorm2d(mid_channels)
-        batchnorm_layer2 = torch.nn.BatchNorm2d(out_channels)
 
         self.seq = torch.nn.Sequential(
             conv1,
-            batchnorm_layer1,
+            batchnorm_layer,
             activate_layer,
             conv2,
-            batchnorm_layer1,
+            batchnorm_layer,
             activate_layer,
             conv3,
-            batchnorm_layer2,
+            batchnorm_last_layer,
             activate_layer
         )
 

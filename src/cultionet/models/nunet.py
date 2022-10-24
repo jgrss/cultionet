@@ -25,7 +25,6 @@ class VGGBlock(torch.nn.Module):
 
         conv1 = nn.GCNConv(in_channels, mid_channels, improved=True)
         conv2 = nn.GCNConv(mid_channels, out_channels, improved=True)
-        activate_layer = torch.nn.ELU(alpha=0.1, inplace=False)
 
         self.seq = nn.Sequential(
             'x, edge_index, edge_weight',
@@ -35,9 +34,9 @@ class VGGBlock(torch.nn.Module):
                 (conv2, 'x, edge_index, edge_weight -> x'),
                 (nn.BatchNorm(out_channels), 'x -> x'),
                 (model_utils.max_pool_neighbor_x, 'x, edge_index -> x'),
-                (activate_layer, 'x -> x')
-                ]
-            )
+                (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x')
+            ]
+        )
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)

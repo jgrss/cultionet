@@ -143,8 +143,7 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
 
-        self.reduce = torch.nn.Conv2d(hidden_dim, nclasses, (3, 3), padding=1)
-        self.final = torch.nn.Conv2d(nclasses*n_layers, nclasses, (3, 3), padding=1)
+        self.final = torch.nn.Conv2d(hidden_dim, nclasses, (3, 3), padding=1)
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -166,11 +165,7 @@ class StarRNN(torch.nn.Module):
         for iter in range(t):
             hidden_s = self.rnn.forward(x[:, :, iter, :, :], hidden_s)
 
-        # last = hidden_s[-1]
-        last = []
-        for hidden_layer in hidden_s:
-            last.append(self.reduce(hidden_layer))
-        last = self.final(torch.cat(last, dim=1))
+        last = self.final(hidden_s[-1])
 
         # The output is (B x C x H x W)
         return last
