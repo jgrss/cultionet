@@ -363,7 +363,7 @@ class CultioLitModel(pl.LightningModule):
     def forward(
         self, batch: Data, batch_idx: int = None
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
     ]:
         """Performs a single model forward pass
 
@@ -444,7 +444,7 @@ class CultioLitModel(pl.LightningModule):
                 publisher={Elsevier}
             }
         """
-        if self.volume.device != self.device:
+        if (self.edge_volume.device != self.device) or (self.crop_volume.device != self.device):
             self.configure_loss()
 
         distance_ori, distance, edge, crop = self(batch)
@@ -545,15 +545,18 @@ class CultioLitModel(pl.LightningModule):
         )
 
     def configure_loss(self):
-        self.volume = torch.ones(
+        self.edge_volume = torch.ones(
+            2, dtype=self.dtype, device=self.device
+        )
+        self.crop_volume = torch.ones(
             self.num_classes, dtype=self.dtype, device=self.device
         )
         self.dloss = HuberLoss()
         self.eloss = TanimotoDistanceLoss(
-            volume=self.volume, inputs_are_logits=True, apply_transform=False
+            volume=self.edge_volume, inputs_are_logits=True, apply_transform=False
         )
         self.closs = TanimotoDistanceLoss(
-            volume=self.volume, inputs_are_logits=True, apply_transform=False
+            volume=self.crop_volume, inputs_are_logits=True, apply_transform=False
         )
 
     def configure_optimizers(self):
