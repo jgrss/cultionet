@@ -18,28 +18,28 @@ class GraphRegressionLayer(torch.nn.Module):
     ):
         super(GraphRegressionLayer, self).__init__()
 
-        conv2d_1 = torch.nn.Conv2d(
-            in_channels,
-            mid_channels,
-            kernel_size=3,
-            padding=1,
-            bias=False
-        )
-        conv2d_2 = torch.nn.Conv2d(
-            mid_channels,
-            mid_channels,
-            kernel_size=3,
-            padding=1,
-            bias=False
-        )
-        conv1 = nn.GCNConv(mid_channels, mid_channels, improved=True)
+        # conv2d_1 = torch.nn.Conv2d(
+        #     in_channels,
+        #     mid_channels,
+        #     kernel_size=3,
+        #     padding=1,
+        #     bias=False
+        # )
+        # conv2d_2 = torch.nn.Conv2d(
+        #     mid_channels,
+        #     mid_channels,
+        #     kernel_size=3,
+        #     padding=1,
+        #     bias=False
+        # )
+        conv1 = nn.GCNConv(in_channels, mid_channels, improved=True)
         conv2 = nn.TransformerConv(
             mid_channels, mid_channels, heads=1, edge_dim=2, dropout=0.1
         )
-        batchnorm2d_layer = torch.nn.BatchNorm2d(mid_channels)
+        # batchnorm2d_layer = torch.nn.BatchNorm2d(mid_channels)
         batchnorm_layer = nn.BatchNorm(in_channels=mid_channels)
-        activate_layer1 = torch.nn.ReLU(inplace=False)
-        activate_layer2 = torch.nn.ELU(alpha=0.1, inplace=False)
+        # activate_layer1 = torch.nn.ReLU(inplace=False)
+        # activate_layer2 = torch.nn.ELU(alpha=0.1, inplace=False)
         dropout_layer = torch.nn.Dropout(dropout)
         lin_layer = torch.nn.Linear(mid_channels, out_channels)
 
@@ -49,21 +49,20 @@ class GraphRegressionLayer(torch.nn.Module):
         self.seq = nn.Sequential(
             'x, edge_index, edge_weight, edge_weight2d',
             [
-                (conv2d_1, 'x -> x'),
-                (batchnorm2d_layer, 'x -> x'),
-                (activate_layer1, 'x -> x'),
-                (conv2d_2, 'x -> x'),
-                (batchnorm2d_layer, 'x -> x'),
-                (activate_layer1, 'x -> x'),
-                (dropout_layer, 'x -> x'),
-                (self.cg, 'x -> x'),
-                (conv1, 'x, edge_index, edge_weight -> x'),
-                (batchnorm_layer, 'x -> x'),
-                (activate_layer2, 'x -> x'),
-                (conv2, 'x, edge_index, edge_weight2d -> x'),
-                (batchnorm_layer, 'x -> x'),
-                (activate_layer2, 'x -> x'),
-                (lin_layer, 'x -> x')
+                # (conv2d_1, 'x -> x'),
+                # (batchnorm2d_layer, 'x -> x'),
+                # (activate_layer1, 'x -> x'),
+                # (conv2d_2, 'x -> x'),
+                # (batchnorm2d_layer, 'x -> x'),
+                # (activate_layer1, 'x -> x'),
+                # (dropout_layer, 'x -> x'),
+                # (self.cg, 'x -> x'),
+                (conv1, 'x, edge_index, edge_weight -> h'),
+                (batchnorm_layer, 'h -> h'),
+                (dropout_layer, 'h -> h'),
+                (conv2, 'h, edge_index, edge_weight2d -> h'),
+                (batchnorm_layer, 'h -> h'),
+                (lin_layer, 'h -> h')
             ]
         )
 
@@ -79,8 +78,8 @@ class GraphRegressionLayer(torch.nn.Module):
         nrows: int,
         ncols: int
     ) -> torch.Tensor:
-        nbatch = 1 if batch is None else batch.unique().size(0)
-        x = self.gc(x, nbatch, nrows, ncols)
+        # nbatch = 1 if batch is None else batch.unique().size(0)
+        # x = self.gc(x, nbatch, nrows, ncols)
 
         return self.seq(
             x, edge_index, edge_attrs[:, 1], edge_attrs
