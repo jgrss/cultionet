@@ -14,6 +14,8 @@ from torch_geometric.data import Data, Dataset
 import psutil
 from tqdm.auto import tqdm
 from joblib import Parallel, delayed, parallel_backend
+import rtree
+import geopandas as gpd
 
 ATTRVINSTANCE = attr.validators.instance_of
 ATTRVIN = attr.validators.in_
@@ -115,6 +117,91 @@ class EdgeDataset(Dataset):
             self.get_data_list()
 
         return self.data_list_
+
+    def to_frame(self, processes: int = 1) -> gpd.GeoDataFrame:
+        """Converts the Dataset to a GeoDataFrame
+        """
+        from shapely.geometry import box
+
+        with parallel_backend(
+            backend='loky',
+            n_jobs=processes
+        ):
+            with TqdmParallel(
+                tqdm_kwargs={
+                    'total': len(self),
+                    'desc': 'Building GeoDataFrame'
+                }
+            ) as pool:
+                geometry = pool(
+                    delayed(box)(
+                        data.left, data.bottom, data.right, data.top
+                    ) for data in self
+                )
+
+        df = gpd.GeoDataFrame(
+            geometry=geometry,
+            crs='epsg:4326'
+        )
+
+        return df
+
+    def get_skfoldcv_partitions(
+        self,
+        spatial_partitions: T.Union[str, Path, gpd.GeoDataFrame],
+        splits: int = 0,
+        processes: int = 0
+    ) -> None:
+        """Gets the spatial partitions
+        """
+        self.create_rtree()
+        if isinstance(spatial_partitions, (str, Path)):
+            spatial_partitions = gpd.read_file(spatial_partitions)
+        else:
+            spatial_partitions = self.to_frame(processes=processes)
+
+        if splits > 0:
+            try:
+                from geosample import QuadTree
+            except ImportError:
+                raise ImportError('geosample must be installed to partition into k-folds.')
+
+            qt = QuadTree(spatial_partitions, force_square=False)
+            for __ in range(splits):
+                qt.split()
+            spatial_partitions = qt.to_frame()
+
+        self.spatial_partitions = spatial_partitions
+
+    def spatial_kfoldcv_iter(self) -> T.Tuple['EdgeDataset', 'EdgeDataset']:
+        """Yield generator to iterate over spatial partitions
+        """
+        for kfold in self.spatial_partitions.itertuples():
+            # Bounding box and indices of the kth fold
+            bbox = kfold.geometry.bounds
+            kfold_indices = list(self.rtree_index.contains(bbox))
+
+            train_idx = []
+            test_idx = []
+            for i in range(0, len(self)):
+                if i in kfold_indices:
+                    test_idx.append(i)
+                else:
+                    train_idx.append(i)
+
+            yield self[train_idx], self[test_idx]
+
+    def create_rtree(self):
+        """Creates the Rtree spatial index
+        """
+        self.rtree_index = rtree.index.Index()
+        for idx, fn in enumerate(self.data_list_):
+            data = torch.load(fn)
+            left = data.left
+            bottom = data.bottom
+            right = data.right
+            top = data.top
+            self.rtree_index.insert(idx, (left, bottom, right, top))
 
     def download(self):
         pass
