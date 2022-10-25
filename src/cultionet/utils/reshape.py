@@ -47,16 +47,26 @@ class ModelOutputs(object):
     def stack_outputs(self, w: Window, w_pad: Window) -> np.ndarray:
         self.reshape(w, w_pad)
         self.nan_to_num()
-        stack_items = (
-            self.edge_dist_ori,
-            self.edge_dist,
-            self.edge_probas,
-            self.crop_probas
-        )
-        if self.instances is not None:
-            stack_items += (self.instances,)
-        import ipdb; ipdb.set_trace()
-        return np.stack(stack_items)
+        if len(self.crop_probas.shape) == 3:
+            stack_items = (
+                self.edge_dist_ori[None],
+                self.edge_dist[None],
+                self.edge_probas[None],
+                self.crop_probas
+            )
+            if self.instances is not None:
+                stack_items += (self.instances[None],)
+        else:
+            stack_items = (
+                self.edge_dist_ori,
+                self.edge_dist,
+                self.edge_probas,
+                self.crop_probas
+            )
+            if self.instances is not None:
+                stack_items += (self.instances,)
+
+        return np.vstack(stack_items)
 
     @staticmethod
     def _clip_and_reshape(tarray: torch.Tensor, window_obj: Window) -> np.ndarray:
