@@ -56,6 +56,8 @@ class ModelOutputs(object):
             )
             if self.instances is not None:
                 stack_items += (self.instances[None],)
+
+            return np.vstack(stack_items)
         else:
             stack_items = (
                 self.edge_dist_ori,
@@ -66,7 +68,7 @@ class ModelOutputs(object):
             if self.instances is not None:
                 stack_items += (self.instances,)
 
-        return np.vstack(stack_items)
+            return np.stack(stack_items)
 
     @staticmethod
     def _clip_and_reshape(tarray: torch.Tensor, window_obj: Window) -> np.ndarray:
