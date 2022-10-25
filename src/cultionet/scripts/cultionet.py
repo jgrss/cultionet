@@ -322,7 +322,7 @@ class WriterModule(BlockWriter):
         self.device = device
         self.scale_factor = scale_factor
         self.include_maskrcnn = include_maskrcnn
-        self.bands = [1, 2, 3] + list(range(4, 4+num_classes))
+        self.bands = [1, 2, 3] + list(range(4, 4+num_classes-1))
         if self.include_maskrcnn:
             self.bands.append(self.bands[-1] + 1)
 
