@@ -321,7 +321,7 @@ class WriterModule(BlockWriter):
         self.device = device
         self.scale_factor = scale_factor
         self.include_maskrcnn = include_maskrcnn
-        self.bands = [1, 2, 3] + list(range(4, 4+num_classes-1))
+        self.bands = [1, 2, 3, 4] + list(range(5, 5+num_classes-1))
         if self.include_maskrcnn:
             self.bands.append(self.bands[-1] + 1)
 
@@ -458,7 +458,7 @@ def predict_image(args):
     )
     # Load the z-score norm values
     data_values = torch.load(ppaths.norm_file)
-    num_classes = data_values.crop_counts.shape[1]
+    num_classes = len(data_values.crop_counts)
 
     try:
         tmp = int(args.grid_id)
