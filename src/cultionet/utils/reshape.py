@@ -46,12 +46,12 @@ class ModelOutputs(object):
     def stack_outputs(self, w: Window, w_pad: Window) -> np.ndarray:
         self.reshape(w, w_pad)
         self.nan_to_num()
-        if len(self.crop_probas.shape) == 3:
+        if len(self.crop_type_probas.shape) == 3:
             stack_items = (
                 self.edge_dist_ori[None],
                 self.edge_dist[None],
                 self.edge_probas[None],
-                self.crop_probas,
+                self.crop_probas[None],
                 self.crop_type_probas
             )
             if self.instances is not None:
