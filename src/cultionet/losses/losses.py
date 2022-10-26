@@ -146,9 +146,6 @@ class QuantileLoss(object):
     """
     quantiles: T.Tuple[float, float, float] = attr.ib(validator=attr.validators.instance_of(tuple))
 
-    def __attrs_post_init__(self):
-        super(QuantileLoss, self).__init__()
-
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
@@ -176,7 +173,6 @@ class HuberLoss(object):
     """Huber loss
     """
     def __attrs_post_init__(self):
-        super(HuberLoss, self).__init__()
         self.loss_func = torch.nn.HuberLoss()
 
     def __call__(self, *args, **kwargs):
