@@ -1,6 +1,5 @@
 from .losses import (
-    F1Score,
-    MatthewsCorrcoef,
+    CrossEntropyLoss,
     TanimotoDistanceLoss,
     HuberLoss
 )
