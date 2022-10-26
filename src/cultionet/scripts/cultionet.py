@@ -1002,7 +1002,7 @@ def train_model(args):
         learning_rate=args.learning_rate,
         filters=args.filters,
         num_classes=class_info['max_crop_class'] + 1,
-        class_weights=data_values.crop_counts.tolist(),
+        class_weights=(data_values.crop_counts.max() / data_values.crop_counts).tolist(),
         random_seed=args.random_seed,
         reset_model=args.reset_model,
         auto_lr_find=args.auto_lr_find,
