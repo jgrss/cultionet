@@ -219,6 +219,8 @@ def fit(
     accumulate_grad_batches: T.Optional[int] = 1,
     filters: T.Optional[int] = 64,
     num_classes: T.Optional[int] = 2,
+    class_weights: T.Sequence[float] = None,
+    edge_weights: T.Sequence[float] = None,
     learning_rate: T.Optional[float] = 0.001,
     epochs: T.Optional[int] = 30,
     save_top_k: T.Optional[int] = 1,
@@ -290,7 +292,9 @@ def fit(
         num_classes=num_classes,
         filters=filters,
         learning_rate=learning_rate,
-        weight_decay=weight_decay
+        weight_decay=weight_decay,
+        class_weights=class_weights,
+        edge_weights=edge_weights
     )
 
     if reset_model:
