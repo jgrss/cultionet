@@ -1,6 +1,5 @@
 import typing as T
 
-from ..data.const import CROP_CLASS
 from ..data.utils import create_data_object, LabeledData
 from ..networks import SingleSensorNetwork
 from ..utils.reshape import nd_to_columns
@@ -104,14 +103,15 @@ def augment_time(
     return xaug
 
 
-def create_parcel_masks(labels_array: np.ndarray) -> T.Union[None, dict]:
+def create_parcel_masks(labels_array: np.ndarray, max_crop_class: int) -> T.Union[None, dict]:
     """
     Creates masks for each instance
 
     Reference:
         https://torchtutorialstaging.z5.web.core.windows.net/intermediate/torchvision_tutorial.html
     """
-    mask = np.where(labels_array == CROP_CLASS, 1, 0)
+    # Remove edges
+    mask = np.where((labels_array > 0) & (labels_array <= max_crop_class), 1, 0)
     mask = nd_label(mask)[0]
     obj_ids = np.unique(mask)
     # first id is the background, so remove it
@@ -166,6 +166,7 @@ def augment(
     aug: str,
     ntime: int,
     nbands: int,
+    max_crop_class: int,
     k: int = 3,
     instance_seg: bool = False,
     zero_padding: int = 0,
@@ -309,7 +310,7 @@ def augment(
 
     mask_y = None
     if instance_seg:
-        mask_y = create_parcel_masks(yaug)
+        mask_y = create_parcel_masks(yaug, max_crop_class)
 
     return create_data_object(
         xaug,
