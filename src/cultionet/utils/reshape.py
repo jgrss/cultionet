@@ -33,6 +33,7 @@ class ModelOutputs(object):
     distance: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     edge: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     crop: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
+    crop_type: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     instances: T.Optional[T.Union[None, np.ndarray]] = attr.ib(
         default=None,
         validator=attr.validators.optional(attr.validators.instance_of(np.ndarray))
@@ -50,7 +51,8 @@ class ModelOutputs(object):
                 self.edge_dist_ori[None],
                 self.edge_dist[None],
                 self.edge_probas[None],
-                self.crop_probas
+                self.crop_probas,
+                self.crop_type_probas
             )
             if self.instances is not None:
                 stack_items += (self.instances[None],)
@@ -61,7 +63,8 @@ class ModelOutputs(object):
                 self.edge_dist_ori,
                 self.edge_dist,
                 self.edge_probas,
-                self.crop_probas
+                self.crop_probas,
+                self.crop_type_probas
             )
             if self.instances is not None:
                 stack_items += (self.instances,)
@@ -110,10 +113,17 @@ class ModelOutputs(object):
 
         # Get the crop probabilities
         if self.apply_softmax:
-            self.crop_probas = F.softmax(self.crop, dim=1)[:, 1:]
+            self.crop_probas = F.softmax(self.crop, dim=1)[:, 1]
         else:
-            self.crop_probas = self.crop[:, 1:]
+            self.crop_probas = self.crop[:, 1]
         self.crop_probas = self._clip_and_reshape(self.crop_probas, w_pad)
+
+        # Get the crop-type probabilities
+        if self.apply_softmax:
+            self.crop_type_probas = F.softmax(self.crop_type, dim=1)[:, 1:]
+        else:
+            self.crop_type_probas = self.crop_type[:, 1:]
+        self.crop_type_probas = self._clip_and_reshape(self.crop_type_probas, w_pad)
 
         # Reshape the window chunk and slice off padding
         i = abs(w.row_off - w_pad.row_off)
@@ -134,6 +144,10 @@ class ModelOutputs(object):
             self.crop_probas = self.crop_probas[slicer3d]
         else:
             self.crop_probas = self.crop_probas[slicer]
+        if len(self.crop_type_probas.shape) == 3:
+            self.crop_type_probas = self.crop_type_probas[slicer3d]
+        else:
+            self.crop_type_probas = self.crop_type_probas[slicer]
         if self.instances is not None:
             self.instances = self.instances.reshape(w_pad.height, w_pad.width)
             self.instances = self.instances[slicer]
@@ -169,6 +183,15 @@ class ModelOutputs(object):
         self.crop_probas = (
             np.nan_to_num(
                 self.crop_probas,
+                nan=-1.0,
+                neginf=-1.0,
+                posinf=-1.0
+            ).astype('float32')
+        )
+
+        self.crop_type_probas = (
+            np.nan_to_num(
+                self.crop_type_probas,
                 nan=-1.0,
                 neginf=-1.0,
                 posinf=-1.0

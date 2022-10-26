@@ -501,7 +501,9 @@ def predict_image(args):
             'transform': src_ts.gw.transform,
             'height': height,
             'width': width,
-            'count': 3 + num_classes if args.include_maskrcnn else 3 + num_classes - 1,
+            # Orientation (+1) + distance (+1) + edge (+1) + crop (+1) crop types (+N)
+            # `num_classes` includes background
+            'count': 4 + num_classes if args.include_maskrcnn else 4 + num_classes - 1,
             'dtype': 'uint16',
             'blockxsize': 64 if 64 < width else width,
             'blockysize': 64 if 64 < height else height,

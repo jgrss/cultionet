@@ -482,7 +482,7 @@ def predict(
         norm_batch = norm_batch.to('cuda')
         lit_model = lit_model.to('cuda')
     with torch.no_grad():
-        distance_ori, distance, edge, crop = lit_model(norm_batch)
+        distance_ori, distance, edge, crop, crop_type = lit_model(norm_batch)
         if include_maskrcnn:
             # TODO: fix this -- separate Mask R-CNN model
             predictions = lit_model.mask_forward(
@@ -570,6 +570,7 @@ def predict(
         distance=distance,
         edge=edge,
         crop=crop,
+        crop_type=crop_type,
         instances=instances,
         apply_softmax=False
     )
