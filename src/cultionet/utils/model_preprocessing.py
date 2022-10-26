@@ -5,6 +5,27 @@ from geowombat.core.util import sort_images_by_date
 
 import pandas as pd
 import attr
+from tqdm.auto import tqdm
+from joblib import Parallel
+
+
+class TqdmParallel(Parallel):
+    """A tqdm progress bar for joblib Parallel tasks
+
+    Reference:
+        https://stackoverflow.com/questions/37804279/how-can-we-use-tqdm-in-a-parallel-execution-with-joblib
+    """
+    def __init__(self, tqdm_kwargs: dict):
+        self.tqdm_kwargs = tqdm_kwargs
+        super().__init__()
+
+    def __call__(self, *args, **kwargs):
+        with tqdm(**self.tqdm_kwargs) as self._pbar:
+            return Parallel.__call__(self, *args, **kwargs)
+
+    def print_progress(self):
+        self._pbar.n = self.n_completed_tasks
+        self._pbar.refresh()
 
 
 @attr.s
