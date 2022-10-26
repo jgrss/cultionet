@@ -3,9 +3,7 @@ from pathlib import Path
 
 from ..losses import (
     HuberLoss,
-    TanimotoDistanceLoss,
-    F1Score,
-    MatthewsCorrcoef
+    TanimotoDistanceLoss
 )
 from ..data.const import CROP_CLASS, EDGE_CLASS
 from .cultio import CultioGraphNet
@@ -19,6 +17,7 @@ from torch_geometric.data import Data
 import pytorch_lightning as pl
 from torchvision.ops import box_iou
 from torchvision import transforms
+import torchmetrics
 
 import warnings
 import logging
@@ -373,9 +372,10 @@ class CultioLitModel(pl.LightningModule):
             crop: Probability of crop [0,1].
         """
         distance_ori, distance, edge, crop = self.model(batch)
+
         # Transform edge and crop logits to probabilities
-        edge = F.softmax(edge, dim=1)
-        crop = F.softmax(crop, dim=1)
+        edge = F.softmax(edge, dim=1, dtype=edge.dtype)
+        crop = F.softmax(crop, dim=1, dtype=crop.dtype)
 
         return distance_ori, distance, edge, crop
 
@@ -458,7 +458,7 @@ class CultioLitModel(pl.LightningModule):
         eloss = self.eloss(edge, true_edge)
         closs = self.closs(crop, true_crop)
 
-        loss = oloss*0.5 + dloss*0.75 + eloss + closs
+        loss = oloss*0.75 + dloss + eloss + closs
 
         return loss
 
@@ -479,24 +479,37 @@ class CultioLitModel(pl.LightningModule):
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
         loss = self.calc_loss(batch)
 
-        __, __, edge, crop = self(batch)
+        __, dist, edge, crop = self(batch)
 
+        dist_mae = self.dist_mae(
+            dist.contiguous().view(-1), batch.bdist.contiguous().view(-1)
+        )
+        dist_mse = self.dist_mse(
+            dist.contiguous().view(-1), batch.bdist.contiguous().view(-1)
+        )
         # Take the argmax of the class probabilities
         edge_ypred = edge.argmax(dim=1)
-        class_ypred = crop.argmax(dim=1)
+        crop_ypred = crop.argmax(dim=1)
         # F1-score
-        edge_score = self.scorer(edge_ypred, batch.y.eq(EDGE_CLASS).long())
-        class_score = self.scorer(class_ypred, batch.y.eq(CROP_CLASS).long())
+        edge_score = self.edge_f1(edge_ypred, batch.y.eq(EDGE_CLASS).long())
+        class_score = self.crop_f1(crop_ypred, batch.y.eq(CROP_CLASS).long())
         # MCC
         edge_mcc = self.edge_mcc(edge_ypred, batch.y.eq(EDGE_CLASS).long())
-        class_mcc = self.crop_mcc(class_ypred, batch.y.eq(CROP_CLASS).long())
+        class_mcc = self.crop_mcc(crop_ypred, batch.y.eq(CROP_CLASS).long())
+        # Dice
+        # edge_dice = self.edge_dice(edge_ypred, batch.y.eq(EDGE_CLASS).long())
+        # crop_dice = self.crop_dice(crop_ypred, batch.y.eq(EDGE_CLASS).long())
 
         metrics = {
             'loss': loss,
-            'edge_score': edge_score,
-            'class_score': class_score,
-            'emcc': edge_mcc,
-            'cmcc': class_mcc
+            'dist_mae': dist_mae,
+            'dist_mse': dist_mse,
+            'edge_f1': edge_score,
+            'class_f1': class_score,
+            'edge_mcc': edge_mcc,
+            'crop_mcc': class_mcc,
+            # 'edge_dice': edge_dice,
+            # 'crop_dice': crop_dice,
         }
         # print('Eval')
         # t = torch.cuda.get_device_properties(0).total_memory
@@ -513,10 +526,10 @@ class CultioLitModel(pl.LightningModule):
 
         metrics = {
             'val_loss': eval_metrics['loss'],
-            'vef1': eval_metrics['edge_score'],
-            'vcf1': eval_metrics['class_score'],
-            'vemcc': eval_metrics['emcc'],
-            'vcmcc': eval_metrics['cmcc']
+            'vef1': eval_metrics['edge_f1'],
+            'vcf1': eval_metrics['class_f1'],
+            'vemcc': eval_metrics['edge_mcc'],
+            'vcmcc': eval_metrics['crop_mcc']
         }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
@@ -529,23 +542,28 @@ class CultioLitModel(pl.LightningModule):
 
         metrics = {
             'test_loss': eval_metrics['loss'],
-            'tef1': eval_metrics['edge_score'],
-            'tcf1': eval_metrics['class_score'],
-            'temcc': eval_metrics['emcc'],
-            'tcmcc': eval_metrics['cmcc']
+            'tmae': eval_metrics['dist_mae'],
+            'tmse': eval_metrics['dist_mse'],
+            'tef1': eval_metrics['edge_f1'],
+            'tcf1': eval_metrics['class_f1'],
+            'temcc': eval_metrics['edge_mcc'],
+            'tcmcc': eval_metrics['crop_mcc'],
+            # 'tedice': eval_metrics['edge_dice'],
+            # 'tcdice': eval_metrics['crop_dice']
         }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         return metrics
 
     def configure_scorer(self):
-        self.scorer = F1Score(num_classes=self.num_classes)
-        self.edge_mcc = MatthewsCorrcoef(
-            num_classes=2, inputs_are_logits=False
-        )
-        self.crop_mcc = MatthewsCorrcoef(
-            num_classes=self.num_classes, inputs_are_logits=False
-        )
+        self.dist_mae = torchmetrics.MeanAbsoluteError()
+        self.dist_mse = torchmetrics.MeanSquaredError()
+        self.edge_f1 = torchmetrics.F1Score(num_classes=2, average='micro')
+        self.crop_f1 = torchmetrics.F1Score(num_classes=self.num_classes, average='weighted')
+        self.edge_mcc = torchmetrics.MatthewsCorrCoef(num_classes=2)
+        self.crop_mcc = torchmetrics.MatthewsCorrCoef(num_classes=self.num_classes)
+        # self.edge_dice = torchmetrics.Dice(num_classes=2, average='micro')
+        # self.crop_dice = torchmetrics.Dice(num_classes=self.num_classes, average='weighted')
 
     def configure_loss(self):
         self.edge_volume = torch.ones(
@@ -554,12 +572,17 @@ class CultioLitModel(pl.LightningModule):
         self.crop_volume = torch.ones(
             self.num_classes, dtype=self.dtype, device=self.device
         )
+
         self.dloss = HuberLoss()
         self.eloss = TanimotoDistanceLoss(
-            volume=self.edge_volume, inputs_are_logits=True, apply_transform=False
+            volume=self.edge_volume,
+            inputs_are_logits=True,
+            apply_transform=False
         )
         self.closs = TanimotoDistanceLoss(
-            volume=self.crop_volume, inputs_are_logits=True, apply_transform=False
+            volume=self.crop_volume,
+            inputs_are_logits=True,
+            apply_transform=False
         )
 
     def configure_optimizers(self):
