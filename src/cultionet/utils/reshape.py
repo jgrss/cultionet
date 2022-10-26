@@ -1,7 +1,5 @@
 import typing as T
 
-from ..data.const import CROP_CLASS, FALLOW_CLASS
-
 import numpy as np
 from rasterio.windows import Window
 import attr
