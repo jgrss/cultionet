@@ -449,7 +449,7 @@ class CultioLitModel(pl.LightningModule):
                 publisher={Elsevier}
             }
         """
-        if (self.edge_volume.device != self.device) or (self.crop_volume.device != self.device):
+        if self.volume.device != self.device:
             self.configure_loss()
 
         distance_ori, distance, edge, crop, crop_type = self(batch)
@@ -465,7 +465,7 @@ class CultioLitModel(pl.LightningModule):
         dist_loss = self.dist_loss(distance, batch.bdist)
         edge_loss = self.edge_loss(edge, true_edge)
         crop_loss = self.crop_loss(crop, true_crop)
-        crop_type_loss = self.crop_loss(crop_type, true_crop_type)
+        crop_type_loss = self.crop_type_loss(crop_type, true_crop_type)
 
         loss = ori_loss*0.75 + dist_loss + edge_loss + crop_loss + crop_type_loss
 
@@ -579,21 +579,18 @@ class CultioLitModel(pl.LightningModule):
         self.crop_dice = torchmetrics.Dice(num_classes=self.num_classes, average='weighted')
 
     def configure_loss(self):
-        self.edge_volume = torch.ones(
+        self.volume = torch.ones(
             2, dtype=self.dtype, device=self.device
-        )
-        self.crop_volume = torch.ones(
-            self.num_classes, dtype=self.dtype, device=self.device
         )
 
         self.dist_loss = HuberLoss()
         self.edge_loss = TanimotoDistanceLoss(
-            volume=self.edge_volume,
+            volume=self.volume,
             inputs_are_logits=True,
             apply_transform=True
         )
         self.crop_loss = TanimotoDistanceLoss(
-            volume=self.crop_volume,
+            volume=self.volume,
             inputs_are_logits=True,
             apply_transform=True
         )
