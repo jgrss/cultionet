@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-import os
 from abc import abstractmethod
 import argparse
 import typing as T
@@ -10,6 +9,7 @@ from datetime import datetime
 import asyncio
 import filelock
 import builtins
+import json
 
 import cultionet
 from cultionet.data.const import SCALE_FACTOR
@@ -28,7 +28,6 @@ from cultionet.utils.logging import set_color_logger
 
 import geowombat as gw
 from geowombat.core.windows import get_window_offsets
-import numpy as np
 import geopandas as gpd
 import pandas as pd
 import yaml
@@ -459,6 +458,7 @@ def predict_image(args):
     )
     # Load the z-score norm values
     data_values = torch.load(ppaths.norm_file)
+    num_classes = data_values.crop_counts.shape[1]
 
     try:
         tmp = int(args.grid_id)
@@ -501,7 +501,7 @@ def predict_image(args):
             'transform': src_ts.gw.transform,
             'height': height,
             'width': width,
-            'count': 3 + args.num_classes if args.include_maskrcnn else 3 + args.num_classes - 1,
+            'count': 3 + num_classes if args.include_maskrcnn else 3 + num_classes - 1,
             'dtype': 'uint16',
             'blockxsize': 64 if 64 < width else width,
             'blockysize': 64 if 64 < height else height,
@@ -522,7 +522,7 @@ def predict_image(args):
                 ntime=ntime,
                 nbands=nbands,
                 filters=args.filters,
-                num_classes=args.num_classes,
+                num_classes=num_classes,
                 ts=time_series,
                 data_values=data_values,
                 ppaths=ppaths,
@@ -562,7 +562,7 @@ def predict_image(args):
                 ntime=ntime,
                 nbands=nbands,
                 filters=args.filters,
-                num_classes=args.num_classes,
+                num_classes=num_classes,
                 ts=ray.put(time_series),
                 data_values=data_values,
                 ppaths=ppaths,
@@ -608,19 +608,17 @@ def cycle_data(
     year_lists: list,
     regions_lists: list,
     project_path_lists: list,
-    lc_paths_lists: list,
     ref_res_lists: list
 ):
-    for years, regions, project_path, lc_path, ref_res in zip(
+    for years, regions, project_path, ref_res in zip(
         year_lists,
         regions_lists,
         project_path_lists,
-        lc_paths_lists,
         ref_res_lists
     ):
         for region in regions:
             for image_year in years:
-                yield region, image_year, project_path, lc_path, ref_res
+                yield region, image_year, project_path, ref_res
 
 
 def get_centroid_coords(df: gpd.GeoDataFrame, dst_crs: T.Optional[str] = None) -> T.Tuple[float, float]:
@@ -632,6 +630,9 @@ def get_centroid_coords(df: gpd.GeoDataFrame, dst_crs: T.Optional[str] = None) -
 
 
 def create_datasets(args):
+    assert isinstance(args.max_crop_class, int), \
+        'The maximum crop class value must be given.'
+
     config = open_config(args.config_file)
     project_path_lists = [args.project_path]
     ref_res_lists = [args.ref_res]
@@ -655,15 +656,13 @@ def create_datasets(args):
 
     inputs = model_preprocessing.TrainInputs(
         regions=regions,
-        years=config['years'],
-        lc_path=config['lc_path']
+        years=config['years']
     )
 
-    for region, end_year, project_path, lc_path, ref_res in cycle_data(
+    for region, end_year, project_path, ref_res in cycle_data(
         inputs.year_lists,
         inputs.regions_lists,
         project_path_lists,
-        inputs.lc_paths_lists,
         ref_res_lists
     ):
         ppaths = setup_paths(
@@ -721,21 +720,19 @@ def create_datasets(args):
 
             image_list += ts_list
 
-        if image_list:
-            if lc_path is None:
-                lc_image = None
-            else:
-                if (Path(lc_path) / f'{end_year}_30m_cdls.tif').is_file():
-                    lc_image = str(Path(lc_path) / f'{end_year}_30m_cdls.tif')
-                else:
-                    if not (Path(lc_path) / f'{end_year}_30m_cdls.img').is_file():
-                        continue
-                    lc_image = str(Path(lc_path) / f'{end_year}_30m_cdls.img')
+        class_info = {
+            'max_crop_class': args.max_crop_class,
+            'edge_class': args.max_crop_class+1
+        }
+        with open(ppaths.classes_info_path, mode='w') as f:
+            f.write(json.dumps(class_info))
 
+        if image_list:
             create_dataset(
-                image_list,
-                df_grids,
-                df_edges,
+                image_list=image_list,
+                df_grids=df_grids,
+                df_edges=df_edges,
+                max_crop_class=args.max_crop_class,
                 group_id=f'{region}_{end_year}',
                 process_path=ppaths.get_process_path(args.destination),
                 transforms=args.transforms,
@@ -743,9 +740,7 @@ def create_datasets(args):
                 resampling=args.resampling,
                 num_workers=args.num_workers,
                 grid_size=args.grid_size,
-                lc_path=lc_image,
                 n_ts=args.n_ts,
-                data_type='boundaries',
                 instance_seg=args.instance_seg,
                 zero_padding=args.zero_padding,
                 crop_column=args.crop_column,
@@ -788,7 +783,7 @@ def train_maskrcnn(args):
         train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
         data_values = get_norm_values(
             dataset=train_ds,
-            batch_size=args.batch_size*8,
+            batch_size=args.batch_size,
             mean_color=args.mean_color,
             sse_color=args.sse_color
         )
@@ -873,7 +868,7 @@ def spatial_kfoldcv(args):
         temp_ds = train_ds.split_train_val(val_frac=args.val_frac)[0]
         data_values = get_norm_values(
             dataset=temp_ds,
-            batch_size=args.batch_size*8,
+            batch_size=args.batch_size,
             mean_color=args.mean_color,
             sse_color=args.sse_color
         )
@@ -911,6 +906,9 @@ def train_model(args):
     # This is a helper function to manage paths
     ppaths = setup_paths(args.project_path)
 
+    with open(ppaths.classes_info_path, mode='r') as f:
+        class_info = json.load(f)
+
     if (
         (args.expected_dim is not None)
         or not ppaths.norm_file.is_file()
@@ -947,6 +945,7 @@ def train_model(args):
         train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
         data_values = get_norm_values(
             dataset=train_ds,
+            class_info=class_info,
             batch_size=args.batch_size,
             mean_color=args.mean_color,
             sse_color=args.sse_color
@@ -960,7 +959,9 @@ def train_model(args):
     ds = EdgeDataset(
         ppaths.train_path,
         data_means=data_values.mean,
-        data_stds=data_values.std
+        data_stds=data_values.std,
+        crop_counts=data_values.crop_counts,
+        edge_counts=data_values.edge_counts
     )
     # Check for a test dataset
     test_ds = None
@@ -968,7 +969,9 @@ def train_model(args):
         test_ds = EdgeDataset(
             ppaths.test_path,
             data_means=data_values.mean,
-            data_stds=data_values.std
+            data_stds=data_values.std,
+            crop_counts=data_values.crop_counts,
+            edge_counts=data_values.edge_counts
         )
         if args.expected_dim is not None:
             try:
@@ -982,7 +985,9 @@ def train_model(args):
             test_ds = EdgeDataset(
                 ppaths.test_path,
                 data_means=data_values.mean,
-                data_stds=data_values.std
+                data_stds=data_values.std,
+                crop_counts=data_values.crop_counts,
+                edge_counts=data_values.edge_counts
             )
 
     # Fit the model
@@ -996,7 +1001,8 @@ def train_model(args):
         accumulate_grad_batches=args.accumulate_grad_batches,
         learning_rate=args.learning_rate,
         filters=args.filters,
-        num_classes=args.num_classes,
+        num_classes=class_info['max_crop_class'] + 1,
+        class_weights=data_values.crop_counts.tolist(),
         random_seed=args.random_seed,
         reset_model=args.reset_model,
         auto_lr_find=args.auto_lr_find,
