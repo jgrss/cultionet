@@ -18,6 +18,7 @@ class ProjectPaths:
     proba_path: Path
     figure_path: Path
     data_path: Path
+    classes_info_path: Path
     process_path: Path
     test_process_path: Path
     ckpt_path: Path
@@ -52,6 +53,7 @@ def setup_paths(
     figure_path = project_path / 'figures'
     data_path = project_path / 'data'
     ckpt_path = project_path / 'ckpt'
+    classes_info_path = data_path / 'classes.info'
     train_path = data_path / 'train'
     test_path = data_path / 'test'
     process_path = train_path / 'processed'
@@ -79,6 +81,7 @@ def setup_paths(
         proba_path=proba_path,
         figure_path=figure_path,
         data_path=data_path,
+        classes_info_path=classes_info_path,
         process_path=process_path,
         test_process_path=test_process_path,
         ckpt_path=ckpt_path,
