@@ -512,7 +512,10 @@ class CultioLitModel(pl.LightningModule):
             distance.contiguous().view(-1),
             batch.bdist.contiguous().view(-1)
         )
-
+        # Get the class probabilities
+        edge = F.softmax(edge, dim=1, dtype=edge.dtype)
+        crop = F.softmax(crop, dim=1, dtype=crop.dtype)
+        crop_type = F.softmax(crop_type, dim=1, dtype=crop_type.dtype)
         # Take the argmax of the class probabilities
         edge_ypred = edge.argmax(dim=1).long()
         crop_ypred = crop.argmax(dim=1).long()

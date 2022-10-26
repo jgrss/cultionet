@@ -487,6 +487,7 @@ def predict(
         edge = F.softmax(edge, dim=1, dtype=edge.dtype)
         crop = F.softmax(crop, dim=1, dtype=crop.dtype)
         crop_type = F.softmax(crop_type, dim=1, dtype=crop_type.dtype)
+        
         if include_maskrcnn:
             # TODO: fix this -- separate Mask R-CNN model
             predictions = lit_model.mask_forward(
