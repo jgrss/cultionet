@@ -501,7 +501,7 @@ def predict_image(args):
             'transform': src_ts.gw.transform,
             'height': height,
             'width': width,
-            'count': 5 if args.include_maskrcnn else 4,
+            'count': 3 + args.num_classes if args.include_maskrcnn else 3 + args.num_classes - 1,
             'dtype': 'uint16',
             'blockxsize': 64 if 64 < width else width,
             'blockysize': 64 if 64 < height else height,
@@ -947,7 +947,7 @@ def train_model(args):
         train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
         data_values = get_norm_values(
             dataset=train_ds,
-            batch_size=args.batch_size*8,
+            batch_size=args.batch_size,
             mean_color=args.mean_color,
             sse_color=args.sse_color
         )
@@ -979,6 +979,11 @@ def train_model(args):
                 )
             except TensorShapeError as e:
                 raise ValueError(e)
+            test_ds = EdgeDataset(
+                ppaths.test_path,
+                data_means=data_values.mean,
+                data_stds=data_values.std
+            )
 
     # Fit the model
     cultionet.fit(
