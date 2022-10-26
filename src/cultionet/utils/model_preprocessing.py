@@ -41,15 +41,11 @@ class VegetationIndices(object):
 class TrainInputs(object):
     regions: T.List[str] = attr.ib(default=None, validator=attr.validators.instance_of(list))
     years: T.List[int] = attr.ib(default=None, validator=attr.validators.instance_of(list))
-    lc_path: T.Optional[str] = attr.ib(
-        default=None, validator=attr.validators.optional(attr.validators.instance_of(str))
-    )
 
     def __attrs_post_init__(self):
         region_list = self.regions
         self.regions_lists: T.List[T.List[str]] = [region_list]
         self.year_lists: T.List[T.List[int]] = [self.years]
-        self.lc_paths_lists: T.List[str] = [self.lc_path]
 
 
 def get_time_series_list(
