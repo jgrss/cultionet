@@ -12,6 +12,10 @@ class ClassifierPreprocessing(object):
         targets: torch.Tensor
     ) -> T.Tuple[torch.Tensor, torch.Tensor]:
         if self.inputs_are_logits:
+            if (len(targets.unique()) > inputs.size(1)) or (targets.unique().max()+1 > inputs.size(1)):
+                raise ValueError(
+                    'The targets should be ordered values of equal length to the inputs 2nd dimension.'
+                )
             if self.apply_transform:
                 inputs = F.softmax(inputs, dim=1, dtype=inputs.dtype)
             targets = F.one_hot(
