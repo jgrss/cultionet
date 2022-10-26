@@ -485,6 +485,8 @@ def create_image_vars(
                 labels_array[edges == 1] = edge_class
                 # No crop pixel should border non-crop
                 labels_array = cleanup_edges(labels_array, labels_array_copy, edge_class)
+                assert labels_array.max() <= edge_class, \
+                    'The labels array have larger than expected values.'
                 # Normalize the boundary distances for each segment
                 bdist, ori = normalize_boundary_distances(
                     np.uint8((labels_array > 0) & (labels_array != edge_class)),
@@ -622,10 +624,7 @@ def create_dataset(
                     grid_edges = gpd.clip(df_edges, df_grids.iloc[int_idx].geometry)
                     merged_grids.append(row.grid)
 
-                # Make polygons unique
                 nonzero_mask = grid_edges[crop_column] != 0
-                if nonzero_mask.any():
-                    grid_edges.loc[nonzero_mask, crop_column] = range(1, nonzero_mask.sum()+1)
 
                 # left, bottom, right, top
                 ref_bounds = df_grids.to_crs(image_crs).iloc[int_idx].total_bounds.tolist()
