@@ -123,6 +123,12 @@ create:
     help: Whether to keep the crop classes as they are (True) or recode all non-zero classes to crop (False)
     kwargs:
       action: store_true
+  max_crop_class:
+    short: ''
+    long: max-crop-class
+    help: The maximum expected crop class value
+    kwargs:
+      type: '&int'
 
 train_predict:
   filters:
@@ -131,13 +137,6 @@ train_predict:
     help: The number of model input filters
     kwargs:
       default: 64
-      type: '&int'
-  num_classes:
-    short: ''
-    long: num-classes
-    help: The number of crop classes
-    kwargs:
-      default: 2
       type: '&int'
   device:
     short: ''
