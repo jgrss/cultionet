@@ -594,7 +594,10 @@ class CultioLitModel(pl.LightningModule):
             inputs_are_logits=True,
             apply_transform=True
         )
-        self.crop_type_loss = CrossEntropyLoss(class_weights=self.class_weights)
+        self.crop_type_loss = CrossEntropyLoss(
+            class_weights=self.class_weights,
+            device=self.device.type
+        )
 
     def configure_optimizers(self):
         params_list = list(self.model.parameters())

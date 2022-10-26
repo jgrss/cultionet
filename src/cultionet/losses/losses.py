@@ -110,10 +110,17 @@ class CrossEntropyLoss(ClassifierPreprocessing):
         default=True,
         validator=attr.validators.optional(validator=attr.validators.instance_of(bool))
     )
+    device: T.Optional[str] = attr.ib(
+        default='cpu',
+        validator=attr.validators.optional(validator=attr.validators.instance_of(str))
+    )
 
     def __attrs_post_init__(self):
         super(CrossEntropyLoss, self).__init__()
-        self.loss_func = torch.nn.CrossEntropyLoss(weight=self.class_weights)
+        if self.device == 'cpu':
+            self.loss_func = torch.nn.CrossEntropyLoss(weight=self.class_weights)
+        else:
+            self.loss_func = torch.nn.CrossEntropyLoss(weight=self.class_weights).cuda()
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
