@@ -106,6 +106,12 @@ class EdgeDataset(Dataset):
     data_stds: T.Optional[torch.Tensor] = attr.ib(
         validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
     )
+    crop_counts: T.Optional[torch.Tensor] = attr.ib(
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
+    )
+    edge_counts: T.Optional[torch.Tensor] = attr.ib(
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
+    )
     pattern: T.Optional[str] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(str)), default='data*.pt')
     processes: T.Optional[int] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=psutil.cpu_count())
     threads_per_worker: T.Optional[int] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=1)
