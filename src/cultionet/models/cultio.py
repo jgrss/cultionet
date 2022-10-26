@@ -42,7 +42,11 @@ class CultioGraphNet(torch.nn.Module):
         self.filters = filters
         num_distances = 2
         num_index_streams = 2
-        base_in_channels = (filters * self.ds_num_bands) * num_index_streams + self.filters
+        # Index streams = filters x num_bands
+        index_stream_out_channels = (filters * self.ds_num_bands) * num_index_streams
+        # RNN stream = 2 + num_classes
+        rnn_stream_out_channels = 2
+        base_in_channels = index_stream_out_channels + rnn_stream_out_channels
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
@@ -61,7 +65,10 @@ class CultioGraphNet(torch.nn.Module):
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
             hidden_dim=star_rnn_hidden_dim,
-            nclasses=self.filters,
+            # Number of output classes (0=not cropland; 1=cropland)
+            num_classes=2,
+            # Number of output crop type classes
+            num_crop_classes=num_classes,
             n_layers=star_rnn_n_layers
         )
         # Boundary distance orientations (+1)
@@ -82,9 +89,15 @@ class CultioGraphNet(torch.nn.Module):
             mid_channels=self.filters,
             out_channels=2
         )
-        # Classes (+num_classes)
+        # Crops (+2)
         self.crop_layer = GraphFinal(
             in_channels=base_in_channels+num_distances+2,
+            mid_channels=self.filters,
+            out_channels=2
+        )
+        # Crop types (+num_classes)
+        self.crop_type_layer = GraphFinal(
+            in_channels=base_in_channels+num_distances+2+2+num_classes,
             mid_channels=self.filters,
             out_channels=num_classes
         )
@@ -95,7 +108,7 @@ class CultioGraphNet(torch.nn.Module):
     def forward(
         self, data: Data
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
     ]:
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
@@ -136,14 +149,16 @@ class CultioGraphNet(torch.nn.Module):
         star_stream = star_stream.reshape(
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         ).permute(0, 2, 1, 3, 4)
-        star_stream = self.star_rnn(star_stream)
+        # Crop/Non-crop and Crop types
+        star_stream, star_stream_local_2 = self.star_rnn(star_stream)
         star_stream = self.cg(star_stream)
+        star_stream_local_2 = self.cg(star_stream_local_2)
         # Concatenate time series streams
         h = torch.cat(
             [
                 transformer_stream,
                 nunet_stream,
-                star_stream
+                star_stream_local_2
             ],
             dim=1
         )
@@ -184,8 +199,19 @@ class CultioGraphNet(torch.nn.Module):
         # Concatenate streams + distance orientations + distances + edges
         h = torch.cat([h, logits_edges], dim=1)
 
-        # Estimate crops
+        # Estimate crop/non-crop
         logits_crop = self.crop_layer(
+            h,
+            data.edge_index,
+            data.edge_attrs,
+            data.batch,
+            height,
+            width
+        )
+        h = torch.cat([h, logits_crop, star_stream], dim=1)
+
+        # Estimate crop-type
+        logits_crop_type = self.crop_type_layer(
             h,
             data.edge_index,
             data.edge_attrs,
@@ -198,5 +224,6 @@ class CultioGraphNet(torch.nn.Module):
             logits_distances_ori,
             logits_distances,
             logits_edges,
-            logits_crop
+            logits_crop,
+            logits_crop_type
         )

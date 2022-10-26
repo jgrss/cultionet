@@ -365,7 +365,7 @@ class CultioLitModel(pl.LightningModule):
     def forward(
         self, batch: Data, batch_idx: int = None
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
     ]:
         """Performs a single model forward pass
 
@@ -374,13 +374,14 @@ class CultioLitModel(pl.LightningModule):
             edge: Probability of an edge [0,1].
             crop: Probability of crop [0,1].
         """
-        distance_ori, distance, edge, crop = self.model(batch)
+        distance_ori, distance, edge, crop, crop_type = self.model(batch)
 
         # Transform edge and crop logits to probabilities
         edge = F.softmax(edge, dim=1, dtype=edge.dtype)
         crop = F.softmax(crop, dim=1, dtype=crop.dtype)
+        crop_type = F.softmax(crop_type, dim=1, dtype=crop.dtype)
 
-        return distance_ori, distance, edge, crop
+        return distance_ori, distance, edge, crop, crop_type
 
     @staticmethod
     def get_cuda_memory():
@@ -394,7 +395,7 @@ class CultioLitModel(pl.LightningModule):
         batch: Data,
         batch_idx: int = None
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
     ]:
         """A prediction step for Lightning
         """
@@ -404,18 +405,19 @@ class CultioLitModel(pl.LightningModule):
         self,
         batch: Data
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
     ]:
         """Predicts edge and crop labels
         """
         with torch.no_grad():
-            distance_ori, distance, edge, crop = self(batch)
+            distance_ori, distance, edge, crop, crop_type = self(batch)
 
         # Take the argmax of the class probabilities
         edge_labels = edge.argmax(dim=1)
-        class_labels = crop.argmax(dim=1)
+        crop_labels = crop.argmax(dim=1)
+        crop_type_labels = crop_type.argmax(dim=1)
 
-        return distance_ori, distance, edge_labels, class_labels
+        return distance_ori, distance, edge_labels, crop_labels, crop_type_labels
 
     def on_validation_epoch_end(self, *args, **kwargs):
         """Save the model on validation end
@@ -450,18 +452,22 @@ class CultioLitModel(pl.LightningModule):
         if (self.edge_volume.device != self.device) or (self.crop_volume.device != self.device):
             self.configure_loss()
 
-        distance_ori, distance, edge, crop = self(batch)
+        distance_ori, distance, edge, crop, crop_type = self(batch)
 
         true_edge = (batch.y == self.edge_class).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.
-        true_crop = torch.where(batch.y == self.edge_class, 0, batch.y).long()
+        true_crop = torch.where(
+            (batch.y > 0) & (batch.y < self.edge_class), 1, 0
+        ).long()
+        true_crop_type = torch.where(batch.y == self.edge_class, 0, batch.y).long()
 
-        oloss = self.dloss(distance_ori, batch.ori)
-        dloss = self.dloss(distance, batch.bdist)
-        eloss = self.eloss(edge, true_edge)
-        closs = self.closs(crop, true_crop)
+        ori_loss = self.dist_loss(distance_ori, batch.ori)
+        dist_loss = self.dist_loss(distance, batch.bdist)
+        edge_loss = self.edge_loss(edge, true_edge)
+        crop_loss = self.crop_loss(crop, true_crop)
+        crop_type_loss = self.crop_loss(crop_type, true_crop_type)
 
-        loss = oloss*0.75 + dloss + eloss + closs
+        loss = ori_loss*0.75 + dist_loss + edge_loss + crop_loss + crop_type_loss
 
         return loss
 
@@ -471,18 +477,12 @@ class CultioLitModel(pl.LightningModule):
         loss = self.calc_loss(batch)
         self.log('loss', loss, on_step=False, on_epoch=True, prog_bar=True)
 
-        # print('Train')
-        # t = torch.cuda.get_device_properties(0).total_memory
-        # r = torch.cuda.memory_reserved(0)
-        # a = torch.cuda.memory_allocated(0)
-        # print(t, r, a)
-
         return loss
 
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
         loss = self.calc_loss(batch)
 
-        __, dist, edge, crop = self(batch)
+        __, dist, edge, crop, crop_type = self(batch)
 
         dist_mae = self.dist_mae(
             dist.contiguous().view(-1), batch.bdist.contiguous().view(-1)
@@ -490,20 +490,26 @@ class CultioLitModel(pl.LightningModule):
         dist_mse = self.dist_mse(
             dist.contiguous().view(-1), batch.bdist.contiguous().view(-1)
         )
+
         # Take the argmax of the class probabilities
         edge_ypred = edge.argmax(dim=1).long()
         crop_ypred = crop.argmax(dim=1).long()
+        crop_type_ypred = crop_type.argmax(dim=1).long()
         # Get the true edge and crop labels
         edge_ytrue = batch.y.eq(self.edge_class).long()
         crop_ytrue = torch.where(
+            (batch.y > 0) & (batch.y < self.edge_class), 1, 0
+        ).long()
+        crop_type_ytrue = torch.where(
             batch.y == self.edge_class, 0, batch.y
         ).long()
         # F1-score
         edge_score = self.edge_f1(edge_ypred, edge_ytrue)
-        class_score = self.crop_f1(crop_ypred, crop_ytrue)
+        crop_score = self.crop_f1(crop_ypred, crop_ytrue)
+        crop_type_score = self.crop_type_f1(crop_type_ypred, crop_type_ytrue)
         # MCC
         edge_mcc = self.edge_mcc(edge_ypred, edge_ytrue)
-        class_mcc = self.crop_mcc(crop_ypred, crop_ytrue)
+        crop_mcc = self.crop_mcc(crop_ypred, crop_ytrue)
         # Dice
         edge_dice = self.edge_dice(edge_ypred, edge_ytrue)
         crop_dice = self.crop_dice(crop_ypred, crop_ytrue)
@@ -513,17 +519,13 @@ class CultioLitModel(pl.LightningModule):
             'dist_mae': dist_mae,
             'dist_mse': dist_mse,
             'edge_f1': edge_score,
-            'crop_f1': class_score,
+            'crop_f1': crop_score,
+            'crop_type_f1': crop_type_score,
             'edge_mcc': edge_mcc,
-            'crop_mcc': class_mcc,
+            'crop_mcc': crop_mcc,
             'edge_dice': edge_dice,
             'crop_dice': crop_dice,
         }
-        # print('Eval')
-        # t = torch.cuda.get_device_properties(0).total_memory
-        # r = torch.cuda.memory_reserved(0)
-        # a = torch.cuda.memory_allocated(0)
-        # print(t, r, a)
 
         return metrics
 
@@ -536,6 +538,7 @@ class CultioLitModel(pl.LightningModule):
             'val_loss': eval_metrics['loss'],
             'vef1': eval_metrics['edge_f1'],
             'vcf1': eval_metrics['crop_f1'],
+            'vctf1': eval_metrics['crop_type_f1'],
             'vemcc': eval_metrics['edge_mcc'],
             'vcmcc': eval_metrics['crop_mcc']
         }
@@ -554,6 +557,7 @@ class CultioLitModel(pl.LightningModule):
             'tmse': eval_metrics['dist_mse'],
             'tef1': eval_metrics['edge_f1'],
             'tcf1': eval_metrics['crop_f1'],
+            'tctf1': eval_metrics['crop_type_f1'],
             'temcc': eval_metrics['edge_mcc'],
             'tcmcc': eval_metrics['crop_mcc'],
             'tedice': eval_metrics['edge_dice'],
@@ -567,7 +571,8 @@ class CultioLitModel(pl.LightningModule):
         self.dist_mae = torchmetrics.MeanAbsoluteError()
         self.dist_mse = torchmetrics.MeanSquaredError()
         self.edge_f1 = torchmetrics.F1Score(num_classes=2, average='micro')
-        self.crop_f1 = torchmetrics.F1Score(num_classes=self.num_classes, average='weighted')
+        self.crop_f1 = torchmetrics.F1Score(num_classes=2, average='micro')
+        self.crop_type_f1 = torchmetrics.F1Score(num_classes=self.num_classes, average='weighted')
         self.edge_mcc = torchmetrics.MatthewsCorrCoef(num_classes=2)
         self.crop_mcc = torchmetrics.MatthewsCorrCoef(num_classes=self.num_classes)
         self.edge_dice = torchmetrics.Dice(num_classes=2, average='micro')
@@ -581,20 +586,18 @@ class CultioLitModel(pl.LightningModule):
             self.num_classes, dtype=self.dtype, device=self.device
         )
 
-        self.dloss = HuberLoss()
-        self.eloss = TanimotoDistanceLoss(
+        self.dist_loss = HuberLoss()
+        self.edge_loss = TanimotoDistanceLoss(
             volume=self.edge_volume,
             inputs_are_logits=True,
             apply_transform=True
         )
-        if self.num_classes == 2:
-            self.closs = TanimotoDistanceLoss(
-                volume=self.crop_volume,
-                inputs_are_logits=True,
-                apply_transform=True
-            )
-        else:
-            self.closs = CrossEntropyLoss(class_weights=self.class_weights)
+        self.crop_loss = TanimotoDistanceLoss(
+            volume=self.crop_volume,
+            inputs_are_logits=True,
+            apply_transform=True
+        )
+        self.crop_type_loss = CrossEntropyLoss(class_weights=self.class_weights)
 
     def configure_optimizers(self):
         params_list = list(self.model.parameters())
