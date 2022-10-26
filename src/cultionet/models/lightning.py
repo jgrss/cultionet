@@ -597,7 +597,9 @@ class CultioLitModel(pl.LightningModule):
         self.dist_mse = torchmetrics.MeanSquaredError()
         self.edge_f1 = torchmetrics.F1Score(num_classes=2, average='micro')
         self.crop_f1 = torchmetrics.F1Score(num_classes=2, average='micro')
-        self.crop_type_f1 = torchmetrics.F1Score(num_classes=self.num_classes, average='weighted')
+        self.crop_type_f1 = torchmetrics.F1Score(
+            num_classes=self.num_classes, average='weighted', ignore_index=0
+        )
         self.edge_mcc = torchmetrics.MatthewsCorrCoef(num_classes=2)
         self.crop_mcc = torchmetrics.MatthewsCorrCoef(num_classes=self.num_classes)
         self.edge_dice = torchmetrics.Dice(num_classes=2, average='micro')
