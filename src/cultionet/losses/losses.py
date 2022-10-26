@@ -95,8 +95,8 @@ class TanimotoDistanceLoss(ClassifierPreprocessing):
 
 
 @attr.s
-class CrossEntropyLoss(ClassifierPreprocessing):
-    """Huber loss
+class CrossEntropyLoss(object):
+    """Cross entropy loss
     """
     class_weights: T.Optional[torch.Tensor] = attr.ib(
         default=None,
@@ -116,7 +116,6 @@ class CrossEntropyLoss(ClassifierPreprocessing):
     )
 
     def __attrs_post_init__(self):
-        super(CrossEntropyLoss, self).__init__()
         if self.device == 'cpu':
             self.loss_func = torch.nn.CrossEntropyLoss(weight=self.class_weights)
         else:
@@ -135,9 +134,7 @@ class CrossEntropyLoss(ClassifierPreprocessing):
         Returns:
             Loss (float)
         """
-        inputs, targets = self.preprocess(inputs, targets)
-
-        return self.loss_func(inputs, targets)
+        return self.loss_func(inputs, targets.contiguous().view(-1))
 
 
 @attr.s

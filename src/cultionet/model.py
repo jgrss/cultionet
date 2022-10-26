@@ -16,6 +16,7 @@ from .utils.logging import set_color_logger
 from scipy.stats import mode as sci_mode
 from rasterio.windows import Window
 import torch
+import torch.nn.functional as F
 from torch_geometric.data import Data
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything
@@ -483,6 +484,9 @@ def predict(
         lit_model = lit_model.to('cuda')
     with torch.no_grad():
         distance_ori, distance, edge, crop, crop_type = lit_model(norm_batch)
+        edge = F.softmax(edge, dim=1, dtype=edge.dtype)
+        crop = F.softmax(crop, dim=1, dtype=crop.dtype)
+        crop_type = F.softmax(crop_type, dim=1, dtype=crop_type.dtype)
         if include_maskrcnn:
             # TODO: fix this -- separate Mask R-CNN model
             predictions = lit_model.mask_forward(

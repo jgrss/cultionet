@@ -376,11 +376,6 @@ class CultioLitModel(pl.LightningModule):
         """
         distance_ori, distance, edge, crop, crop_type = self.model(batch)
 
-        # Transform edge and crop logits to probabilities
-        edge = F.softmax(edge, dim=1, dtype=edge.dtype)
-        crop = F.softmax(crop, dim=1, dtype=crop.dtype)
-        crop_type = F.softmax(crop_type, dim=1, dtype=crop.dtype)
-
         return distance_ori, distance, edge, crop, crop_type
 
     @staticmethod
@@ -412,6 +407,11 @@ class CultioLitModel(pl.LightningModule):
         with torch.no_grad():
             distance_ori, distance, edge, crop, crop_type = self(batch)
 
+        # Transform edge and crop logits to probabilities
+        edge = F.softmax(edge, dim=1, dtype=edge.dtype)
+        crop = F.softmax(crop, dim=1, dtype=crop.dtype)
+        crop_type = F.softmax(crop_type, dim=1, dtype=crop.dtype)
+
         # Take the argmax of the class probabilities
         edge_labels = edge.argmax(dim=1)
         crop_labels = crop.argmax(dim=1)
@@ -429,7 +429,15 @@ class CultioLitModel(pl.LightningModule):
             self.state_dict(), model_file
         )
 
-    def calc_loss(self, batch: T.Union[Data, T.List]):
+    def calc_loss(
+        self,
+        batch: T.Union[Data, T.List],
+        distance_ori: torch.Tensor,
+        distance: torch.Tensor,
+        edge: torch.Tensor,
+        crop: torch.Tensor,
+        crop_type: torch.Tensor
+    ):
         """Calculates the loss for each layer
 
         Returns:
@@ -452,8 +460,6 @@ class CultioLitModel(pl.LightningModule):
         if self.volume.device != self.device:
             self.configure_loss()
 
-        distance_ori, distance, edge, crop, crop_type = self(batch)
-
         true_edge = (batch.y == self.edge_class).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.
         true_crop = torch.where(
@@ -474,21 +480,37 @@ class CultioLitModel(pl.LightningModule):
     def training_step(self, batch: Data, batch_idx: int = None):
         """Executes one training step
         """
-        loss = self.calc_loss(batch)
+        distance_ori, distance, edge, crop, crop_type = self(batch)
+        loss = self.calc_loss(
+            batch,
+            distance_ori,
+            distance,
+            edge,
+            crop,
+            crop_type
+        )
         self.log('loss', loss, on_step=False, on_epoch=True, prog_bar=True)
 
         return loss
 
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
-        loss = self.calc_loss(batch)
-
-        __, dist, edge, crop, crop_type = self(batch)
+        distance_ori, distance, edge, crop, crop_type = self(batch)
+        loss = self.calc_loss(
+            batch,
+            distance_ori,
+            distance,
+            edge,
+            crop,
+            crop_type
+        )
 
         dist_mae = self.dist_mae(
-            dist.contiguous().view(-1), batch.bdist.contiguous().view(-1)
+            distance.contiguous().view(-1),
+            batch.bdist.contiguous().view(-1)
         )
         dist_mse = self.dist_mse(
-            dist.contiguous().view(-1), batch.bdist.contiguous().view(-1)
+            distance.contiguous().view(-1),
+            batch.bdist.contiguous().view(-1)
         )
 
         # Take the argmax of the class probabilities
