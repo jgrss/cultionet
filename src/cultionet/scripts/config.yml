@@ -28,5 +28,3 @@ predict_year: 2021
 # to set these dates to avoid unexpected date inclusions.
 start_date: 07-01
 end_date: 07-01
-
-lc_path: !!null
