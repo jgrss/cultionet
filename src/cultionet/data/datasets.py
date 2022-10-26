@@ -1,19 +1,18 @@
 import typing as T
 from pathlib import Path
 import random
-import logging
 from functools import partial
 
 from ..errors import TensorShapeError
 from ..utils.logging import set_color_logger
+from ..utils.model_preprocessing import TqdmParallel
 
 import numpy as np
 import attr
 import torch
 from torch_geometric.data import Data, Dataset
 import psutil
-from tqdm.auto import tqdm
-from joblib import Parallel, delayed, parallel_backend
+from joblib import delayed, parallel_backend
 import rtree
 import geopandas as gpd
 
@@ -86,50 +85,12 @@ def _check_shape(
     return True, index, uid
 
 
-class TqdmParallel(Parallel):
-    """A tqdm progress bar for joblib Parallel tasks
-
-    Reference:
-        https://stackoverflow.com/questions/37804279/how-can-we-use-tqdm-in-a-parallel-execution-with-joblib
-    """
-    def __init__(self, tqdm_kwargs: dict):
-        self.tqdm_kwargs = tqdm_kwargs
-        super().__init__()
-
-    def __call__(self, *args, **kwargs):
-        with tqdm(**self.tqdm_kwargs) as self._pbar:
-            return Parallel.__call__(self, *args, **kwargs)
-
-    def print_progress(self):
-        self._pbar.n = self.n_completed_tasks
-        self._pbar.refresh()
-
-
 def _check_shape(
     d1: int, d2: int, index: int, uid: str
 ) -> T.Tuple[bool, int, str]:
     if d1 != d2:
         return False, index, uid
     return True, index, uid
-
-
-class TqdmParallel(Parallel):
-    """A tqdm progress bar for joblib Parallel tasks
-
-    Reference:
-        https://stackoverflow.com/questions/37804279/how-can-we-use-tqdm-in-a-parallel-execution-with-joblib
-    """
-    def __init__(self, tqdm_kwargs: dict):
-        self.tqdm_kwargs = tqdm_kwargs
-        super().__init__()
-
-    def __call__(self, *args, **kwargs):
-        with tqdm(**self.tqdm_kwargs) as self._pbar:
-            return Parallel.__call__(self, *args, **kwargs)
-
-    def print_progress(self):
-        self._pbar.n = self.n_completed_tasks
-        self._pbar.refresh()
 
 
 @attr.s
@@ -139,8 +100,12 @@ class EdgeDataset(Dataset):
     root: T.Union[str, Path, bytes] = attr.ib(default='.')
     transform: T.Any = attr.ib(default=None)
     pre_transform: T.Any = attr.ib(default=None)
-    data_means: T.Optional[torch.Tensor] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None)
-    data_stds: T.Optional[torch.Tensor] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None)
+    data_means: T.Optional[torch.Tensor] = attr.ib(
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
+    )
+    data_stds: T.Optional[torch.Tensor] = attr.ib(
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
+    )
     pattern: T.Optional[str] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(str)), default='data*.pt')
     processes: T.Optional[int] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=psutil.cpu_count())
     threads_per_worker: T.Optional[int] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=1)
