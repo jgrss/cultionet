@@ -1,18 +1,12 @@
 import typing as T
 from pathlib import Path
 
-from .const import (
-    POLYGON_CROP_CLASS,
-    POLYGON_FALLOW_CLASS,
-    EDGE_CLASS,
-    CROP_CLASS,
-    FALLOW_CLASS
-)
 from .lookup import CDL_CROP_LABELS_r
 from .utils import LabeledData, get_image_list_dims
 from ..augment.augmentation import augment
 from ..errors import TopologyClipError
 from ..utils.geometry import bounds_to_frame, warp_by_image
+from cultionet.utils.logging import set_color_logger
 
 import geowombat as gw
 from geowombat.core import polygon_to_array
@@ -22,11 +16,13 @@ from scipy import stats as sci_stats
 import cv2
 import geopandas as gpd
 from skimage.measure import regionprops
-from skimage.morphology import thin as sk_thin
 import xarray as xr
 from tqdm.auto import tqdm
 import torch
 from torch_geometric.data import Data
+
+
+logger = set_color_logger(__name__)
 
 
 def remove_noncrop(xvars: np.ndarray, labels_array: np.ndarray) -> T.Tuple[np.ndarray, np.ndarray]:
@@ -83,75 +79,8 @@ def edge_gradient(array: np.ndarray, train_type: str, cell_res: float) -> np.nda
     return array
 
 
-def focal_compare(arr: np.ndarray) -> np.ndarray:
-    """Calculates a focal comparison of neighbors and the central pixel
-    """
-    # crop mask
-    out = [np.uint8(arr > 0)]
-    arr_pad = np.pad(arr, pad_width=((1, 1), (1, 1)), mode='edge')
-    # Direct neighbors
-    out.append(np.where(roll(arr_pad, 1, axis=0) == arr, 1, 0))
-    out.append(np.where(roll(arr_pad, -1, axis=0) == arr, 1, 0))
-    out.append(np.where(roll(arr_pad, 1, axis=1) == arr, 1, 0))
-    out.append(np.where(roll(arr_pad, -1, axis=1) == arr, 1, 0))
-    # Corner neighbors
-    out.append(np.where(roll(arr_pad, (1, 1), axis=(0, 1)) == arr, 1, 0))
-    out.append(np.where(roll(arr_pad, (1, -1), axis=(0, 1)) == arr, 1, 0))
-    out.append(np.where(roll(arr_pad, (-1, 1), axis=(0, 1)) == arr, 1, 0))
-    out.append(np.where(roll(arr_pad, (-1, -1), axis=(0, 1)) == arr, 1, 0))
-
-    return np.array(out).sum(axis=0) * out[0]
-
-
-def focal_stat(arr: np.ndarray, stat: str = 'var') -> np.ndarray:
-    """Calculates the focal variance
-    """
-    out = [arr.squeeze().copy()]
-    arr_pad = np.pad(arr, pad_width=((1, 1), (1, 1)), mode='edge')
-    # Direct neighbors
-    out.append(roll(arr_pad, 1, axis=0))
-    out.append(roll(arr_pad, -1, axis=0))
-    out.append(roll(arr_pad, 1, axis=1))
-    out.append(roll(arr_pad, -1, axis=1))
-    # Corner neighbors
-    out.append(roll(arr_pad, (1, 1), axis=(0, 1)))
-    out.append(roll(arr_pad, (1, -1), axis=(0, 1)))
-    out.append(roll(arr_pad, (-1, 1), axis=(0, 1)))
-    out.append(roll(arr_pad, (-1, -1), axis=(0, 1)))
-
-    return getattr(np, stat)(np.array(out), axis=0)
-
-
-def fill_field_gaps(arr: np.ndarray, reset_edges: T.Optional[bool] = False) -> np.ndarray:
-    """Fills gaps between fields and edges
-    """
-    arr = arr.squeeze().copy().astype('float64')
-    arr[arr == EDGE_CLASS] = np.nan
-    out = [arr]
-    arr_pad = np.pad(arr, pad_width=((1, 1), (1, 1)), mode='edge')
-    # Direct neighbors
-    out.append(roll(arr_pad, 1, axis=0))
-    out.append(roll(arr_pad, -1, axis=0))
-    out.append(roll(arr_pad, 1, axis=1))
-    out.append(roll(arr_pad, -1, axis=1))
-    # Corner neighbors
-    # out.append(np.roll(arr_pad, (1, 1), axis=(0, 1))[1:-1, 1:-1])
-    # out.append(np.roll(arr_pad, (1, -1), axis=(0, 1))[1:-1, 1:-1])
-    # out.append(np.roll(arr_pad, (-1, 1), axis=(0, 1))[1:-1, 1:-1])
-    # out.append(np.roll(arr_pad, (-1, -1), axis=(0, 1))[1:-1, 1:-1])
-
-    nsum = np.nansum(np.array(out), axis=0)
-    if reset_edges:
-        arr[np.isnan(arr)] = EDGE_CLASS
-    out = np.where((arr == 0) & (nsum > 0), CROP_CLASS, arr.astype('int64'))
-    if not reset_edges:
-        out[np.isnan(out)] = 0
-
-    return out
-
-
 def check_slivers(
-    labels_array: np.ndarray, edges: np.ndarray, segments: np.ndarray
+    labels_array: np.ndarray, edges: np.ndarray, segments: np.ndarray, edge_class: int
 ) -> T.Tuple[np.ndarray, list]:
     """Checks for small segment slivers
     """
@@ -160,13 +89,13 @@ def check_slivers(
         min_row, min_col, max_row, max_col = p.bbox
         if (max_row - min_row <= 1) or (max_col - min_col <= 1):
             labels_array[segments == p.label] = 0
-    labels_array[edges == 1] = EDGE_CLASS
+    labels_array[edges == 1] = edge_class
 
     return labels_array, props
 
 
 def make_crops_uniform(
-    labels_array: np.ndarray, edges: np.ndarray, data_type: str
+    labels_array: np.ndarray, edges: np.ndarray, max_crop_class: int, data_type: str
 ) -> T.Tuple[np.ndarray, np.ndarray]:
     """Makes each segment uniform in its class value
     """
@@ -184,7 +113,7 @@ def make_crops_uniform(
             if crop_prop > 0.5:
                 # Majority cropland
                 if data_type == 'boundaries':
-                    labels_array[segments == lab] = CROP_CLASS
+                    labels_array[segments == lab] = max_crop_class
                 else:
                     idx = np.where(segments == lab)
                     crop_pixels = labels_array[idx].flatten()
@@ -290,28 +219,28 @@ def fill_edge_gaps(labels: np.ndarray, array: np.ndarray) -> np.ndarray:
     return array
 
 
-def get_crop_count(array: np.ndarray) -> np.ndarray:
+def get_crop_count(array: np.ndarray, edge_class: int) -> np.ndarray:
     array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode='edge')
 
     rarray = roll(array_pad, 1, axis=0)
-    crop_count = np.uint8((rarray > 0) & (rarray != EDGE_CLASS))
+    crop_count = np.uint8((rarray > 0) & (rarray != edge_class))
     rarray = roll(array_pad, -1, axis=0)
-    crop_count += np.uint8((rarray > 0) & (rarray != EDGE_CLASS))
+    crop_count += np.uint8((rarray > 0) & (rarray != edge_class))
     rarray = roll(array_pad, 1, axis=1)
-    crop_count += np.uint8((rarray > 0) & (rarray != EDGE_CLASS))
+    crop_count += np.uint8((rarray > 0) & (rarray != edge_class))
     rarray = roll(array_pad, -1, axis=1)
-    crop_count += np.uint8((rarray > 0) & (rarray != EDGE_CLASS))
+    crop_count += np.uint8((rarray > 0) & (rarray != edge_class))
 
     return crop_count
 
 
-def get_edge_count(array: np.ndarray) -> np.ndarray:
+def get_edge_count(array: np.ndarray, edge_class: int) -> np.ndarray:
     array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode='edge')
 
-    edge_count = np.uint8(roll(array_pad, 1, axis=0) == EDGE_CLASS)
-    edge_count += np.uint8(roll(array_pad, -1, axis=0) == EDGE_CLASS)
-    edge_count += np.uint8(roll(array_pad, 1, axis=1) == EDGE_CLASS)
-    edge_count += np.uint8(roll(array_pad, -1, axis=1) == EDGE_CLASS)
+    edge_count = np.uint8(roll(array_pad, 1, axis=0) == edge_class)
+    edge_count += np.uint8(roll(array_pad, -1, axis=0) == edge_class)
+    edge_count += np.uint8(roll(array_pad, 1, axis=1) == edge_class)
+    edge_count += np.uint8(roll(array_pad, -1, axis=1) == edge_class)
 
     return edge_count
 
@@ -327,7 +256,7 @@ def get_non_count(array: np.ndarray) -> np.ndarray:
     return non_count
 
 
-def cleanup_edges(array: np.ndarray, original: np.ndarray) -> np.ndarray:
+def cleanup_edges(array: np.ndarray, original: np.ndarray, edge_class: int) -> np.ndarray:
     """Removes crop pixels that border non-crop pixels
     """
     array_pad = np.pad(original, pad_width=((1, 1), (1, 1)), mode='edge')
@@ -338,12 +267,12 @@ def cleanup_edges(array: np.ndarray, original: np.ndarray) -> np.ndarray:
 
     # Fill edges
     array = np.where(
-        (array == 0) & (get_crop_count(array) > 0) & (get_edge_count(array) > 0),
-        EDGE_CLASS, array
+        (array == 0) & (get_crop_count(array, edge_class) > 0) & (get_edge_count(array, edge_class) > 0),
+        edge_class, array
     )
     # Remove crops next to non-crop
     array = np.where(
-        (array > 0) & (array != EDGE_CLASS) & (get_non_count(array) > 0) & (get_edge_count(array) > 0),
+        (array > 0) & (array != edge_class) & (get_non_count(array) > 0) & (get_edge_count(array, edge_class) > 0),
         0, array
     )
     # Fill in non-cropland
@@ -352,7 +281,7 @@ def cleanup_edges(array: np.ndarray, original: np.ndarray) -> np.ndarray:
     )
     # Remove isolated crop pixels (i.e., crop clumps with 2 or fewer pixels)
     array = np.where(
-        (array > 0) & (array != EDGE_CLASS) & (get_crop_count(array) <= 1), 0, array
+        (array > 0) & (array != edge_class) & (get_crop_count(array, edge_class) <= 1), 0, array
     )
 
     return array
@@ -469,6 +398,7 @@ def normalize_boundary_distances(
 
 def create_image_vars(
     image: T.Union[str, Path, list],
+    max_crop_class: int,
     bounds: tuple,
     num_workers: int,
     gain: float = 1e-4,
@@ -479,10 +409,12 @@ def create_image_vars(
     crop_column: T.Optional[str] = 'class',
     keep_crop_classes: T.Optional[bool] = False
 ) -> T.Tuple[
-    np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int
+    np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int
 ]:
     """Creates the initial image training data
     """
+    edge_class = max_crop_class + 1
+
     if isinstance(image, list):
         image = [str(fn) for fn in image]
 
@@ -546,23 +478,16 @@ def create_image_vars(
                 # import ipdb; ipdb.set_trace()
                 # Recode
                 if not keep_crop_classes:
-                    if FALLOW_CLASS != -999:
-                        labels_array = np.where(
-                            labels_array == POLYGON_FALLOW_CLASS, FALLOW_CLASS, np.where(
-                                labels_array == 0, 0, CROP_CLASS
-                            )
-                        )
-                    else:
-                        labels_array = np.where(
-                            labels_array > 0, CROP_CLASS, 0
-                        )
+                    labels_array = np.where(
+                        labels_array > 0, max_crop_class, 0
+                    )
                 # Set edges
-                labels_array[edges == 1] = EDGE_CLASS
+                labels_array[edges == 1] = edge_class
                 # No crop pixel should border non-crop
-                labels_array = cleanup_edges(labels_array, labels_array_copy)
+                labels_array = cleanup_edges(labels_array, labels_array_copy, edge_class)
                 # Normalize the boundary distances for each segment
                 bdist, ori = normalize_boundary_distances(
-                    np.uint8((labels_array > 0) & (labels_array != EDGE_CLASS)),
+                    np.uint8((labels_array > 0) & (labels_array != edge_class)),
                     grid_edges.geom_type.values[0],
                     src_ts.gw.celly
                 )
@@ -593,13 +518,14 @@ def create_image_vars(
                 ori = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='float64')
                 edges = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='uint8')
 
-    return time_series, labels_array, edges, bdist, ori, ntime, nbands
+    return time_series, labels_array, bdist, ori, ntime, nbands
 
 
 def create_dataset(
     image_list: T.List[T.List[T.Union[str, Path]]],
     df_grids: gpd.GeoDataFrame,
     df_edges: gpd.GeoDataFrame,
+    max_crop_class: int,
     group_id: str = None,
     process_path: Path = None,
     transforms: T.List[str] = None,
@@ -609,9 +535,7 @@ def create_dataset(
     resampling: str = 'nearest',
     num_workers: int = 1,
     grid_size: T.Optional[T.Union[T.Tuple[int, int], T.List[int], None]] = None,
-    lc_path: T.Optional[T.Union[str, None]] = None,
     n_ts: T.Optional[int] = 2,
-    data_type: T.Optional[str] = 'boundaries',
     instance_seg: T.Optional[bool] = False,
     zero_padding: T.Optional[int] = 0,
     crop_column: T.Optional[str] = 'class',
@@ -623,6 +547,7 @@ def create_dataset(
         image_list: A list of images.
         df_grids: The training grids.
         df_edges: The training edges.
+        max_crop_class: The maximum expected crop class value.
         group_id: A group identifier, used for logging.
         process_path: The main processing path.
         transforms: A list of augmentation transforms to apply.
@@ -657,9 +582,11 @@ def create_dataset(
             try:
                 grid_edges = gpd.clip(df_edges, row.geometry)
             except:
-                print(TopologyClipError('The input GeoDataFrame contains topology errors.'))
+                logger.warning(TopologyClipError('The input GeoDataFrame contains topology errors.'))
                 df_edges = gpd.GeoDataFrame(
-                    data=df_edges['class'].values, columns=['class'], geometry=df_edges.buffer(0).geometry
+                    data=df_edges[crop_column].values,
+                    columns=[crop_column],
+                    geometry=df_edges.buffer(0).geometry
                 )
                 grid_edges = gpd.clip(df_edges, row.geometry)
 
@@ -667,17 +594,27 @@ def create_dataset(
             # be used for training.
             if grid_edges.loc[~grid_edges.is_empty].empty:
                 grid_edges = df_grids.copy()
-                grid_edges.loc[:, 'class'] = 0
+                grid_edges = grid_edges.assign(**{crop_column: 0})
             # Remove empty geometry
             grid_edges = grid_edges.loc[~grid_edges.is_empty]
 
             if not grid_edges.empty:
                 # Check if the edges overlap multiple grids
-                int_idx = sorted(list(sindex.intersection(tuple(grid_edges.total_bounds.flatten()))))
+                int_idx = sorted(
+                    list(
+                        sindex.intersection(
+                            tuple(grid_edges.total_bounds.flatten())
+                        )
+                    )
+                )
 
                 if len(int_idx) > 1:
                     # Check if any of the grids have already been stored
-                    if any([rowg in merged_grids for rowg in df_grids.iloc[int_idx].grid.values.tolist()]):
+                    if any(
+                        [
+                            rowg in merged_grids for rowg in df_grids.iloc[int_idx].grid.values.tolist()
+                        ]
+                    ):
                         pbar.update(1)
                         pbar.set_description(f'No edges for {group_id}')
                         continue
@@ -686,9 +623,9 @@ def create_dataset(
                     merged_grids.append(row.grid)
 
                 # Make polygons unique
-                nonzero_mask = grid_edges['class'] != 0
+                nonzero_mask = grid_edges[crop_column] != 0
                 if nonzero_mask.any():
-                    grid_edges.loc[nonzero_mask, 'class'] = range(1, nonzero_mask.sum()+1)
+                    grid_edges.loc[nonzero_mask, crop_column] = range(1, nonzero_mask.sum()+1)
 
                 # left, bottom, right, top
                 ref_bounds = df_grids.to_crs(image_crs).iloc[int_idx].total_bounds.tolist()
@@ -698,8 +635,9 @@ def create_dataset(
                     ref_bounds = [left, top-ref_res*height, left+ref_res*width, top]
 
                 # Data for graph network
-                xvars, labels_array, edges, bdist, ori, ntime, nbands = create_image_vars(
-                    image_list,
+                xvars, labels_array, bdist, ori, ntime, nbands = create_image_vars(
+                    image=image_list,
+                    max_crop_class=max_crop_class,
                     bounds=ref_bounds,
                     num_workers=num_workers,
                     gain=gain,
@@ -750,36 +688,8 @@ def create_dataset(
                 else:
                     start_year, end_year = None, None
 
-                # Get land cover over the block sample
-                if isinstance(lc_path, (str, Path)):
-                    # Convert the grid bounding box from lat/lon to projected coordinates
-                    df_latlon = bounds_to_frame(left, bottom, right, top, crs='epsg:4326')
-                    df_latlon, ref_crs = warp_by_image(df_latlon, lc_path)
-
-                    # Open the projected land cover
-                    with gw.config.update(
-                        ref_bounds=df_latlon.total_bounds.tolist(),
-                        ref_crs=ref_crs,
-                        ref_res=ref_res
-                    ):
-                        with gw.open(lc_path, chunks=2048) as src:
-                            lc_labels = src.squeeze()[:labels_array.shape[0], :labels_array.shape[1]].data.compute()
-
-                    # Close ends
-                    labels_array = close_edge_ends(labels_array)
-                    # Recode crop labels
-                    labels_array, edges = recode_crop_labels(
-                        labels_array, lc_labels, lc_is_cdl=True, data_type=data_type
-                    )
-                    # Make each segment uniform in its class value
-                    labels_array, segments = make_crops_uniform(labels_array, edges, data_type=data_type)
-                    # Check for slivers
-                    labels_array, props = check_slivers(labels_array, edges, segments)
-                    # Remove non-crop edges
-                    xvars, labels_array = remove_noncrop(xvars, labels_array)
-                else:
-                    segments = nd_label(labels_array)[0]
-                    props = regionprops(segments)
+                segments = nd_label(labels_array)[0]
+                props = regionprops(segments)
 
                 ldata = LabeledData(
                     x=xvars,
@@ -802,6 +712,7 @@ def create_dataset(
                                 aug=aug,
                                 ntime=ntime,
                                 nbands=nbands,
+                                max_crop_class=max_crop_class,
                                 k=3,
                                 instance_seg=instance_seg,
                                 zero_padding=zero_padding,
@@ -826,6 +737,7 @@ def create_dataset(
                             aug=aug,
                             ntime=ntime,
                             nbands=nbands,
+                            max_crop_class=max_crop_class,
                             k=3,
                             instance_seg=instance_seg,
                             zero_padding=zero_padding,
