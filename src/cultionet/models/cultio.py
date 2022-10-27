@@ -133,6 +133,7 @@ class CultioGraphNet(torch.nn.Module):
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
         transformer_stream = self.cg(self.transformer(transformer_stream))
+        
         # Nested UNet on each band time series
         nunet_stream = self.nunet(
             data.x,
@@ -142,6 +143,7 @@ class CultioGraphNet(torch.nn.Module):
             height,
             width
         )
+
         # RNN ConvStar
         star_stream = self.gc(
             data.x, batch_size, height, width

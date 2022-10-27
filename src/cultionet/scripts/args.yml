@@ -401,7 +401,7 @@ train:
     long: gradient-clip-val
     help: The gradient clip value
     kwargs:
-      default: 0.1
+      default: 1.0
       type: '&float'
   patience:
     short: ''
