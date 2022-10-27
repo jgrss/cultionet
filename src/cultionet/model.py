@@ -1,8 +1,8 @@
-from statistics import mode
 import typing as T
 from pathlib import Path
 import logging
 import json
+import filelock
 
 import numpy as np
 
@@ -13,10 +13,11 @@ from .models.lightning import CultioLitModel, MaskRCNNLitModel
 from .utils.reshape import ModelOutputs
 from .utils.logging import set_color_logger
 
+import geowombat as gw
 from scipy.stats import mode as sci_mode
+import rasterio as rio
 from rasterio.windows import Window
 import torch
-import torch.nn.functional as F
 from torch_geometric.data import Data
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything
@@ -24,7 +25,8 @@ from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
     StochasticWeightAveraging,
-    ModelPruning
+    ModelPruning,
+    BasePredictionWriter
 )
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from torchvision import transforms
@@ -455,6 +457,209 @@ def load_model(
         lit_model.freeze()
 
     return trainer, lit_model
+
+
+class LightningGTiffWriter(BasePredictionWriter):
+    def __init__(
+        self,
+        reference_image: Path,
+        out_path: Path,
+        num_classes: int,
+        ref_res: float,
+        resampling,
+        compression: str,
+        write_interval: str = 'batch'
+    ):
+        super().__init__(write_interval)
+        self.reference_image = reference_image
+        self.out_path = out_path
+
+        with gw.config.update(ref_res=ref_res):
+            with gw.open(reference_image, resampling=resampling) as src:
+                profile = {
+                    'crs': src.crs,
+                    'transform': src.gw.transform,
+                    'height': src.gw.nrows,
+                    'width': src.gw.ncols,
+                    # Orientation (+1) + distance (+1) + edge (+1) + crop (+1) crop types (+N)
+                    # `num_classes` includes background
+                    'count': 4 + num_classes - 1,
+                    'dtype': 'uint16',
+                    'blockxsize': 64 if 64 < src.gw.ncols else src.gw.ncols,
+                    'blockysize': 64 if 64 < src.gw.nrows else src.gw.nrows,
+                    'driver': 'GTiff',
+                    'sharing': False,
+                    'compress': compression
+                }
+        profile['tiled'] = True if max(profile['blockxsize'], profile['blockysize']) >= 16 else False
+        with rio.open(out_path, mode='w', **profile):
+            pass
+        self.dst = rio.open(out_path, mode='r+')
+
+    def write_on_epoch_end(self, trainer, pl_module, predictions, batch_indices):
+        self.dst.close()
+
+    def reshape_predictions(
+        self,
+        batch: Data,
+        distance_ori_batch: torch.Tensor,
+        distance_batch: torch.Tensor,
+        edge_batch: torch.Tensor,
+        crop_batch: torch.Tensor,
+        crop_type_batch: torch.Tensor,
+        batch_index: int
+    ) -> T.Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        pad_slice2d = (
+            slice(
+                int(batch.row_pad_before[batch_index]),
+                int(batch.height[batch_index])-int(batch.row_pad_after[batch_index])
+            ),
+            slice(
+                int(batch.col_pad_before[batch_index]),
+                int(batch.width[batch_index])-int(batch.col_pad_after[batch_index])
+            )
+        )
+        pad_slice3d = (
+            slice(0, None),
+            slice(
+                int(batch.row_pad_before[batch_index]),
+                int(batch.height[batch_index])-int(batch.row_pad_after[batch_index])
+            ),
+            slice(
+                int(batch.col_pad_before[batch_index]),
+                int(batch.width[batch_index])-int(batch.col_pad_after[batch_index])
+            )
+        )
+        distance_ori_batch = distance_ori_batch.reshape(
+            int(batch.height[batch_index]), int(batch.width[batch_index])
+        )[pad_slice2d].contiguous().view(-1)[:, None]
+        distance_batch = distance_batch.reshape(
+            int(batch.height[batch_index]), int(batch.width[batch_index])
+        )[pad_slice2d].contiguous().view(-1)[:, None]
+        rheight = pad_slice2d[0].stop - pad_slice2d[0].start
+        rwidth = pad_slice2d[1].stop - pad_slice2d[1].start
+        edge_batch = edge_batch.t().reshape(
+            2, int(batch.height[batch_index]), int(batch.width[batch_index])
+        )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, 2)
+        crop_batch = crop_batch.t().reshape(
+            2, int(batch.height[batch_index]), int(batch.width[batch_index])
+        )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, 2)
+        num_classes = crop_type_batch.size(1)
+        crop_type_batch = crop_type_batch.t().reshape(
+            num_classes, int(batch.height[batch_index]), int(batch.width[batch_index])
+        )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, num_classes)
+
+        return distance_ori_batch, distance_batch, edge_batch, crop_batch, crop_type_batch
+
+    def write_on_batch_end(
+        self, trainer, pl_module, prediction, batch_indices, batch, batch_idx, dataloader_idx
+    ):
+        distance_ori, distance, edge, crop, crop_type = prediction
+        for batch_index in batch.batch.unique():
+            mask = batch.batch == batch_index
+            w = Window(
+                row_off=int(batch.window_row_off[batch_index]),
+                col_off=int(batch.window_col_off[batch_index]),
+                height=int(batch.window_height[batch_index]),
+                width=int(batch.window_width[batch_index])
+            )
+            w_pad = Window(
+                row_off=int(batch.window_pad_row_off[batch_index]),
+                col_off=int(batch.window_pad_col_off[batch_index]),
+                height=int(batch.window_pad_height[batch_index]),
+                width=int(batch.window_pad_width[batch_index])
+            )
+            distance_ori_batch, distance_batch, edge_batch, crop_batch, crop_type_batch = self.reshape_predictions(
+                batch=batch,
+                distance_ori_batch=distance_ori[mask],
+                distance_batch=distance[mask],
+                edge_batch=edge[mask],
+                crop_batch=crop[mask],
+                crop_type_batch=crop_type[mask],
+                batch_index=batch_index
+            )
+            mo = ModelOutputs(
+                distance_ori=distance_ori_batch,
+                distance=distance_batch,
+                edge=edge_batch,
+                crop=crop_batch,
+                crop_type=crop_type_batch,
+                instances=None,
+                apply_softmax=False
+            )
+            stack = mo.stack_outputs(w, w_pad)
+            stack = (stack * SCALE_FACTOR).clip(0, SCALE_FACTOR)
+
+            with filelock.FileLock('./dst.lock'):
+                self.dst.write(
+                    stack,
+                    indexes=range(1, self.dst.profile['count']+1),
+                    window=w
+                )
+
+
+def predict_lightning(
+    reference_image: T.Union[str, Path],
+    out_path: T.Union[str, Path],
+    ckpt: Path,
+    dataset: EdgeDataset,
+    batch_size: int,
+    device: str,
+    filters: int,
+    precision: int,
+    num_classes: int,
+    resampling: str,
+    ref_res: float,
+    compression: str
+):
+    reference_image = Path(reference_image)
+    out_path = Path(out_path)
+    ckpt_file = Path(ckpt)
+    assert ckpt_file.is_file(), 'The checkpoint file does not exist.'
+
+    data_module = EdgeDataModule(
+        predict_ds=dataset,
+        batch_size=batch_size,
+        num_workers=0,
+        shuffle=False
+    )
+    pred_writer = LightningGTiffWriter(
+        reference_image=reference_image,
+        out_path=out_path,
+        num_classes=num_classes,
+        ref_res=ref_res,
+        resampling=resampling,
+        compression=compression
+    )
+    trainer_kwargs = dict(
+        default_root_dir=str(ckpt_file.parent),
+        callbacks=[pred_writer],
+        precision=precision,
+        devices=1 if device == 'gpu' else None,
+        gpus=1 if device == 'gpu' else None,
+        accelerator=device,
+        num_processes=0,
+        log_every_n_steps=0,
+        logger=False
+    )
+    lit_kwargs = dict(
+        num_features=dataset.num_features,
+        num_time_features=dataset.num_time_features,
+        filters=filters
+    )
+
+    trainer = pl.Trainer(**trainer_kwargs)
+    lit_model = (
+        CultioLitModel(**lit_kwargs)
+        .load_from_checkpoint(checkpoint_path=str(ckpt_file))
+    )
+
+    # Make predictions
+    trainer.predict(
+        model=lit_model,
+        datamodule=data_module,
+        return_predictions=False
+    )
 
 
 def predict(

@@ -18,11 +18,11 @@ from torch_geometric.data import Data
 @dataclass
 class LabeledData:
     x: np.ndarray
-    y: np.ndarray
-    bdist: np.ndarray
-    ori: np.ndarray
-    segments: np.ndarray
-    props: T.List
+    y: T.Union[None, np.ndarray]
+    bdist: T.Union[None, np.ndarray]
+    ori: T.Union[None, np.ndarray]
+    segments: T.Union[None, np.ndarray]
+    props: T.Union[None, T.List]
 
 
 def get_image_list_dims(

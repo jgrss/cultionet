@@ -1,25 +1,29 @@
 import typing as T
 from pathlib import Path
+from functools import partial
 
 from .lookup import CDL_CROP_LABELS_r
 from .utils import LabeledData, get_image_list_dims
 from ..augment.augmentation import augment
 from ..errors import TopologyClipError
-from ..utils.geometry import bounds_to_frame, warp_by_image
-from cultionet.utils.logging import set_color_logger
+from ..utils.logging import set_color_logger
+from ..utils.model_preprocessing import TqdmParallel
 
 import geowombat as gw
 from geowombat.core import polygon_to_array
+from geowombat.core.windows import get_window_offsets
 import numpy as np
 from scipy.ndimage.measurements import label as nd_label, sum as nd_sum
 from scipy import stats as sci_stats
 import cv2
+from rasterio.windows import Window
+import xarray as xr
 import geopandas as gpd
 from skimage.measure import regionprops
-import xarray as xr
 from tqdm.auto import tqdm
 import torch
 from torch_geometric.data import Data
+from joblib import delayed, parallel_backend
 
 
 logger = set_color_logger(__name__)
@@ -523,6 +527,174 @@ def create_image_vars(
     return time_series, labels_array, bdist, ori, ntime, nbands
 
 
+def create_predict_dataset(
+    image_list: T.List[T.List[T.Union[str, Path]]],
+    region: str,
+    year: int,
+    process_path: Path = None,
+    gain: float = 1e-4,
+    offset: float = 0.0,
+    ref_res: float = 10.0,
+    resampling: str = 'nearest',
+    window_size: int = 100,
+    padding: int = 101,
+    num_workers: int = 1
+):
+    def save_and_update(
+        write_path: Path,
+        predict_data: Data,
+        name: str
+    ) -> None:
+        predict_path = write_path / f'data_{name}.pt'
+        torch.save(predict_data, predict_path)
+
+    def read_slice(darray: xr.DataArray, w_pad: Window):
+        slicer = (
+            slice(0, None),
+            slice(w_pad.row_off, w_pad.row_off+w_pad.height),
+            slice(w_pad.col_off, w_pad.col_off+w_pad.width)
+        )
+
+        return darray[slicer].gw.compute()
+
+    def create_and_save_window(
+        write_path: Path,
+        ntime: int,
+        nbands: int,
+        image_height: int,
+        image_width: int,
+        res: float,
+        resampling: str,
+        region: str,
+        year: int,
+        window_size: int,
+        padding: int,
+        x: np.ndarray,
+        w: Window,
+        w_pad: Window,
+    ) -> None:
+        size = window_size + padding*2
+        x_height = x.shape[1]
+        x_width = x.shape[2]
+
+        row_pad_before = 0
+        col_pad_before = 0
+        col_pad_after = 0
+        row_pad_after = 0
+        if (x_height != size) or (x_width != size):
+            # Pre-padding
+            if w.row_off < padding:
+                row_pad_before = padding - w.row_off
+            if w.col_off < padding:
+                col_pad_before = padding - w.col_off
+            # Post-padding
+            if w.row_off + window_size + padding > image_height:
+                row_pad_after = size - x_height
+            if w.col_off + window_size + padding > image_width:
+                col_pad_after = size - x_width
+
+            x = np.pad(
+                x,
+                pad_width=(
+                    (0, 0),
+                    (row_pad_before, row_pad_after),
+                    (col_pad_before, col_pad_after)
+                ),
+                mode='constant',
+            )
+        if x.shape[1:] != (size, size):
+            logger.exception('The array does not match the expected size.')
+
+        ldata = LabeledData(
+            x=x,
+            y=None,
+            bdist=None,
+            ori=None,
+            segments=None,
+            props=None
+        )
+        predict_data = augment(
+            ldata,
+            aug='none',
+            ntime=ntime,
+            nbands=nbands,
+            max_crop_class=0,
+            k=3,
+            instance_seg=False,
+            zero_padding=0,
+            window_row_off=w.row_off,
+            window_col_off=w.col_off,
+            window_height=w.height,
+            window_width=w.width,
+            window_pad_row_off=w_pad.row_off,
+            window_pad_col_off=w_pad.col_off,
+            window_pad_height=w_pad.height,
+            window_pad_width=w_pad.width,
+            row_pad_before=row_pad_before,
+            row_pad_after=row_pad_after,
+            col_pad_before=col_pad_before,
+            col_pad_after=col_pad_after,
+            res=res,
+            resampling=resampling
+        )
+        save_and_update(
+            write_path, predict_data, f'{region}_{year}_{w.row_off}_{w.col_off}'
+        )
+
+    with gw.config.update(ref_res=ref_res):
+        with gw.open(
+            image_list,
+            stack_dim='band',
+            band_names=list(range(1, len(image_list) + 1)),
+            resampling=resampling
+        ) as src_ts:
+            windows = get_window_offsets(
+                src_ts.gw.nrows,
+                src_ts.gw.ncols,
+                window_size,
+                window_size,
+                padding=(
+                    padding, padding, padding, padding
+                )
+            )
+            time_series = (
+                (src_ts.astype('float64') * gain + offset)
+                .clip(0, 1)
+            )
+
+            ntime, nbands = get_image_list_dims(image_list, src_ts)
+            partial_create = partial(
+                create_and_save_window,
+                process_path,
+                ntime,
+                nbands,
+                src_ts.gw.nrows,
+                src_ts.gw.ncols,
+                ref_res,
+                resampling,
+                region,
+                year,
+                window_size,
+                padding
+            )
+
+            with parallel_backend(
+                backend='loky',
+                n_jobs=num_workers
+            ):
+                with TqdmParallel(
+                    tqdm_kwargs={
+                        'total': len(windows),
+                        'desc': 'Creating prediction windows'
+                    }
+                ) as pool:
+                    __ = pool(
+                        delayed(partial_create)(
+                            read_slice(time_series, window_pad), window, window_pad
+                        ) for window, window_pad in windows
+                    )
+
+
 def create_dataset(
     image_list: T.List[T.List[T.Union[str, Path]]],
     df_grids: gpd.GeoDataFrame,
@@ -531,7 +703,7 @@ def create_dataset(
     group_id: str = None,
     process_path: Path = None,
     transforms: T.List[str] = None,
-    gain: float = 0.0001,
+    gain: float = 1e-4,
     offset: float = 0.0,
     ref_res: float = 10.0,
     resampling: str = 'nearest',
@@ -584,7 +756,9 @@ def create_dataset(
             try:
                 grid_edges = gpd.clip(df_edges, row.geometry)
             except:
-                logger.warning(TopologyClipError('The input GeoDataFrame contains topology errors.'))
+                logger.warning(
+                    TopologyClipError('The input GeoDataFrame contains topology errors.')
+                )
                 df_edges = gpd.GeoDataFrame(
                     data=df_edges[crop_column].values,
                     columns=[crop_column],

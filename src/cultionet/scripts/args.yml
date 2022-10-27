@@ -15,6 +15,20 @@ epilog: |
   # Apply inference over an image
   cultionet predict --project-path /projects/data -o estimates.tif
 
+dates:
+  start_date:
+    short: 'sd'
+    long: start-date
+    help: The predict start date (mm-dd)
+    kwargs:
+      default: 01-01
+  end_date:
+    short: 'ed'
+    long: end-date
+    help: The predict start date (mm-dd)
+    kwargs:
+      default: 01-01
+
 create:
   num_workers:
     short: n
@@ -130,6 +144,86 @@ create:
     kwargs:
       type: '&int'
 
+create_predict:
+  predict_year:
+    short: 'y'
+    long: year
+    help: The predict end year (yyyy)
+    kwargs:
+      type: '&int'
+  num_workers:
+    short: n
+    long: num-workers
+    help: The number of CPUs for data creation
+    kwargs:
+      default: 4
+      type: '&int'
+  ref_res:
+    short: r
+    long: res
+    help: The cell resolution
+    kwargs:
+      default: 10.0
+      type: '&float'
+  resampling:
+    short: rm
+    long: resampling
+    help: The resampling method
+    kwargs:
+      default: nearest
+  window_size:
+    short: w
+    long: window-size
+    help: The processing windows size at which to apply inference
+    kwargs:
+      default: 100
+      type: '&int'
+  padding:
+    short: ''
+    long: padding
+    help: The read padding around the window (padding is sliced off before writing)
+    kwargs:
+      default: 101
+      type: '&int'
+  append_ts:
+    short: ''
+    long: append-ts
+    help: Whether to append time_series_vars to the image path
+    kwargs:
+      default: y
+      choices: ['y', 'n']
+  time_series_path:
+    short: ''
+    long: ts-path
+    help: A path with time series data (overrides the config regions)
+  gain:
+    short: ''
+    long: gain
+    help: The image gain, or scale, factor
+    kwargs:
+      default: 1e-4
+      type: '&float'
+  offset:
+    short: ''
+    long: offset
+    help: The image offset to add to the scaling
+    kwargs:
+      default: 0.0
+      type: '&float'
+  instance_seg:
+    short: ''
+    long: instance-seg
+    help: Whether to create a dataset for instance segmentation
+    kwargs:
+      action: store_true
+  zero_padding:
+    short: ''
+    long: zero-padding
+    help: Zero padding to apply
+    kwargs:
+      default: 0
+      type: '&int'
+
 train_predict:
   filters:
     short: ''
@@ -151,6 +245,20 @@ train_predict:
     help: The number of concurrent processes for loading data
     kwargs:
       default: 1
+      type: '&int'
+  batch_size:
+    short: ''
+    long: batch-size
+    help: The batch size
+    kwargs:
+      default: 4
+      type: '&int'
+  precision:
+    short: ''
+    long: precision
+    help: The model data precision
+    kwargs:
+      default: 16
       type: '&int'
 
 maskrcnn:
@@ -217,13 +325,6 @@ train:
     help: The random seed
     kwargs:
       default: 42
-      type: '&int'
-  batch_size:
-    short: ''
-    long: batch-size
-    help: The batch size
-    kwargs:
-      default: 4
       type: '&int'
   epochs:
     short: ''
@@ -323,13 +424,6 @@ train:
     kwargs:
       default: 1
       type: '&int'
-  precision:
-    short: ''
-    long: precision
-    help: The model data precision
-    kwargs:
-      default: 16
-      type: '&int'
   stochastic_weight_averaging:
     short: ''
     long: swa
@@ -359,10 +453,30 @@ train:
       type: '&float'
 
 predict:
+  predict_year:
+    short: 'y'
+    long: year
+    help: The predict end year (yyyy)
+    kwargs:
+      type: '&int'
   out_path:
     short: o
     long: out-path
     help: The output raster path and filename to be created
+  data_path:
+    short: d
+    long: data-path
+    help: |
+      A data path with PyTorch .pt files to predict on
+      (if given, overrides --grid-id, --window-size, --padding, --gain, --offset, --append-ts)
+  region:
+    short: ''
+    long: region
+    help: A region name to search .pt files by (only needed if --data-path is not None)
+  reference_image:
+    short: ''
+    long: ref-image
+    help: A reference image to get geo-information from (only needed if --data-path is not None)
   grid_id:
     short: g
     long: grid-id
@@ -370,14 +484,14 @@ predict:
   window_size:
     short: w
     long: window-size
-    help: The processing windows size at which to apply inference in-memory
+    help: The processing windows size at which to apply inference
     kwargs:
       default: 100
       type: '&int'
   padding:
     short: ''
     long: padding
-    help: The read padding around the in-memory window (padding is sliced off before writing)
+    help: The read padding around the window (padding is sliced off before writing)
     kwargs:
       default: 101
       type: '&int'
@@ -427,3 +541,9 @@ predict:
     help: Whether to include Mask R-CNN
     kwargs:
       action: store_true
+  resampling:
+    short: rm
+    long: resampling
+    help: The resampling method
+    kwargs:
+      default: nearest

@@ -19,7 +19,7 @@ from cultionet.utils.project_paths import (
 )
 from cultionet.errors import TensorShapeError
 from cultionet.utils.normalize import get_norm_values
-from cultionet.data.create import create_dataset
+from cultionet.data.create import create_dataset, create_predict_dataset
 from cultionet.data.utils import (
     get_image_list_dims, create_network_data
 )
@@ -68,12 +68,12 @@ def get_centroid_coords_from_image(
 
 def get_start_end_dates(
     feature_path: Path,
-    config: dict,
     start_year: int,
-    lat: float
+    start_date: str,
+    end_date: str,
+    lat: T.Optional[float] = None
 ) -> T.Tuple[str, str]:
-    """Gets the start and end dates from the config setup
-    or from the filenames
+    """Gets the start and end dates from user args or from the filenames
 
     Returns:
         str (mm-dd), str (mm-dd)
@@ -83,29 +83,30 @@ def get_start_end_dates(
     # Get the date from the file name
     file_dt = datetime.strptime(filename.stem, '%Y%j')
 
-    if config['start_date'] is not None:
-        start_date = config['start_date']
+    if start_date is not None:
+        start_date = start_date
     else:
         start_date = file_dt.strftime('%m-%d')
-    if config['end_date'] is not None:
-        end_date = config['end_date']
+    if end_date is not None:
+        end_date = end_date
     else:
         end_date = file_dt.strftime('%m-%d')
 
     month = int(start_date.split('-')[0])
 
-    if lat > 0:
-        # Expected time series start in northern hemisphere winter
-        if 2 < month < 11:
-            logger.warning(
-                f"The time series start date is {start_date} but the time series is in the Northern hemisphere."
-            )
-    else:
-        # Expected time series start in northern southern winter
-        if (month < 5) or (month > 9):
-            logger.warning(
-                f"The time series start date is {start_date} but the time series is in the Southern hemisphere."
-            )
+    if lat is not None:
+        if lat > 0:
+            # Expected time series start in northern hemisphere winter
+            if 2 < month < 11:
+                logger.warning(
+                    f"The time series start date is {start_date} but the time series is in the Northern hemisphere."
+                )
+        else:
+            # Expected time series start in northern southern winter
+            if (month < 5) or (month > 9):
+                logger.warning(
+                    f"The time series start date is {start_date} but the time series is in the Southern hemisphere."
+                )
 
     return start_date, end_date
 
@@ -113,6 +114,9 @@ def get_start_end_dates(
 def get_image_list(
     ppaths: ProjectPaths,
     region: str,
+    predict_year: int,
+    start_date: str,
+    end_date: str,
     config: dict
 ):
     """Gets a list of the time series images
@@ -136,9 +140,10 @@ def get_image_list(
         # Get the start and end dates
         start_date, end_date = get_start_end_dates(
             vi_path,
-            config,
-            config['predict_year']-1,
-            lat
+            start_year=predict_year-1,
+            start_date=start_date,
+            end_date=end_date,
+            lat=lat
         )
         # Get the requested time slice
         ts_list = model_preprocessing.get_time_series_list(
@@ -460,150 +465,184 @@ def predict_image(args):
     data_values = torch.load(ppaths.norm_file)
     num_classes = len(data_values.crop_counts)
 
-    try:
-        tmp = int(args.grid_id)
-        region = f'{tmp:06d}'
-    except ValueError:
-        region = args.grid_id
-
-    # Get the image list
-    image_list = get_image_list(ppaths, region, config)
-
-    with gw.open(
-        image_list,
-        stack_dim='band',
-        band_names=list(range(1, len(image_list)+1))
-    ) as src_ts:
-        time_series = (
-            (src_ts * args.gain + args.offset)
-            .astype('float64')
-            .clip(0, 1)
+    if args.data_path is not None:
+        ds = EdgeDataset(
+            ppaths.predict_path,
+            data_means=data_values.mean,
+            data_stds=data_values.std,
+            pattern=f'data_{args.region}_{args.predict_year}*.pt'
         )
-        if args.preload_data:
-            with TqdmCallback(desc='Loading data'):
-                time_series.load(num_workers=args.processes)
-        # Get the image dimensions
-        nvars = model_preprocessing.VegetationIndices(image_vis=config['image_vis']).n_vis
-        nfeas, height, width = time_series.shape
-        ntime = int(nfeas / nvars)
-        windows = get_window_offsets(
-            height,
-            width,
-            args.window_size,
-            args.window_size,
-            padding=(
-                args.padding, args.padding, args.padding, args.padding
-            )
+        cultionet.predict_lightning(
+            reference_image=args.reference_image,
+            out_path=args.out_path,
+            ckpt=ppaths.ckpt_path / 'last.ckpt',
+            dataset=ds,
+            batch_size=args.batch_size,
+            device=args.device,
+            filters=args.filters,
+            precision=args.precision,
+            num_classes=num_classes,
+            ref_res=ds[0].res,
+            resampling=ds[0].resampling,
+            compression=args.compression
         )
 
-        profile = {
-            'crs': src_ts.crs,
-            'transform': src_ts.gw.transform,
-            'height': height,
-            'width': width,
-            # Orientation (+1) + distance (+1) + edge (+1) + crop (+1) crop types (+N)
-            # `num_classes` includes background
-            'count': 4 + num_classes if args.include_maskrcnn else 4 + num_classes - 1,
-            'dtype': 'uint16',
-            'blockxsize': 64 if 64 < width else width,
-            'blockysize': 64 if 64 < height else height,
-            'driver': 'GTiff',
-            'sharing': False,
-            'compress': args.compression
-        }
-        profile['tiled'] = True if max(profile['blockxsize'], profile['blockysize']) >= 16 else False
+        # TODO: add optional .pt file cleanup
+    else:
+        try:
+            tmp = int(args.grid_id)
+            region = f'{tmp:06d}'
+        except ValueError:
+            region = args.grid_id
 
-        # Get the time and band count
-        ntime, nbands = get_image_list_dims(image_list, time_series)
+        # Get the image list
+        image_list = get_image_list(
+            ppaths,
+            region=region,
+            predict_year=args.predict_year,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            config=config
+        )
 
-        if args.processes == 1:
-            serial_writer = SerialWriter(
-                out_path=args.out_path,
-                mode=args.mode,
-                profile=profile,
-                ntime=ntime,
-                nbands=nbands,
-                filters=args.filters,
-                num_classes=num_classes,
-                ts=time_series,
-                data_values=data_values,
-                ppaths=ppaths,
-                device=args.device,
-                scale_factor=SCALE_FACTOR,
-                include_maskrcnn=args.include_maskrcnn
+        with gw.open(
+            image_list,
+            stack_dim='band',
+            band_names=list(range(1, len(image_list)+1))
+        ) as src_ts:
+            time_series = (
+                (src_ts * args.gain + args.offset)
+                .astype('float64')
+                .clip(0, 1)
             )
-            try:
-                with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
-                    results = [
-                        serial_writer.write(w, w_pad, pba=pbar) for w, w_pad in windows
-                    ]
-                serial_writer.close()
-            except Exception as e:
-                serial_writer.close()
-                logger.exception(f"The predictions failed because {e}.")
-        else:
-            if ray.is_initialized():
-                logger.warning('The Ray cluster is already running.')
-            else:
-                if args.device == 'gpu':
-                    # TODO: support multiple GPUs through CLI
-                    try:
-                        ray.init(num_cpus=args.processes, num_gpus=1)
-                    except KeyError as e:
-                        logger.exception(f"Ray could not be instantiated with a GPU because {e}.")
-                else:
-                    ray.init(num_cpus=args.processes)
-            assert ray.is_initialized(), 'The Ray cluster is not running.'
-            # Setup the remote ray writer
-            remote_writer = RemoteWriter.options(
-                max_concurrency=args.processes
-            ).remote(
-                out_path=args.out_path,
-                mode=args.mode,
-                profile=profile,
-                ntime=ntime,
-                nbands=nbands,
-                filters=args.filters,
-                num_classes=num_classes,
-                ts=ray.put(time_series),
-                data_values=data_values,
-                ppaths=ppaths,
-                device=args.device,
-                scale_factor=SCALE_FACTOR,
-                include_maskrcnn=args.include_maskrcnn
+            if args.preload_data:
+                with TqdmCallback(desc='Loading data'):
+                    time_series.load(num_workers=args.processes)
+            # Get the image dimensions
+            nvars = model_preprocessing.VegetationIndices(image_vis=config['image_vis']).n_vis
+            nfeas, height, width = time_series.shape
+            ntime = int(nfeas / nvars)
+            windows = get_window_offsets(
+                height,
+                width,
+                args.window_size,
+                args.window_size,
+                padding=(
+                    args.padding, args.padding, args.padding, args.padding
+                )
             )
-            actor_chunksize = args.processes * 8
-            try:
-                with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
-                    for wchunk in range(0, len(windows)+actor_chunksize, actor_chunksize):
-                        chunk_windows = windows[wchunk:wchunk+actor_chunksize]
-                        pbar.set_description(
-                            f"Windows {wchunk:,d}--{wchunk+len(chunk_windows):,d}"
-                        )
-                        # pb = ProgressBar(
-                        #     total=len(chunk_windows),
-                        #     desc=f'Chunks {wchunk}-{wchunk+len(chunk_windows)}',
-                        #     position=1,
-                        #     leave=False
-                        # )
-                        # tqdm_actor = pb.actor
-                        # Write each window concurrently
+
+            profile = {
+                'crs': src_ts.crs,
+                'transform': src_ts.gw.transform,
+                'height': height,
+                'width': width,
+                # Orientation (+1) + distance (+1) + edge (+1) + crop (+1) crop types (+N)
+                # `num_classes` includes background
+                'count': 4 + num_classes if args.include_maskrcnn else 4 + num_classes - 1,
+                'dtype': 'uint16',
+                'blockxsize': 64 if 64 < width else width,
+                'blockysize': 64 if 64 < height else height,
+                'driver': 'GTiff',
+                'sharing': False,
+                'compress': args.compression
+            }
+            profile['tiled'] = True if max(profile['blockxsize'], profile['blockysize']) >= 16 else False
+
+            # Get the time and band count
+            ntime, nbands = get_image_list_dims(
+                image_list,
+                time_series
+            )
+
+            if args.processes == 1:
+                serial_writer = SerialWriter(
+                    out_path=args.out_path,
+                    mode=args.mode,
+                    profile=profile,
+                    ntime=ntime,
+                    nbands=nbands,
+                    filters=args.filters,
+                    num_classes=num_classes,
+                    ts=time_series,
+                    data_values=data_values,
+                    ppaths=ppaths,
+                    device=args.device,
+                    scale_factor=SCALE_FACTOR,
+                    include_maskrcnn=args.include_maskrcnn
+                )
+                try:
+                    with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
                         results = [
-                            remote_writer.write.remote(w, w_pad)
-                            for w, w_pad in chunk_windows
+                            serial_writer.write(w, w_pad, pba=pbar) for w, w_pad in windows
                         ]
-                        # Initiate the processing
-                        # pb.print_until_done()
-                        ray.get(results)
-                        # Close the file
-                        ray.get(remote_writer.close_open.remote())
-                        pbar.update(len(chunk_windows))
-                ray.get(remote_writer.close.remote())
-                ray.shutdown()
-            except Exception as e:
-                ray.get(remote_writer.close.remote())
-                ray.shutdown()
-                logger.exception(f"The predictions failed because {e}.")
+                    serial_writer.close()
+                except Exception as e:
+                    serial_writer.close()
+                    logger.exception(f"The predictions failed because {e}.")
+            else:
+                if ray.is_initialized():
+                    logger.warning('The Ray cluster is already running.')
+                else:
+                    if args.device == 'gpu':
+                        # TODO: support multiple GPUs through CLI
+                        try:
+                            ray.init(num_cpus=args.processes, num_gpus=1)
+                        except KeyError as e:
+                            logger.exception(f"Ray could not be instantiated with a GPU because {e}.")
+                    else:
+                        ray.init(num_cpus=args.processes)
+                assert ray.is_initialized(), 'The Ray cluster is not running.'
+                # Setup the remote ray writer
+                remote_writer = RemoteWriter.options(
+                    max_concurrency=args.processes
+                ).remote(
+                    out_path=args.out_path,
+                    mode=args.mode,
+                    profile=profile,
+                    ntime=ntime,
+                    nbands=nbands,
+                    filters=args.filters,
+                    num_classes=num_classes,
+                    ts=ray.put(time_series),
+                    data_values=data_values,
+                    ppaths=ppaths,
+                    device=args.device,
+                    scale_factor=SCALE_FACTOR,
+                    include_maskrcnn=args.include_maskrcnn
+                )
+                actor_chunksize = args.processes * 8
+                try:
+                    with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
+                        for wchunk in range(0, len(windows)+actor_chunksize, actor_chunksize):
+                            chunk_windows = windows[wchunk:wchunk+actor_chunksize]
+                            pbar.set_description(
+                                f"Windows {wchunk:,d}--{wchunk+len(chunk_windows):,d}"
+                            )
+                            # pb = ProgressBar(
+                            #     total=len(chunk_windows),
+                            #     desc=f'Chunks {wchunk}-{wchunk+len(chunk_windows)}',
+                            #     position=1,
+                            #     leave=False
+                            # )
+                            # tqdm_actor = pb.actor
+                            # Write each window concurrently
+                            results = [
+                                remote_writer.write.remote(w, w_pad)
+                                for w, w_pad in chunk_windows
+                            ]
+                            # Initiate the processing
+                            # pb.print_until_done()
+                            ray.get(results)
+                            # Close the file
+                            ray.get(remote_writer.close_open.remote())
+                            pbar.update(len(chunk_windows))
+                    ray.get(remote_writer.close.remote())
+                    ray.shutdown()
+                except Exception as e:
+                    ray.get(remote_writer.close.remote())
+                    ray.shutdown()
+                    logger.exception(f"The predictions failed because {e}.")
 
 
 def cycle_data(
@@ -632,34 +671,41 @@ def get_centroid_coords(df: gpd.GeoDataFrame, dst_crs: T.Optional[str] = None) -
 
 
 def create_datasets(args):
-    assert isinstance(args.max_crop_class, int), \
-        'The maximum crop class value must be given.'
-
     config = open_config(args.config_file)
     project_path_lists = [args.project_path]
     ref_res_lists = [args.ref_res]
 
-    region_as_list = config['regions'] is not None
-    region_as_file = config["region_id_file"] is not None
+    if hasattr(args, 'max_crop_class'):
+        assert isinstance(args.max_crop_class, int), \
+            'The maximum crop class value must be given.'
 
-    assert (
-        region_as_list or region_as_file
-    ), "Only submit region as a list or as a given file"
+        region_as_list = config['regions'] is not None
+        region_as_file = config['region_id_file'] is not None
 
-    if region_as_file:
-        file_path = config['region_id_file']
-        if not Path(file_path).is_file():
-            raise IOError('The id file does not exist')
-        id_data = pd.read_csv(file_path)
-        assert "id" in id_data.columns, f"id column not found in {file_path}."
-        regions = id_data['id'].unique().tolist()
+        assert (
+            region_as_list or region_as_file
+        ), "Only submit region as a list or as a given file"
+
+    if hasattr(args, 'time_series_path') and (args.time_series_path is not None):
+        inputs = model_preprocessing.TrainInputs(
+            regions=[Path(args.time_series_path).name],
+            years=[args.predict_year]
+        )
     else:
-        regions = list(range(config['regions'][0], config['regions'][1]+1))
+        if region_as_file:
+            file_path = config['region_id_file']
+            if not Path(file_path).is_file():
+                raise IOError('The id file does not exist')
+            id_data = pd.read_csv(file_path)
+            assert "id" in id_data.columns, f"id column not found in {file_path}."
+            regions = id_data['id'].unique().tolist()
+        else:
+            regions = list(range(config['regions'][0], config['regions'][1]+1))
 
-    inputs = model_preprocessing.TrainInputs(
-        regions=regions,
-        years=config['years']
-    )
+        inputs = model_preprocessing.TrainInputs(
+            regions=regions,
+            years=config['years']
+        )
 
     for region, end_year, project_path, ref_res in cycle_data(
         inputs.year_lists,
@@ -678,17 +724,21 @@ def create_datasets(args):
         except ValueError:
             pass
 
-        # Read the training data
-        grids = ppaths.edge_training_path / f'{region}_grid_{end_year}.gpkg'
-        edges = ppaths.edge_training_path / f'{region}_edges_{end_year}.gpkg'
-        if not grids.is_file():
-            logger.warning(f'{grids} does not exist.')
-            continue
-        if not edges.is_file():
-            edges = ppaths.edge_training_path / f'{region}_poly_{end_year}.gpkg'
-        # Open GeoDataFrames
-        df_grids = gpd.read_file(grids)
-        df_edges = gpd.read_file(edges)
+        if args.destination == 'predict':
+            df_grids = None
+            df_edges = None
+        else:
+            # Read the training data
+            grids = ppaths.edge_training_path / f'{region}_grid_{end_year}.gpkg'
+            edges = ppaths.edge_training_path / f'{region}_edges_{end_year}.gpkg'
+            if not grids.is_file():
+                logger.warning(f'{grids} does not exist.')
+                continue
+            if not edges.is_file():
+                edges = ppaths.edge_training_path / f'{region}_poly_{end_year}.gpkg'
+            # Open GeoDataFrames
+            df_grids = gpd.read_file(grids)
+            df_edges = gpd.read_file(edges)
 
         image_list = []
         for image_vi in model_preprocessing.VegetationIndices(
@@ -705,13 +755,16 @@ def create_datasets(args):
                 continue
 
             # Get the centroid coordinates of the grid
-            lat = get_centroid_coords(df_grids.centroid, dst_crs='epsg:4326')[1]
+            lat = None
+            if args.destination != 'predict':
+                lat = get_centroid_coords(df_grids.centroid, dst_crs='epsg:4326')[1]
             # Get the start and end dates
             start_date, end_date = get_start_end_dates(
                 vi_path,
-                config,
-                end_year-1,
-                lat
+                start_year=end_year-1,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                lat=lat,
             )
             # Get the requested time slice
             ts_list = model_preprocessing.get_time_series_list(
@@ -720,34 +773,52 @@ def create_datasets(args):
             if len(ts_list) <= 1:
                 continue
 
-            image_list += ts_list
+            image_list += ts_list#[::2]
 
-        class_info = {
-            'max_crop_class': args.max_crop_class,
-            'edge_class': args.max_crop_class+1
-        }
-        with open(ppaths.classes_info_path, mode='w') as f:
-            f.write(json.dumps(class_info))
+        if args.destination != 'predict':
+            class_info = {
+                'max_crop_class': args.max_crop_class,
+                'edge_class': args.max_crop_class+1
+            }
+            with open(ppaths.classes_info_path, mode='w') as f:
+                f.write(json.dumps(class_info))
 
         if image_list:
-            create_dataset(
-                image_list=image_list,
-                df_grids=df_grids,
-                df_edges=df_edges,
-                max_crop_class=args.max_crop_class,
-                group_id=f'{region}_{end_year}',
-                process_path=ppaths.get_process_path(args.destination),
-                transforms=args.transforms,
-                ref_res=ref_res,
-                resampling=args.resampling,
-                num_workers=args.num_workers,
-                grid_size=args.grid_size,
-                n_ts=args.n_ts,
-                instance_seg=args.instance_seg,
-                zero_padding=args.zero_padding,
-                crop_column=args.crop_column,
-                keep_crop_classes=args.keep_crop_classes
-            )
+            if args.destination == 'predict':
+                create_predict_dataset(
+                    image_list=image_list,
+                    region=region,
+                    year=end_year,
+                    process_path=ppaths.get_process_path(args.destination),
+                    gain=args.gain,
+                    offset=args.offset,
+                    ref_res=ref_res,
+                    resampling=args.resampling,
+                    window_size=args.window_size,
+                    padding=args.padding,
+                    num_workers=args.num_workers
+                )
+            else:
+                create_dataset(
+                    image_list=image_list,
+                    df_grids=df_grids,
+                    df_edges=df_edges,
+                    max_crop_class=args.max_crop_class,
+                    group_id=f'{region}_{end_year}',
+                    process_path=ppaths.get_process_path(args.destination),
+                    transforms=args.transforms,
+                    gain=args.gain,
+                    offset=args.offset,
+                    ref_res=ref_res,
+                    resampling=args.resampling,
+                    num_workers=args.num_workers,
+                    grid_size=args.grid_size,
+                    n_ts=args.n_ts,
+                    instance_seg=args.instance_seg,
+                    zero_padding=args.zero_padding,
+                    crop_column=args.crop_column,
+                    keep_crop_classes=args.keep_crop_classes
+                )
 
 
 def train_maskrcnn(args):
@@ -1034,7 +1105,9 @@ def main():
     )
 
     subparsers = parser.add_subparsers(dest='process')
-    available_processes = ['create', 'skfoldcv', 'train', 'maskrcnn', 'predict', 'version']
+    available_processes = [
+        'create', 'create-predict', 'skfoldcv', 'train', 'maskrcnn', 'predict', 'version'
+    ]
     for process in available_processes:
         subparser = subparsers.add_parser(process)
 
@@ -1048,11 +1121,15 @@ def main():
             help='The project path (the directory that contains the grid ids)'
         )
 
-        process_dict = args_config[process]
+        if process == 'create-predict':
+            process_dict = args_config['create_predict']
+        else:
+            process_dict = args_config[process]
         if process in ('skfoldcv', 'maskrcnn'):
             process_dict.update(args_config['train'])
         if process in ('train', 'maskrcnn', 'predict'):
             process_dict.update(args_config['train_predict'])
+        process_dict.update(args_config['dates'])
         for process_key, process_values in process_dict.items():
             if 'kwargs' in process_values:
                 kwargs = process_values['kwargs']
@@ -1073,7 +1150,7 @@ def main():
                 **process_values['kwargs']
             )
 
-        if process in ('create', 'predict'):
+        if process in ('create', 'create-predict', 'predict'):
             subparser.add_argument(
                 '--config-file',
                 dest='config_file',
@@ -1082,12 +1159,14 @@ def main():
             )
 
     args = parser.parse_args()
+    if args.process == 'create-predict':
+        setattr(args, 'destination', 'predict')
 
     if args.process == 'version':
         print(cultionet.__version__)
         return
 
-    if args.process == 'create':
+    if args.process in ('create', 'create-predict'):
         create_datasets(args)
     elif args.process == 'skfoldcv':
         spatial_kfoldcv(args)

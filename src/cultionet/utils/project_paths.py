@@ -21,6 +21,7 @@ class ProjectPaths:
     classes_info_path: Path
     process_path: Path
     test_process_path: Path
+    predict_process_path: Path
     ckpt_path: Path
     train_path: Path
     test_path: Path
@@ -38,7 +39,7 @@ class ProjectPaths:
         self.process_path.mkdir(exist_ok=True, parents=True)
 
     def get_process_path(self, destination: str) -> Path:
-        return self.process_path if destination == Destinations.train.name else self.test_process_path
+        return self.data_path / destination / 'processed'
 
 
 def setup_paths(
@@ -56,9 +57,10 @@ def setup_paths(
     classes_info_path = data_path / 'classes.info'
     train_path = data_path / 'train'
     test_path = data_path / 'test'
+    predict_path = data_path / 'predict'
     process_path = train_path / 'processed'
     test_process_path = test_path / 'processed'
-    predict_path = data_path / 'predict'
+    predict_process_path = predict_path / 'processed'
     edge_training_path = project_path / 'user_train'
     ckpt_file = ckpt_path / ckpt_name
     loss_file = ckpt_path / 'losses.npy'
@@ -70,6 +72,7 @@ def setup_paths(
         data_path,
         process_path,
         test_process_path,
+        predict_process_path,
         ckpt_path
     ]:
         p.mkdir(exist_ok=True, parents=True)
@@ -84,6 +87,7 @@ def setup_paths(
         classes_info_path=classes_info_path,
         process_path=process_path,
         test_process_path=test_process_path,
+        predict_process_path=predict_process_path,
         ckpt_path=ckpt_path,
         train_path=train_path,
         test_path=test_path,

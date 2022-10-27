@@ -184,12 +184,18 @@ def augment(
         y = zpad(torch.tensor(y)).numpy()
         bdist = zpad(torch.tensor(bdist)).numpy()
         ori = zpad(torch.tensor(ori)).numpy()
-    xaug = x.copy()
-    yaug = y.copy()
-    bdist_aug = bdist.copy()
-    ori_aug = ori.copy()
 
-    label_dtype = 'float' if 'float' in y.dtype.name else 'int'
+    xaug = x.copy()
+    yaug = None
+    bdist_aug = None
+    ori_aug = None
+    if y is not None:
+        yaug = y.copy()
+        label_dtype = 'float' if 'float' in y.dtype.name else 'int'
+    if bdist is not None:
+        bdist_aug = bdist.copy()
+    if ori is not None:
+        ori_aug = ori.copy()
 
     if 'ts-warp' in aug:
         # Warp each segment

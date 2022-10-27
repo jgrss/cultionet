@@ -394,30 +394,27 @@ class CultioLitModel(pl.LightningModule):
     ]:
         """A prediction step for Lightning
         """
-        return self.forward(batch, batch_idx)
+        distance_ori, distance, edge, crop, crop_type = self.forward(batch, batch_idx)
+        edge, crop, crop_type = self.predict_probas(
+            edge, crop, crop_type
+        )
 
-    def predict_labels(
+        return distance_ori, distance, edge, crop, crop_type
+
+    def predict_probas(
         self,
-        batch: Data
+        edge: torch.Tensor,
+        crop: torch.Tensor,
+        crop_type: torch.Tensor
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor, torch.Tensor, torch.Tensor
     ]:
-        """Predicts edge and crop labels
-        """
-        with torch.no_grad():
-            distance_ori, distance, edge, crop, crop_type = self(batch)
-
         # Transform edge and crop logits to probabilities
         edge = F.softmax(edge, dim=1, dtype=edge.dtype)
         crop = F.softmax(crop, dim=1, dtype=crop.dtype)
         crop_type = F.softmax(crop_type, dim=1, dtype=crop.dtype)
 
-        # Take the argmax of the class probabilities
-        edge_labels = edge.argmax(dim=1)
-        crop_labels = crop.argmax(dim=1)
-        crop_type_labels = crop_type.argmax(dim=1)
-
-        return distance_ori, distance, edge_labels, crop_labels, crop_type_labels
+        return edge, crop, crop_type
 
     def on_validation_epoch_end(self, *args, **kwargs):
         """Save the model on validation end
@@ -513,9 +510,9 @@ class CultioLitModel(pl.LightningModule):
             batch.bdist.contiguous().view(-1)
         )
         # Get the class probabilities
-        edge = F.softmax(edge, dim=1, dtype=edge.dtype)
-        crop = F.softmax(crop, dim=1, dtype=crop.dtype)
-        crop_type = F.softmax(crop_type, dim=1, dtype=crop_type.dtype)
+        edge, crop, crop_type = self.predict_probas(
+            edge, crop, crop_type
+        )
         # Take the argmax of the class probabilities
         edge_ypred = edge.argmax(dim=1).long()
         crop_ypred = crop.argmax(dim=1).long()
