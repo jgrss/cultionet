@@ -144,8 +144,8 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
 
-        self.final_local_2 = torch.nn.Conv2d(hidden_dim, num_classes, (3, 3), padding=1)
-        self.final = torch.nn.Conv2d(hidden_dim, num_crop_classes, (3, 3), padding=1)
+        self.final_local_2 = torch.nn.Conv2d(hidden_dim, num_classes, 3, padding=1)
+        self.final = torch.nn.Conv2d(hidden_dim, num_crop_classes, 3, padding=1)
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -155,20 +155,21 @@ class StarRNN(torch.nn.Module):
         x,
         hidden_s: T.Optional[torch.Tensor] = None
     ) -> T.Tuple[torch.Tensor, torch.Tensor]:
-        # (b x t x c x h x w) -> (b x c x t x h x w)
-        x = x.permute(0, 2, 1, 3, 4)
-        b, c, t, h, w = x.shape
+        # input shape = (B x C x T x H x W)
+        batch_size, __, time_size, height, width = x.shape
 
         # convRNN step
         # hidden_s is a list (number of layer) of hidden states of size [b x c x h x w]
         if hidden_s is None:
-            hidden_s = [torch.zeros((b, self.hidden_dim, h, w))] * self.n_layers
+            hidden_s = [
+                torch.zeros(
+                    (batch_size, self.hidden_dim, height, width),
+                    dtype=x.dtype,
+                    device=x.device
+                )
+            ] * self.n_layers
 
-        if torch.cuda.is_available():
-            for i in range(self.n_layers):
-                hidden_s[i] = hidden_s[i].to(x.device)
-
-        for iter in range(t):
+        for iter in range(0, time_size):
             hidden_s = self.rnn.forward(x[:, :, iter, :, :], hidden_s)
 
         if self.n_layers == 3:

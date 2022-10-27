@@ -1063,9 +1063,10 @@ def train_model(args):
                 edge_counts=data_values.edge_counts
             )
 
-    # Give non-cropland 0 weight in the crop-type layer
-    class_weights = data_values.crop_counts.max() / data_values.crop_counts
-    class_weights[0] = 0
+    # Get balanced class weights
+    # Reference: https://github.com/scikit-learn/scikit-learn/blob/f3f51f9b6/sklearn/utils/class_weight.py#L10
+    recip_freq = data_values.crop_counts.sum() / (len(data_values.crop_counts) * data_values.crop_counts)
+    class_weights = recip_freq[torch.arange(len(data_values.crop_counts))]
 
     # Fit the model
     cultionet.fit(

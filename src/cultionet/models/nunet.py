@@ -5,11 +5,10 @@ MIT License
 Copyright (c) 2018 Takato Kimura
 """
 from . import model_utils
-from .base_layers import DoubleConv, ResConv
+from .base_layers import DoubleConv
 
 import torch
 from torch_geometric import nn
-from torchvision import transforms
 
 
 class VGGBlock(torch.nn.Module):
@@ -87,7 +86,6 @@ class NestedUNet2(torch.nn.Module):
         ]
 
         self.gc = model_utils.GraphToConv()
-        self.cg = model_utils.ConvToGraph()
         self.up = model_utils.UpSample()
 
         self.conv0_0 = VGGBlock(in_channels, nb_filter[0], nb_filter[0])
@@ -112,7 +110,6 @@ class NestedUNet2(torch.nn.Module):
         self.conv0_4 = DoubleConv(nb_filter[0]*4+nb_filter[1], nb_filter[0], nb_filter[0])
 
         self.final2d = torch.nn.Conv2d(nb_filter[0], out_channels, kernel_size=1)
-        self.final = nn.GCNConv(out_channels, out_channels, improved=True)
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -150,9 +147,54 @@ class NestedUNet2(torch.nn.Module):
         x0_4 = self.conv0_4(torch.cat([x0_0, x0_1, x0_2, x0_3, self.up(x1_3, size=x0_3.shape[2:])], dim=1))
 
         output = self.final2d(x0_4)
-        # Reshape to GNN 2d
-        output = self.cg(output)
-
-        output = self.final(output, edge_index, edge_weight)
 
         return output
+
+
+class TemporalNestedUNet2(torch.nn.Module):
+    def __init__(
+        self,
+        num_features: int,
+        in_channels: int,
+        mid_channels: int,
+        out_channels: int
+    ):
+        super(TemporalNestedUNet2, self).__init__()
+
+        self.num_features = num_features
+        self.in_channels = in_channels
+        self.cg = model_utils.ConvToGraph()
+
+        self.nunet = NestedUNet2(
+            in_channels=in_channels, out_channels=mid_channels
+        )
+        self.final = nn.GCNConv(
+            mid_channels*int(num_features / in_channels), out_channels,
+            improved=True
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weight: torch.Tensor,
+        batch: torch.Tensor,
+        height: int,
+        width: int
+    ) -> torch.Tensor:
+        h = []
+        for band in range(0, self.num_features, self.in_channels):
+            t = self.nunet(
+                x[:, band:band+self.in_channels],
+                edge_index,
+                edge_weight,
+                batch,
+                height,
+                width
+            )
+            h.append(t)
+        h = torch.cat(h, dim=1)
+        # Reshape to GNN 2d
+        h = self.final(self.cg(h), edge_index, edge_weight)
+
+        return h

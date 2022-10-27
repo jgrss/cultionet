@@ -317,7 +317,7 @@ class CultioLitModel(pl.LightningModule):
         num_classes: int = 2,
         filters: int = 64,
         star_rnn_hidden_dim: int = 64,
-        star_rnn_n_layers: int = 4,
+        star_rnn_n_layers: int = 3,
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-5,
         ckpt_name: str = 'last',
@@ -365,7 +365,7 @@ class CultioLitModel(pl.LightningModule):
     def forward(
         self, batch: Data, batch_idx: int = None
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, T.Union[torch.Tensor, None]
     ]:
         """Performs a single model forward pass
 
@@ -390,7 +390,7 @@ class CultioLitModel(pl.LightningModule):
         batch: Data,
         batch_idx: int = None
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, T.Union[torch.Tensor, None]
     ]:
         """A prediction step for Lightning
         """
@@ -405,14 +405,15 @@ class CultioLitModel(pl.LightningModule):
         self,
         edge: torch.Tensor,
         crop: torch.Tensor,
-        crop_type: torch.Tensor
+        crop_type: T.Union[torch.Tensor, None]
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor, torch.Tensor, T.Union[torch.Tensor, None]
     ]:
         # Transform edge and crop logits to probabilities
         edge = F.softmax(edge, dim=1, dtype=edge.dtype)
         crop = F.softmax(crop, dim=1, dtype=crop.dtype)
-        crop_type = F.softmax(crop_type, dim=1, dtype=crop.dtype)
+        if crop_type is not None:
+            crop_type = F.softmax(crop_type, dim=1, dtype=crop.dtype)
 
         return edge, crop, crop_type
 
@@ -433,7 +434,7 @@ class CultioLitModel(pl.LightningModule):
         distance: torch.Tensor,
         edge: torch.Tensor,
         crop: torch.Tensor,
-        crop_type: torch.Tensor
+        crop_type: T.Union[torch.Tensor, None]
     ):
         """Calculates the loss for each layer
 
@@ -468,9 +469,11 @@ class CultioLitModel(pl.LightningModule):
         dist_loss = self.dist_loss(distance, batch.bdist)
         edge_loss = self.edge_loss(edge, true_edge)
         crop_loss = self.crop_loss(crop, true_crop)
-        crop_type_loss = self.crop_type_loss(crop_type, true_crop_type)
-
-        loss = ori_loss*0.75 + dist_loss + edge_loss + crop_loss + crop_type_loss
+        if crop_type is not None:
+            crop_type_loss = self.crop_type_loss(crop_type, true_crop_type)
+            loss = ori_loss*0.75 + dist_loss + edge_loss + crop_loss + crop_type_loss
+        else:
+            loss = ori_loss*0.75 + dist_loss + edge_loss + crop_loss
 
         return loss
 
@@ -516,19 +519,23 @@ class CultioLitModel(pl.LightningModule):
         # Take the argmax of the class probabilities
         edge_ypred = edge.argmax(dim=1).long()
         crop_ypred = crop.argmax(dim=1).long()
-        crop_type_ypred = crop_type.argmax(dim=1).long()
+        crop_type_score = 0.0
+        if crop_type is not None:
+            crop_type_ypred = crop_type.argmax(dim=1).long()
+            crop_type_ytrue = torch.where(
+                batch.y == self.edge_class, 0, batch.y
+            ).long()
+            crop_type_score = self.crop_type_f1(
+                crop_type_ypred, crop_type_ytrue
+            )
         # Get the true edge and crop labels
         edge_ytrue = batch.y.eq(self.edge_class).long()
         crop_ytrue = torch.where(
             (batch.y > 0) & (batch.y < self.edge_class), 1, 0
         ).long()
-        crop_type_ytrue = torch.where(
-            batch.y == self.edge_class, 0, batch.y
-        ).long()
         # F1-score
         edge_score = self.edge_f1(edge_ypred, edge_ytrue)
         crop_score = self.crop_f1(crop_ypred, crop_ytrue)
-        crop_type_score = self.crop_type_f1(crop_type_ypred, crop_type_ytrue)
         # MCC
         edge_mcc = self.edge_mcc(edge_ypred, edge_ytrue)
         crop_mcc = self.crop_mcc(crop_ypred, crop_ytrue)

@@ -1,9 +1,7 @@
 from . import model_utils
-from .nunet import ResConv
 
 import torch
 from torch_geometric import nn
-# from torchvision import transforms
 
 
 class GraphRegressionLayer(torch.nn.Module):

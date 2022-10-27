@@ -506,9 +506,11 @@ class LightningGTiffWriter(BasePredictionWriter):
         distance_batch: torch.Tensor,
         edge_batch: torch.Tensor,
         crop_batch: torch.Tensor,
-        crop_type_batch: torch.Tensor,
+        crop_type_batch: T.Union[torch.Tensor, None],
         batch_index: int
-    ) -> T.Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> T.Tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, T.Union[torch.Tensor, None]
+    ]:
         pad_slice2d = (
             slice(
                 int(batch.row_pad_before[batch_index]),
@@ -544,10 +546,11 @@ class LightningGTiffWriter(BasePredictionWriter):
         crop_batch = crop_batch.t().reshape(
             2, int(batch.height[batch_index]), int(batch.width[batch_index])
         )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, 2)
-        num_classes = crop_type_batch.size(1)
-        crop_type_batch = crop_type_batch.t().reshape(
-            num_classes, int(batch.height[batch_index]), int(batch.width[batch_index])
-        )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, num_classes)
+        if crop_type_batch is not None:
+            num_classes = crop_type_batch.size(1)
+            crop_type_batch = crop_type_batch.t().reshape(
+                num_classes, int(batch.height[batch_index]), int(batch.width[batch_index])
+            )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, num_classes)
 
         return distance_ori_batch, distance_batch, edge_batch, crop_batch, crop_type_batch
 
@@ -575,9 +578,11 @@ class LightningGTiffWriter(BasePredictionWriter):
                 distance_batch=distance[mask],
                 edge_batch=edge[mask],
                 crop_batch=crop[mask],
-                crop_type_batch=crop_type[mask],
+                crop_type_batch=crop_type[mask] if crop_type is not None else None,
                 batch_index=batch_index
             )
+            if crop_type_batch is None:
+                crop_type_batch = torch.zeros((crop_batch.size(0), 2), dtype=crop_batch.dtype)
             mo = ModelOutputs(
                 distance_ori=distance_ori_batch,
                 distance=distance_batch,

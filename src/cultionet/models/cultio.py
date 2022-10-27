@@ -1,14 +1,14 @@
 import typing as T
 
 from . import model_utils
-from .nunet import NestedUNet2
+from .nunet import TemporalNestedUNet2
 from .convstar import StarRNN
-from .graph import GraphMid, GraphFinal
+from .graph import GraphFinal
 from .regression import GraphRegressionLayer
+from .tcn import TemporalConvNet
 
 import torch
 from torch_geometric.data import Data
-from torch_geometric import nn
 
 
 class CultioGraphNet(torch.nn.Module):
@@ -25,8 +25,8 @@ class CultioGraphNet(torch.nn.Module):
         self,
         ds_features: int,
         ds_time_features: int,
-        filters: int = 32,
-        star_rnn_hidden_dim: int = 32,
+        filters: int = 64,
+        star_rnn_hidden_dim: int = 64,
         star_rnn_n_layers: int = 3,
         num_classes: int = 2,
         dropout: T.Optional[float] = 0.1
@@ -41,25 +41,32 @@ class CultioGraphNet(torch.nn.Module):
         self.ds_num_bands = int(self.ds_num_features / self.ds_num_time)
         self.filters = filters
         num_distances = 2
-        num_index_streams = 2
-        # Index streams = filters x num_bands
-        index_stream_out_channels = (filters * self.ds_num_bands) * num_index_streams
+        num_index_streams = 1
+        # Temporal Convolution Network outputs
+        tcn_out_channels = 2 + num_classes
+        # Temporal UNet++
+        nunet_out_channels = 2 + num_classes
         # RNN stream = 2 + num_classes
-        rnn_stream_out_channels = 2
-        base_in_channels = index_stream_out_channels + rnn_stream_out_channels
+        rnn_stream_out_channels = 2 + num_classes
+        base_in_channels = tcn_out_channels + nunet_out_channels + rnn_stream_out_channels
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
-        # Transformer stream (+self.filters x self.ds_num_bands)
-        self.transformer = GraphMid(
-            nn.TransformerConv(
-                self.ds_num_time, self.filters, heads=1, edge_dim=2, dropout=dropout
-            )
+        # Transformer stream (+self.filters x self.ds_num_time)
+        self.transformer = TemporalConvNet(
+            num_inputs=self.ds_num_bands,
+            num_channels=[self.filters, self.filters],
+            num_time=self.ds_num_time,
+            out_channels=tcn_out_channels,
+            dropout=dropout
         )
         # Nested UNet (+self.filters x self.ds_num_bands)
-        self.nunet = NestedUNet2(
-            in_channels=self.ds_num_time, out_channels=self.filters
+        self.nunet = TemporalNestedUNet2(
+            num_features=self.ds_num_features,
+            in_channels=self.ds_num_time,
+            mid_channels=self.filters,
+            out_channels=nunet_out_channels
         )
         # Star RNN layer
         self.star_rnn = StarRNN(
@@ -95,12 +102,14 @@ class CultioGraphNet(torch.nn.Module):
             mid_channels=self.filters,
             out_channels=2
         )
-        # Crop types (+num_classes)
-        self.crop_type_layer = GraphFinal(
-            in_channels=base_in_channels+num_distances+2+2+num_classes,
-            mid_channels=self.filters,
-            out_channels=num_classes
-        )
+        self.crop_type_layer = None
+        if num_classes > 2:
+            # Crop types (+num_classes)
+            self.crop_type_layer = GraphFinal(
+                in_channels=base_in_channels+num_distances+2+2,
+                mid_channels=self.filters,
+                out_channels=num_classes
+            )
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -108,47 +117,41 @@ class CultioGraphNet(torch.nn.Module):
     def forward(
         self, data: Data
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, T.Union[torch.Tensor, None]
     ]:
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
         # Transformer on each band time series
-        transformer_stream = []
-        # Iterate over all data features, stepping over time chunks
-        for band in range(0, self.ds_num_features, self.ds_num_time):
-            # Get the current band through all time steps
-            t = self.transformer(
-                data.x[:, band:band+self.ds_num_time],
-                data.edge_index,
-                data.edge_attrs
-            )
-            transformer_stream.append(t)
-        transformer_stream = torch.cat(transformer_stream, dim=1)
-
+        transformer_stream = self.gc(
+            data.x, batch_size, height, width
+        )
+        # nbatch, ntime, height, width
+        nbatch, __, height, width = transformer_stream.shape
+        # Reshape from (B x C x H x W) -> (B x C x T x H x W)
+        transformer_stream = transformer_stream.reshape(
+            nbatch, self.ds_num_bands, self.ds_num_time, height, width
+        )
+        transformer_stream = self.cg(self.transformer(transformer_stream))
         # Nested UNet on each band time series
-        nunet_stream = []
-        for band in range(0, self.ds_num_features, self.ds_num_time):
-            t = self.nunet(
-                data.x[:, band:band+self.ds_num_time],
-                data.edge_index,
-                data.edge_attrs[:, 1],
-                data.batch,
-                height,
-                width
-            )
-            nunet_stream.append(t)
-        nunet_stream = torch.cat(nunet_stream, dim=1)
+        nunet_stream = self.nunet(
+            data.x,
+            data.edge_index,
+            data.edge_attrs[:, 1],
+            data.batch,
+            height,
+            width
+        )
         # RNN ConvStar
-        # Reshape from (B x C x H x W) -> (B x T x C x H x W)
         star_stream = self.gc(
             data.x, batch_size, height, width
         )
         # nbatch, ntime, height, width
         nbatch, __, height, width = star_stream.shape
+        # Reshape from (B x C x H x W) -> (B x C x T x H x W)
         star_stream = star_stream.reshape(
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
-        ).permute(0, 2, 1, 3, 4)
+        )
         # Crop/Non-crop and Crop types
         star_stream, star_stream_local_2 = self.star_rnn(star_stream)
         star_stream = self.cg(star_stream)
@@ -156,8 +159,9 @@ class CultioGraphNet(torch.nn.Module):
         # Concatenate time series streams
         h = torch.cat(
             [
-                transformer_stream,
                 nunet_stream,
+                transformer_stream,
+                star_stream,
                 star_stream_local_2
             ],
             dim=1
@@ -198,7 +202,6 @@ class CultioGraphNet(torch.nn.Module):
         )
         # Concatenate streams + distance orientations + distances + edges
         h = torch.cat([h, logits_edges], dim=1)
-
         # Estimate crop/non-crop
         logits_crop = self.crop_layer(
             h,
@@ -208,17 +211,19 @@ class CultioGraphNet(torch.nn.Module):
             height,
             width
         )
-        h = torch.cat([h, logits_crop, star_stream], dim=1)
 
         # Estimate crop-type
-        logits_crop_type = self.crop_type_layer(
-            h,
-            data.edge_index,
-            data.edge_attrs,
-            data.batch,
-            height,
-            width
-        )
+        logits_crop_type = None
+        if self.crop_type_layer is not None:
+            h = torch.cat([h, logits_crop], dim=1)
+            logits_crop_type = self.crop_type_layer(
+                h,
+                data.edge_index,
+                data.edge_attrs,
+                data.batch,
+                height,
+                width
+            )
 
         return (
             logits_distances_ori,
