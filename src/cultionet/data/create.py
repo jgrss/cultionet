@@ -686,7 +686,8 @@ def create_predict_dataset(
                     tqdm_kwargs={
                         'total': len(windows),
                         'desc': 'Creating prediction windows'
-                    }
+                    },
+                    temp_folder='/tmp'
                 ) as pool:
                     __ = pool(
                         delayed(partial_create)(

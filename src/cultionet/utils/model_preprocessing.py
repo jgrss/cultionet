@@ -15,9 +15,9 @@ class TqdmParallel(Parallel):
     Reference:
         https://stackoverflow.com/questions/37804279/how-can-we-use-tqdm-in-a-parallel-execution-with-joblib
     """
-    def __init__(self, tqdm_kwargs: dict):
+    def __init__(self, tqdm_kwargs: dict, **joblib_kwargs):
         self.tqdm_kwargs = tqdm_kwargs
-        super().__init__()
+        super().__init__(**joblib_kwargs)
 
     def __call__(self, *args, **kwargs):
         with tqdm(**self.tqdm_kwargs) as self._pbar:
