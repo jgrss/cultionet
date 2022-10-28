@@ -29,27 +29,6 @@ from joblib import delayed, parallel_backend
 logger = set_color_logger(__name__)
 
 
-def remove_noncrop(xvars: np.ndarray, labels_array: np.ndarray) -> T.Tuple[np.ndarray, np.ndarray]:
-    """Removes non-crop distances and edges
-    """
-    # This masking aligns with the reference studies
-    # Remove non-crop distances
-    bdist = xvars[-1]
-    bdist = bdist * np.uint8(labels_array > 0)
-    xvars[-1] = bdist
-    # Remove non-crop edges
-    bdist = np.pad(bdist, pad_width=((5, 5), (5, 5)), mode='edge')
-    dist_mean = np.zeros_like(bdist)
-    dist_mean[1:-1, 1:-1] = dist_mean[1:-1, 1:-1] + np.roll(bdist, 1, axis=1)[1:-1, 1:-1]
-    dist_mean[1:-1, 1:-1] = dist_mean[1:-1, 1:-1] + np.roll(bdist, -1, axis=1)[1:-1, 1:-1]
-    dist_mean[1:-1, 1:-1] = dist_mean[1:-1, 1:-1] + np.roll(bdist, 1, axis=0)[1:-1, 1:-1]
-    dist_mean[1:-1, 1:-1] = dist_mean[1:-1, 1:-1] + np.roll(bdist, -1, axis=0)[1:-1, 1:-1]
-    dist_mean = (dist_mean / 4.0)[5:-5, 5:-5]
-    labels_array = labels_array * np.uint8(dist_mean > 0)
-
-    return xvars, labels_array
-
-
 def roll(
     arr_pad: np.ndarray,
     shift: T.Union[int, T.Tuple[int, int]],
@@ -57,108 +36,6 @@ def roll(
 ) -> np.ndarray:
     """Rolls array elements along a given axis and slices off padded edges"""
     return np.roll(arr_pad, shift, axis=axis)[1:-1, 1:-1]
-
-
-def edge_gradient(array: np.ndarray, train_type: str, cell_res: float) -> np.ndarray:
-    """Calculates the morphological gradient of crop fields
-    """
-    se = np.array(
-        [
-            [1, 1],
-            [1, 1]
-        ], dtype='uint8'
-    )
-    array_shape = array.shape
-    dim = (array.shape[0] * 2, array.shape[1] * 2)
-    array = cv2.resize(array, dim, interpolation=cv2.INTER_NEAREST)
-    bdist = normalize_boundary_distances(
-        np.uint8(array > 0),
-        train_type,
-        cell_res * 0.5,
-        normalize=False
-    )[0]
-    bdist = cv2.resize(np.uint8(bdist > 0), array_shape, interpolation=cv2.INTER_CUBIC)
-    array = np.uint8(cv2.morphologyEx(np.uint8(bdist > 0), cv2.MORPH_GRADIENT, se) > 0)
-
-    return array
-
-
-def check_slivers(
-    labels_array: np.ndarray, edges: np.ndarray, segments: np.ndarray, edge_class: int
-) -> T.Tuple[np.ndarray, list]:
-    """Checks for small segment slivers
-    """
-    props = regionprops(segments)
-    for p in props:
-        min_row, min_col, max_row, max_col = p.bbox
-        if (max_row - min_row <= 1) or (max_col - min_col <= 1):
-            labels_array[segments == p.label] = 0
-    labels_array[edges == 1] = edge_class
-
-    return labels_array, props
-
-
-def make_crops_uniform(
-    labels_array: np.ndarray, edges: np.ndarray, max_crop_class: int, data_type: str
-) -> T.Tuple[np.ndarray, np.ndarray]:
-    """Makes each segment uniform in its class value
-    """
-    segments, num_objects = nd_label(np.uint8(edges == 0))
-    index = np.unique(segments)
-    crop_totals = nd_sum(np.uint8(labels_array > 0), labels=segments, index=index)
-    for lidx in range(0, len(index)):
-        lab = index[lidx]
-        if crop_totals[lidx] == 0:
-            # No cropland
-            labels_array[segments == lab] = 0
-        else:
-            seg_area = (segments == lab).sum()
-            crop_prop = crop_totals[lidx] / seg_area
-            if crop_prop > 0.5:
-                # Majority cropland
-                if data_type == 'boundaries':
-                    labels_array[segments == lab] = max_crop_class
-                else:
-                    idx = np.where(segments == lab)
-                    crop_pixels = labels_array[idx].flatten()
-                    labels_array[segments == lab] = sci_stats.mode(crop_pixels).mode[0]
-            else:
-                labels_array[segments == lab] = 0
-
-    return labels_array, segments
-
-
-def recode_crop_labels(
-    labels_array: np.ndarray, lc_array: np.ndarray, lc_is_cdl: bool, data_type: str
-) -> T.Tuple[np.ndarray, np.ndarray]:
-    """Recodes crop labels for non-edge values
-    """
-    edges = labels_array.copy()
-    # Recode the crop labels
-    if lc_is_cdl:
-        # Ensure the land cover array is the same shape
-        if lc_array.shape != labels_array.shape:
-            row_diff = labels_array.shape[0] - lc_array.shape[0]
-            col_diff = labels_array.shape[1] - lc_array.shape[1]
-            lc_array = np.pad(lc_array, pad_width=((0, row_diff), (0, col_diff)), mode='edge')
-        recoded_labels = np.zeros_like(labels_array)
-        crop_counter = 1
-        for lc_value, lc_name in CDL_CROP_LABELS_r.items():
-            # TODO: testing two crops
-            # if lc_value not in [CDL_CROP_LABELS['maize'], CDL_CROP_LABELS['soybeans']]:
-            #     continue
-            # Crop = 1
-            if data_type == 'boundaries':
-                recoded_labels[(lc_array == lc_value) & (edges == 0)] = 1
-            else:
-                recoded_labels[(lc_array == lc_value) & (edges == 0)] = crop_counter
-                # Check if the code was added
-                if (recoded_labels == crop_counter).sum() > 0:
-                    crop_counter += 1
-    else:
-        recoded_labels = np.where(lc_array == 1, 1, 0)
-
-    return recoded_labels, edges
 
 
 def close_edge_ends(array: np.ndarray) -> np.ndarray:

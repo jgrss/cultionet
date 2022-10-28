@@ -44,7 +44,7 @@ class TemporalBlock(torch.nn.Module):
         chomp = Chomp1d(padding)
         self.activate_layer = torch.nn.ReLU()
         batchnorm_layer = torch.nn.BatchNorm3d(n_outputs)
-        # dropout = torch.nn.Dropout3d(dropout)
+        dropout_layer = torch.nn.Dropout3d(dropout)
 
         self.conv2 = weight_norm(
             torch.nn.Conv3d(
@@ -65,7 +65,13 @@ class TemporalBlock(torch.nn.Module):
             self.conv2,
             chomp,
             batchnorm_layer,
-            self.activate_layer
+            self.activate_layer,
+            dropout_layer,
+            self.conv2,
+            chomp,
+            batchnorm_layer,
+            self.activate_layer,
+            dropout_layer
         )
         self.downsample = torch.nn.Conv3d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
         self.init_weights()
@@ -124,12 +130,23 @@ class TemporalConvNet(torch.nn.Module):
             bias=False
         )
 
-    def forward(self, x: torch.Tensor):
-        x = self.network(x)
+    def forward(self, x: torch.Tensor, batch_size: int, height: int, width: int):
+        # Transformer on each band time series
+        h = self.gc(
+            h, batch_size, height, width
+        )
+        # # nbatch, ntime, height, width
+        nbatch, __, height, width = x.shape
+        # # Reshape from (B x C x H x W) -> (B x C x T x H x W)
+        h = h.reshape(
+            nbatch, self.num_bands, self.num_time, height, width
+        )
+        h = self.network(h)
+        h = self.final(h)
         # (B x C x T x H x W)
         batch_size, __, __, height, width = x.shape
         # (B x C x H x W)
-        x = x.reshape(batch_size, -1, height, width)
+        h = h.reshape(batch_size, -1, height, width)
 
         return self.final(x)
 

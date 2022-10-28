@@ -6,6 +6,7 @@ from .convstar import StarRNN
 from .graph import GraphFinal
 from .regression import GraphRegressionLayer
 from .tcn import GraphTransformer
+from .hed import HED
 
 import torch
 from torch_geometric.data import Data
@@ -44,23 +45,17 @@ class CultioGraphNet(torch.nn.Module):
         num_index_streams = 1
         # Temporal Convolution Network outputs
         tcn_out_channels = 2 + num_classes
+        # Holistic edge detection
+        hed_out_channels = 2
         # Temporal UNet++
         nunet_out_channels = 2 + num_classes
         # RNN stream = 2 + num_classes
         rnn_stream_out_channels = 2 + num_classes
-        base_in_channels = tcn_out_channels + nunet_out_channels + rnn_stream_out_channels
+        base_in_channels = tcn_out_channels + hed_out_channels + nunet_out_channels + rnn_stream_out_channels
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
-        # Transformer stream (+self.filters x self.ds_num_time)
-        # self.transformer = TemporalConvNet(
-        #     num_inputs=self.ds_num_bands,
-        #     num_channels=[self.filters, self.filters],
-        #     num_time=self.ds_num_time,
-        #     out_channels=tcn_out_channels,
-        #     dropout=0.2
-        # )
         self.transformer = GraphTransformer(
             num_features=self.ds_num_features,
             in_channels=self.ds_num_time,
@@ -68,6 +63,10 @@ class CultioGraphNet(torch.nn.Module):
             out_channels=tcn_out_channels,
             heads=2,
             dropout=dropout
+        )
+        self.hed = HED(
+            in_channels=self.ds_num_features,
+            out_channels=2
         )
         # Nested UNet (+self.filters x self.ds_num_bands)
         self.nunet = TemporalNestedUNet2(
@@ -146,7 +145,13 @@ class CultioGraphNet(torch.nn.Module):
             data.edge_index,
             data.edge_attrs
         )
-
+        # HED stream
+        hed_stream = self.hed(
+            data.x,
+            data.batch,
+            height,
+            width
+        )
         # Nested UNet on each band time series
         nunet_stream = self.nunet(
             data.x,
@@ -156,7 +161,6 @@ class CultioGraphNet(torch.nn.Module):
             height,
             width
         )
-
         # RNN ConvStar
         star_stream = self.gc(
             data.x, batch_size, height, width
@@ -174,8 +178,9 @@ class CultioGraphNet(torch.nn.Module):
         # Concatenate time series streams
         h = torch.cat(
             [
-                nunet_stream,
                 transformer_stream,
+                hed_stream,
+                nunet_stream,
                 star_stream,
                 star_stream_local_2
             ],
