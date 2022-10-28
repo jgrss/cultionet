@@ -75,6 +75,20 @@ create:
     kwargs:
       default: 6
       type: '&int'
+  gain:
+    short: ''
+    long: gain
+    help: The image gain, or scale, factor
+    kwargs:
+      default: 1e-4
+      type: '&float'
+  offset:
+    short: ''
+    long: offset
+    help: The image offset to add to the scaling
+    kwargs:
+      default: 0.0
+      type: '&float'
   ref_res:
     short: r
     long: res
