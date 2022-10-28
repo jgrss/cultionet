@@ -1,7 +1,10 @@
 import typing as T
 
+from .graph import GraphMid
+
 import torch
 from torch.nn.utils import weight_norm
+from torch_geometric import nn
 
 
 class Chomp1d(torch.nn.Module):
@@ -121,7 +124,7 @@ class TemporalConvNet(torch.nn.Module):
             bias=False
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         x = self.network(x)
         # (B x C x T x H x W)
         batch_size, __, __, height, width = x.shape
@@ -129,3 +132,50 @@ class TemporalConvNet(torch.nn.Module):
         x = x.reshape(batch_size, -1, height, width)
 
         return self.final(x)
+
+
+
+class GraphTransformer(torch.nn.Module):
+    def __init__(
+        self,
+        num_features: int,
+        in_channels: int,
+        mid_channels: int,
+        out_channels: int,
+        heads: int = 1,
+        dropout: float = 0.1
+    ):
+        super(GraphTransformer, self).__init__()
+
+        self.num_features = num_features
+        self.in_channels = in_channels
+        conv = nn.TransformerConv(
+            in_channels, mid_channels, heads=heads, edge_dim=2, dropout=dropout
+        )
+        self.net = GraphMid(conv)
+        self.final = nn.GCNConv(
+            heads*mid_channels*int(num_features / in_channels), out_channels,
+            improved=True
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_attrs: torch.Tensor
+    ) -> torch.Tensor:
+        h = []
+        # Iterate over all data features, stepping over time chunks
+        for band in range(0, self.num_features, self.in_channels):
+            # Get the current band through all time steps
+            t = self.net(
+                x[:, band:band+self.in_channels],
+                edge_index,
+                edge_attrs
+            )
+            h.append(t)
+        h = torch.cat(h, dim=1)
+        # Reshape to GNN 2d
+        h = self.final(h, edge_index, edge_attrs[:, 1])
+
+        return h

@@ -5,7 +5,7 @@ from .nunet import TemporalNestedUNet2
 from .convstar import StarRNN
 from .graph import GraphFinal
 from .regression import GraphRegressionLayer
-from .tcn import TemporalConvNet
+from .tcn import GraphTransformer
 
 import torch
 from torch_geometric.data import Data
@@ -54,12 +54,20 @@ class CultioGraphNet(torch.nn.Module):
         self.cg = model_utils.ConvToGraph()
 
         # Transformer stream (+self.filters x self.ds_num_time)
-        self.transformer = TemporalConvNet(
-            num_inputs=self.ds_num_bands,
-            num_channels=[self.filters, self.filters],
-            num_time=self.ds_num_time,
+        # self.transformer = TemporalConvNet(
+        #     num_inputs=self.ds_num_bands,
+        #     num_channels=[self.filters, self.filters],
+        #     num_time=self.ds_num_time,
+        #     out_channels=tcn_out_channels,
+        #     dropout=0.2
+        # )
+        self.transformer = GraphTransformer(
+            num_features=self.ds_num_features,
+            in_channels=self.ds_num_time,
+            mid_channels=self.filters,
             out_channels=tcn_out_channels,
-            dropout=0.2
+            heads=2,
+            dropout=dropout
         )
         # Nested UNet (+self.filters x self.ds_num_bands)
         self.nunet = TemporalNestedUNet2(
@@ -123,16 +131,21 @@ class CultioGraphNet(torch.nn.Module):
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
         # Transformer on each band time series
-        transformer_stream = self.gc(
-            data.x, batch_size, height, width
+        # transformer_stream = self.gc(
+        #     data.x, batch_size, height, width
+        # )
+        # # nbatch, ntime, height, width
+        # nbatch, __, height, width = transformer_stream.shape
+        # # Reshape from (B x C x H x W) -> (B x C x T x H x W)
+        # transformer_stream = transformer_stream.reshape(
+        #     nbatch, self.ds_num_bands, self.ds_num_time, height, width
+        # )
+        # transformer_stream = self.cg(self.transformer(transformer_stream))
+        transformer_stream = self.transformer(
+            data.x,
+            data.edge_index,
+            data.edge_attrs
         )
-        # nbatch, ntime, height, width
-        nbatch, __, height, width = transformer_stream.shape
-        # Reshape from (B x C x H x W) -> (B x C x T x H x W)
-        transformer_stream = transformer_stream.reshape(
-            nbatch, self.ds_num_bands, self.ds_num_time, height, width
-        )
-        transformer_stream = self.cg(self.transformer(transformer_stream))
 
         # Nested UNet on each band time series
         nunet_stream = self.nunet(
