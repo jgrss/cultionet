@@ -346,6 +346,7 @@ def create_image_vars(
                     all_touched=False
                 ).squeeze().gw.compute(num_workers=num_workers)
                 edges[edges > 0] = 1
+                assert edges.max() == 1, 'Edges were not created.'
                 # def save_labels(out_fig: Path):
                 #     import matplotlib.pyplot as plt
                 #     fig, axes = plt.subplots(1, 3, figsize=(6, 5), sharey=True, sharex=True, dpi=300)
