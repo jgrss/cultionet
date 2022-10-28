@@ -1140,9 +1140,6 @@ def main():
                 for key, value in kwargs.items():
                     if isinstance(value, str) and value.startswith('&'):
                         kwargs[key] = getattr(builtins, value.replace('&', ''))
-                    if process_key == 'replace_dict':
-                        if value is not None:
-                            kwargs[key] = ast.literal_eval(value)
 
             else:
                 process_values['kwargs'] = {}
@@ -1173,6 +1170,10 @@ def main():
     if args.process == 'version':
         print(cultionet.__version__)
         return
+
+    if hasattr(args, 'replace_dict'):
+        if args.replace_dict is not None:
+            setattr(args, 'replace_dict', ast.literal_eval(args.replace_dict))
 
     if args.process in ('create', 'create-predict'):
         create_datasets(args)
