@@ -58,8 +58,8 @@ def create_data_object(
 ) -> Data:
     """Creates a training data object
     """
-    edge_indices_ = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
-    edge_attrs_ = torch.tensor(edge_attrs, dtype=torch.float)
+    edge_indices = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
+    edge_attrs = torch.tensor(edge_attrs, dtype=torch.float)
     x = torch.tensor(x, dtype=torch.float)
     xy = torch.tensor(xy, dtype=torch.float)
 
@@ -74,8 +74,8 @@ def create_data_object(
     if y is None:
         train_data = Data(
             x=x,
-            edge_index=edge_indices_,
-            edge_attrs=edge_attrs_,
+            edge_index=edge_indices,
+            edge_attrs=edge_attrs,
             pos=xy,
             height=height,
             width=width,
@@ -95,8 +95,8 @@ def create_data_object(
         if other is None:
             train_data = Data(
                 x=x,
-                edge_index=edge_indices_,
-                edge_attrs=edge_attrs_,
+                edge_index=edge_indices,
+                edge_attrs=edge_attrs,
                 y=y,
                 bdist=bdist_,
                 ori=ori_,
@@ -116,8 +116,8 @@ def create_data_object(
 
             train_data = Data(
                 x=x,
-                edge_index=edge_indices_,
-                edge_attrs=edge_attrs_,
+                edge_index=edge_indices,
+                edge_attrs=edge_attrs,
                 y=y,
                 bdist=bdist_,
                 ori=ori_,

@@ -113,7 +113,9 @@ def get_norm_values(
                 }
             ) as pool:
                 results = pool(
-                    delayed(get_info)(batch.x, batch.y) for batch in data_module.train_dataloader()
+                    delayed(get_info)(
+                        batch.x, batch.y
+                    ) for batch in data_module.train_dataloader()
                 )
         data_sums, pix_count, crop_counts, edge_counts = list(map(list, zip(*results)))
 
@@ -141,7 +143,9 @@ def get_norm_values(
                 }
             ) as pool:
                 sses = pool(
-                    delayed(sse_partial)(batch.x) for batch in data_module.train_dataloader()
+                    delayed(sse_partial)(
+                        batch.x
+                    ) for batch in data_module.train_dataloader()
                 )
 
         sses = torch.stack(sses).sum(dim=0)

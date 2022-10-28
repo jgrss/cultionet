@@ -1065,8 +1065,9 @@ def train_model(args):
 
     # Get balanced class weights
     # Reference: https://github.com/scikit-learn/scikit-learn/blob/f3f51f9b6/sklearn/utils/class_weight.py#L10
-    recip_freq = data_values.crop_counts.sum() / (len(data_values.crop_counts) * data_values.crop_counts)
-    class_weights = recip_freq[torch.arange(len(data_values.crop_counts))]
+    recip_freq = data_values.crop_counts[1:].sum() / ((len(data_values.crop_counts)-1) * data_values.crop_counts[1:])
+    class_weights = recip_freq[torch.arange(1, len(data_values.crop_counts))]
+    class_weights = torch.tensor([0] + list(class_weights), dtype=torch.float)
 
     # Fit the model
     cultionet.fit(

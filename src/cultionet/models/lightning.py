@@ -471,9 +471,9 @@ class CultioLitModel(pl.LightningModule):
         crop_loss = self.crop_loss(crop, true_crop)
         if crop_type is not None:
             crop_type_loss = self.crop_type_loss(crop_type, true_crop_type)
-            loss = ori_loss*0.75 + dist_loss + edge_loss + crop_loss + crop_type_loss
+            loss = ori_loss + dist_loss + edge_loss + crop_loss + crop_type_loss*0.75
         else:
-            loss = ori_loss*0.75 + dist_loss + edge_loss + crop_loss
+            loss = ori_loss + dist_loss + edge_loss + crop_loss
 
         return loss
 

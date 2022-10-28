@@ -32,8 +32,6 @@ def update_data(
     idx: T.Optional[int] = None,
     x: T.Optional[torch.Tensor] = None
 ) -> Data:
-    if x is not None:
-        exclusion = ('x',)
     image_id = None
     if idx is not None:
         if hasattr(batch, 'boxes'):
@@ -41,6 +39,8 @@ def update_data(
                 image_id = torch.zeros_like(batch.box_labels, dtype=torch.int64) + idx
 
     if x is not None:
+        exclusion = ('x',)
+
         return Data(
             x=x,
             image_id=image_id,

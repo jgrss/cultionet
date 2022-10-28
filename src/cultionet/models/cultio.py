@@ -59,7 +59,7 @@ class CultioGraphNet(torch.nn.Module):
             num_channels=[self.filters, self.filters],
             num_time=self.ds_num_time,
             out_channels=tcn_out_channels,
-            dropout=dropout
+            dropout=0.2
         )
         # Nested UNet (+self.filters x self.ds_num_bands)
         self.nunet = TemporalNestedUNet2(
@@ -133,7 +133,7 @@ class CultioGraphNet(torch.nn.Module):
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
         transformer_stream = self.cg(self.transformer(transformer_stream))
-        
+
         # Nested UNet on each band time series
         nunet_stream = self.nunet(
             data.x,

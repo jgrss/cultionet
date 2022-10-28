@@ -40,7 +40,7 @@ class TemporalBlock(torch.nn.Module):
         )
         self.chomp = Chomp1d(padding)
         self.relu = torch.nn.ReLU()
-        self.dropout = torch.nn.Dropout3d(dropout)
+        self.dropout = torch.nn.Dropout(dropout)
 
         self.conv2 = weight_norm(
             torch.nn.Conv3d(
