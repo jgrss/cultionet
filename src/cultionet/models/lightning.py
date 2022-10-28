@@ -9,6 +9,7 @@ from ..losses import (
 from .cultio import CultioGraphNet
 from .maskcrnn import BFasterRCNN
 from . import model_utils
+from .convstar import CropType
 
 import torch
 import torch.nn.functional as F
@@ -345,10 +346,9 @@ class CultioLitModel(pl.LightningModule):
         self.num_time_features = num_time_features
         self.class_weights = class_weights
         self.edge_weights = edge_weights
-        self.crop_class = num_classes - 1
         self.edge_class = num_classes
 
-        self.model = CultioGraphNet(
+        self.cultionet_model = CultioGraphNet(
             ds_features=num_features,
             ds_time_features=num_time_features,
             filters=filters,
@@ -356,6 +356,12 @@ class CultioLitModel(pl.LightningModule):
             star_rnn_n_layers=star_rnn_n_layers,
             num_classes=self.num_classes
         )
+        self.crop_type_model = None
+        if self.num_classes > 2:
+            self.crop_type_model = CropType(
+                in_channels=self.num_classes,
+                out_channels=self.num_classes
+            )
         self.configure_loss()
         self.configure_scorer()
 
@@ -374,7 +380,15 @@ class CultioLitModel(pl.LightningModule):
             edge: Probability of an edge [0,1].
             crop: Probability of crop [0,1].
         """
-        distance_ori, distance, edge, crop, crop_type = self.model(batch)
+        distance_ori, distance, edge, crop, crop_type = self.cultionet_model(batch)
+        if crop_type is not None:
+            crop_type = self.crop_type_model(
+                crop,
+                crop_type,
+                batch.batch,
+                batch.height,
+                batch.width
+            )
 
         return distance_ori, distance, edge, crop, crop_type
 
@@ -632,7 +646,9 @@ class CultioLitModel(pl.LightningModule):
         )
 
     def configure_optimizers(self):
-        params_list = list(self.model.parameters())
+        params_list = list(self.cultionet_model.parameters())
+        if self.crop_type_model is not None:
+            params_list += list(self.crop_type_model.parameters())
         optimizer = torch.optim.AdamW(
             params_list,
             lr=self.learning_rate,
@@ -642,7 +658,7 @@ class CultioLitModel(pl.LightningModule):
         lr_scheduler = ReduceLROnPlateau(
             optimizer,
             factor=0.1,
-            patience=5
+            patience=7
         )
 
         return {

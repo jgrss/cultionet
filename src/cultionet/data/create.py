@@ -288,7 +288,8 @@ def create_image_vars(
     ref_res: T.Optional[float] = 10.0,
     resampling: T.Optional[str] = 'nearest',
     crop_column: T.Optional[str] = 'class',
-    keep_crop_classes: T.Optional[bool] = False
+    keep_crop_classes: T.Optional[bool] = False,
+    replace_dict: T.Optional[T.Dict[int, int]] = None
 ) -> T.Tuple[
     np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int
 ]:
@@ -310,12 +311,18 @@ def create_image_vars(
             # X variables
             time_series = (
                 (src_ts.astype('float64') * gain + offset)
-                .gw.compute(num_workers=num_workers)
                 .clip(0, 1)
+                .gw.compute(num_workers=num_workers)
             )
             # Get the time and band count
             ntime, nbands = get_image_list_dims(image, src_ts)
             if grid_edges is not None:
+                if replace_dict is not None:
+                    for crop_class in grid_edges[crop_column].unique():
+                        if crop_class not in list(replace_dict.keys()):
+                            grid_edges[crop_column] = grid_edges[crop_column].replace({crop_class: -999})
+                    replace_dict[-999] = 1
+                    grid_edges[crop_column] = grid_edges[crop_column].replace(replace_dict)
                 # Get the field polygons
                 labels_array = polygon_to_array(
                     grid_edges,
@@ -591,7 +598,8 @@ def create_dataset(
     instance_seg: T.Optional[bool] = False,
     zero_padding: T.Optional[int] = 0,
     crop_column: T.Optional[str] = 'class',
-    keep_crop_classes: T.Optional[bool] = False
+    keep_crop_classes: T.Optional[bool] = False,
+    replace_dict: T.Optional[T.Dict[int, int]] = None
 ) -> None:
     """Creates a dataset for training
 
@@ -617,6 +625,7 @@ def create_dataset(
         crop_column: The crop column name in the polygon vector files.
         keep_crop_classes: Whether to keep the crop classes as they are (True) or recode all
             non-zero classes to crop (False).
+        replace_dict: A dictionary of crop class remappings.
     """
     if transforms is None:
         transforms = ['none']
@@ -697,7 +706,8 @@ def create_dataset(
                     ref_res=ref_res,
                     resampling=resampling,
                     crop_column=crop_column,
-                    keep_crop_classes=keep_crop_classes
+                    keep_crop_classes=keep_crop_classes,
+                    replace_dict=replace_dict
                 )
 
                 if (xvars.shape[1] < 5) or (xvars.shape[2] < 5):

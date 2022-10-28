@@ -2,6 +2,8 @@
 """
 import typing as T
 
+from . import model_utils
+
 import torch
 import torch.nn as nn
 from torch.nn import init
@@ -101,7 +103,6 @@ class ConvSTAR(nn.Module):
             hidden = [None] * self.n_layers
 
         input_ = x
-
         upd_hidden = []
 
         for layer_idx in range(self.n_layers):
@@ -126,7 +127,7 @@ class StarRNN(torch.nn.Module):
         num_classes: int = 2,
         num_crop_classes: int = 2,
         nstage: int = 3,
-        kernel_size: T.Tuple[int, int] = (3, 3),
+        kernel_size: int = 3,
         n_layers: int = 6,
         cell: str = 'star'
     ):
@@ -140,10 +141,11 @@ class StarRNN(torch.nn.Module):
         self.rnn = ConvSTAR(
             input_size=input_dim,
             hidden_sizes=hidden_dim,
-            kernel_sizes=kernel_size[0],
+            kernel_sizes=kernel_size,
             n_layers=n_layers
         )
 
+        self.final_local_1 = torch.nn.Conv2d(hidden_dim, num_classes, 3, padding=1)
         self.final_local_2 = torch.nn.Conv2d(hidden_dim, num_classes, 3, padding=1)
         self.final = torch.nn.Conv2d(hidden_dim, num_crop_classes, 3, padding=1)
 
@@ -169,24 +171,128 @@ class StarRNN(torch.nn.Module):
                 )
             ] * self.n_layers
 
-        for iter in range(0, time_size):
-            hidden_s = self.rnn.forward(x[:, :, iter, :, :], hidden_s)
+        for iter_ in range(0, time_size):
+            hidden_s = self.rnn(x[:, :, iter_, :, :], hidden_s)
 
         if self.n_layers == 3:
-            # local_1 = hidden_s[0]
+            local_1 = hidden_s[0]
             local_2 = hidden_s[1]
-        elif self.nstage==3:
-            # local_1 = hidden_s[1]
+        elif self.nstage == 3:
+            local_1 = hidden_s[1]
             local_2 = hidden_s[3]
-        elif self.nstage==2:
-            # local_1 = hidden_s[1]
+        elif self.nstage == 2:
+            local_1 = hidden_s[1]
             local_2 = hidden_s[2]
-        elif self.nstage==1:
-            # local_1 = hidden_s[-1]
+        elif self.nstage == 1:
+            local_1 = hidden_s[-1]
             local_2 = hidden_s[-1]
 
+        local_1 = self.final_local_1(local_1)
+        local_2 = self.final_local_2(local_2) + local_1
         last = self.final(hidden_s[-1])
-        local_2 = self.final_local_2(local_2)
 
         # The output is (B x C x H x W)
-        return last, local_2
+        return local_2, last
+
+
+class CropType(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        planes=128,
+        padding=False,
+        dropout=0.5
+    ):
+        super(CropType, self).__init__()
+
+        self.hidden_dim = 2 * in_channels
+        self.planes = planes
+        self.padding = padding
+
+        self.gc = model_utils.GraphToConv()
+        self.cg = model_utils.ConvToGraph()
+
+        self.conv1 = torch.nn.Conv2d(
+            in_channels+2,
+            self.planes,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+            bias=True
+        )
+        self.bn1 = torch.nn.BatchNorm2d(self.planes)
+        self.relu = torch.nn.ReLU(inplace=True)
+
+        self.conv2 = torch.nn.Conv2d(
+            self.planes,
+            self.planes,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=True,
+            padding_mode='replicate'
+        )
+        self.bn2 = torch.nn.BatchNorm2d(self.planes)
+        self.drop2 = torch.nn.Dropout(dropout)
+
+        self.conv3 = torch.nn.Conv2d(
+            self.planes,
+            self.planes,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=True,
+            padding_mode='replicate'
+        )
+        self.bn3 = torch.nn.BatchNorm2d(self.planes)
+        self.drop3 = torch.nn.Dropout(dropout)
+
+        self.conv4 = torch.nn.Conv2d(
+            self.planes,
+            out_channels,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+            bias=True
+        )
+
+    def forward(
+        self,
+        crop: torch.Tensor,
+        crop_type: torch.Tensor,
+        batch: torch.Tensor,
+        height: torch.Tensor,
+        width: torch.Tensor
+    ) -> torch.Tensor:
+        height = int(height) if batch is None else int(height[0])
+        width = int(width) if batch is None else int(width[0])
+        batch_size = 1 if batch is None else batch.unique().size(0)
+
+        crop = self.gc(
+            crop, batch_size, height, width
+        )
+        crop_type = self.gc(
+            crop_type, batch_size, height, width
+        )
+        h = torch.cat([crop, crop_type], dim=1)
+
+        out1 = self.conv1(h)
+        out1 = self.bn1(out1)
+        out1 = self.relu(out1)
+
+        out = self.conv2(out1)
+        out = self.bn2(out)
+        out = self.relu(out)
+        out = self.drop2(out)
+
+        out = self.conv3(out)
+        out = self.bn3(out)
+        out += out1
+        out = self.relu(out)
+        out = self.drop3(out)
+
+        out = self.conv4(out)
+        out += crop_type
+
+        return self.cg(out)

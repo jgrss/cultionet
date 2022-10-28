@@ -50,8 +50,16 @@ class CultioGraphNet(torch.nn.Module):
         # Temporal UNet++
         nunet_out_channels = 2 + num_classes
         # RNN stream = 2 + num_classes
-        rnn_stream_out_channels = 2 + num_classes
-        base_in_channels = tcn_out_channels + hed_out_channels + nunet_out_channels + rnn_stream_out_channels
+        rnn_stream_local_out_channels = 2
+        self.crop_type_layer = True if num_classes > 2 else False
+        rnn_stream_out_channels = num_classes if not self.crop_type_layer else 0
+        base_in_channels = (
+            tcn_out_channels
+            + hed_out_channels
+            + nunet_out_channels
+            + rnn_stream_local_out_channels
+            + rnn_stream_out_channels
+        )
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
@@ -109,14 +117,14 @@ class CultioGraphNet(torch.nn.Module):
             mid_channels=self.filters,
             out_channels=2
         )
-        self.crop_type_layer = None
-        if num_classes > 2:
-            # Crop types (+num_classes)
-            self.crop_type_layer = GraphFinal(
-                in_channels=base_in_channels+num_distances+2+2,
-                mid_channels=self.filters,
-                out_channels=num_classes
-            )
+        # if num_classes > 2:
+        #     self.crop_type_layer = True
+            # # Crop types (+num_classes)
+            # self.crop_type_layer = GraphFinal(
+            #     in_channels=base_in_channels+num_distances+2+2,
+            #     mid_channels=self.filters,
+            #     out_channels=num_classes
+            # )
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -129,17 +137,7 @@ class CultioGraphNet(torch.nn.Module):
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
-        # Transformer on each band time series
-        # transformer_stream = self.gc(
-        #     data.x, batch_size, height, width
-        # )
-        # # nbatch, ntime, height, width
-        # nbatch, __, height, width = transformer_stream.shape
-        # # Reshape from (B x C x H x W) -> (B x C x T x H x W)
-        # transformer_stream = transformer_stream.reshape(
-        #     nbatch, self.ds_num_bands, self.ds_num_time, height, width
-        # )
-        # transformer_stream = self.cg(self.transformer(transformer_stream))
+
         transformer_stream = self.transformer(
             data.x,
             data.edge_index,
@@ -172,20 +170,22 @@ class CultioGraphNet(torch.nn.Module):
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
         # Crop/Non-crop and Crop types
-        star_stream, star_stream_local_2 = self.star_rnn(star_stream)
-        star_stream = self.cg(star_stream)
+        star_stream_local_2, star_stream = self.star_rnn(star_stream)
         star_stream_local_2 = self.cg(star_stream_local_2)
+        star_stream = self.cg(star_stream)
         # Concatenate time series streams
         h = torch.cat(
             [
                 transformer_stream,
                 hed_stream,
                 nunet_stream,
-                star_stream,
                 star_stream_local_2
             ],
             dim=1
         )
+        if not self.crop_type_layer:
+            h = torch.cat([h, star_stream], dim=1)
+            star_stream = None
 
         # Estimate distance orientations
         logits_distances_ori = self.dist_layer_ori(
@@ -233,22 +233,22 @@ class CultioGraphNet(torch.nn.Module):
         )
 
         # Estimate crop-type
-        logits_crop_type = None
-        if self.crop_type_layer is not None:
-            h = torch.cat([h, logits_crop], dim=1)
-            logits_crop_type = self.crop_type_layer(
-                h,
-                data.edge_index,
-                data.edge_attrs,
-                data.batch,
-                height,
-                width
-            )
+        # logits_crop_type = None
+        # if self.crop_type_layer is not None:
+        #     h = torch.cat([h, logits_crop], dim=1)
+        #     logits_crop_type = self.crop_type_layer(
+        #         h,
+        #         data.edge_index,
+        #         data.edge_attrs,
+        #         data.batch,
+        #         height,
+        #         width
+        #     )
 
         return (
             logits_distances_ori,
             logits_distances,
             logits_edges,
             logits_crop,
-            logits_crop_type
+            star_stream
         )

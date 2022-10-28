@@ -143,6 +143,10 @@ create:
     help: The maximum expected crop class value
     kwargs:
       type: '&int'
+  replace_dict:
+    short: ''
+    long: replace-dict
+    help: A dictionary of crop class remappings
 
 create_predict:
   predict_year:

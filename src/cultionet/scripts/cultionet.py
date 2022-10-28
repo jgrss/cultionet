@@ -10,6 +10,7 @@ import asyncio
 import filelock
 import builtins
 import json
+import ast
 
 import cultionet
 from cultionet.data.const import SCALE_FACTOR
@@ -817,7 +818,8 @@ def create_datasets(args):
                     instance_seg=args.instance_seg,
                     zero_padding=args.zero_padding,
                     crop_column=args.crop_column,
-                    keep_crop_classes=args.keep_crop_classes
+                    keep_crop_classes=args.keep_crop_classes,
+                    replace_dict=args.replace_dict
                 )
 
 
@@ -1138,6 +1140,10 @@ def main():
                 for key, value in kwargs.items():
                     if isinstance(value, str) and value.startswith('&'):
                         kwargs[key] = getattr(builtins, value.replace('&', ''))
+                    if process_key == 'replace_dict':
+                        if value is not None:
+                            kwargs[key] = ast.literal_eval(value)
+
             else:
                 process_values['kwargs'] = {}
             key_args = ()
