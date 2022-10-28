@@ -38,9 +38,10 @@ class TemporalBlock(torch.nn.Module):
                 dilation=dilation
             )
         )
-        self.chomp = Chomp1d(padding)
-        self.relu = torch.nn.ReLU()
-        self.dropout = torch.nn.Dropout(dropout)
+        chomp = Chomp1d(padding)
+        self.activate_layer = torch.nn.ReLU()
+        batchnorm_layer = torch.nn.BatchNorm3d(n_outputs)
+        # dropout = torch.nn.Dropout3d(dropout)
 
         self.conv2 = weight_norm(
             torch.nn.Conv3d(
@@ -55,13 +56,13 @@ class TemporalBlock(torch.nn.Module):
 
         self.net = torch.nn.Sequential(
             self.conv1,
-            self.chomp,
-            self.relu,
-            self.dropout,
+            chomp,
+            batchnorm_layer,
+            self.activate_layer,
             self.conv2,
-            self.chomp,
-            self.relu,
-            self.dropout
+            chomp,
+            batchnorm_layer,
+            self.activate_layer
         )
         self.downsample = torch.nn.Conv3d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
         self.init_weights()
@@ -76,7 +77,7 @@ class TemporalBlock(torch.nn.Module):
         out = self.net(x)
         res = x if self.downsample is None else self.downsample(x)
 
-        return self.relu(out + res)
+        return self.activate_layer(out + res)
 
 
 class TemporalConvNet(torch.nn.Module):
