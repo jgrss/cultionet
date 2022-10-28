@@ -339,6 +339,7 @@ def create_image_vars(
                         .to_frame(name='geometry')
                         .reset_index()
                         .rename(columns={'index': crop_column})
+                        .assign(**{crop_column: 1})
                     ),
                     col=crop_column,
                     data=src_ts,
