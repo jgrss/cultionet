@@ -581,10 +581,13 @@ class CultioLitModel(pl.LightningModule):
             'val_loss': eval_metrics['loss'],
             'vef1': eval_metrics['edge_f1'],
             'vcf1': eval_metrics['crop_f1'],
-            'vctf1': eval_metrics['crop_type_f1'],
             'vemcc': eval_metrics['edge_mcc'],
             'vcmcc': eval_metrics['crop_mcc']
         }
+        if self.num_classes > 2:
+            metrics['vctf1'] = eval_metrics['crop_type_f1']
+        else:
+            metrics['vmae'] = eval_metrics['dist_mae']
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         return metrics

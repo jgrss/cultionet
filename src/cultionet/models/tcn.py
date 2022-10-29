@@ -157,7 +157,6 @@ class GraphTransformer(torch.nn.Module):
         self,
         num_features: int,
         in_channels: int,
-        mid_channels: int,
         out_channels: int,
         heads: int = 1,
         dropout: float = 0.1
@@ -167,11 +166,11 @@ class GraphTransformer(torch.nn.Module):
         self.num_features = num_features
         self.in_channels = in_channels
         conv = nn.TransformerConv(
-            in_channels, mid_channels, heads=heads, edge_dim=2, dropout=dropout
+            in_channels, out_channels, heads=heads, edge_dim=2, dropout=dropout
         )
         self.net = GraphMid(conv)
         self.final = nn.GCNConv(
-            heads*mid_channels*int(num_features / in_channels), out_channels,
+            heads*out_channels*int(num_features / in_channels), out_channels,
             improved=True
         )
 

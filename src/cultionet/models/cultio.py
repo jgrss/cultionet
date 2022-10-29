@@ -3,10 +3,9 @@ import typing as T
 from . import model_utils
 from .nunet import TemporalNestedUNet2
 from .convstar import StarRNN
-from .graph import GraphFinal
-from .regression import GraphRegressionLayer
+from .crop import CropFinal
+from .regression import RegressionLayer
 from .tcn import GraphTransformer
-from .hed import HED
 
 import torch
 from torch_geometric.data import Data
@@ -44,18 +43,16 @@ class CultioGraphNet(torch.nn.Module):
         num_distances = 2
         num_index_streams = 1
         # Temporal Convolution Network outputs
-        tcn_out_channels = 2 + num_classes
-        # Holistic edge detection
-        hed_out_channels = 2
+        tcn_heads = 2
+        tcn_out_channels = self.filters
         # Temporal UNet++
-        nunet_out_channels = 2 + num_classes
+        nunet_out_channels = self.filters
         # RNN stream = 2 + num_classes
-        rnn_stream_local_out_channels = 2
+        rnn_stream_local_out_channels = star_rnn_hidden_dim
         self.crop_type_layer = True if num_classes > 2 else False
-        rnn_stream_out_channels = num_classes if not self.crop_type_layer else 0
+        rnn_stream_out_channels = star_rnn_hidden_dim if not self.crop_type_layer else 0
         base_in_channels = (
             tcn_out_channels
-            + hed_out_channels
             + nunet_out_channels
             + rnn_stream_local_out_channels
             + rnn_stream_out_channels
@@ -67,14 +64,9 @@ class CultioGraphNet(torch.nn.Module):
         self.transformer = GraphTransformer(
             num_features=self.ds_num_features,
             in_channels=self.ds_num_time,
-            mid_channels=self.filters,
-            out_channels=tcn_out_channels,
-            heads=2,
+            out_channels=self.filters,
+            heads=tcn_heads,
             dropout=dropout
-        )
-        self.hed = HED(
-            in_channels=self.ds_num_features,
-            out_channels=2
         )
         # Nested UNet (+self.filters x self.ds_num_bands)
         self.nunet = TemporalNestedUNet2(
@@ -87,44 +79,32 @@ class CultioGraphNet(torch.nn.Module):
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
             hidden_dim=star_rnn_hidden_dim,
-            # Number of output classes (0=not cropland; 1=cropland)
-            num_classes=2,
-            # Number of output crop type classes
-            num_crop_classes=num_classes,
             n_layers=star_rnn_n_layers
         )
         # Boundary distance orientations (+1)
-        self.dist_layer_ori = GraphRegressionLayer(
+        self.dist_layer_ori = RegressionLayer(
             in_channels=base_in_channels,
             mid_channels=self.filters,
             out_channels=1
         )
         # Boundary distances (+1)
-        self.dist_layer = GraphRegressionLayer(
+        self.dist_layer = RegressionLayer(
             in_channels=base_in_channels+1,
             mid_channels=self.filters,
             out_channels=1
         )
         # Edges (+2)
-        self.edge_layer = GraphFinal(
+        self.edge_layer = CropFinal(
             in_channels=base_in_channels+num_distances,
             mid_channels=self.filters,
             out_channels=2
         )
         # Crops (+2)
-        self.crop_layer = GraphFinal(
+        self.crop_layer = CropFinal(
             in_channels=base_in_channels+num_distances+2,
             mid_channels=self.filters,
             out_channels=2
         )
-        # if num_classes > 2:
-        #     self.crop_type_layer = True
-            # # Crop types (+num_classes)
-            # self.crop_type_layer = GraphFinal(
-            #     in_channels=base_in_channels+num_distances+2+2,
-            #     mid_channels=self.filters,
-            #     out_channels=num_classes
-            # )
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -142,13 +122,6 @@ class CultioGraphNet(torch.nn.Module):
             data.x,
             data.edge_index,
             data.edge_attrs
-        )
-        # HED stream
-        hed_stream = self.hed(
-            data.x,
-            data.batch,
-            height,
-            width
         )
         # Nested UNet on each band time series
         nunet_stream = self.nunet(
@@ -177,7 +150,6 @@ class CultioGraphNet(torch.nn.Module):
         h = torch.cat(
             [
                 transformer_stream,
-                hed_stream,
                 nunet_stream,
                 star_stream_local_2
             ],
@@ -231,19 +203,6 @@ class CultioGraphNet(torch.nn.Module):
             height,
             width
         )
-
-        # Estimate crop-type
-        # logits_crop_type = None
-        # if self.crop_type_layer is not None:
-        #     h = torch.cat([h, logits_crop], dim=1)
-        #     logits_crop_type = self.crop_type_layer(
-        #         h,
-        #         data.edge_index,
-        #         data.edge_attrs,
-        #         data.batch,
-        #         height,
-        #         width
-        #     )
 
         return (
             logits_distances_ori,

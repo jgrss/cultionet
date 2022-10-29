@@ -124,8 +124,6 @@ class StarRNN(torch.nn.Module):
         self,
         input_dim: int = 3,
         hidden_dim: int = 64,
-        num_classes: int = 2,
-        num_crop_classes: int = 2,
         nstage: int = 3,
         kernel_size: int = 3,
         n_layers: int = 6,
@@ -144,10 +142,6 @@ class StarRNN(torch.nn.Module):
             kernel_sizes=kernel_size,
             n_layers=n_layers
         )
-
-        self.final_local_1 = torch.nn.Conv2d(hidden_dim, num_classes, 3, padding=1)
-        self.final_local_2 = torch.nn.Conv2d(hidden_dim, num_classes, 3, padding=1)
-        self.final = torch.nn.Conv2d(hidden_dim, num_crop_classes, 3, padding=1)
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -175,21 +169,19 @@ class StarRNN(torch.nn.Module):
             hidden_s = self.rnn(x[:, :, iter_, :, :], hidden_s)
 
         if self.n_layers == 3:
-            local_1 = hidden_s[0]
+            # local_1 = hidden_s[0]
             local_2 = hidden_s[1]
         elif self.nstage == 3:
-            local_1 = hidden_s[1]
+            # local_1 = hidden_s[1]
             local_2 = hidden_s[3]
         elif self.nstage == 2:
-            local_1 = hidden_s[1]
+            # local_1 = hidden_s[1]
             local_2 = hidden_s[2]
         elif self.nstage == 1:
-            local_1 = hidden_s[-1]
+            # local_1 = hidden_s[-1]
             local_2 = hidden_s[-1]
 
-        local_1 = self.final_local_1(local_1)
-        local_2 = self.final_local_2(local_2) + local_1
-        last = self.final(hidden_s[-1])
+        last = hidden_s[-1]
 
         # The output is (B x C x H x W)
         return local_2, last

@@ -188,7 +188,7 @@ create_predict:
     long: resampling
     help: The resampling method
     kwargs:
-      default: nearest
+      default: bilinear
   window_size:
     short: w
     long: window-size

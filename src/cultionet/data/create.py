@@ -14,7 +14,6 @@ from geowombat.core import polygon_to_array
 from geowombat.core.windows import get_window_offsets
 import numpy as np
 from scipy.ndimage.measurements import label as nd_label, sum as nd_sum
-from scipy import stats as sci_stats
 import cv2
 from rasterio.windows import Window
 import xarray as xr
@@ -23,6 +22,7 @@ from skimage.measure import regionprops
 from tqdm.auto import tqdm
 import torch
 from torch_geometric.data import Data
+from shapely.geometry import LineString
 from joblib import delayed, parallel_backend
 
 
@@ -277,6 +277,20 @@ def normalize_boundary_distances(
     return bdist, ori
 
 
+def edge_gradient(array: np.ndarray) -> np.ndarray:
+    """Calculates the morphological gradient of crop fields
+    """
+    se = np.array(
+        [
+            [1, 1],
+            [1, 1]
+        ], dtype='uint8'
+    )
+    array = np.uint8(cv2.morphologyEx(np.uint8(array), cv2.MORPH_GRADIENT, se) > 0)
+
+    return array
+
+
 def create_image_vars(
     image: T.Union[str, Path, list],
     max_crop_class: int,
@@ -324,13 +338,18 @@ def create_image_vars(
                     replace_dict[-999] = 1
                     grid_edges[crop_column] = grid_edges[crop_column].replace(replace_dict)
                 # Get the field polygons
+                labels_array_copy = polygon_to_array(
+                    grid_edges.assign(**{crop_column: range(1, len(grid_edges.index)+1)}),
+                    col=crop_column,
+                    data=src_ts,
+                    all_touched=False
+                ).squeeze().gw.compute(num_workers=num_workers)
                 labels_array = polygon_to_array(
                     grid_edges,
                     col=crop_column,
                     data=src_ts,
                     all_touched=False
                 ).squeeze().gw.compute(num_workers=num_workers)
-                labels_array_copy = labels_array.copy()
                 # Get the field edges
                 edges = polygon_to_array(
                     (
@@ -339,7 +358,7 @@ def create_image_vars(
                         .to_frame(name='geometry')
                         .reset_index()
                         .rename(columns={'index': crop_column})
-                        .assign(**{crop_column: 1})
+                        .assign(**{crop_column: range(1, len(grid_edges.index)+1)})
                     ),
                     col=crop_column,
                     data=src_ts,
@@ -347,13 +366,15 @@ def create_image_vars(
                 ).squeeze().gw.compute(num_workers=num_workers)
                 edges[edges > 0] = 1
                 assert edges.max() == 1, 'Edges were not created.'
+                image_grad = edge_gradient(labels_array_copy)
+                image_grad_count = get_crop_count(image_grad, edge_class)
+                edges = np.where(image_grad_count > 0, edges, 0)
                 # def save_labels(out_fig: Path):
                 #     import matplotlib.pyplot as plt
                 #     fig, axes = plt.subplots(1, 3, figsize=(6, 5), sharey=True, sharex=True, dpi=300)
                 #     axes = axes.flatten()
                 #     axes[0].imshow(labels_array, interpolation='nearest')
-                #     axes[1].imshow(edge_array, interpolation='nearest')
-                #     axes[2].imshow(test, interpolation='nearest')
+                #     axes[1].imshow(edges, interpolation='nearest')
                 #     for ax in axes:
                 #         ax.axis('off')
 
@@ -365,7 +386,6 @@ def create_image_vars(
                 # save_labels(
                 #     out_fig=fig_dir / f'{uuid.uuid4().hex}.png'
                 # )
-                # import ipdb; ipdb.set_trace()
                 # Recode
                 if not keep_crop_classes:
                     labels_array = np.where(
@@ -383,8 +403,8 @@ def create_image_vars(
                     grid_edges.geom_type.values[0],
                     src_ts.gw.celly
                 )
+                # import matplotlib.pyplot as plt
                 # def save_labels(out_fig: Path):
-                #     import matplotlib.pyplot as plt
                 #     fig, axes = plt.subplots(2, 2, figsize=(6, 5), sharey=True, sharex=True, dpi=300)
                 #     axes = axes.flatten()
                 #     for ax, im, title in zip(
@@ -401,8 +421,9 @@ def create_image_vars(
                 # import uuid
                 # fig_dir = Path('figures')
                 # fig_dir.mkdir(exist_ok=True, parents=True)
+                # hash_id = uuid.uuid4().hex
                 # save_labels(
-                #     out_fig=fig_dir / f'{uuid.uuid4().hex}.png'
+                #     out_fig=fig_dir / f'{hash_id}.png'
                 # )
             else:
                 labels_array = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='uint8')
