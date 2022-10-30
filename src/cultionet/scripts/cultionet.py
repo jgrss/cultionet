@@ -1004,6 +1004,8 @@ def train_model(args):
         try:
             ds.check_dims(
                 args.expected_dim,
+                args.expected_height,
+                args.expected_width,
                 args.delete_mismatches,
                 args.dim_color
             )

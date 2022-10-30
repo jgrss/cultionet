@@ -78,17 +78,16 @@ def zscores(
 
 
 def _check_shape(
-    d1: int, d2: int, index: int, uid: str
+    d1: int,
+    h1: int,
+    w1: int,
+    d2: int,
+    h2: int,
+    w2: int,
+    index: int,
+    uid: str
 ) -> T.Tuple[bool, int, str]:
-    if d1 != d2:
-        return False, index, uid
-    return True, index, uid
-
-
-def _check_shape(
-    d1: int, d2: int, index: int, uid: str
-) -> T.Tuple[bool, int, str]:
-    if d1 != d2:
+    if (d1 != d2) or (h1 != h2) or (w1 != w2):
         return False, index, uid
     return True, index, uid
 
@@ -246,12 +245,19 @@ class EdgeDataset(Dataset):
     def check_dims(
         self,
         expected_dim: int,
+        expected_height: int,
+        expected_width: int,
         delete_mismatches: bool = False,
         tqdm_color: str = 'ffffff'
     ):
         """Checks if all tensors in the dataset match in shape dimensions
         """
-        check_partial = partial(_check_shape, expected_dim)
+        check_partial = partial(
+            _check_shape,
+            expected_dim,
+            expected_height,
+            expected_width
+        )
 
         with parallel_backend(
             backend='loky',
@@ -267,7 +273,11 @@ class EdgeDataset(Dataset):
             ) as pool:
                 results = pool(
                     delayed(check_partial)(
-                        self[i].x.shape[1], i, self[i].train_id
+                        self[i].x.shape[1],
+                        self[i].height,
+                        self[i].width,
+                        i,
+                        self[i].train_id
                     ) for i in range(0, len(self))
                 )
         matches, indices, ids = list(map(list, zip(*results)))

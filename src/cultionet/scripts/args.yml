@@ -386,9 +386,23 @@ train:
   expected_dim:
     short: ''
     long: expected-dim
-    help: The expected X dimension of the training data
+    help: The expected X dimension (time x bands) of the training data
     kwargs:
       default: !!null
+      type: '&int'
+  expected_height:
+    short: ''
+    long: expected-height
+    help: The expected height (rows) of the training data
+    kwargs:
+      default: 100
+      type: '&int'
+  expected_width:
+    short: ''
+    long: expected-width
+    help: The expected width (columns) of the training data
+    kwargs:
+      default: 100
       type: '&int'
   delete_mismatches:
     short: ''
