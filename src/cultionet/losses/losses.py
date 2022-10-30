@@ -183,6 +183,32 @@ class QuantileLoss(object):
 
 
 @attr.s
+class AngularLoss(object):
+    """Angular loss
+    """
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Performs a single forward pass
+
+        Args:
+            inputs: Predictions from model.
+            targets: Ground truth values.
+
+        Returns:
+            Loss (float)
+        """
+        loss = torch.sqrt(
+            2.0 - (2.0 * torch.cos(
+                inputs.contiguous().view(-1) - targets.contiguous().view(-1)
+            ))
+        )
+
+        return loss.mean()
+
+
+@attr.s
 class HuberLoss(object):
     """Huber loss
     """

@@ -3,8 +3,7 @@ from pathlib import Path
 
 from ..losses import (
     HuberLoss,
-    TanimotoDistanceLoss,
-    CrossEntropyLoss
+    TanimotoDistanceLoss
 )
 from .cultio import CultioGraphNet
 from .maskcrnn import BFasterRCNN
@@ -380,17 +379,11 @@ class CultioLitModel(pl.LightningModule):
             edge: Probability of an edge [0,1].
             crop: Probability of crop [0,1].
         """
-        distance_ori, distance, edge, crop, crop_type = self.cultionet_model(batch)
-        if crop_type is not None:
-            crop_type = self.crop_type_model(
-                crop,
-                crop_type,
-                batch.batch,
-                batch.height,
-                batch.width
-            )
+        distance, edge, crop = self.cultionet_model(batch)
+        distance_ori = torch.zeros_like(edge[:, 0])
+        # distance = torch.zeros_like(edge[:, 0])
 
-        return distance_ori, distance, edge, crop, crop_type
+        return distance_ori, distance, edge, crop, None
 
     @staticmethod
     def get_cuda_memory():
@@ -419,7 +412,7 @@ class CultioLitModel(pl.LightningModule):
         self,
         edge: torch.Tensor,
         crop: torch.Tensor,
-        crop_type: T.Union[torch.Tensor, None]
+        crop_type: T.Union[torch.Tensor, None] = None
     ) -> T.Tuple[
         torch.Tensor, torch.Tensor, T.Union[torch.Tensor, None]
     ]:
@@ -427,7 +420,7 @@ class CultioLitModel(pl.LightningModule):
         edge = F.softmax(edge, dim=1, dtype=edge.dtype)
         crop = F.softmax(crop, dim=1, dtype=crop.dtype)
         if crop_type is not None:
-            crop_type = F.softmax(crop_type, dim=1, dtype=crop.dtype)
+            crop_type = F.softmax(crop_type, dim=1, dtype=crop_type.dtype)
 
         return edge, crop, crop_type
 
@@ -477,17 +470,12 @@ class CultioLitModel(pl.LightningModule):
         true_crop = torch.where(
             (batch.y > 0) & (batch.y < self.edge_class), 1, 0
         ).long()
-        true_crop_type = torch.where(batch.y == self.edge_class, 0, batch.y).long()
 
-        ori_loss = self.dist_loss(distance_ori, batch.ori)
         dist_loss = self.dist_loss(distance, batch.bdist)
         edge_loss = self.edge_loss(edge, true_edge)
         crop_loss = self.crop_loss(crop, true_crop)
-        if crop_type is not None:
-            crop_type_loss = self.crop_type_loss(crop_type, true_crop_type)
-            loss = ori_loss + dist_loss + edge_loss + crop_loss + crop_type_loss
-        else:
-            loss = ori_loss + dist_loss + edge_loss + crop_loss
+
+        loss = dist_loss + edge_loss + crop_loss
 
         return loss
 
@@ -533,15 +521,6 @@ class CultioLitModel(pl.LightningModule):
         # Take the argmax of the class probabilities
         edge_ypred = edge.argmax(dim=1).long()
         crop_ypred = crop.argmax(dim=1).long()
-        crop_type_score = 0.0
-        if crop_type is not None:
-            crop_type_ypred = crop_type.argmax(dim=1).long()
-            crop_type_ytrue = torch.where(
-                batch.y == self.edge_class, 0, batch.y
-            ).long()
-            crop_type_score = self.crop_type_f1(
-                crop_type_ypred, crop_type_ytrue
-            )
         # Get the true edge and crop labels
         edge_ytrue = batch.y.eq(self.edge_class).long()
         crop_ytrue = torch.where(
@@ -563,7 +542,6 @@ class CultioLitModel(pl.LightningModule):
             'dist_mse': dist_mse,
             'edge_f1': edge_score,
             'crop_f1': crop_score,
-            'crop_type_f1': crop_type_score,
             'edge_mcc': edge_mcc,
             'crop_mcc': crop_mcc,
             'edge_dice': edge_dice,
@@ -582,12 +560,9 @@ class CultioLitModel(pl.LightningModule):
             'vef1': eval_metrics['edge_f1'],
             'vcf1': eval_metrics['crop_f1'],
             'vemcc': eval_metrics['edge_mcc'],
-            'vcmcc': eval_metrics['crop_mcc']
+            'vcmcc': eval_metrics['crop_mcc'],
+            'vmae': eval_metrics['dist_mae']
         }
-        if self.num_classes > 2:
-            metrics['vctf1'] = eval_metrics['crop_type_f1']
-        else:
-            metrics['vmae'] = eval_metrics['dist_mae']
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         return metrics
@@ -603,7 +578,6 @@ class CultioLitModel(pl.LightningModule):
             'tmse': eval_metrics['dist_mse'],
             'tef1': eval_metrics['edge_f1'],
             'tcf1': eval_metrics['crop_f1'],
-            'tctf1': eval_metrics['crop_type_f1'],
             'temcc': eval_metrics['edge_mcc'],
             'tcmcc': eval_metrics['crop_mcc'],
             'tedice': eval_metrics['edge_dice'],
@@ -618,13 +592,13 @@ class CultioLitModel(pl.LightningModule):
         self.dist_mse = torchmetrics.MeanSquaredError()
         self.edge_f1 = torchmetrics.F1Score(num_classes=2, average='micro')
         self.crop_f1 = torchmetrics.F1Score(num_classes=2, average='micro')
-        self.crop_type_f1 = torchmetrics.F1Score(
-            num_classes=self.num_classes, average='weighted', ignore_index=0
-        )
+        # self.crop_type_f1 = torchmetrics.F1Score(
+        #     num_classes=self.num_classes, average='weighted', ignore_index=0
+        # )
         self.edge_mcc = torchmetrics.MatthewsCorrCoef(num_classes=2)
-        self.crop_mcc = torchmetrics.MatthewsCorrCoef(num_classes=self.num_classes)
+        self.crop_mcc = torchmetrics.MatthewsCorrCoef(num_classes=2)
         self.edge_dice = torchmetrics.Dice(num_classes=2, average='micro')
-        self.crop_dice = torchmetrics.Dice(num_classes=self.num_classes, average='weighted')
+        self.crop_dice = torchmetrics.Dice(num_classes=2, average='micro')
 
     def configure_loss(self):
         self.volume = torch.ones(
@@ -642,16 +616,14 @@ class CultioLitModel(pl.LightningModule):
             inputs_are_logits=True,
             apply_transform=True
         )
-        self.crop_type_loss = CrossEntropyLoss(
-            class_weights=self.class_weights,
-            ignore_index=0,
-            device=self.device.type
-        )
+        # self.crop_type_loss = CrossEntropyLoss(
+        #     class_weights=self.class_weights,
+        #     ignore_index=0,
+        #     device=self.device.type
+        # )
 
     def configure_optimizers(self):
         params_list = list(self.cultionet_model.parameters())
-        if self.crop_type_model is not None:
-            params_list += list(self.crop_type_model.parameters())
         optimizer = torch.optim.AdamW(
             params_list,
             lr=self.learning_rate,
