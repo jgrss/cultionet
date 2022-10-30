@@ -113,7 +113,9 @@ class NestedUNet2(torch.nn.Module):
         out_channels: int,
         out_side_channels: int,
         init_filter: int = 64,
-        linear_fc: bool = False
+        boundary_layer: bool = True,
+        linear_fc: bool = False,
+        dropout: float = 0.1
     ):
         super(NestedUNet2, self).__init__()
 
@@ -128,7 +130,7 @@ class NestedUNet2(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
-        if not linear_fc:
+        if boundary_layer:
             self.bound_0 = BoundaryStream(
                 in_channels=nb_filter[3]+nb_filter[4],
                 out_channels=out_side_channels
@@ -178,7 +180,7 @@ class NestedUNet2(torch.nn.Module):
                 ),
                 torch.nn.BatchNorm2d(nb_filter[0]+out_side_channels),
                 torch.nn.ReLU(inplace=False),
-                torch.nn.Dropout2d(0.1),
+                torch.nn.Dropout2d(dropout),
                 Permute((0, 2, 3, 1)),
                 torch.nn.Linear(
                     nb_filter[0]+out_side_channels, out_channels
@@ -192,6 +194,8 @@ class NestedUNet2(torch.nn.Module):
                 ),
                 torch.nn.ELU(alpha=0.1, inplace=False)
             )
+
+        if boundary_layer:
             self.side_final = torch.nn.Sequential(
                 torch.nn.Conv2d(
                     out_side_channels, out_side_channels, kernel_size=3, padding=1
@@ -263,7 +267,9 @@ class TemporalNestedUNet2(torch.nn.Module):
         out_channels: int,
         out_side_channels: int,
         init_filter: int,
-        linear_fc: bool = False
+        boundary_layer: bool = True,
+        linear_fc: bool = False,
+        dropout: float = 0.1
     ):
         super(TemporalNestedUNet2, self).__init__()
 
@@ -272,7 +278,9 @@ class TemporalNestedUNet2(torch.nn.Module):
             out_channels=out_channels,
             out_side_channels=out_side_channels,
             init_filter=init_filter,
-            linear_fc=linear_fc
+            boundary_layer=boundary_layer,
+            linear_fc=linear_fc,
+            dropout=dropout
         )
 
     def forward(

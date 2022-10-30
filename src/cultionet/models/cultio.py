@@ -53,21 +53,18 @@ class CultioGraphNet(torch.nn.Module):
             in_channels=self.ds_num_features+2,
             out_channels=2,
             out_side_channels=2,
-            init_filter=self.filters
+            init_filter=self.filters,
+            boundary_layer=True
         )
         self.dist_model = TemporalNestedUNet2(
             in_channels=self.ds_num_features+2+2,
             out_channels=1,
             out_side_channels=2,
             init_filter=self.filters,
-            linear_fc=True
+            boundary_layer=False,
+            linear_fc=True,
+            dropout=dropout
         )
-        # self.star_refine = Refine(
-        #     in_channels=2+2+2,
-        #     mid_channels=128,
-        #     out_channels=2,
-        #     dropout=dropout
-        # )
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -96,7 +93,7 @@ class CultioGraphNet(torch.nn.Module):
         # logits_star_local_2 = self.cg(logits_star_local_2)
         logits_star_last = self.cg(logits_star_last)
 
-        # # CONCAT
+        # CONCAT
         h = torch.cat([data.x, logits_star_last], dim=1)
 
         # (2) Nested UNet for crop and edges
@@ -105,12 +102,13 @@ class CultioGraphNet(torch.nn.Module):
                 h, batch_size, height, width
             )
         )
-        logits_edges = self.cg(nunet_stream['side'])
         logits_crop = self.cg(nunet_stream['net'])
+        logits_edges = self.cg(nunet_stream['side'])
 
         # CONCAT
         h = torch.cat([h, logits_crop], dim=1)
 
+        # (3) Distance stream
         dist_stream = self.dist_model(
             self.gc(
                 h, batch_size, height, width

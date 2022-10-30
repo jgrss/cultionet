@@ -174,7 +174,7 @@ create:
     kwargs:
       default: 0
       type: '&int'
-      
+
 create_predict:
   predict_year:
     short: 'y'
@@ -260,6 +260,13 @@ create_predict:
     help: The image file date format
     kwargs:
       default: '%Y%j'
+  skip_index:
+    short: ''
+    long: skip-index
+    help: A skip index to slice time series lists by
+    kwargs:
+      default: 0
+      type: '&int'
 
 train_predict:
   filters:

@@ -144,7 +144,6 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
 
-        # self.final_hidden = torch.nn.Conv2d(hidden_dim, num_classes_last, 3, padding=1)
         self.final = torch.nn.Conv2d(hidden_dim, num_classes_last, 3, padding=1)
         self.relu = torch.nn.ReLU(inplace=False)
 
