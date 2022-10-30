@@ -375,7 +375,9 @@ def create_image_vars(
                         all_touched=False
                     ).squeeze().gw.compute(num_workers=num_workers)
                     edges[edges > 0] = 1
-                    assert edges.max() == 1, 'Edges were not created.'
+                    assert edges.max() <= 1, 'Edges were not created.'
+                    if edges.max() == 0:
+                        return None, None, None, None, None, None
                     image_grad = edge_gradient(labels_array_copy)
                     image_grad_count = get_crop_count(image_grad, edge_class)
                     edges = np.where(image_grad_count > 0, edges, 0)
@@ -725,7 +727,10 @@ def create_dataset(
                     keep_crop_classes=keep_crop_classes,
                     replace_dict=replace_dict
                 )
-
+                if xvars is None:
+                    pbar.update(1)
+                    pbar.set_description(f'No valid fields for {group_id}')
+                    continue
                 if (xvars.shape[1] < 5) or (xvars.shape[2] < 5):
                     pbar.update(1)
                     pbar.set_description(f'{group_id} is too small')
