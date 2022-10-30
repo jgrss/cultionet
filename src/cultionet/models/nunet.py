@@ -88,6 +88,18 @@ class BoundaryStream(torch.nn.Module):
             return x
 
 
+class Permute(torch.nn.Module):
+    def __init__(self, axis_order: T.Sequence[int]):
+        super(Permute, self).__init__()
+        self.axis_order = axis_order
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.permute(*self.axis_order)
+
+
 class NestedUNet2(torch.nn.Module):
     """UNet++ with residual convolutional dilation
 
@@ -104,7 +116,6 @@ class NestedUNet2(torch.nn.Module):
         linear_fc: bool = False
     ):
         super(NestedUNet2, self).__init__()
-        self.linear_fc = linear_fc
 
         init_filter = int(init_filter)
         nb_filter = [
@@ -154,18 +165,38 @@ class NestedUNet2(torch.nn.Module):
 
         self.conv0_4 = DoubleConv(nb_filter[0]*4+nb_filter[1], nb_filter[0], nb_filter[0])
 
-        self.net_final = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                nb_filter[0]+out_side_channels, out_channels, kernel_size=3, padding=1
-            ),
-            torch.nn.ELU(alpha=0.1, inplace=False)
-        )
-        self.side_final = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                out_side_channels, out_side_channels, kernel_size=3, padding=1
-            ),
-            torch.nn.ELU(alpha=0.1, inplace=False)
-        )
+        if linear_fc:
+            self.net_final = torch.nn.Sequential(
+                torch.nn.BatchNorm2d(nb_filter[0]+out_side_channels),
+                torch.nn.ReLU(inplace=False),
+                torch.nn.Conv2d(
+                    nb_filter[0]+out_side_channels,
+                    nb_filter[0]+out_side_channels,
+                    kernel_size=1,
+                    padding=0
+                ),
+                torch.nn.BatchNorm2d(nb_filter[0]+out_side_channels),
+                torch.nn.ReLU(inplace=False),
+                torch.nn.Dropout2d(0.1),
+                Permute((0, 2, 3, 1)),
+                torch.nn.Linear(
+                    nb_filter[0]+out_side_channels, out_channels
+                ),
+                Permute((0, 3, 1, 2))
+            )
+        else:
+            self.net_final = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    nb_filter[0]+out_side_channels, out_channels, kernel_size=3, padding=1
+                ),
+                torch.nn.ELU(alpha=0.1, inplace=False)
+            )
+            self.side_final = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    out_side_channels, out_side_channels, kernel_size=3, padding=1
+                ),
+                torch.nn.ELU(alpha=0.1, inplace=False)
+            )
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)

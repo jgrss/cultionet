@@ -60,17 +60,11 @@ class CultioGraphNet(torch.nn.Module):
             init_filter=self.filters
         )
         self.dist_model = TemporalNestedUNet2(
-            in_channels=2,
+            in_channels=self.ds_num_features+2,
             out_channels=1,
             out_side_channels=2,
-            init_filter=self.filters
-        )
-        self.dist_linear = torch.nn.Sequential(
-            torch.nn.BatchNorm2d(1),
-            torch.nn.Dropout2d(dropout),
-            torch.nn.ReLU(inplace=False),
-            self.cg,
-            torch.nn.Linear(1, 1)
+            init_filter=self.filters,
+            linear_fc=True
         )
         # Star RNN layer
         # self.star_rnn = StarRNN(
@@ -98,13 +92,6 @@ class CultioGraphNet(torch.nn.Module):
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
-        # logits_distance = self.dist_model(
-        #     self.gc(
-        #         data.x, batch_size, height, width
-        #     ),
-        #     data.edge_index,
-        #     data.edge_attrs
-        # )
         # Nested UNet on each band time series
         nunet_stream = self.nunet_model(
             self.gc(
@@ -115,13 +102,14 @@ class CultioGraphNet(torch.nn.Module):
         logits_crop = self.cg(nunet_stream['net'])
         dist_stream = self.dist_model(
             self.gc(
-                logits_crop, batch_size, height, width
+                torch.cat([data.x, logits_crop], dim=1),
+                batch_size, height, width
             ),
             side=self.gc(
                 logits_edges, batch_size, height, width
             )
         )
-        logits_distance = self.dist_linear(dist_stream['net'])
+        logits_distance = self.cg(dist_stream['net'])
         # # RNN ConvStar
         # star_stream = self.gc(
         #     data.x, batch_size, height, width
