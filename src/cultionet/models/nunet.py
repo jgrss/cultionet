@@ -7,9 +7,11 @@ Copyright (c) 2018 Takato Kimura
 import typing as T
 
 from . import model_utils
-from .base_layers import DoubleConv
+from .base_layers import DoubleConv, Permute
 
 import torch
+import torch.nn.functional as F
+from torch_geometric import nn
 
 
 class VGGBlock(torch.nn.Module):
@@ -88,16 +90,69 @@ class BoundaryStream(torch.nn.Module):
             return x
 
 
-class Permute(torch.nn.Module):
-    def __init__(self, axis_order: T.Sequence[int]):
-        super(Permute, self).__init__()
-        self.axis_order = axis_order
+class AttentionGate(torch.nn.Module):
+    def __init__(
+        self,
+        high_channels: int,
+        low_channels: int
+    ):
+        super(AttentionGate, self).__init__()
+
+        conv_x = torch.nn.Conv2d(
+            high_channels,
+            high_channels,
+            kernel_size=3,
+            padding=1,
+            stride=2
+        )
+        conv_g = torch.nn.Conv2d(
+            low_channels,
+            high_channels,
+            kernel_size=1,
+            padding=0,
+        )
+        conv1d = torch.nn.Conv2d(
+            high_channels,
+            1,
+            kernel_size=1,
+            padding=0
+        )
+        self.up = model_utils.UpSample()
+        self.seq = nn.Sequential(
+            'x, g',
+            [
+                (conv_x, 'x -> x'),
+                (conv_g, 'g -> g'),
+                (self.add, 'x, g -> x'),
+                (torch.nn.ReLU(inplace=False), 'x -> x'),
+                (conv1d, 'x -> x'),
+                (torch.nn.Sigmoid(), 'x -> x')
+            ]
+        )
+        self.final = torch.nn.Sequential(
+            torch.nn.Conv2d(high_channels, high_channels, 1, padding=0),
+            torch.nn.BatchNorm2d(high_channels)
+        )
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x.permute(*self.axis_order)
+    def add(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+        if x.shape != g.shape:
+            x = F.interpolate(x, size=g.shape[-2:], mode='bilinear', align_corners=True)
+
+        return x + g
+
+    def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            g: Higher dimension
+            x: Lower dimension
+        """
+        h = self.seq(x, g)
+        h = self.up(h, size=x.shape[-2:], mode='bilinear')
+
+        return self.final(x * h)
 
 
 class NestedUNet2(torch.nn.Module):
@@ -131,22 +186,40 @@ class NestedUNet2(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
+        self.attention_0 = AttentionGate(
+            high_channels=nb_filter[3],
+            low_channels=nb_filter[4]
+        )
+        self.attention_1 = AttentionGate(
+            high_channels=nb_filter[2],
+            low_channels=nb_filter[3]
+        )
+        self.attention_2 = AttentionGate(
+            high_channels=nb_filter[1],
+            low_channels=nb_filter[2]
+        )
+        self.attention_3 = AttentionGate(
+            high_channels=nb_filter[0],
+            low_channels=nb_filter[1]
+        )
+
         if boundary_layer:
-            self.bound_0 = BoundaryStream(
-                in_channels=nb_filter[3]+nb_filter[4],
-                out_channels=out_side_channels
-            )
-            self.bound_1 = BoundaryStream(
-                in_channels=out_side_channels+nb_filter[2],
-                out_channels=out_side_channels
-            )
-            self.bound_2 = BoundaryStream(
-                in_channels=out_side_channels+nb_filter[1],
-                out_channels=out_side_channels
-            )
-            self.bound_3 = BoundaryStream(
-                in_channels=out_side_channels+nb_filter[0],
-                out_channels=out_side_channels
+            self.bound0_1 = DoubleConv(nb_filter[0]+nb_filter[0],  nb_filter[0],  nb_filter[0])
+            self.bound0_2 = DoubleConv(nb_filter[0]+nb_filter[0],  nb_filter[0],  nb_filter[0])
+            self.bound0_3 = DoubleConv(nb_filter[0]+nb_filter[0],  nb_filter[0],  nb_filter[0])
+            self.bound0_4 = DoubleConv(nb_filter[0]+nb_filter[0],  nb_filter[0],  nb_filter[0])
+
+            self.bound4_0 = DoubleConv(nb_filter[4]+nb_filter[3],  nb_filter[3],  nb_filter[3])
+            self.bound3_0 = DoubleConv(nb_filter[3]+nb_filter[2],  nb_filter[2],  nb_filter[2])
+            self.bound2_0 = DoubleConv(nb_filter[2]+nb_filter[1],  nb_filter[1],  nb_filter[1])
+            self.bound1_0 = DoubleConv(nb_filter[1]+nb_filter[0],  nb_filter[0],  nb_filter[0])
+
+            self.bound_final = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    nb_filter[0]+nb_filter[0], out_side_channels, kernel_size=3, padding=1
+                ),
+                torch.nn.BatchNorm2d(out_side_channels),
+                torch.nn.ELU(alpha=0.1, inplace=False)
             )
 
         self.conv0_0 = VGGBlock(in_channels, nb_filter[0], nb_filter[0])
@@ -197,23 +270,14 @@ class NestedUNet2(torch.nn.Module):
                 torch.nn.ELU(alpha=0.1, inplace=False),
             )
 
-        if boundary_layer:
-            self.side_final = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    out_side_channels, out_side_channels, kernel_size=3, padding=1
-                ),
-                torch.nn.BatchNorm2d(out_side_channels),
-                torch.nn.ELU(alpha=0.1, inplace=False)
-            )
-
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
     def forward(
         self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
-        net = None
-        side = None
+        mask = None
+        boundary = None
 
         x0_0 = self.conv0_0(x)
         x1_0 = self.conv1_0(x0_0)
@@ -222,6 +286,7 @@ class NestedUNet2(torch.nn.Module):
         x1_0 = self.conv1_0(x0_0)
         # 1/1
         x0_1 = self.conv0_1(torch.cat([x0_0, self.up(x1_0, size=x0_0.shape[-2:])], dim=1))
+        b0_1 = self.bound0_1(torch.cat([x0_0, x0_1], dim=1))
 
         # 1/4
         x2_0 = self.conv2_0(x1_0)
@@ -229,6 +294,7 @@ class NestedUNet2(torch.nn.Module):
         x1_1 = self.conv1_1(torch.cat([x1_0, self.up(x2_0, size=x1_0.shape[-2:])], dim=1))
         # 1/1
         x0_2 = self.conv0_2(torch.cat([x0_0, x0_1, self.up(x1_1, size=x0_1.shape[-2:])], dim=1))
+        b0_2 = self.bound0_2(torch.cat([b0_1, x0_2], dim=1))
 
         # 1/8
         x3_0 = self.conv3_0(x2_0)
@@ -238,31 +304,39 @@ class NestedUNet2(torch.nn.Module):
         x1_2 = self.conv1_2(torch.cat([x1_0, x1_1, self.up(x2_1, size=x1_1.shape[-2:])], dim=1))
         # 1/1
         x0_3 = self.conv0_3(torch.cat([x0_0, x0_1, x0_2, self.up(x1_2, size=x0_2.shape[-2:])], dim=1))
+        b0_3 = self.bound0_3(torch.cat([b0_2, x0_3], dim=1))
 
         # 1/16
         x4_0 = self.conv4_0(x3_0)
+        # b0 = self.bound_0(x4_0)
+        x3_0 = self.attention_0(x3_0, x4_0)
         # 1/8
         x3_1 = self.conv3_1(torch.cat([x3_0, self.up(x4_0, size=x3_0.shape[-2:])], dim=1))
+        b4_0 = self.bound4_0(torch.cat([x3_1, self.up(x4_0, size=x3_1.shape[-2:])], dim=1))
+        x2_0 = self.attention_1(x2_0, x3_1)
         # 1/4
         x2_2 = self.conv2_2(torch.cat([x2_0, x2_1, self.up(x3_1, size=x2_1.shape[-2:])], dim=1))
+        b3_0 = self.bound3_0(torch.cat([x2_2, self.up(b4_0, size=x2_2.shape[-2:])], dim=1))
+        x1_0 = self.attention_2(x1_0, x2_2)
         # 1/2
         x1_3 = self.conv1_3(torch.cat([x1_0, x1_1, x1_2, self.up(x2_2, size=x1_2.shape[-2:])], dim=1))
+        b2_0 = self.bound2_0(torch.cat([x1_3, self.up(b3_0, size=x1_3.shape[-2:])], dim=1))
+        x0_0 = self.attention_3(x0_0, x1_3)
         # 1/1
         x0_4 = self.conv0_4(torch.cat([x0_0, x0_1, x0_2, x0_3, self.up(x1_3, size=x0_3.shape[-2:])], dim=1))
+        b0_4 = self.bound0_4(torch.cat([b0_3, x0_4], dim=1))
+        b1_0 = self.bound1_0(torch.cat([x0_4, self.up(b2_0, size=x0_4.shape[-2:])], dim=1))
+
         if self.linear_fc:
-            net = self.net_final(x0_4)
+            mask = self.net_final(x0_4)
         else:
-            # Side stream
-            b_0 = self.bound_0(x4_0, x3_0)
-            b_1 = self.bound_1(b_0, x2_0)
-            b_2 = self.bound_2(b_1, x1_0)
-            side = self.bound_3(b_2, x0_0)
-            side = self.side_final(side)
-            net = self.net_final(torch.cat([x0_4, side], dim=1))
+            # Boundary stream
+            boundary = self.bound_final(torch.cat([b0_4, b1_0], dim=1))
+            mask = self.net_final(torch.cat([x0_4, boundary], dim=1))
 
         return {
-            'net': net,
-            'side': side
+            'mask': mask,
+            'boundary': boundary
         }
 
 

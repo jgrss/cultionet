@@ -8,7 +8,6 @@ from ..losses import (
 from .cultio import CultioGraphNet
 from .maskcrnn import BFasterRCNN
 from . import model_utils
-from .convstar import CropType
 
 import torch
 import torch.nn.functional as F
@@ -356,11 +355,11 @@ class CultioLitModel(pl.LightningModule):
             num_classes=self.num_classes
         )
         self.crop_type_model = None
-        if self.num_classes > 2:
-            self.crop_type_model = CropType(
-                in_channels=self.num_classes,
-                out_channels=self.num_classes
-            )
+        # if self.num_classes > 2:
+        #     self.crop_type_model = CropType(
+        #         in_channels=self.num_classes,
+        #         out_channels=self.num_classes
+        #     )
         self.configure_loss()
         self.configure_scorer()
 
@@ -379,10 +378,10 @@ class CultioLitModel(pl.LightningModule):
             edge: Probability of an edge [0,1].
             crop: Probability of crop [0,1].
         """
-        distance, edge, crop = self.cultionet_model(batch)
+        distance, edge, crop, star = self.cultionet_model(batch)
         distance_ori = torch.zeros_like(edge[:, 0])
 
-        return distance_ori, distance, edge, crop
+        return distance_ori, distance, edge, crop, star
 
     @staticmethod
     def get_cuda_memory():
@@ -400,14 +399,14 @@ class CultioLitModel(pl.LightningModule):
     ]:
         """A prediction step for Lightning
         """
-        distance_ori, distance, edge, crop = self.forward(
+        distance_ori, distance, edge, crop, star = self.forward(
             batch, batch_idx
         )
         edge, crop = self.predict_probas(
             edge, crop
         )
 
-        return distance_ori, distance, edge, crop
+        return distance_ori, distance, edge, crop, star
 
     def predict_probas(
         self,
@@ -438,7 +437,8 @@ class CultioLitModel(pl.LightningModule):
         distance_ori: torch.Tensor,
         distance: torch.Tensor,
         edge: torch.Tensor,
-        crop: torch.Tensor
+        crop: torch.Tensor,
+        star: torch.Tensor
     ):
         """Calculates the loss for each layer
 
@@ -471,36 +471,37 @@ class CultioLitModel(pl.LightningModule):
         dist_loss = self.dist_loss(distance, batch.bdist)
         edge_loss = self.edge_loss(edge, true_edge)
         crop_loss = self.crop_loss(crop, true_crop)
-        # crop_star_hidden_loss = self.crop_loss(crop_star_hidden, true_crop)
-        # crop_star_loss = self.crop_loss(crop_star, true_crop)
+        star_loss = self.crop_loss(star, true_crop)
 
-        loss = dist_loss + edge_loss + crop_loss
+        loss = dist_loss + edge_loss + crop_loss + star_loss
 
         return loss
 
     def training_step(self, batch: Data, batch_idx: int = None):
         """Executes one training step
         """
-        distance_ori, distance, edge, crop = self(batch)
+        distance_ori, distance, edge, crop, star = self(batch)
         loss = self.calc_loss(
             batch,
             distance_ori,
             distance,
             edge,
-            crop
+            crop,
+            star
         )
         self.log('loss', loss, on_step=False, on_epoch=True, prog_bar=True)
 
         return loss
 
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
-        distance_ori, distance, edge, crop = self(batch)
+        distance_ori, distance, edge, crop, star = self(batch)
         loss = self.calc_loss(
             batch,
             distance_ori,
             distance,
             edge,
-            crop
+            crop,
+            star
         )
 
         dist_mae = self.dist_mae(

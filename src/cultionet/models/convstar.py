@@ -144,8 +144,10 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
 
-        # self.final = torch.nn.Conv2d(hidden_dim, num_classes_last, 3, padding=1)
-        # self.relu = torch.nn.ReLU(inplace=False)
+        self.final = torch.nn.Sequential(
+            torch.nn.Conv2d(hidden_dim, num_classes_last, 3, padding=1),
+            torch.nn.ELU(alpha=0.1, inplace=False)
+        )
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -186,7 +188,7 @@ class StarRNN(torch.nn.Module):
         #     local_2 = hidden_s[-1]
 
         # local_2 = self.final_hidden(local_2)
-        last = hidden_s[-1]
+        last = self.final(hidden_s[-1])
 
         # The output is (B x C x H x W)
         return last
@@ -264,106 +266,3 @@ class Refine(torch.nn.Module):
         out = self.conv4(out) + x[:, -2:]
 
         return out
-
-
-class CropType(torch.nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        planes=128,
-        padding=False,
-        dropout=0.5
-    ):
-        super(CropType, self).__init__()
-
-        self.hidden_dim = 2 * in_channels
-        self.planes = planes
-        self.padding = padding
-
-        self.gc = model_utils.GraphToConv()
-        self.cg = model_utils.ConvToGraph()
-
-        self.conv1 = torch.nn.Conv2d(
-            in_channels+2,
-            self.planes,
-            kernel_size=1,
-            stride=1,
-            padding=0,
-            bias=True
-        )
-        self.bn1 = torch.nn.BatchNorm2d(self.planes)
-        self.relu = torch.nn.ReLU(inplace=True)
-
-        self.conv2 = torch.nn.Conv2d(
-            self.planes,
-            self.planes,
-            kernel_size=3,
-            stride=1,
-            padding=1,
-            bias=True,
-            padding_mode='replicate'
-        )
-        self.bn2 = torch.nn.BatchNorm2d(self.planes)
-        self.drop2 = torch.nn.Dropout(dropout)
-
-        self.conv3 = torch.nn.Conv2d(
-            self.planes,
-            self.planes,
-            kernel_size=3,
-            stride=1,
-            padding=1,
-            bias=True,
-            padding_mode='replicate'
-        )
-        self.bn3 = torch.nn.BatchNorm2d(self.planes)
-        self.drop3 = torch.nn.Dropout(dropout)
-
-        self.conv4 = torch.nn.Conv2d(
-            self.planes,
-            out_channels,
-            kernel_size=1,
-            stride=1,
-            padding=0,
-            bias=True
-        )
-
-    def forward(
-        self,
-        crop: torch.Tensor,
-        crop_type: torch.Tensor,
-        batch: torch.Tensor,
-        height: torch.Tensor,
-        width: torch.Tensor
-    ) -> torch.Tensor:
-        height = int(height) if batch is None else int(height[0])
-        width = int(width) if batch is None else int(width[0])
-        batch_size = 1 if batch is None else batch.unique().size(0)
-
-        crop = self.gc(
-            crop, batch_size, height, width
-        )
-        crop_type = self.gc(
-            crop_type, batch_size, height, width
-        )
-        h = torch.cat([crop, crop_type], dim=1)
-
-        out1 = self.conv1(h)
-        out1 = self.bn1(out1)
-        out1 = self.relu(out1)
-
-        out = self.conv2(out1)
-        out = self.bn2(out)
-        out = self.relu(out)
-        out = self.drop2(out)
-
-        out = self.conv3(out)
-        out = self.bn3(out)
-        out += out1
-        out = self.relu(out)
-        out = self.drop3(out)
-
-        out = self.conv4(out)
-        out += crop_type
-
-        return self.cg(out)

@@ -1,4 +1,18 @@
+import typing as T
+
 import torch
+
+
+class Permute(torch.nn.Module):
+    def __init__(self, axis_order: T.Sequence[int]):
+        super(Permute, self).__init__()
+        self.axis_order = axis_order
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.permute(*self.axis_order)
 
 
 class ResConv(torch.nn.Module):

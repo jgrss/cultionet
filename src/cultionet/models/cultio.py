@@ -3,6 +3,7 @@ import typing as T
 from . import model_utils
 from .nunet import TemporalNestedUNet2
 from .convstar import StarRNN
+from .regression import RegressionConv
 
 import torch
 from torch_geometric.data import Data
@@ -50,19 +51,16 @@ class CultioGraphNet(torch.nn.Module):
         )
         # Nested UNet (+self.filters x self.ds_num_bands)
         self.nunet_model = TemporalNestedUNet2(
-            in_channels=self.ds_num_features+star_rnn_hidden_dim,
+            in_channels=self.ds_num_features+2,
             out_channels=2,
             out_side_channels=2,
             init_filter=self.filters,
             boundary_layer=True
         )
-        self.dist_model = TemporalNestedUNet2(
-            in_channels=self.ds_num_features+star_rnn_hidden_dim+2+2,
+        self.dist_model = RegressionConv(
+            in_channels=self.ds_num_features+2+2+2,
+            mid_channels=self.filters,
             out_channels=1,
-            out_side_channels=2,
-            init_filter=self.filters,
-            boundary_layer=False,
-            linear_fc=True,
             dropout=dropout
         )
 
@@ -102,22 +100,23 @@ class CultioGraphNet(torch.nn.Module):
                 h, batch_size, height, width
             )
         )
-        logits_crop = self.cg(nunet_stream['net'])
-        logits_edges = self.cg(nunet_stream['side'])
+        logits_crop = self.cg(nunet_stream['mask'])
+        logits_edges = self.cg(nunet_stream['boundary'])
 
         # CONCAT
         h = torch.cat([h, logits_crop, logits_edges], dim=1)
 
         # (3) Distance stream
-        dist_stream = self.dist_model(
+        logits_distance = self.dist_model(
             self.gc(
                 h, batch_size, height, width
             )
         )
-        logits_distance = self.cg(dist_stream['net'])
+        logits_distance = self.cg(logits_distance)
 
         return (
             logits_distance,
             logits_edges,
-            logits_crop
+            logits_crop,
+            logits_star_last
         )
