@@ -72,6 +72,7 @@ def get_start_end_dates(
     start_year: int,
     start_date: str,
     end_date: str,
+    date_format: str = '%Y%j',
     lat: T.Optional[float] = None
 ) -> T.Tuple[str, str]:
     """Gets the start and end dates from user args or from the filenames
@@ -82,7 +83,7 @@ def get_start_end_dates(
     # Get the first file for the start year
     filename = list(feature_path.glob(f"{start_year}*.tif"))[0]
     # Get the date from the file name
-    file_dt = datetime.strptime(filename.stem, '%Y%j')
+    file_dt = datetime.strptime(filename.stem, date_format)
 
     if start_date is not None:
         start_date = start_date
@@ -118,7 +119,8 @@ def get_image_list(
     predict_year: int,
     start_date: str,
     end_date: str,
-    config: dict
+    config: dict,
+    date_format: str
 ):
     """Gets a list of the time series images
     """
@@ -144,6 +146,7 @@ def get_image_list(
             start_year=predict_year-1,
             start_date=start_date,
             end_date=end_date,
+            date_format=date_format,
             lat=lat
         )
         # Get the requested time slice
@@ -503,7 +506,8 @@ def predict_image(args):
             predict_year=args.predict_year,
             start_date=args.start_date,
             end_date=args.end_date,
-            config=config
+            config=config,
+            date_format=args.date_format
         )
 
         with gw.open(
@@ -765,6 +769,7 @@ def create_datasets(args):
                 start_year=end_year-1,
                 start_date=args.start_date,
                 end_date=args.end_date,
+                date_format=args.date_format,
                 lat=lat,
             )
             # Get the requested time slice

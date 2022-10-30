@@ -161,6 +161,12 @@ create:
     short: ''
     long: replace-dict
     help: A dictionary of crop class remappings
+  date_format:
+    short: ''
+    long: image-date-format
+    help: The image file date format
+    kwargs:
+      default: '%Y%j'
 
 create_predict:
   predict_year:
@@ -241,6 +247,12 @@ create_predict:
     kwargs:
       default: 0
       type: '&int'
+  date_format:
+    short: ''
+    long: image-date-format
+    help: The image file date format
+    kwargs:
+      default: '%Y%j'
 
 train_predict:
   filters:
@@ -565,3 +577,9 @@ predict:
     help: The resampling method
     kwargs:
       default: nearest
+  date_format:
+    short: ''
+    long: image-date-format
+    help: The image file date format
+    kwargs:
+      default: '%Y%j'
