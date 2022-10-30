@@ -119,6 +119,7 @@ class NestedUNet2(torch.nn.Module):
     ):
         super(NestedUNet2, self).__init__()
 
+        self.linear_fc = linear_fc
         init_filter = int(init_filter)
         nb_filter = [
             init_filter,
@@ -168,31 +169,32 @@ class NestedUNet2(torch.nn.Module):
 
         self.conv0_4 = DoubleConv(nb_filter[0]*4+nb_filter[1], nb_filter[0], nb_filter[0])
 
-        if linear_fc:
+        if self.linear_fc:
             self.net_final = torch.nn.Sequential(
-                torch.nn.BatchNorm2d(nb_filter[0]+out_side_channels),
-                torch.nn.ReLU(inplace=False),
                 torch.nn.Conv2d(
-                    nb_filter[0]+out_side_channels,
-                    nb_filter[0]+out_side_channels,
-                    kernel_size=1,
-                    padding=0
+                    nb_filter[0],
+                    nb_filter[0],
+                    kernel_size=3,
+                    padding=1
                 ),
-                torch.nn.BatchNorm2d(nb_filter[0]+out_side_channels),
+                torch.nn.BatchNorm2d(nb_filter[0]),
                 torch.nn.ReLU(inplace=False),
-                torch.nn.Dropout2d(dropout),
                 Permute((0, 2, 3, 1)),
                 torch.nn.Linear(
-                    nb_filter[0]+out_side_channels, out_channels
+                    nb_filter[0], out_channels
                 ),
                 Permute((0, 3, 1, 2))
             )
         else:
             self.net_final = torch.nn.Sequential(
                 torch.nn.Conv2d(
-                    nb_filter[0]+out_side_channels, out_channels, kernel_size=3, padding=1
+                    nb_filter[0]+out_side_channels,
+                    out_channels,
+                    kernel_size=3,
+                    padding=1
                 ),
-                torch.nn.ELU(alpha=0.1, inplace=False)
+                torch.nn.BatchNorm2d(out_channels),
+                torch.nn.ELU(alpha=0.1, inplace=False),
             )
 
         if boundary_layer:
@@ -200,6 +202,7 @@ class NestedUNet2(torch.nn.Module):
                 torch.nn.Conv2d(
                     out_side_channels, out_side_channels, kernel_size=3, padding=1
                 ),
+                torch.nn.BatchNorm2d(out_side_channels),
                 torch.nn.ELU(alpha=0.1, inplace=False)
             )
 
@@ -207,10 +210,11 @@ class NestedUNet2(torch.nn.Module):
         return self.forward(*args, **kwargs)
 
     def forward(
-        self,
-        x: torch.Tensor,
-        side: T.Optional[torch.Tensor] = None
+        self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
+        net = None
+        side = None
+
         x0_0 = self.conv0_0(x)
         x1_0 = self.conv1_0(x0_0)
 
@@ -245,14 +249,16 @@ class NestedUNet2(torch.nn.Module):
         x1_3 = self.conv1_3(torch.cat([x1_0, x1_1, x1_2, self.up(x2_2, size=x1_2.shape[-2:])], dim=1))
         # 1/1
         x0_4 = self.conv0_4(torch.cat([x0_0, x0_1, x0_2, x0_3, self.up(x1_3, size=x0_3.shape[-2:])], dim=1))
-        if side is None:
+        if self.linear_fc:
+            net = self.net_final(x0_4)
+        else:
             # Side stream
             b_0 = self.bound_0(x4_0, x3_0)
             b_1 = self.bound_1(b_0, x2_0)
             b_2 = self.bound_2(b_1, x1_0)
             side = self.bound_3(b_2, x0_0)
             side = self.side_final(side)
-        net = self.net_final(torch.cat([x0_4, side], dim=1))
+            net = self.net_final(torch.cat([x0_4, side], dim=1))
 
         return {
             'net': net,
@@ -284,8 +290,6 @@ class TemporalNestedUNet2(torch.nn.Module):
         )
 
     def forward(
-        self,
-        x: torch.Tensor,
-        side: T.Optional[torch.Tensor] = None
+        self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
-        return self.nunet(x, side=side)
+        return self.nunet(x)

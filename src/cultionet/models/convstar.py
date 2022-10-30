@@ -144,8 +144,8 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
 
-        self.final = torch.nn.Conv2d(hidden_dim, num_classes_last, 3, padding=1)
-        self.relu = torch.nn.ReLU(inplace=False)
+        # self.final = torch.nn.Conv2d(hidden_dim, num_classes_last, 3, padding=1)
+        # self.relu = torch.nn.ReLU(inplace=False)
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -186,7 +186,7 @@ class StarRNN(torch.nn.Module):
         #     local_2 = hidden_s[-1]
 
         # local_2 = self.final_hidden(local_2)
-        last = self.relu(self.final(hidden_s[-1]))
+        last = hidden_s[-1]
 
         # The output is (B x C x H x W)
         return last

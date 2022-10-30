@@ -24,7 +24,7 @@ class CultioGraphNet(torch.nn.Module):
         ds_time_features: int,
         filters: int = 64,
         star_rnn_hidden_dim: int = 64,
-        star_rnn_n_layers: int = 3,
+        star_rnn_n_layers: int = 4,
         num_classes: int = 2,
         dropout: T.Optional[float] = 0.1
     ):
@@ -50,14 +50,14 @@ class CultioGraphNet(torch.nn.Module):
         )
         # Nested UNet (+self.filters x self.ds_num_bands)
         self.nunet_model = TemporalNestedUNet2(
-            in_channels=self.ds_num_features+2,
+            in_channels=self.ds_num_features+star_rnn_hidden_dim,
             out_channels=2,
             out_side_channels=2,
             init_filter=self.filters,
             boundary_layer=True
         )
         self.dist_model = TemporalNestedUNet2(
-            in_channels=self.ds_num_features+2+2,
+            in_channels=self.ds_num_features+star_rnn_hidden_dim+2+2,
             out_channels=1,
             out_side_channels=2,
             init_filter=self.filters,
@@ -106,15 +106,12 @@ class CultioGraphNet(torch.nn.Module):
         logits_edges = self.cg(nunet_stream['side'])
 
         # CONCAT
-        h = torch.cat([h, logits_crop], dim=1)
+        h = torch.cat([h, logits_crop, logits_edges], dim=1)
 
         # (3) Distance stream
         dist_stream = self.dist_model(
             self.gc(
                 h, batch_size, height, width
-            ),
-            side=self.gc(
-                logits_edges, batch_size, height, width
             )
         )
         logits_distance = self.cg(dist_stream['net'])
@@ -122,6 +119,5 @@ class CultioGraphNet(torch.nn.Module):
         return (
             logits_distance,
             logits_edges,
-            logits_crop,
-            logits_star_last
+            logits_crop
         )

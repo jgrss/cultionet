@@ -379,10 +379,10 @@ class CultioLitModel(pl.LightningModule):
             edge: Probability of an edge [0,1].
             crop: Probability of crop [0,1].
         """
-        distance, edge, crop, crop_star = self.cultionet_model(batch)
+        distance, edge, crop = self.cultionet_model(batch)
         distance_ori = torch.zeros_like(edge[:, 0])
 
-        return distance_ori, distance, edge, crop, crop_star
+        return distance_ori, distance, edge, crop
 
     @staticmethod
     def get_cuda_memory():
@@ -400,14 +400,14 @@ class CultioLitModel(pl.LightningModule):
     ]:
         """A prediction step for Lightning
         """
-        distance_ori, distance, edge, crop, crop_star = self.forward(
+        distance_ori, distance, edge, crop = self.forward(
             batch, batch_idx
         )
         edge, crop = self.predict_probas(
             edge, crop
         )
 
-        return distance_ori, distance, edge, crop, crop_star
+        return distance_ori, distance, edge, crop
 
     def predict_probas(
         self,
@@ -438,8 +438,7 @@ class CultioLitModel(pl.LightningModule):
         distance_ori: torch.Tensor,
         distance: torch.Tensor,
         edge: torch.Tensor,
-        crop: torch.Tensor,
-        crop_star: torch.Tensor
+        crop: torch.Tensor
     ):
         """Calculates the loss for each layer
 
@@ -473,37 +472,35 @@ class CultioLitModel(pl.LightningModule):
         edge_loss = self.edge_loss(edge, true_edge)
         crop_loss = self.crop_loss(crop, true_crop)
         # crop_star_hidden_loss = self.crop_loss(crop_star_hidden, true_crop)
-        crop_star_loss = self.crop_loss(crop_star, true_crop)
+        # crop_star_loss = self.crop_loss(crop_star, true_crop)
 
-        loss = dist_loss + edge_loss + crop_loss + crop_star_loss
+        loss = dist_loss + edge_loss + crop_loss
 
         return loss
 
     def training_step(self, batch: Data, batch_idx: int = None):
         """Executes one training step
         """
-        distance_ori, distance, edge, crop, crop_star = self(batch)
+        distance_ori, distance, edge, crop = self(batch)
         loss = self.calc_loss(
             batch,
             distance_ori,
             distance,
             edge,
-            crop,
-            crop_star
+            crop
         )
         self.log('loss', loss, on_step=False, on_epoch=True, prog_bar=True)
 
         return loss
 
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
-        distance_ori, distance, edge, crop, crop_star = self(batch)
+        distance_ori, distance, edge, crop = self(batch)
         loss = self.calc_loss(
             batch,
             distance_ori,
             distance,
             edge,
-            crop,
-            crop_star
+            crop
         )
 
         dist_mae = self.dist_mae(
