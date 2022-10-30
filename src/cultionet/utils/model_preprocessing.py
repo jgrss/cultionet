@@ -52,7 +52,8 @@ def get_time_series_list(
     feature_path: Path,
     start_year: int,
     start_date: str,
-    end_date: str
+    end_date: str,
+    date_format: str = '%Y%j'
 ) -> T.List[str]:
     """Gets a list of time series paths
     """
@@ -63,7 +64,7 @@ def get_time_series_list(
         date_pos=0,
         date_start=0,
         date_end=7,
-        date_format='%Y%j'
+        date_format=date_format
     )
     # Create a DataFrame with paths and dates
     df = pd.DataFrame(

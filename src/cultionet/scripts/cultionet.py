@@ -151,7 +151,7 @@ def get_image_list(
         )
         # Get the requested time slice
         ts_list = model_preprocessing.get_time_series_list(
-            vi_path, config['predict_year']-1, start_date, end_date
+            vi_path, config['predict_year']-1, start_date, end_date, date_format=date_format
         )
         if len(ts_list) <= 1:
             continue
@@ -774,7 +774,7 @@ def create_datasets(args):
             )
             # Get the requested time slice
             ts_list = model_preprocessing.get_time_series_list(
-                vi_path, end_year-1, start_date, end_date
+                vi_path, end_year-1, start_date, end_date, date_format=args.date_format
             )
             if len(ts_list) <= 1:
                 continue

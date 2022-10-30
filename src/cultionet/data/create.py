@@ -337,74 +337,67 @@ def create_image_vars(
                             grid_edges[crop_column] = grid_edges[crop_column].replace({crop_class: -999})
                     replace_dict[-999] = 1
                     grid_edges[crop_column] = grid_edges[crop_column].replace(replace_dict)
-                    # Remove any fields that were recoded to zero
+                    # Remove any non-crop polygons
                     grid_edges = grid_edges.query(f"{crop_column} != 0")
-                # Get the field polygons
-                labels_array_copy = polygon_to_array(
-                    grid_edges.assign(**{crop_column: range(1, len(grid_edges.index)+1)}),
-                    col=crop_column,
-                    data=src_ts,
-                    all_touched=False
-                ).squeeze().gw.compute(num_workers=num_workers)
-                labels_array = polygon_to_array(
-                    grid_edges,
-                    col=crop_column,
-                    data=src_ts,
-                    all_touched=False
-                ).squeeze().gw.compute(num_workers=num_workers)
-                # Get the field edges
-                edges = polygon_to_array(
-                    (
-                        grid_edges
-                        .boundary
-                        .to_frame(name='geometry')
-                        .reset_index()
-                        .rename(columns={'index': crop_column})
-                        .assign(**{crop_column: range(1, len(grid_edges.index)+1)})
-                    ),
-                    col=crop_column,
-                    data=src_ts,
-                    all_touched=False
-                ).squeeze().gw.compute(num_workers=num_workers)
-                edges[edges > 0] = 1
-                assert edges.max() == 1, 'Edges were not created.'
-                image_grad = edge_gradient(labels_array_copy)
-                image_grad_count = get_crop_count(image_grad, edge_class)
-                edges = np.where(image_grad_count > 0, edges, 0)
-                # def save_labels(out_fig: Path):
-                #     import matplotlib.pyplot as plt
-                #     fig, axes = plt.subplots(1, 3, figsize=(6, 5), sharey=True, sharex=True, dpi=300)
-                #     axes = axes.flatten()
-                #     axes[0].imshow(labels_array, interpolation='nearest')
-                #     axes[1].imshow(edges, interpolation='nearest')
-                #     for ax in axes:
-                #         ax.axis('off')
-
-                #     plt.tight_layout()
-                #     plt.savefig(out_fig, dpi=300)
-                # import uuid
-                # fig_dir = Path('figures')
-                # fig_dir.mkdir(exist_ok=True, parents=True)
-                # save_labels(
-                #     out_fig=fig_dir / f'{uuid.uuid4().hex}.png'
-                # )
-                # Recode
-                if not keep_crop_classes:
-                    labels_array = np.where(
-                        labels_array > 0, max_crop_class, 0
+                if grid_edges.empty:
+                    labels_array = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='uint8')
+                    bdist = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='float64')
+                    ori = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='float64')
+                    edges = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='uint8')
+                else:
+                    # Get the field polygons
+                    labels_array_copy = polygon_to_array(
+                        grid_edges.assign(
+                            **{
+                                crop_column: range(1, len(grid_edges.index)+1)
+                            }
+                        ),
+                        col=crop_column,
+                        data=src_ts,
+                        all_touched=False
+                    ).squeeze().gw.compute(num_workers=num_workers)
+                    labels_array = polygon_to_array(
+                        grid_edges,
+                        col=crop_column,
+                        data=src_ts,
+                        all_touched=False
+                    ).squeeze().gw.compute(num_workers=num_workers)
+                    # Get the field edges
+                    edges = polygon_to_array(
+                        (
+                            grid_edges
+                            .boundary
+                            .to_frame(name='geometry')
+                            .reset_index()
+                            .rename(columns={'index': crop_column})
+                            .assign(**{crop_column: range(1, len(grid_edges.index)+1)})
+                        ),
+                        col=crop_column,
+                        data=src_ts,
+                        all_touched=False
+                    ).squeeze().gw.compute(num_workers=num_workers)
+                    edges[edges > 0] = 1
+                    assert edges.max() == 1, 'Edges were not created.'
+                    image_grad = edge_gradient(labels_array_copy)
+                    image_grad_count = get_crop_count(image_grad, edge_class)
+                    edges = np.where(image_grad_count > 0, edges, 0)
+                    # Recode
+                    if not keep_crop_classes:
+                        labels_array = np.where(
+                            labels_array > 0, max_crop_class, 0
+                        )
+                    # Set edges
+                    labels_array[edges == 1] = edge_class
+                    # No crop pixel should border non-crop
+                    labels_array = cleanup_edges(labels_array, labels_array_copy, edge_class)
+                    assert labels_array.max() <= edge_class, \
+                        'The labels array have larger than expected values.'
+                    # Normalize the boundary distances for each segment
+                    bdist, ori = normalize_boundary_distances(
+                        np.uint8((labels_array > 0) & (labels_array != edge_class)),
+                        grid_edges.geom_type.values[0],
+                        src_ts.gw.celly
                     )
-                # Set edges
-                labels_array[edges == 1] = edge_class
-                # No crop pixel should border non-crop
-                labels_array = cleanup_edges(labels_array, labels_array_copy, edge_class)
-                assert labels_array.max() <= edge_class, \
-                    'The labels array have larger than expected values.'
-                # Normalize the boundary distances for each segment
-                bdist, ori = normalize_boundary_distances(
-                    np.uint8((labels_array > 0) & (labels_array != edge_class)),
-                    grid_edges.geom_type.values[0],
-                    src_ts.gw.celly
-                )
                 # import matplotlib.pyplot as plt
                 # def save_labels(out_fig: Path):
                 #     fig, axes = plt.subplots(2, 2, figsize=(6, 5), sharey=True, sharex=True, dpi=300)
