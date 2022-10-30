@@ -2,7 +2,6 @@ import typing as T
 from pathlib import Path
 from functools import partial
 
-from .lookup import CDL_CROP_LABELS_r
 from .utils import LabeledData, get_image_list_dims
 from ..augment.augmentation import augment
 from ..errors import TopologyClipError
@@ -13,7 +12,7 @@ import geowombat as gw
 from geowombat.core import polygon_to_array
 from geowombat.core.windows import get_window_offsets
 import numpy as np
-from scipy.ndimage.measurements import label as nd_label, sum as nd_sum
+from scipy.ndimage.measurements import label as nd_label
 import cv2
 from rasterio.windows import Window
 import xarray as xr
@@ -22,7 +21,6 @@ from skimage.measure import regionprops
 from tqdm.auto import tqdm
 import torch
 from torch_geometric.data import Data
-from shapely.geometry import LineString
 from joblib import delayed, parallel_backend
 
 

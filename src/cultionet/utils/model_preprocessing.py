@@ -57,13 +57,14 @@ def get_time_series_list(
 ) -> T.List[str]:
     """Gets a list of time series paths
     """
+    assert date_format in ('%Y%j', '%Y%m%d'), 'The date format is not supported.'
     # Get the requested time slice
     image_dict = sort_images_by_date(
         feature_path,
         '*.tif',
         date_pos=0,
         date_start=0,
-        date_end=7,
+        date_end=7 if date_format == '%Y%j' else 8,
         date_format=date_format
     )
     # Create a DataFrame with paths and dates
