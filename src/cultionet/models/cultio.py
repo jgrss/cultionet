@@ -2,6 +2,7 @@ import typing as T
 
 from . import model_utils
 from .nunet import TemporalNestedUNet2
+from .convstar import StarRNN
 
 import torch
 from torch_geometric.data import Data
@@ -40,39 +41,27 @@ class CultioGraphNet(torch.nn.Module):
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
+        # Star RNN layer
+        self.star_rnn = StarRNN(
+            input_dim=self.ds_num_bands,
+            hidden_dim=star_rnn_hidden_dim,
+            n_layers=star_rnn_n_layers,
+            num_classes_last=2
+        )
         # Nested UNet (+self.filters x self.ds_num_bands)
-        # self.nunet1 = TemporalNestedUNet2(
-        #     in_channels=self.ds_num_features,
-        #     out_channels=1,
-        #     out_side_channels=0,
-        #     init_filter=int(self.filters / 2),
-        #     linear_fc=True
-        # )
-        # self.dist_model = GraphRegressionLayer(
-        #     in_channels=self.ds_num_features,
-        #     mid_channels=self.filters,
-        #     out_channels=1
-        # )
         self.nunet_model = TemporalNestedUNet2(
-            in_channels=self.ds_num_features,
+            in_channels=self.ds_num_features+2+2,
             out_channels=2,
             out_side_channels=2,
             init_filter=self.filters
         )
         self.dist_model = TemporalNestedUNet2(
-            in_channels=self.ds_num_features+2,
+            in_channels=self.ds_num_features+2+2+2,
             out_channels=1,
             out_side_channels=2,
             init_filter=self.filters,
             linear_fc=True
         )
-        # Star RNN layer
-        # self.star_rnn = StarRNN(
-        #     input_dim=self.ds_num_bands,
-        #     hidden_dim=star_rnn_hidden_dim,
-        #     n_layers=star_rnn_n_layers,
-        #     num_classes_last=2
-        # )
         # self.star_refine = Refine(
         #     in_channels=2+2+2,
         #     mid_channels=128,
@@ -86,59 +75,56 @@ class CultioGraphNet(torch.nn.Module):
     def forward(
         self, data: Data
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
     ]:
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
-        # Nested UNet on each band time series
+        # (1) RNN ConvStar
+        star_stream = self.gc(
+            data.x, batch_size, height, width
+        )
+        # nbatch, ntime, height, width
+        nbatch, __, height, width = star_stream.shape
+        # Reshape from (B x C x H x W) -> (B x C x T x H x W)
+        star_stream = star_stream.reshape(
+            nbatch, self.ds_num_bands, self.ds_num_time, height, width
+        )
+        # Crop/Non-crop and Crop types
+        logits_star_local_2, logits_star_last = self.star_rnn(star_stream)
+        logits_star_local_2 = self.cg(logits_star_local_2)
+        logits_star_last = self.cg(logits_star_last)
+
+        # CONCAT
+        h = torch.cat([data.x, logits_star_local_2, logits_star_last], dim=1)
+
+        # (2) Nested UNet for crop and edges
         nunet_stream = self.nunet_model(
             self.gc(
-                data.x, batch_size, height, width
+                h, batch_size, height, width
             )
         )
         logits_edges = self.cg(nunet_stream['side'])
         logits_crop = self.cg(nunet_stream['net'])
+
+        # CONCAT
+        h = torch.cat([h, logits_crop], dim=1)
+
         dist_stream = self.dist_model(
             self.gc(
-                torch.cat([data.x, logits_crop], dim=1),
-                batch_size, height, width
+                h, batch_size, height, width
             ),
             side=self.gc(
                 logits_edges, batch_size, height, width
             )
         )
         logits_distance = self.cg(dist_stream['net'])
-        # # RNN ConvStar
-        # star_stream = self.gc(
-        #     data.x, batch_size, height, width
-        # )
-        # # nbatch, ntime, height, width
-        # nbatch, __, height, width = star_stream.shape
-        # # Reshape from (B x C x H x W) -> (B x C x T x H x W)
-        # star_stream = star_stream.reshape(
-        #     nbatch, self.ds_num_bands, self.ds_num_time, height, width
-        # )
-        # # Crop/Non-crop and Crop types
-        # star_stream = self.star_rnn(star_stream)[1]
-        # logits_star = self.cg(star_stream)
-        # # Concatenate time series streams
-        # h = torch.cat(
-        #     [
-        #         logits_edges,
-        #         logits_crop,
-        #         logits_star
-        #     ],
-        #     dim=1
-        # )
-        # h = self.gc(
-        #     h, batch_size, height, width
-        # )
-        # logits_star = self.cg(self.star_refine(h))
 
         return (
             logits_distance,
             logits_edges,
-            logits_crop
+            logits_crop,
+            logits_star_local_2,
+            logits_star_last
         )
