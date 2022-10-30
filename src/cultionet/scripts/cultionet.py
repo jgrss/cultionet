@@ -120,7 +120,8 @@ def get_image_list(
     start_date: str,
     end_date: str,
     config: dict,
-    date_format: str
+    date_format: str,
+    skip_index: int
 ):
     """Gets a list of the time series images
     """
@@ -156,7 +157,10 @@ def get_image_list(
         if len(ts_list) <= 1:
             continue
 
-        image_list += ts_list#[::2]
+        if skip_index > 0:
+            image_list += ts_list[::skip_index]
+        else:
+            image_list += ts_list
 
     return image_list
 
@@ -507,7 +511,8 @@ def predict_image(args):
             start_date=args.start_date,
             end_date=args.end_date,
             config=config,
-            date_format=args.date_format
+            date_format=args.date_format,
+            skip_index=args.skip_index
         )
 
         with gw.open(
@@ -779,7 +784,10 @@ def create_datasets(args):
             if len(ts_list) <= 1:
                 continue
 
-            image_list += ts_list#[::2]
+            if args.skip_index > 0:
+                image_list += ts_list[::args.skip_index]
+            else:
+                image_list += ts_list
 
         if args.destination != 'predict':
             class_info = {
