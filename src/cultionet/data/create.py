@@ -337,6 +337,8 @@ def create_image_vars(
                             grid_edges[crop_column] = grid_edges[crop_column].replace({crop_class: -999})
                     replace_dict[-999] = 1
                     grid_edges[crop_column] = grid_edges[crop_column].replace(replace_dict)
+                    # Remove any fields that were recoded to zero
+                    grid_edges = grid_edges.query(f"{crop_column} != 0")
                 # Get the field polygons
                 labels_array_copy = polygon_to_array(
                     grid_edges.assign(**{crop_column: range(1, len(grid_edges.index)+1)}),
