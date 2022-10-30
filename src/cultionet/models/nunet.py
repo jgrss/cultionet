@@ -128,28 +128,29 @@ class NestedUNet2(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
-        self.conv0_0 = VGGBlock(in_channels, nb_filter[0], nb_filter[0])
-        self.bound_3 = BoundaryStream(
-            in_channels=out_side_channels+nb_filter[0],
-            out_channels=out_side_channels
-        )
-        self.conv1_0 = PoolConv(nb_filter[0], nb_filter[1], nb_filter[1])
-        self.bound_2 = BoundaryStream(
-            in_channels=out_side_channels+nb_filter[1],
-            out_channels=out_side_channels
-        )
+        if not linear_fc:
+            self.bound_0 = BoundaryStream(
+                in_channels=nb_filter[3]+nb_filter[4],
+                out_channels=out_side_channels
+            )
+            self.bound_1 = BoundaryStream(
+                in_channels=out_side_channels+nb_filter[2],
+                out_channels=out_side_channels
+            )
+            self.bound_2 = BoundaryStream(
+                in_channels=out_side_channels+nb_filter[1],
+                out_channels=out_side_channels
+            )
+            self.bound_3 = BoundaryStream(
+                in_channels=out_side_channels+nb_filter[0],
+                out_channels=out_side_channels
+            )
 
+        self.conv0_0 = VGGBlock(in_channels, nb_filter[0], nb_filter[0])
+        self.conv1_0 = PoolConv(nb_filter[0], nb_filter[1], nb_filter[1])
         self.conv2_0 = PoolConv(nb_filter[1], nb_filter[2], nb_filter[2])
-        self.bound_1 = BoundaryStream(
-            in_channels=out_side_channels+nb_filter[2],
-            out_channels=out_side_channels
-        )
         self.conv3_0 = PoolConv(nb_filter[2], nb_filter[3], nb_filter[3])
         self.conv4_0 = PoolConv(nb_filter[3], nb_filter[4], nb_filter[4])
-        self.bound_0 = BoundaryStream(
-            in_channels=nb_filter[3]+nb_filter[4],
-            out_channels=out_side_channels
-        )
 
         self.conv0_1 = DoubleConv(nb_filter[0]+nb_filter[1], nb_filter[0], nb_filter[0])
         self.conv1_1 = DoubleConv(nb_filter[1]+nb_filter[2], nb_filter[1], nb_filter[1])
