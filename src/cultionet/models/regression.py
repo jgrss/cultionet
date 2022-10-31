@@ -39,7 +39,7 @@ class RegressionConv(torch.nn.Module):
             stride=1,
             padding=1
         )
-        dropout_layer = torch.nn.Dropout2d(dropout)
+        dropout_layer = torch.nn.Dropout(dropout)
 
         linear_layer = torch.nn.Linear(
             mid_channels,

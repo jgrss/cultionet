@@ -2,7 +2,7 @@ import typing as T
 from pathlib import Path
 
 from ..losses import (
-    HuberLoss,
+    QuantileLoss,
     TanimotoDistanceLoss
 )
 from .cultio import CultioGraphNet
@@ -402,6 +402,7 @@ class CultioLitModel(pl.LightningModule):
         distance_ori, distance, edge, crop, star = self.forward(
             batch, batch_idx
         )
+        distance = distance[:, 1].contiguous().view(-1)
         edge, crop = self.predict_probas(
             edge, crop
         )
@@ -424,12 +425,13 @@ class CultioLitModel(pl.LightningModule):
     def on_validation_epoch_end(self, *args, **kwargs):
         """Save the model on validation end
         """
-        model_file = Path(self.logger.save_dir) / f'{self.model_name}.pt'
-        if model_file.is_file():
-            model_file.unlink()
-        torch.save(
-            self.state_dict(), model_file
-        )
+        if self.logger.save_dir is not None:
+            model_file = Path(self.logger.save_dir) / f'{self.model_name}.pt'
+            if model_file.is_file():
+                model_file.unlink()
+            torch.save(
+                self.state_dict(), model_file
+            )
 
     def calc_loss(
         self,
@@ -505,11 +507,11 @@ class CultioLitModel(pl.LightningModule):
         )
 
         dist_mae = self.dist_mae(
-            distance.contiguous().view(-1),
+            distance[:, 1].contiguous().view(-1),
             batch.bdist.contiguous().view(-1)
         )
         dist_mse = self.dist_mse(
-            distance.contiguous().view(-1),
+            distance[:, 1].contiguous().view(-1),
             batch.bdist.contiguous().view(-1)
         )
         # Get the class probabilities
@@ -603,7 +605,7 @@ class CultioLitModel(pl.LightningModule):
             2, dtype=self.dtype, device=self.device
         )
 
-        self.dist_loss = HuberLoss()
+        self.dist_loss = QuantileLoss(quantiles=(0.1, 0.5, 0.9))
         self.edge_loss = TanimotoDistanceLoss(
             volume=self.volume,
             inputs_are_logits=True,
@@ -614,11 +616,6 @@ class CultioLitModel(pl.LightningModule):
             inputs_are_logits=True,
             apply_transform=True
         )
-        # self.crop_type_loss = CrossEntropyLoss(
-        #     class_weights=self.class_weights,
-        #     ignore_index=0,
-        #     device=self.device.type
-        # )
 
     def configure_optimizers(self):
         params_list = list(self.cultionet_model.parameters())
@@ -631,7 +628,7 @@ class CultioLitModel(pl.LightningModule):
         lr_scheduler = ReduceLROnPlateau(
             optimizer,
             factor=0.1,
-            patience=7
+            patience=10
         )
 
         return {

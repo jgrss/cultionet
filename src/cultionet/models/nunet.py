@@ -50,11 +50,18 @@ class VGGBlock(torch.nn.Module):
 class PoolConv(torch.nn.Module):
     """Max pooling followed by a double convolution
     """
-    def __init__(self, in_channels: int, mid_channels: int, out_channels: int):
+    def __init__(
+        self,
+        in_channels: int,
+        mid_channels: int,
+        out_channels: int,
+        dropout: float
+    ):
         super(PoolConv, self).__init__()
 
         self.seq = torch.nn.Sequential(
             torch.nn.MaxPool2d(2),
+            torch.nn.Dropout(dropout),
             DoubleConv(in_channels, mid_channels, out_channels)
         )
 
@@ -169,8 +176,7 @@ class NestedUNet2(torch.nn.Module):
         out_side_channels: int,
         init_filter: int = 64,
         boundary_layer: bool = True,
-        linear_fc: bool = False,
-        dropout: float = 0.1
+        linear_fc: bool = False
     ):
         super(NestedUNet2, self).__init__()
 
@@ -223,10 +229,10 @@ class NestedUNet2(torch.nn.Module):
             )
 
         self.conv0_0 = VGGBlock(in_channels, nb_filter[0], nb_filter[0])
-        self.conv1_0 = PoolConv(nb_filter[0], nb_filter[1], nb_filter[1])
-        self.conv2_0 = PoolConv(nb_filter[1], nb_filter[2], nb_filter[2])
-        self.conv3_0 = PoolConv(nb_filter[2], nb_filter[3], nb_filter[3])
-        self.conv4_0 = PoolConv(nb_filter[3], nb_filter[4], nb_filter[4])
+        self.conv1_0 = PoolConv(nb_filter[0], nb_filter[1], nb_filter[1], dropout=0.25)
+        self.conv2_0 = PoolConv(nb_filter[1], nb_filter[2], nb_filter[2], dropout=0.5)
+        self.conv3_0 = PoolConv(nb_filter[2], nb_filter[3], nb_filter[3], dropout=0.5)
+        self.conv4_0 = PoolConv(nb_filter[3], nb_filter[4], nb_filter[4], dropout=0.5)
 
         self.conv0_1 = DoubleConv(nb_filter[0]+nb_filter[1], nb_filter[0], nb_filter[0])
         self.conv1_1 = DoubleConv(nb_filter[1]+nb_filter[2], nb_filter[1], nb_filter[1])
@@ -348,8 +354,7 @@ class TemporalNestedUNet2(torch.nn.Module):
         out_side_channels: int,
         init_filter: int,
         boundary_layer: bool = True,
-        linear_fc: bool = False,
-        dropout: float = 0.1
+        linear_fc: bool = False
     ):
         super(TemporalNestedUNet2, self).__init__()
 
@@ -359,8 +364,7 @@ class TemporalNestedUNet2(torch.nn.Module):
             out_side_channels=out_side_channels,
             init_filter=init_filter,
             boundary_layer=boundary_layer,
-            linear_fc=linear_fc,
-            dropout=dropout
+            linear_fc=linear_fc
         )
 
     def forward(
