@@ -60,7 +60,7 @@ class CultioGraphNet(torch.nn.Module):
         self.dist_model = RegressionConv(
             in_channels=self.ds_num_features+2+2+2,
             mid_channels=self.filters,
-            out_channels=3,
+            out_channels=1,
             dropout=dropout
         )
 

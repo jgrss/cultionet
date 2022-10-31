@@ -146,7 +146,7 @@ class StarRNN(torch.nn.Module):
 
         self.final = torch.nn.Sequential(
             torch.nn.Conv2d(hidden_dim, num_classes_last, 3, padding=1),
-            torch.nn.ELU(alpha=0.1, inplace=False)
+            torch.nn.ReLU(inplace=False)
         )
 
     def __call__(self, *args, **kwargs):

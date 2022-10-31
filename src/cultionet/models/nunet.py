@@ -7,44 +7,11 @@ Copyright (c) 2018 Takato Kimura
 import typing as T
 
 from . import model_utils
-from .base_layers import DoubleConv, Permute
+from .base_layers import DoubleConv, DoubleResConv, Permute
 
 import torch
 import torch.nn.functional as F
 from torch_geometric import nn
-
-
-class VGGBlock(torch.nn.Module):
-    """A UNet block for graphs
-    """
-    def __init__(
-        self,
-        in_channels: int,
-        mid_channels: int,
-        out_channels: int
-    ):
-        super(VGGBlock, self).__init__()
-
-        activate_layer = torch.nn.SiLU(inplace=False)
-        conv1 = torch.nn.Conv2d(in_channels, mid_channels, 3, padding=1)
-        batchnorm_layer1 = torch.nn.BatchNorm2d(mid_channels)
-        conv2 = torch.nn.Conv2d(mid_channels, out_channels, 3, padding=1)
-        batchnorm_layer2 = torch.nn.BatchNorm2d(out_channels)
-
-        self.seq = torch.nn.Sequential(
-            conv1,
-            batchnorm_layer1,
-            activate_layer,
-            conv2,
-            batchnorm_layer2,
-            activate_layer
-        )
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.seq(x)
 
 
 class PoolConv(torch.nn.Module):
@@ -53,7 +20,6 @@ class PoolConv(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        mid_channels: int,
         out_channels: int,
         dropout: float
     ):
@@ -62,7 +28,7 @@ class PoolConv(torch.nn.Module):
         self.seq = torch.nn.Sequential(
             torch.nn.MaxPool2d(2),
             torch.nn.Dropout(dropout),
-            DoubleConv(in_channels, mid_channels, out_channels)
+            DoubleConv(in_channels, out_channels)
         )
 
     def __call__(self, *args, **kwargs):
@@ -70,31 +36,6 @@ class PoolConv(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
-
-
-class BoundaryStream(torch.nn.Module):
-    def __init__(self, in_channels: int, out_channels: int):
-        super(BoundaryStream, self).__init__()
-
-        conv = torch.nn.Conv2d(in_channels, out_channels, 1, padding=0)
-        self.up = model_utils.UpSample()
-        self.seq = torch.nn.Sequential(
-            conv,
-            torch.nn.Sigmoid()
-        )
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    def forward(self, s: torch.Tensor, m: torch.Tensor) -> torch.Tensor:
-        s = self.up(s, size=m.shape[-2:])
-        x = torch.cat([s, m], dim=1)
-        x = self.seq(x)
-
-        if s.size(1) == 2:
-            return x * s
-        else:
-            return x
 
 
 class AttentionGate(torch.nn.Module):
@@ -210,43 +151,43 @@ class NestedUNet2(torch.nn.Module):
         )
 
         if boundary_layer:
-            self.bound0_1 = DoubleConv(nb_filter[0]+nb_filter[0],  nb_filter[0],  nb_filter[0])
-            self.bound0_2 = DoubleConv(nb_filter[0]+nb_filter[0],  nb_filter[0],  nb_filter[0])
-            self.bound0_3 = DoubleConv(nb_filter[0]+nb_filter[0],  nb_filter[0],  nb_filter[0])
-            self.bound0_4 = DoubleConv(nb_filter[0]+nb_filter[0],  nb_filter[0],  nb_filter[0])
+            self.bound0_1 = DoubleConv(nb_filter[0]+nb_filter[0],  nb_filter[0])
+            self.bound0_2 = DoubleConv(nb_filter[0]+nb_filter[0],  nb_filter[0])
+            self.bound0_3 = DoubleConv(nb_filter[0]+nb_filter[0],  nb_filter[0])
+            self.bound0_4 = DoubleConv(nb_filter[0]+nb_filter[0],  nb_filter[0])
 
-            self.bound4_0 = DoubleConv(nb_filter[4]+nb_filter[3],  nb_filter[3],  nb_filter[3])
-            self.bound3_0 = DoubleConv(nb_filter[3]+nb_filter[2],  nb_filter[2],  nb_filter[2])
-            self.bound2_0 = DoubleConv(nb_filter[2]+nb_filter[1],  nb_filter[1],  nb_filter[1])
-            self.bound1_0 = DoubleConv(nb_filter[1]+nb_filter[0],  nb_filter[0],  nb_filter[0])
+            self.bound4_0 = DoubleConv(nb_filter[4]+nb_filter[3],  nb_filter[3])
+            self.bound3_0 = DoubleConv(nb_filter[3]+nb_filter[2],  nb_filter[2])
+            self.bound2_0 = DoubleConv(nb_filter[2]+nb_filter[1],  nb_filter[1])
+            self.bound1_0 = DoubleConv(nb_filter[1]+nb_filter[0],  nb_filter[0])
 
             self.bound_final = torch.nn.Sequential(
                 torch.nn.Conv2d(
                     nb_filter[0]+nb_filter[0], out_side_channels, kernel_size=3, padding=1
                 ),
                 torch.nn.BatchNorm2d(out_side_channels),
-                torch.nn.ELU(alpha=0.1, inplace=False)
+                torch.nn.ReLU(inplace=False)
             )
 
-        self.conv0_0 = VGGBlock(in_channels, nb_filter[0], nb_filter[0])
-        self.conv1_0 = PoolConv(nb_filter[0], nb_filter[1], nb_filter[1], dropout=0.25)
-        self.conv2_0 = PoolConv(nb_filter[1], nb_filter[2], nb_filter[2], dropout=0.5)
-        self.conv3_0 = PoolConv(nb_filter[2], nb_filter[3], nb_filter[3], dropout=0.5)
-        self.conv4_0 = PoolConv(nb_filter[3], nb_filter[4], nb_filter[4], dropout=0.5)
+        self.conv0_0 = DoubleConv(in_channels, nb_filter[0])
+        self.conv1_0 = PoolConv(nb_filter[0], nb_filter[1], dropout=0.25)
+        self.conv2_0 = PoolConv(nb_filter[1], nb_filter[2], dropout=0.5)
+        self.conv3_0 = PoolConv(nb_filter[2], nb_filter[3], dropout=0.5)
+        self.conv4_0 = PoolConv(nb_filter[3], nb_filter[4], dropout=0.5)
 
-        self.conv0_1 = DoubleConv(nb_filter[0]+nb_filter[1], nb_filter[0], nb_filter[0])
-        self.conv1_1 = DoubleConv(nb_filter[1]+nb_filter[2], nb_filter[1], nb_filter[1])
-        self.conv2_1 = DoubleConv(nb_filter[2]+nb_filter[3], nb_filter[2], nb_filter[2])
-        self.conv3_1 = DoubleConv(nb_filter[3]+nb_filter[4], nb_filter[3], nb_filter[3])
+        self.conv0_1 = DoubleConv(nb_filter[0]+nb_filter[1], nb_filter[0])
+        self.conv1_1 = DoubleConv(nb_filter[1]+nb_filter[2], nb_filter[1])
+        self.conv2_1 = DoubleConv(nb_filter[2]+nb_filter[3], nb_filter[2])
+        self.conv3_1 = DoubleConv(nb_filter[3]+nb_filter[4], nb_filter[3])
 
-        self.conv0_2 = DoubleConv(nb_filter[0]*2+nb_filter[1], nb_filter[0], nb_filter[0])
-        self.conv1_2 = DoubleConv(nb_filter[1]*2+nb_filter[2], nb_filter[1], nb_filter[1])
-        self.conv2_2 = DoubleConv(nb_filter[2]*2+nb_filter[3], nb_filter[2], nb_filter[2])
+        self.conv0_2 = DoubleConv(nb_filter[0]*2+nb_filter[1], nb_filter[0])
+        self.conv1_2 = DoubleConv(nb_filter[1]*2+nb_filter[2], nb_filter[1])
+        self.conv2_2 = DoubleConv(nb_filter[2]*2+nb_filter[3], nb_filter[2])
 
-        self.conv0_3 = DoubleConv(nb_filter[0]*3+nb_filter[1], nb_filter[0], nb_filter[0])
-        self.conv1_3 = DoubleConv(nb_filter[1]*3+nb_filter[2], nb_filter[1], nb_filter[1])
+        self.conv0_3 = DoubleConv(nb_filter[0]*3+nb_filter[1], nb_filter[0])
+        self.conv1_3 = DoubleConv(nb_filter[1]*3+nb_filter[2], nb_filter[1])
 
-        self.conv0_4 = DoubleConv(nb_filter[0]*4+nb_filter[1], nb_filter[0], nb_filter[0])
+        self.conv0_4 = DoubleConv(nb_filter[0]*4+nb_filter[1], nb_filter[0])
 
         if self.linear_fc:
             self.net_final = torch.nn.Sequential(
@@ -273,7 +214,7 @@ class NestedUNet2(torch.nn.Module):
                     padding=1
                 ),
                 torch.nn.BatchNorm2d(out_channels),
-                torch.nn.ELU(alpha=0.1, inplace=False),
+                torch.nn.ReLU(inplace=False),
             )
 
     def __call__(self, *args, **kwargs):

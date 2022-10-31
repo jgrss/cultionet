@@ -402,7 +402,6 @@ class CultioLitModel(pl.LightningModule):
         distance_ori, distance, edge, crop, star = self.forward(
             batch, batch_idx
         )
-        distance = distance[:, 1].contiguous().view(-1)
         edge, crop = self.predict_probas(
             edge, crop
         )
@@ -507,11 +506,11 @@ class CultioLitModel(pl.LightningModule):
         )
 
         dist_mae = self.dist_mae(
-            distance[:, 1].contiguous().view(-1),
+            distance.contiguous().view(-1),
             batch.bdist.contiguous().view(-1)
         )
         dist_mse = self.dist_mse(
-            distance[:, 1].contiguous().view(-1),
+            distance.contiguous().view(-1),
             batch.bdist.contiguous().view(-1)
         )
         # Get the class probabilities
@@ -605,7 +604,7 @@ class CultioLitModel(pl.LightningModule):
             2, dtype=self.dtype, device=self.device
         )
 
-        self.dist_loss = QuantileLoss(quantiles=(0.1, 0.5, 0.9))
+        self.dist_loss = torch.nn.MSELoss()
         self.edge_loss = TanimotoDistanceLoss(
             volume=self.volume,
             inputs_are_logits=True,

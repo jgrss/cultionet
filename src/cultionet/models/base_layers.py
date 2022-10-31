@@ -1,6 +1,7 @@
 import typing as T
 
 import torch
+from torch_geometric import nn
 
 
 class Permute(torch.nn.Module):
@@ -15,33 +16,51 @@ class Permute(torch.nn.Module):
         return x.permute(*self.axis_order)
 
 
-class ResConv(torch.nn.Module):
-    """2d residual convolution
+class ResAdd(torch.nn.Module):
+    def __init__(self):
+        super(ResAdd, self).__init__()
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        return x + y
+
+
+class DoubleResConv(torch.nn.Module):
+    """A double residual convolution layer
     """
     def __init__(
         self,
         in_channels: int,
-        out_channels: int,
-        kernel_size: int = 3,
-        padding: int = 1,
-        dilation: int = 1
+        out_channels: int
     ):
-        super(ResConv, self).__init__()
+        super(DoubleResConv, self).__init__()
 
-        self.conv = torch.nn.Conv2d(
-            in_channels,
-            out_channels,
-            kernel_size=kernel_size,
-            padding=padding,
-            dilation=dilation,
-            bias=False
+        conv1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        conv2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=2, dilation=2)
+        batchnorm_layer = torch.nn.BatchNorm2d(out_channels)
+        activate_layer = torch.nn.ReLU(inplace=False)
+        add_layer = ResAdd()
+
+        self.seq = nn.Sequential(
+            'x',
+            [
+                (conv1, 'x -> h1'),
+                (batchnorm_layer, 'h1 -> h'),
+                (activate_layer, 'h -> h'),
+                (conv2, 'h -> h'),
+                (batchnorm_layer, 'h -> h'),
+                (add_layer, 'h, h1 -> h'),
+                (activate_layer, 'h -> h')
+            ]
         )
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.conv(x) + x
+        return self.seq(x)
 
 
 class DoubleConv(torch.nn.Module):
@@ -50,17 +69,14 @@ class DoubleConv(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        mid_channels: int,
         out_channels: int
     ):
         super(DoubleConv, self).__init__()
 
-        conv1 = torch.nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False)
-        conv2 = ResConv(mid_channels, mid_channels, kernel_size=3, padding=2, dilation=2)
-        conv3 = ResConv(mid_channels, out_channels, kernel_size=3, padding=3, dilation=3)
-        batchnorm_layer = torch.nn.BatchNorm2d(mid_channels)
-        batchnorm_last_layer = torch.nn.BatchNorm2d(out_channels)
-        activate_layer = torch.nn.SiLU(inplace=False)
+        conv1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        conv2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        batchnorm_layer = torch.nn.BatchNorm2d(out_channels)
+        activate_layer = torch.nn.ELU(alpha=0.1, inplace=False)
 
         self.seq = torch.nn.Sequential(
             conv1,
@@ -68,9 +84,6 @@ class DoubleConv(torch.nn.Module):
             activate_layer,
             conv2,
             batchnorm_layer,
-            activate_layer,
-            conv3,
-            batchnorm_last_layer,
             activate_layer
         )
 
