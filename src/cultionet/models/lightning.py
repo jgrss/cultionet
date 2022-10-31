@@ -469,7 +469,10 @@ class CultioLitModel(pl.LightningModule):
             (batch.y > 0) & (batch.y < self.edge_class), 1, 0
         ).long()
 
-        dist_loss = self.dist_loss(distance, batch.bdist)
+        dist_loss = self.dist_loss(
+            distance.contiguous().view(-1),
+            batch.bdist.contiguous().view(-1)
+        )
         edge_loss = self.edge_loss(edge, true_edge)
         crop_loss = self.crop_loss(crop, true_crop)
         star_loss = self.crop_loss(star, true_crop)

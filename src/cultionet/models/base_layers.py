@@ -40,7 +40,7 @@ class DoubleResConv(torch.nn.Module):
         conv1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
         conv2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=2, dilation=2)
         batchnorm_layer = torch.nn.BatchNorm2d(out_channels)
-        activate_layer = torch.nn.ReLU(inplace=False)
+        activate_layer = torch.nn.ELU(alpha=0.1, inplace=False)
         add_layer = ResAdd()
 
         self.seq = nn.Sequential(

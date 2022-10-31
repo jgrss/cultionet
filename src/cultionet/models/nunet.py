@@ -72,7 +72,7 @@ class AttentionGate(torch.nn.Module):
                 (conv_x, 'x -> x'),
                 (conv_g, 'g -> g'),
                 (self.add, 'x, g -> x'),
-                (torch.nn.ReLU(inplace=False), 'x -> x'),
+                (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x'),
                 (conv1d, 'x -> x'),
                 (torch.nn.Sigmoid(), 'x -> x')
             ]
@@ -166,7 +166,7 @@ class NestedUNet2(torch.nn.Module):
                     nb_filter[0]+nb_filter[0], out_side_channels, kernel_size=3, padding=1
                 ),
                 torch.nn.BatchNorm2d(out_side_channels),
-                torch.nn.ReLU(inplace=False)
+                torch.nn.ELU(alpha=0.1, inplace=False)
             )
 
         self.conv0_0 = DoubleConv(in_channels, nb_filter[0])
@@ -198,7 +198,7 @@ class NestedUNet2(torch.nn.Module):
                     padding=1
                 ),
                 torch.nn.BatchNorm2d(nb_filter[0]),
-                torch.nn.ReLU(inplace=False),
+                torch.nn.ELU(alpha=0.1, inplace=False),
                 Permute((0, 2, 3, 1)),
                 torch.nn.Linear(
                     nb_filter[0], out_channels
@@ -214,7 +214,7 @@ class NestedUNet2(torch.nn.Module):
                     padding=1
                 ),
                 torch.nn.BatchNorm2d(out_channels),
-                torch.nn.ReLU(inplace=False),
+                torch.nn.ELU(alpha=0.1, inplace=False),
             )
 
     def __call__(self, *args, **kwargs):

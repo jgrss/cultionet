@@ -21,7 +21,7 @@ class RegressionConv(torch.nn.Module):
             padding=0
         )
         batchnorm_layer1 = torch.nn.BatchNorm2d(mid_channels)
-        activate_layer = torch.nn.ReLU(inplace=False)
+        activate_layer = torch.nn.ELU(alpha=0.1, inplace=False)
 
         conv2 = torch.nn.Conv2d(
             mid_channels,
