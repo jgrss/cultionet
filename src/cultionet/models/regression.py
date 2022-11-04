@@ -1,3 +1,4 @@
+from . import model_utils
 from .base_layers import Permute
 
 import torch
@@ -12,6 +13,8 @@ class RegressionConv(torch.nn.Module):
         dropout: float = 0.1
     ):
         super(RegressionConv, self).__init__()
+
+        cg = model_utils.ConvToGraph()
 
         conv1 = torch.nn.Conv2d(
             in_channels,
@@ -63,5 +66,7 @@ class RegressionConv(torch.nn.Module):
             Permute((0, 3, 1, 2))
         )
 
-    def forward(self, x: torch.Tensor):
+    def forward(
+        self, x: torch.Tensor
+    ) -> torch.Tensor:
         return self.seq(x)
