@@ -1,12 +1,10 @@
 import typing as T
 
 from . import model_utils
-from .nunet import NestedUNet2
+from .nunet import NestedUNet2, NestedUNet3
 from .convstar import StarRNN
-from .regression import RegressionConv
 
 import torch
-from torch_geometric import nn
 from torch_geometric.data import Data
 
 
@@ -51,20 +49,21 @@ class CultioGraphNet(torch.nn.Module):
             num_classes_last=self.filters
         )
         base_in_channels = self.filters * 2
-        # Distance layer (+1)
-        self.dist_model = RegressionConv(
+        # Distance layers (+5)
+        self.nunet3_model = NestedUNet3(
             in_channels=base_in_channels,
-            mid_channels=self.filters,
             out_channels=1,
-            dropout=dropout
+            init_filter=self.filters,
+            deep_supervision=True
         )
         # Nested UNet (+2 edges +2 crops)
-        self.nunet_model = NestedUNet2(
-            in_channels=base_in_channels+1,
+        self.nunet2_model = NestedUNet2(
+            in_channels=base_in_channels+5,
             out_channels=2,
             out_side_channels=2,
             init_filter=self.filters,
-            boundary_layer=True
+            boundary_layer=True,
+            deep_supervision=True
         )
 
     def __call__(self, *args, **kwargs):
@@ -94,18 +93,31 @@ class CultioGraphNet(torch.nn.Module):
         logits_star_last = self.cg(logits_star_last)
 
         # (2) Distance stream
-        logits_distance = self.dist_model(
+        logits_distance = self.nunet3_model(
             self.gc(
                 logits_star_last, batch_size, height, width
             )
         )
-        logits_distance = self.cg(logits_distance)
+        logits_distance_0 = self.cg(logits_distance['mask_0'])
+        logits_distance_1 = self.cg(logits_distance['mask_1'])
+        logits_distance_2 = self.cg(logits_distance['mask_2'])
+        logits_distance_3 = self.cg(logits_distance['mask_3'])
+        logits_distance_4 = self.cg(logits_distance['mask_4'])
 
         # CONCAT
-        h = torch.cat([logits_star_last, logits_distance], dim=1)
+        h = torch.cat(
+            [
+                logits_star_last,
+                logits_distance_0,
+                logits_distance_1,
+                logits_distance_2,
+                logits_distance_3,
+                logits_distance_4
+            ], dim=1
+        )
 
         # (3) Nested UNet for crop and edges
-        nunet_stream = self.nunet_model(
+        nunet_stream = self.nunet2_model(
             self.gc(
                 h, batch_size, height, width
             )
@@ -114,7 +126,11 @@ class CultioGraphNet(torch.nn.Module):
         logits_edges = self.cg(nunet_stream['boundary'])
 
         return (
-            logits_distance,
+            logits_distance_0,
+            logits_distance_1,
+            logits_distance_2,
+            logits_distance_3,
+            logits_distance_4,
             logits_edges,
             logits_crop
         )
