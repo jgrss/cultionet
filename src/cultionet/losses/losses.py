@@ -209,6 +209,32 @@ class AngularLoss(object):
 
 
 @attr.s
+class MSELoss(object):
+    """MSE loss
+    """
+    def __attrs_post_init__(self):
+        self.loss_func = torch.nn.MSELoss()
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Performs a single forward pass
+
+        Args:
+            inputs: Predictions from model.
+            targets: Ground truth values.
+
+        Returns:
+            Loss (float)
+        """
+        return self.loss_func(
+            inputs.contiguous().view(-1),
+            targets.contiguous().view(-1)
+        )
+
+
+@attr.s
 class HuberLoss(object):
     """Huber loss
     """

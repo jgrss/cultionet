@@ -10,6 +10,7 @@ from . import model_utils
 from .base_layers import (
     SingleConv,
     DoubleConv,
+    DoubleResConv,
     Permute,
     PoolConv,
     PoolConvSingle
@@ -21,6 +22,10 @@ from torch_geometric import nn
 
 
 def weights_init_kaiming(m):
+    """
+    Source:
+        https://github.com/ZJUGiveLab/UNet-Version/blob/master/models/init_weights.py
+    """
     classname = m.__class__.__name__
     if classname.find('Conv') != -1:
         torch.nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
@@ -198,25 +203,25 @@ class NestedUNet2(torch.nn.Module):
                 padding=0
             )
 
-        self.conv0_0 = DoubleConv(in_channels, nb_filter[0])
+        self.conv0_0 = DoubleResConv(in_channels, nb_filter[0])
         self.conv1_0 = PoolConv(nb_filter[0], nb_filter[1], dropout=0.25)
         self.conv2_0 = PoolConv(nb_filter[1], nb_filter[2], dropout=0.5)
         self.conv3_0 = PoolConv(nb_filter[2], nb_filter[3], dropout=0.5)
         self.conv4_0 = PoolConv(nb_filter[3], nb_filter[4], dropout=0.5)
 
-        self.conv0_1 = DoubleConv(nb_filter[0]+nb_filter[1], nb_filter[0])
+        self.conv0_1 = DoubleResConv(nb_filter[0]+nb_filter[1], nb_filter[0])
         self.conv1_1 = DoubleConv(nb_filter[1]+nb_filter[2], nb_filter[1])
         self.conv2_1 = DoubleConv(nb_filter[2]+nb_filter[3], nb_filter[2])
         self.conv3_1 = DoubleConv(nb_filter[3]+nb_filter[4], nb_filter[3])
 
-        self.conv0_2 = DoubleConv(nb_filter[0]*2+nb_filter[1], nb_filter[0])
+        self.conv0_2 = DoubleResConv(nb_filter[0]*2+nb_filter[1], nb_filter[0])
         self.conv1_2 = DoubleConv(nb_filter[1]*2+nb_filter[2], nb_filter[1])
         self.conv2_2 = DoubleConv(nb_filter[2]*2+nb_filter[3], nb_filter[2])
 
-        self.conv0_3 = DoubleConv(nb_filter[0]*3+nb_filter[1], nb_filter[0])
+        self.conv0_3 = DoubleResConv(nb_filter[0]*3+nb_filter[1], nb_filter[0])
         self.conv1_3 = DoubleConv(nb_filter[1]*3+nb_filter[2], nb_filter[1])
 
-        self.conv0_4 = DoubleConv(nb_filter[0]*4+nb_filter[1], nb_filter[0])
+        self.conv0_4 = DoubleResConv(nb_filter[0]*4+nb_filter[1], nb_filter[0])
 
         if self.linear_fc:
             self.net_final = torch.nn.Sequential(
@@ -431,6 +436,10 @@ class NestedUNet3(torch.nn.Module):
         self.conv2_0 = PoolConv(nb_filter[1], nb_filter[2], dropout=0.1)
         self.conv3_0 = PoolConv(nb_filter[2], nb_filter[3], dropout=0.1)
         self.conv4_0 = PoolConv(nb_filter[3], nb_filter[4], dropout=0.1)
+        self.conv4_0_side = SingleConv(nb_filter[4]+up_channels, nb_filter[0])
+        self.conv3_1_side = SingleConv(up_channels+nb_filter[0], nb_filter[0])
+        self.conv2_2_side = SingleConv(up_channels+nb_filter[0], nb_filter[0])
+        self.conv1_3_side = SingleConv(up_channels+nb_filter[0], nb_filter[0])
 
         # Connect 3
         self.conv0_0_3_1_con = PoolConvSingle(nb_filter[0], nb_filter[0], pool_size=8)
@@ -464,16 +473,33 @@ class NestedUNet3(torch.nn.Module):
         self.conv4_0_0_4_con = SingleConv(nb_filter[4], nb_filter[0])
         self.conv0_4 = SingleConv(up_channels, up_channels)
 
+        if linear_fc:
+            self.final = torch.nn.Sequential(
+                torch.nn.ELU(alpha=0.1, inplace=False),
+                Permute((0, 2, 3, 1)),
+                torch.nn.Linear(
+                    up_channels, out_channels
+                ),
+                Permute((0, 3, 1, 2))
+            )
+            self.final_side = torch.nn.Sequential(
+                torch.nn.ELU(alpha=0.1, inplace=False),
+                Permute((0, 2, 3, 1)),
+                torch.nn.Linear(
+                    nb_filter[0], out_channels
+                ),
+                Permute((0, 3, 1, 2))
+            )
+        else:
+            self.final = torch.nn.Conv2d(
+                up_channels, out_channels, kernel_size=3, padding=1
+            )
+            self.final_side = torch.nn.Conv2d(
+                nb_filter[0], out_channels, kernel_size=3, padding=1
+            )
+
         if self.deep_supervision:
             if linear_fc:
-                self.final_0 = torch.nn.Sequential(
-                    torch.nn.ELU(alpha=0.1, inplace=False),
-                    Permute((0, 2, 3, 1)),
-                    torch.nn.Linear(
-                        up_channels, out_channels
-                    ),
-                    Permute((0, 3, 1, 2))
-                )
                 self.final_1 = torch.nn.Sequential(
                     torch.nn.ELU(alpha=0.1, inplace=False),
                     Permute((0, 2, 3, 1)),
@@ -507,9 +533,6 @@ class NestedUNet3(torch.nn.Module):
                     Permute((0, 3, 1, 2))
                 )
             else:
-                self.final_0 = torch.nn.Conv2d(
-                    up_channels, out_channels, kernel_size=3, padding=1
-                )
                 self.final_1 = torch.nn.Conv2d(
                     up_channels, out_channels, kernel_size=3, padding=1
                 )
@@ -522,19 +545,8 @@ class NestedUNet3(torch.nn.Module):
                 self.final_4 = torch.nn.Conv2d(
                     nb_filter[4], out_channels, kernel_size=3, padding=1
                 )
-        else:
-            if linear_fc:
-                self.final = torch.nn.Sequential(
-                    torch.nn.ELU(alpha=0.1, inplace=False),
-                    Permute((0, 2, 3, 1)),
-                    torch.nn.Linear(
-                        up_channels, out_channels
-                    ),
-                    Permute((0, 3, 1, 2))
-                )
-            else:
-                self.final = torch.nn.Conv2d(
-                    up_channels, out_channels, kernel_size=3, padding=1
+                self.final_side = torch.nn.Conv2d(
+                    nb_filter[0], out_channels, kernel_size=3, padding=1
                 )
 
         # Initialise weights
@@ -579,6 +591,13 @@ class NestedUNet3(torch.nn.Module):
             )
         )
 
+        # Side
+        s4_0 = self.conv4_0_side(
+            torch.cat(
+                [x3_1, self.up(x4_0, size=x3_1.shape[-2:])], dim=1
+            )
+        )
+
         # 1/4 connection
         x0_0_x2_2_con = self.conv0_0_2_2_con(x0_0)
         x1_0_x2_2_con = self.conv1_0_2_2_con(x1_0)
@@ -595,6 +614,13 @@ class NestedUNet3(torch.nn.Module):
                     x4_0_x2_2_con
                 ],
                 dim=1
+            )
+        )
+
+        # Side
+        s3_1 = self.conv3_1_side(
+            torch.cat(
+                [x2_2, self.up(s4_0, size=x2_2.shape[-2:])], dim=1
             )
         )
 
@@ -617,6 +643,13 @@ class NestedUNet3(torch.nn.Module):
             )
         )
 
+        # Side
+        s2_2 = self.conv2_2_side(
+            torch.cat(
+                [x1_3, self.up(s3_1, size=x1_3.shape[-2:])], dim=1
+            )
+        )
+
         # 1/1 connection
         x0_0_x0_4_con = self.conv0_0_0_4_con(x0_0)
         x1_3_x0_4_con = self.conv1_3_0_4_con(self.up(x1_3, size=x0_0.shape[-2:]))
@@ -636,22 +669,34 @@ class NestedUNet3(torch.nn.Module):
             )
         )
 
+        # Side
+        s1_3 = self.conv1_3_side(
+            torch.cat(
+                [x0_4, self.up(s2_2, size=x0_4.shape[-2:])], dim=1
+            )
+        )
+
+        side = self.final_side(s1_3)
+        mask = self.final(x0_4)
+
         if self.deep_supervision:
-            mask_0 = self.final_0(x0_4)
             mask_1 = self.final_1(self.up(x1_3, size=x0_0.shape[-2:]))
             mask_2 = self.final_2(self.up(x2_2, size=x0_0.shape[-2:]))
             mask_3 = self.final_3(self.up(x3_1, size=x0_0.shape[-2:]))
             mask_4 = self.final_4(self.up(x4_0, size=x0_0.shape[-2:]))
 
             out = {
-                'mask_0': mask_0,
+                'mask_0': mask,
                 'mask_1': mask_1,
                 'mask_2': mask_2,
                 'mask_3': mask_3,
-                'mask_4': mask_4
+                'mask_4': mask_4,
+                'side': side
             }
         else:
-            mask = self.final(x0_4)
-            out = {'mask': mask}
+            out = {
+                'mask': mask,
+                'side': side
+            }
 
         return out

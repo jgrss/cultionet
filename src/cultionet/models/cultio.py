@@ -8,13 +8,15 @@ import torch
 from torch_geometric.data import Data
 
 
-class CultioGraphNet(torch.nn.Module):
-    """The cultionet graph network model framework
+class CultioNet(torch.nn.Module):
+    """The cultionet model framework
 
     Args:
         ds_features (int): The total number of dataset features (bands x time).
         ds_time_features (int): The number of dataset time features in each band/channel.
         filters (int): The number of output filters for each stream.
+        star_rnn_hidden_dim (int): The number of hidden features for the ConvSTAR layer.
+        star_rnn_n_layers (int): The number of ConvSTAR layers.
         num_classes (int): The number of output classes.
         dropout (Optional[float]): The dropout fraction for the transformer stream.
     """
@@ -28,7 +30,7 @@ class CultioGraphNet(torch.nn.Module):
         num_classes: int = 2,
         dropout: T.Optional[float] = 0.1
     ):
-        super(CultioGraphNet, self).__init__()
+        super(CultioNet, self).__init__()
 
         # Total number of features (time x bands/indices/channels)
         self.ds_num_features = ds_features
@@ -58,7 +60,7 @@ class CultioGraphNet(torch.nn.Module):
         )
         # Nested UNet (+2 edges +2 crops)
         self.nunet2_model = NestedUNet2(
-            in_channels=base_in_channels+5,
+            in_channels=base_in_channels+6,
             out_channels=2,
             out_side_channels=2,
             init_filter=self.filters,
@@ -103,6 +105,7 @@ class CultioGraphNet(torch.nn.Module):
         logits_distance_2 = self.cg(logits_distance['mask_2'])
         logits_distance_3 = self.cg(logits_distance['mask_3'])
         logits_distance_4 = self.cg(logits_distance['mask_4'])
+        logits_ori = self.cg(logits_distance['side'])
 
         # CONCAT
         h = torch.cat(
@@ -112,7 +115,8 @@ class CultioGraphNet(torch.nn.Module):
                 logits_distance_1,
                 logits_distance_2,
                 logits_distance_3,
-                logits_distance_4
+                logits_distance_4,
+                logits_ori
             ], dim=1
         )
 
@@ -131,6 +135,7 @@ class CultioGraphNet(torch.nn.Module):
             logits_distance_2,
             logits_distance_3,
             logits_distance_4,
+            logits_ori,
             logits_edges,
             logits_crop
         )

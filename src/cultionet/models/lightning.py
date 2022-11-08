@@ -1,11 +1,8 @@
 import typing as T
 from pathlib import Path
 
-from ..losses import (
-    QuantileLoss,
-    TanimotoDistanceLoss
-)
-from .cultio import CultioGraphNet
+from ..losses import MSELoss, TanimotoDistanceLoss
+from .cultio import CultioNet
 from .maskcrnn import BFasterRCNN
 from . import model_utils
 
@@ -346,7 +343,7 @@ class CultioLitModel(pl.LightningModule):
         self.edge_weights = edge_weights
         self.edge_class = num_classes
 
-        self.cultionet_model = CultioGraphNet(
+        self.cultionet_model = CultioNet(
             ds_features=num_features,
             ds_time_features=num_time_features,
             filters=filters,
@@ -369,7 +366,14 @@ class CultioLitModel(pl.LightningModule):
     def forward(
         self, batch: Data, batch_idx: int = None
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor
     ]:
         """Performs a single model forward pass
 
@@ -378,9 +382,9 @@ class CultioLitModel(pl.LightningModule):
             edge: Probability of an edge [0,1].
             crop: Probability of crop [0,1].
         """
-        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop = self.cultionet_model(batch)
+        dist_0, dist_1, dist_2, dist_3, dist_4, dist_ori, edge, crop = self.cultionet_model(batch)
 
-        return dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop
+        return dist_0, dist_1, dist_2, dist_3, dist_4, dist_ori, edge, crop
 
     @staticmethod
     def get_cuda_memory():
@@ -394,18 +398,25 @@ class CultioLitModel(pl.LightningModule):
         batch: Data,
         batch_idx: int = None
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor
     ]:
         """A prediction step for Lightning
         """
-        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop = self.forward(
+        dist_0, dist_1, dist_2, dist_3, dist_4, dist_ori, edge, crop = self.forward(
             batch, batch_idx
         )
         edge, crop = self.predict_probas(
             edge, crop
         )
 
-        return dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop
+        return dist_0, dist_1, dist_2, dist_3, dist_4, dist_ori, edge, crop
 
     def predict_probas(
         self,
@@ -439,6 +450,7 @@ class CultioLitModel(pl.LightningModule):
         dist_2: torch.Tensor,
         dist_3: torch.Tensor,
         dist_4: torch.Tensor,
+        dist_ori: torch.Tensor,
         edge: torch.Tensor,
         crop: torch.Tensor
     ):
@@ -471,36 +483,43 @@ class CultioLitModel(pl.LightningModule):
         ).long()
 
         dist_loss_0 = self.dist_loss_0(
-            dist_0.contiguous().view(-1),
-            batch.bdist.contiguous().view(-1)
+            dist_0, batch.bdist
         )
         dist_loss_1 = self.dist_loss_1(
-            dist_1.contiguous().view(-1),
-            batch.bdist.contiguous().view(-1)
+            dist_1, batch.bdist
         )
         dist_loss_2 = self.dist_loss_2(
-            dist_2.contiguous().view(-1),
-            batch.bdist.contiguous().view(-1)
+            dist_2, batch.bdist
         )
         dist_loss_3 = self.dist_loss_3(
-            dist_3.contiguous().view(-1),
-            batch.bdist.contiguous().view(-1)
+            dist_3, batch.bdist
         )
         dist_loss_4 = self.dist_loss_4(
-            dist_4.contiguous().view(-1),
-            batch.bdist.contiguous().view(-1)
+            dist_4, batch.bdist
+        )
+        ori_loss = self.ori_loss(
+            dist_ori, batch.ori
         )
         edge_loss = self.edge_loss(edge, true_edge)
         crop_loss = self.crop_loss(crop, true_crop)
 
-        loss = dist_loss_0 + dist_loss_1*0.75 + dist_loss_2*0.5 + dist_loss_3*0.25 + dist_loss_4*0.1 + edge_loss + crop_loss
+        loss = (
+            dist_loss_0
+            + dist_loss_1 * 0.75
+            + dist_loss_2 * 0.5
+            + dist_loss_3 * 0.25
+            + dist_loss_4 * 0.1
+            + ori_loss
+            + edge_loss
+            + crop_loss
+        )
 
         return loss
 
     def training_step(self, batch: Data, batch_idx: int = None):
         """Executes one training step
         """
-        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop = self(batch)
+        dist_0, dist_1, dist_2, dist_3, dist_4, dist_ori, edge, crop = self(batch)
         loss = self.calc_loss(
             batch,
             dist_0,
@@ -508,6 +527,7 @@ class CultioLitModel(pl.LightningModule):
             dist_2,
             dist_3,
             dist_4,
+            dist_ori,
             edge,
             crop
         )
@@ -516,7 +536,7 @@ class CultioLitModel(pl.LightningModule):
         return loss
 
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
-        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop = self(batch)
+        dist_0, dist_1, dist_2, dist_3, dist_4, dist_ori, edge, crop = self(batch)
         loss = self.calc_loss(
             batch,
             dist_0,
@@ -524,16 +544,17 @@ class CultioLitModel(pl.LightningModule):
             dist_2,
             dist_3,
             dist_4,
+            dist_ori,
             edge,
             crop
         )
 
         dist_mae = self.dist_mae(
-            dist_4.contiguous().view(-1),
+            dist_0.contiguous().view(-1),
             batch.bdist.contiguous().view(-1)
         )
         dist_mse = self.dist_mse(
-            dist_4.contiguous().view(-1),
+            dist_0.contiguous().view(-1),
             batch.bdist.contiguous().view(-1)
         )
         # Get the class probabilities
@@ -627,11 +648,12 @@ class CultioLitModel(pl.LightningModule):
             2, dtype=self.dtype, device=self.device
         )
 
-        self.dist_loss_0 = torch.nn.MSELoss()
-        self.dist_loss_1 = torch.nn.MSELoss()
-        self.dist_loss_2 = torch.nn.MSELoss()
-        self.dist_loss_3 = torch.nn.MSELoss()
-        self.dist_loss_4 = torch.nn.MSELoss()
+        self.dist_loss_0 = MSELoss()
+        self.dist_loss_1 = MSELoss()
+        self.dist_loss_2 = MSELoss()
+        self.dist_loss_3 = MSELoss()
+        self.dist_loss_4 = MSELoss()
+        self.ori_loss = MSELoss()
         self.edge_loss = TanimotoDistanceLoss(
             volume=self.volume,
             inputs_are_logits=True,
