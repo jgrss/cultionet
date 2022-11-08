@@ -60,7 +60,7 @@ class CultioNet(torch.nn.Module):
         )
         # Nested UNet (+2 edges +2 crops)
         self.nunet2_model = NestedUNet2(
-            in_channels=base_in_channels+6,
+            in_channels=base_in_channels+5,
             out_channels=2,
             out_side_channels=2,
             init_filter=self.filters,
@@ -105,7 +105,6 @@ class CultioNet(torch.nn.Module):
         logits_distance_2 = self.cg(logits_distance['mask_2'])
         logits_distance_3 = self.cg(logits_distance['mask_3'])
         logits_distance_4 = self.cg(logits_distance['mask_4'])
-        logits_ori = self.cg(logits_distance['side'])
 
         # CONCAT
         h = torch.cat(
@@ -115,8 +114,7 @@ class CultioNet(torch.nn.Module):
                 logits_distance_1,
                 logits_distance_2,
                 logits_distance_3,
-                logits_distance_4,
-                logits_ori
+                logits_distance_4
             ], dim=1
         )
 
@@ -135,7 +133,6 @@ class CultioNet(torch.nn.Module):
             logits_distance_2,
             logits_distance_3,
             logits_distance_4,
-            logits_ori,
             logits_edges,
             logits_crop
         )

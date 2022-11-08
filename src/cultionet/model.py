@@ -481,9 +481,9 @@ class LightningGTiffWriter(BasePredictionWriter):
                     'transform': src.gw.transform,
                     'height': src.gw.nrows,
                     'width': src.gw.ncols,
-                    # Orientation (+1) + distance (+1) + edge (+1) + crop (+1) crop types (+N)
+                    # distance (+1) + edge (+1) + crop (+1) crop types (+N)
                     # `num_classes` includes background
-                    'count': 4 + num_classes - 1,
+                    'count': 3 + num_classes - 1,
                     'dtype': 'uint16',
                     'blockxsize': 64 if 64 < src.gw.ncols else src.gw.ncols,
                     'blockysize': 64 if 64 < src.gw.nrows else src.gw.nrows,
@@ -502,14 +502,13 @@ class LightningGTiffWriter(BasePredictionWriter):
     def reshape_predictions(
         self,
         batch: Data,
-        distance_ori_batch: torch.Tensor,
         distance_batch: torch.Tensor,
         edge_batch: torch.Tensor,
         crop_batch: torch.Tensor,
         crop_type_batch: T.Union[torch.Tensor, None],
         batch_index: int
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, T.Union[torch.Tensor, None]
+        torch.Tensor, torch.Tensor, torch.Tensor, T.Union[torch.Tensor, None]
     ]:
         pad_slice2d = (
             slice(
@@ -532,9 +531,6 @@ class LightningGTiffWriter(BasePredictionWriter):
                 int(batch.width[batch_index])-int(batch.col_pad_after[batch_index])
             )
         )
-        distance_ori_batch = distance_ori_batch.reshape(
-            int(batch.height[batch_index]), int(batch.width[batch_index])
-        )[pad_slice2d].contiguous().view(-1)[:, None]
         distance_batch = distance_batch.reshape(
             int(batch.height[batch_index]), int(batch.width[batch_index])
         )[pad_slice2d].contiguous().view(-1)[:, None]
@@ -552,12 +548,12 @@ class LightningGTiffWriter(BasePredictionWriter):
                 num_classes, int(batch.height[batch_index]), int(batch.width[batch_index])
             )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, num_classes)
 
-        return distance_ori_batch, distance_batch, edge_batch, crop_batch, crop_type_batch
+        return distance_batch, edge_batch, crop_batch, crop_type_batch
 
     def write_on_batch_end(
         self, trainer, pl_module, prediction, batch_indices, batch, batch_idx, dataloader_idx
     ):
-        distance, dist_1, dist_2, dist_3, dist_4, distance_ori, edge, crop = prediction
+        distance, dist_1, dist_2, dist_3, dist_4, edge, crop = prediction
         crop_type = None
         for batch_index in batch.batch.unique():
             mask = batch.batch == batch_index
@@ -573,9 +569,8 @@ class LightningGTiffWriter(BasePredictionWriter):
                 height=int(batch.window_pad_height[batch_index]),
                 width=int(batch.window_pad_width[batch_index])
             )
-            distance_ori_batch, distance_batch, edge_batch, crop_batch, crop_type_batch = self.reshape_predictions(
+            distance_batch, edge_batch, crop_batch, crop_type_batch = self.reshape_predictions(
                 batch=batch,
-                distance_ori_batch=distance_ori[mask],
                 distance_batch=distance[mask],
                 edge_batch=edge[mask],
                 crop_batch=crop[mask],
@@ -585,7 +580,6 @@ class LightningGTiffWriter(BasePredictionWriter):
             if crop_type_batch is None:
                 crop_type_batch = torch.zeros((crop_batch.size(0), 2), dtype=crop_batch.dtype)
             mo = ModelOutputs(
-                distance_ori=distance_ori_batch,
                 distance=distance_batch,
                 edge=edge_batch,
                 crop=crop_batch,
@@ -694,12 +688,11 @@ def predict(
         norm_batch = norm_batch.to('cuda')
         lit_model = lit_model.to('cuda')
     with torch.no_grad():
-        distance_ori, distance, edge, crop, crop_type = lit_model(norm_batch)
+        distance, edge, crop, crop_type = lit_model(norm_batch)
 
         if include_maskrcnn:
             # TODO: fix this -- separate Mask R-CNN model
             predictions = lit_model.mask_forward(
-                distance_ori=distance_ori,
                 distance=distance,
                 edge=edge,
                 height=norm_batch.height,
@@ -779,7 +772,6 @@ def predict(
                 logger.warning('No fields were identified.')
 
     mo = ModelOutputs(
-        distance_ori=distance_ori,
         distance=distance,
         edge=edge,
         crop=crop,
