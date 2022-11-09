@@ -1103,6 +1103,7 @@ def train_model(args):
         reset_model=args.reset_model,
         auto_lr_find=args.auto_lr_find,
         device=args.device,
+        profiler=args.profiler,
         gradient_clip_val=args.gradient_clip_val,
         early_stopping_patience=args.patience,
         weight_decay = args.weight_decay,

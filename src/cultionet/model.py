@@ -234,6 +234,7 @@ def fit(
     reset_model: T.Optional[bool] = False,
     auto_lr_find: T.Optional[bool] = False,
     device: T.Optional[str] = 'gpu',
+    profiler: T.Optional[str] = None,
     weight_decay: T.Optional[float] = 1e-5,
     precision: T.Optional[int] = 32,
     stochastic_weight_averaging: T.Optional[bool] = False,
@@ -262,6 +263,7 @@ def fit(
             an existing model.
         auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
         device (Optional[str]): The device to train on. Choices are ['cpu', 'gpu'].
+        profiler (Optional[str]): A profiler level. Choices are [None, 'simple', 'advanced'].
         weight_decay (Optional[float]): The weight decay passed to the optimizer. Default is 1e-5.
         precision (Optional[int]): The data precision. Default is 32.
         stochastic_weight_averaging (Optional[bool]): Whether to use stochastic weight averaging.
@@ -363,7 +365,7 @@ def fit(
         num_processes=0,
         accelerator=device,
         log_every_n_steps=10,
-        profiler=None,
+        profiler=profiler,
         deterministic=False,
         benchmark=False
     )

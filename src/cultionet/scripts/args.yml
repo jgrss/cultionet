@@ -509,6 +509,16 @@ train:
     kwargs:
       default: 0
       type: '&float'
+  profiler:
+    short: ''
+    long: profiler
+    help: A profiler to level
+    kwargs:
+      default: !!null
+      choices:
+        - !!null
+        - simple
+        - advanced
 
 predict:
   predict_year:
