@@ -47,7 +47,7 @@ jobs:
           pip install torch torchvision torchaudio --extra-index-url $TORCH_CPU
           TORCH_VERSION=$(python -c "import torch;print(torch.__version__)")
           PYG_TORCH_CPU="https://data.pyg.org/whl/torch-${TORCH_VERSION}.html"
-          pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f $PYG_TORCH_CPU
+          pip install torch-scatter torch-sparse==0.6.15 torch-cluster torch-spline-conv torch-geometric -f $PYG_TORCH_CPU
           pip install torchmetrics>=0.7.0
         if: steps.cnetenv.outputs.cache-hit != 'true'
       - name: Install cultionet
