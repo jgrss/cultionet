@@ -2,6 +2,16 @@
 
 <!--next-version-placeholder-->
 
+## v1.5.0 (2022-11-9)
+*  PR [#36](https://github.com/jgrss/cultionet/pull/36)
+*  Re-configures the model architecture to improve the distance transform predictions
+*  Improved prediction performance through pytorch-lightning batch predictions
+*  Improves the edge calculations during cultionet create by using geometry boundary
+*  Adds improved performance for mean and standard deviation calculations
+*  Adds experimental orientation
+*  Adds experimental Mask-RCNN
+*  Adds a Docker file for CUDA 11.6
+
 ## v1.4.0 (2022-10-24)
 * Added spatial k-fold cross-validation ([#35](https://github.com/jgrss/cultionet/pull/35))
 
