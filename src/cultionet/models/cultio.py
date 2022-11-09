@@ -1,22 +1,22 @@
 import typing as T
 
 from . import model_utils
-from .nunet import NestedUNet
+from .nunet import NestedUNet2, NestedUNet3
 from .convstar import StarRNN
 
-import numpy as np
 import torch
 from torch_geometric.data import Data
-from torch_geometric import nn
 
 
-class CultioGraphNet(torch.nn.Module):
-    """The cultionet graph network model framework
+class CultioNet(torch.nn.Module):
+    """The cultionet model framework
 
     Args:
         ds_features (int): The total number of dataset features (bands x time).
         ds_time_features (int): The number of dataset time features in each band/channel.
         filters (int): The number of output filters for each stream.
+        star_rnn_hidden_dim (int): The number of hidden features for the ConvSTAR layer.
+        star_rnn_n_layers (int): The number of ConvSTAR layers.
         num_classes (int): The number of output classes.
         dropout (Optional[float]): The dropout fraction for the transformer stream.
     """
@@ -24,11 +24,12 @@ class CultioGraphNet(torch.nn.Module):
         self,
         ds_features: int,
         ds_time_features: int,
-        filters: int = 32,
-        num_classes: int = 2,
-        dropout: T.Optional[float] = 0.1
+        filters: int = 64,
+        star_rnn_hidden_dim: int = 64,
+        star_rnn_n_layers: int = 4,
+        num_classes: int = 2
     ):
-        super(CultioGraphNet, self).__init__()
+        super(CultioNet, self).__init__()
 
         # Total number of features (time x bands/indices/channels)
         self.ds_num_features = ds_features
@@ -37,162 +38,117 @@ class CultioGraphNet(torch.nn.Module):
         # Total number of bands
         self.ds_num_bands = int(self.ds_num_features / self.ds_num_time)
         self.filters = filters
-        num_quantiles = 3
-        num_index_streams = 2
-        base_in_channels = (filters * self.ds_num_bands) * num_index_streams + self.filters
+        self.num_classes = num_classes
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
-        # Transformer stream (+self.filters x self.ds_num_bands)
-        self.transformer = self.mid_sequence_weights(
-            nn.TransformerConv(self.ds_num_time, self.filters, heads=1, edge_dim=2, dropout=dropout)
-        )
-
-        # Nested UNet (+self.filters x self.ds_num_bands)
-        self.nunet = NestedUNet(in_channels=self.ds_num_time, out_channels=self.filters)
+        # Star RNN layer (+star_rnn_hidden_dim +num_classes_last)
+        num_last_channels = self.num_classes if self.num_classes > 2 else star_rnn_hidden_dim
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
-            hidden_dim=32,
-            nclasses=self.filters,
-            n_layers=4
+            hidden_dim=star_rnn_hidden_dim,
+            n_layers=star_rnn_n_layers,
+            num_classes_last=num_last_channels
         )
-
-        # Boundary distances (+num_quantiles) (0.1, 0.5, 0.9)
-        self.dist_layer = self.final_sequence_weights(
-            nn.GCNConv(base_in_channels, self.filters, improved=True),
-            nn.TransformerConv(self.filters, self.filters, heads=1, edge_dim=2, dropout=0.1),
-            self.filters, num_quantiles
+        base_in_channels = star_rnn_hidden_dim + num_last_channels
+        # Distance layers (+5)
+        self.nunet3_model = NestedUNet3(
+            in_channels=base_in_channels,
+            out_channels=1,
+            init_filter=self.filters,
+            deep_supervision=True
         )
-
-        # Edges (+num_classes)
-        self.edge_layer = self.final_sequence_weights_logits(
-            nn.GCNConv(base_in_channels+num_quantiles, self.filters, improved=True),
-            nn.TransformerConv(self.filters, num_classes, heads=1, edge_dim=2, dropout=0.1),
-            self.filters, num_classes
+        # Nested UNet (+2 edges +2 crops)
+        self.nunet2_model = NestedUNet2(
+            in_channels=base_in_channels+5,
+            out_channels=2,
+            out_side_channels=2,
+            init_filter=self.filters,
+            boundary_layer=True,
+            deep_supervision=True
         )
-
-        # Classes (+num_classes)
-        self.class_layer = self.final_sequence_weights_logits(
-            nn.GCNConv(base_in_channels+num_quantiles+num_classes, self.filters, improved=True),
-            nn.TransformerConv(
-                self.filters, num_classes, heads=1, edge_dim=2, dropout=0.1
-            ),
-            self.filters, num_classes
-        )
-
-    @staticmethod
-    def mid_sequence_weights(conv: T.Callable) -> nn.Sequential:
-        return nn.Sequential('x, edge_index, edge_weight',
-                             [
-                                 (conv, 'x, edge_index, edge_weight -> x'),
-                                 (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x')
-                             ])
-
-    @staticmethod
-    def final_sequence_weights(
-        conv1: T.Callable, conv2: T.Callable, mid_channels: int, out_channels: int
-    ) -> nn.Sequential:
-        return nn.Sequential('x, edge_index, edge_weight, edge_weight2d',
-                             [
-                                 (conv1, 'x, edge_index, edge_weight -> x'),
-                                 (nn.BatchNorm(in_channels=mid_channels), 'x -> x'),
-                                 (conv2, 'x, edge_index, edge_weight2d -> x'),
-                                 (nn.BatchNorm(in_channels=mid_channels), 'x -> x'),
-                                 (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x'),
-                                 (torch.nn.Linear(mid_channels, out_channels), 'x -> x')
-                             ])
-
-    @staticmethod
-    def final_sequence_weights_logits(
-        conv1: T.Callable, conv2: T.Callable, mid_channels: int, out_channels: int
-    ) -> nn.Sequential:
-        return nn.Sequential('x, edge_index, edge_weight, edge_weight2d',
-                             [
-                                 (conv1, 'x, edge_index, edge_weight -> x'),
-                                 (nn.BatchNorm(in_channels=mid_channels), 'x -> x'),
-                                 (conv2, 'x, edge_index, edge_weight2d -> x'),
-                                 (nn.BatchNorm(in_channels=out_channels), 'x -> x'),
-                                 (torch.nn.ELU(alpha=0.1, inplace=False), 'x -> x')
-                             ])
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
-    def forward(self, data: Data) -> T.Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, data: Data
+    ) -> T.Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor
+    ]:
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
-        # Transformer on each band time series
-        transformer_stream = []
-        # Iterate over all data features, stepping over time chunks
-        for band in range(0, self.ds_num_features, self.ds_num_time):
-            # Get the current band through all time steps
-            t = self.transformer(
-                data.x[:, band:band+self.ds_num_time],
-                data.edge_index,
-                data.edge_attrs
-            )
-            transformer_stream.append(t)
-        transformer_stream = torch.cat(transformer_stream, dim=1)
 
-        # Nested UNet on each band time series
-        nunet_stream = []
-        for band in range(0, self.ds_num_features, self.ds_num_time):
-            t = self.nunet(
-                data.x[:, band:band+self.ds_num_time],
-                data.edge_index,
-                data.edge_attrs[:, 1],
-                data.batch,
-                height,
-                width
-            )
-            nunet_stream.append(t)
-        nunet_stream = torch.cat(nunet_stream, dim=1)
-
-        # RNN ConvStar
-        # Reshape from (B x C x H x W) -> (B x T x C x H x W)
+        # (1) RNN ConvStar
         star_stream = self.gc(
             data.x, batch_size, height, width
         )
-        nbatch, ntime, height, width = star_stream.shape
+        # Reshape from (B x C x H x W) -> (B x C x T x H x W)
+        # nbatch, ntime, height, width
+        nbatch, __, height, width = star_stream.shape
         star_stream = star_stream.reshape(
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
-        ).permute(0, 2, 1, 3, 4)
-        star_stream = self.star_rnn(star_stream)
-        star_stream = self.cg(star_stream)
+        )
+        # Crop/Non-crop and Crop types
+        logits_star_local, logits_star_last = self.star_rnn(star_stream)
+        logits_star_local = self.cg(logits_star_local)
+        logits_star_last = self.cg(logits_star_last)
 
-        # Concatenate streams
-        h = torch.cat([transformer_stream, nunet_stream, star_stream], dim=1)
+        # (2) Distance stream
+        logits_distance = self.nunet3_model(
+            self.gc(
+                torch.cat(
+                    [
+                        logits_star_local, logits_star_last
+                    ], dim=1
+                ),
+                batch_size,
+                height,
+                width
+            )
+        )
+        logits_distance_0 = self.cg(logits_distance['mask_0'])
+        logits_distance_1 = self.cg(logits_distance['mask_1'])
+        logits_distance_2 = self.cg(logits_distance['mask_2'])
+        logits_distance_3 = self.cg(logits_distance['mask_3'])
+        logits_distance_4 = self.cg(logits_distance['mask_4'])
 
-        # Estimate distance from edges
-        logits_distances = self.dist_layer(
-            h,
-            data.edge_index,
-            data.edge_attrs[:, 1],
-            data.edge_attrs
+        # CONCAT
+        h = torch.cat(
+            [
+                logits_star_local,
+                logits_star_last,
+                logits_distance_0,
+                logits_distance_1,
+                logits_distance_2,
+                logits_distance_3,
+                logits_distance_4
+            ], dim=1
         )
 
-        # Concatenate streams + distances
-        h = torch.cat([h, logits_distances], dim=1)
-
-        # Estimate edges
-        logits_edges = self.edge_layer(
-            h,
-            data.edge_index,
-            data.edge_attrs[:, 1],
-            data.edge_attrs
+        # (3) Nested UNet for crop and edges
+        nunet_stream = self.nunet2_model(
+            self.gc(
+                h, batch_size, height, width
+            )
         )
+        logits_crop = self.cg(nunet_stream['mask'])
+        logits_edges = self.cg(nunet_stream['boundary'])
 
-        # Concatenate streams + distances + edges
-        h = torch.cat([h, logits_edges], dim=1)
-
-        # Estimate all classes
-        logits_labels = self.class_layer(
-            h,
-            data.edge_index,
-            data.edge_attrs[:, 1],
-            data.edge_attrs
+        return (
+            logits_distance_0,
+            logits_distance_1,
+            logits_distance_2,
+            logits_distance_3,
+            logits_distance_4,
+            logits_edges,
+            logits_crop
         )
-
-        return logits_distances, logits_edges, logits_labels

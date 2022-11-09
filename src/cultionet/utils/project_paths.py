@@ -18,8 +18,10 @@ class ProjectPaths:
     proba_path: Path
     figure_path: Path
     data_path: Path
+    classes_info_path: Path
     process_path: Path
     test_process_path: Path
+    predict_process_path: Path
     ckpt_path: Path
     train_path: Path
     test_path: Path
@@ -37,10 +39,14 @@ class ProjectPaths:
         self.process_path.mkdir(exist_ok=True, parents=True)
 
     def get_process_path(self, destination: str) -> Path:
-        return self.process_path if destination == Destinations.train.name else self.test_process_path
+        return self.data_path / destination / 'processed'
 
 
-def setup_paths(project_path: T.Union[str, Path, bytes], append_ts: T.Optional[bool] = True) -> ProjectPaths:
+def setup_paths(
+    project_path: T.Union[str, Path, bytes],
+    append_ts: T.Optional[bool] = True,
+    ckpt_name: T.Optional[str] = 'last.ckpt'
+) -> ProjectPaths:
     project_path = Path(project_path)
     image_path = project_path / 'time_series_vars' if append_ts else project_path
     composite_path = project_path.parent / 'composites'
@@ -48,13 +54,15 @@ def setup_paths(project_path: T.Union[str, Path, bytes], append_ts: T.Optional[b
     figure_path = project_path / 'figures'
     data_path = project_path / 'data'
     ckpt_path = project_path / 'ckpt'
+    classes_info_path = data_path / 'classes.info'
     train_path = data_path / 'train'
     test_path = data_path / 'test'
+    predict_path = data_path / 'predict'
     process_path = train_path / 'processed'
     test_process_path = test_path / 'processed'
-    predict_path = data_path / 'predict'
+    predict_process_path = predict_path / 'processed'
     edge_training_path = project_path / 'user_train'
-    ckpt_file = ckpt_path / 'last.ckpt'
+    ckpt_file = ckpt_path / ckpt_name
     loss_file = ckpt_path / 'losses.npy'
     norm_file = ckpt_path / 'last.norm'
 
@@ -64,6 +72,7 @@ def setup_paths(project_path: T.Union[str, Path, bytes], append_ts: T.Optional[b
         data_path,
         process_path,
         test_process_path,
+        predict_process_path,
         ckpt_path
     ]:
         p.mkdir(exist_ok=True, parents=True)
@@ -75,8 +84,10 @@ def setup_paths(project_path: T.Union[str, Path, bytes], append_ts: T.Optional[b
         proba_path=proba_path,
         figure_path=figure_path,
         data_path=data_path,
+        classes_info_path=classes_info_path,
         process_path=process_path,
         test_process_path=test_process_path,
+        predict_process_path=predict_process_path,
         ckpt_path=ckpt_path,
         train_path=train_path,
         test_path=test_path,

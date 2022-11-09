@@ -6,8 +6,10 @@ from ..utils.reshape import nd_to_columns
 
 import numpy as np
 import cv2
+from scipy.ndimage.measurements import label as nd_label
 from skimage import util as sk_util
 from tsaug import AddNoise, Drift, TimeWarp
+import torch
 from torch_geometric.data import Data
 
 
@@ -89,7 +91,7 @@ def augment_time(
     xseg_warped = tsaug_to_feature_stack(
         xseg_warped, nfeas, nrows, ncols
     ).clip(0, 1)
-    
+
     # Ensure reshaping back to original values
     # assert np.allclose(xseg_original, tsaug_to_feature_stack(xseg, nfeas, nrows, ncols))
 
@@ -101,12 +103,73 @@ def augment_time(
     return xaug
 
 
+def create_parcel_masks(labels_array: np.ndarray, max_crop_class: int) -> T.Union[None, dict]:
+    """
+    Creates masks for each instance
+
+    Reference:
+        https://torchtutorialstaging.z5.web.core.windows.net/intermediate/torchvision_tutorial.html
+    """
+    # Remove edges
+    mask = np.where((labels_array > 0) & (labels_array <= max_crop_class), 1, 0)
+    mask = nd_label(mask)[0]
+    obj_ids = np.unique(mask)
+    # first id is the background, so remove it
+    obj_ids = obj_ids[1:]
+    # split the color-encoded mask into a set
+    # of binary masks
+    masks = mask == obj_ids[:, None, None]
+
+    # get bounding box coordinates for each mask
+    num_objs = len(obj_ids)
+    boxes = []
+    small_box_idx = []
+    for i in range(num_objs):
+        pos = np.where(masks[i])
+        xmin = np.min(pos[1])
+        xmax = np.max(pos[1])
+        ymin = np.min(pos[0])
+        ymax = np.max(pos[0])
+        # Fields too small
+        if (xmax - xmin == 0) or (ymax - ymin == 0):
+            small_box_idx.append(i)
+            continue
+        boxes.append([xmin, ymin, xmax, ymax])
+
+    if small_box_idx:
+        good_idx = np.array(
+            [idx for idx in range(0, masks.shape[0]) if idx not in small_box_idx]
+        )
+        masks = masks[good_idx]
+    # convert everything into arrays
+    boxes = torch.as_tensor(boxes, dtype=torch.float32)
+    if boxes.size(0) == 0:
+        return None
+    # there is only one class
+    labels = torch.ones((masks.shape[0],), dtype=torch.int64)
+    masks = torch.as_tensor(masks, dtype=torch.uint8)
+
+    assert boxes.size(0) == labels.size(0) == masks.size(0), \
+        'The tensor sizes do not match.'
+
+    target = {
+        'boxes': boxes,
+        'labels': labels,
+        'masks': masks
+    }
+
+    return target
+
+
 def augment(
     ldata: LabeledData,
     aug: str,
     ntime: int,
     nbands: int,
+    max_crop_class: int,
     k: int = 3,
+    instance_seg: bool = False,
+    zero_padding: int = 0,
     **kwargs
 ) -> Data:
     """Applies augmentation to a dataset
@@ -114,15 +177,27 @@ def augment(
     x = ldata.x
     y = ldata.y
     bdist = ldata.bdist
+    ori = ldata.ori
+    if zero_padding > 0:
+        zpad = torch.nn.ZeroPad2d(zero_padding)
+        x = zpad(torch.tensor(x)).numpy()
+        y = zpad(torch.tensor(y)).numpy()
+        bdist = zpad(torch.tensor(bdist)).numpy()
+        ori = zpad(torch.tensor(ori)).numpy()
+
     xaug = x.copy()
-
-    label_dtype = 'float' if 'float' in y.dtype.name else 'int'
-
-    if 'none' in aug:
+    yaug = None
+    bdist_aug = None
+    ori_aug = None
+    if y is not None:
         yaug = y.copy()
+        label_dtype = 'float' if 'float' in y.dtype.name else 'int'
+    if bdist is not None:
         bdist_aug = bdist.copy()
+    if ori is not None:
+        ori_aug = ori.copy()
 
-    elif 'ts-warp' in aug:
+    if 'ts-warp' in aug:
         # Warp each segment
         for p in ldata.props:
             xaug = augment_time(
@@ -133,8 +208,6 @@ def augment(
                     static_rand=True
                 )
             )
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
 
     elif 'ts-noise' in aug:
         # Warp each segment
@@ -143,8 +216,6 @@ def augment(
                 ldata, p, xaug, ntime, nbands, False,
                 AddNoise(scale=np.random.uniform(low=0.01, high=0.05))
             )
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
 
     elif 'ts-drift' in aug:
         # Warp each segment
@@ -157,20 +228,19 @@ def augment(
                     static_rand=True
                 )
             )
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
 
     elif 'rot' in aug:
         deg = int(aug.replace('rot', ''))
-
         deg_dict = {
             90: cv2.ROTATE_90_CLOCKWISE,
             180: cv2.ROTATE_180,
             270: cv2.ROTATE_90_COUNTERCLOCKWISE
         }
 
-        xaug = np.zeros((xaug.shape[0], *cv2.rotate(np.float32(x[0]), deg_dict[deg]).shape), dtype=xaug.dtype)
-
+        xaug = np.zeros(
+            (xaug.shape[0], *cv2.rotate(np.float32(x[0]), deg_dict[deg]).shape),
+            dtype=xaug.dtype
+        )
         for i in range(0, x.shape[0]):
             xaug[i] = cv2.rotate(np.float32(x[i]), deg_dict[deg])
 
@@ -179,12 +249,11 @@ def augment(
         else:
             yaug = cv2.rotate(np.uint8(y), deg_dict[deg])
         bdist_aug = cv2.rotate(np.float32(bdist), deg_dict[deg])
+        ori_aug = cv2.rotate(np.float32(ori), deg_dict[deg])
 
     elif 'roll' in aug:
         shift = np.random.choice(range(1, int(xaug.shape[0]*0.75)+1), size=1)[0]
         xaug = np.roll(xaug, shift=shift, axis=0)
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
 
     elif 'flip' in aug:
         if aug == 'flipfb':
@@ -192,8 +261,6 @@ def augment(
             for b in range(0, xaug.shape[0], ntime):
                 # Get the slice for the current band, n time steps
                 xaug[b:b+ntime] = xaug[b:b+ntime][::-1]
-            yaug = y.copy()
-            bdist_aug = bdist.copy()
         else:
 
             for i in range(0, x.shape[0]):
@@ -201,6 +268,7 @@ def augment(
 
             yaug = getattr(np, aug)(y)
             bdist_aug = getattr(np, aug)(bdist)
+            ori_aug = getattr(np, aug)(ori)
 
     elif 'scale' in aug:
         scale = float(aug.replace('scale', ''))
@@ -209,32 +277,26 @@ def augment(
         width = int(xaug.shape[2] * scale)
 
         xaug = np.zeros((xaug.shape[0], height, width), dtype=xaug.dtype)
-
         dim = (width, height)
 
         for i in range(0, x.shape[0]):
             xaug[i] = cv2.resize(np.float32(x[i]), dim, interpolation=cv2.INTER_LINEAR)
-            # xaug[i] = sk_transform.rescale(x[i], order=1, scale=scale, preserve_range=True, mode='reflect')
 
         if label_dtype == 'float':
             yaug = cv2.resize(np.float32(y), dim, interpolation=cv2.INTER_LINEAR)
         else:
             yaug = cv2.resize(np.uint8(y), dim, interpolation=cv2.INTER_NEAREST)
         bdist_aug = cv2.resize(np.float32(bdist), dim, interpolation=cv2.INTER_LINEAR)
+        ori_aug = cv2.resize(np.float32(ori), dim, interpolation=cv2.INTER_LINEAR)
 
     elif 'gaussian' in aug:
         var = float(aug.replace('gaussian', ''))
-
         for i in range(0, x.shape[0]):
             xaug[i] = sk_util.random_noise(x[i], mode='gaussian', clip=True, mean=0, var=var)
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
 
     elif 's&p' in aug:
         for i in range(0, x.shape[0]):
             xaug[i] = sk_util.random_noise(x[i], mode='s&p', clip=True)
-        yaug = y.copy()
-        bdist_aug = bdist.copy()
 
     # Create the network
     nwk = SingleSensorNetwork(np.ascontiguousarray(xaug, dtype='float64'), k=k)
@@ -252,6 +314,10 @@ def augment(
 
     xaug = nd_to_columns(xaug, dims, height, width)
 
+    mask_y = None
+    if instance_seg:
+        mask_y = create_parcel_masks(yaug, max_crop_class)
+
     return create_data_object(
         xaug,
         edge_indices,
@@ -262,6 +328,9 @@ def augment(
         height=height,
         width=width,
         y=yaug,
+        mask_y=mask_y,
         bdist=bdist_aug,
+        ori=ori_aug,
+        zero_padding=zero_padding,
         **kwargs
     )

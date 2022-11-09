@@ -1,11 +1,14 @@
 import typing as T
 from dataclasses import dataclass
+from functools import partial
 
 from ..data.datasets import EdgeDataset
 from ..data.modules import EdgeDataModule
+from ..utils.model_preprocessing import TqdmParallel
 
 from tqdm import tqdm
 import torch
+from joblib import delayed, parallel_backend
 
 
 @dataclass
@@ -13,9 +16,11 @@ class NormValues:
     mean: torch.Tensor
     std: torch.Tensor
     max: torch.Tensor
+    crop_counts: torch.Tensor
+    edge_counts: torch.Tensor
 
 
-def add_dims(d: torch.Tensor) -> torch.Tensor:
+def add_dim(d: torch.Tensor) -> torch.Tensor:
     return d.unsqueeze(0)
 
 
@@ -27,7 +32,10 @@ def inverse_transform(x: torch.Tensor, data_values: NormValues) -> torch.Tensor:
 def get_norm_values(
     dataset: T.Union[EdgeDataset, torch.utils.data.Dataset],
     batch_size: int,
+    class_info: T.Dict[str, int],
     num_workers: int = 0,
+    processes: int = 1,
+    threads_per_worker: int = 1,
     mean_color: str = 'ffffff',
     sse_color: str = 'ffffff'
 ) -> NormValues:
@@ -73,46 +81,83 @@ def get_norm_values(
         data_stds = torch.sqrt(sse / pix_count)
 
     else:
-        # Calculate the means and standard deviations for each channel
         data_module = EdgeDataModule(
             train_ds=dataset,
             batch_size=batch_size,
             num_workers=num_workers
         )
 
-        data_sums = torch.zeros(dataset[0].x.shape[1], dtype=torch.float)
-        sse = torch.zeros(dataset[0].x.shape[1], dtype=torch.float)
-        pix_count = 0.0
+        def get_info(
+            x: torch.Tensor, y: torch.Tensor
+        ) -> T.Tuple[torch.Tensor, int, torch.Tensor, torch.Tensor]:
+            crop_counts = torch.zeros(class_info['max_crop_class']+1)
+            edge_counts = torch.zeros(2)
+            crop_counts[0] = ((y == 0) | (y == class_info['edge_class'])).sum()
+            for i in range(1, class_info['edge_class']):
+                crop_counts[i] = (y == i).sum()
+            edge_counts[0] = (y != class_info['edge_class']).sum()
+            edge_counts[1] = (y == class_info['edge_class']).sum()
 
-        with tqdm(
-            total=int(len(dataset)/batch_size),
-            desc='Calculating means',
-            colour=mean_color
-        ) as pbar:
-            for batch in data_module.train_dataloader():
-                data_sums += batch.x.sum(dim=0)
-                pix_count += batch.x.shape[0]
+            return x.sum(dim=0), x.shape[0], crop_counts, edge_counts
 
-                pbar.update(1)
+        with parallel_backend(
+            backend='loky',
+            n_jobs=processes,
+            inner_max_num_threads=threads_per_worker
+        ):
+            with TqdmParallel(
+                tqdm_kwargs={
+                    'total': int(len(dataset) / batch_size),
+                    'desc': 'Calculating means',
+                    'colour': mean_color
+                }
+            ) as pool:
+                results = pool(
+                    delayed(get_info)(
+                        batch.x, batch.y
+                    ) for batch in data_module.train_dataloader()
+                )
+        data_sums, pix_count, crop_counts, edge_counts = list(map(list, zip(*results)))
 
+        data_sums = torch.stack(data_sums).sum(dim=0)
+        pix_count = torch.tensor(pix_count).sum()
+        crop_counts = torch.stack(crop_counts).sum(dim=0)
+        edge_counts = torch.stack(edge_counts).sum(dim=0)
         data_means = data_sums / float(pix_count)
-        with tqdm(
-            total=int(len(dataset)/batch_size),
-            desc='Calculating SSEs',
-            colour=sse_color
-        ) as pbar:
-            for batch in data_module.train_dataloader():
-                sse += ((batch.x - add_dims(data_means)).pow(2)).sum(dim=0)
 
-                pbar.update(1)
+        def get_sse(x_mu: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+            return ((x - x_mu).pow(2)).sum(dim=0)
 
-        data_stds = torch.sqrt(sse / pix_count)
+        sse_partial = partial(get_sse, add_dim(data_means))
+
+        with parallel_backend(
+            backend='loky',
+            n_jobs=processes,
+            inner_max_num_threads=threads_per_worker
+        ):
+            with TqdmParallel(
+                tqdm_kwargs={
+                    'total': int(len(dataset) / batch_size),
+                    'desc': 'Calculating SSEs',
+                    'colour': sse_color
+                }
+            ) as pool:
+                sses = pool(
+                    delayed(sse_partial)(
+                        batch.x
+                    ) for batch in data_module.train_dataloader()
+                )
+
+        sses = torch.stack(sses).sum(dim=0)
+        data_stds = torch.sqrt(sses / float(pix_count))
         data_maxs = torch.zeros_like(data_means)
 
     norm_values = NormValues(
         mean=data_means,
         std=data_stds,
-        max=data_maxs
+        max=data_maxs,
+        crop_counts=crop_counts,
+        edge_counts=edge_counts
     )
 
     return norm_values

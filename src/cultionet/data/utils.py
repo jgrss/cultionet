@@ -18,10 +18,11 @@ from torch_geometric.data import Data
 @dataclass
 class LabeledData:
     x: np.ndarray
-    y: np.ndarray
-    bdist: np.ndarray
-    segments: np.ndarray
-    props: T.List
+    y: T.Union[None, np.ndarray]
+    bdist: T.Union[None, np.ndarray]
+    ori: T.Union[None, np.ndarray]
+    segments: T.Union[None, np.ndarray]
+    props: T.Union[None, T.List]
 
 
 def get_image_list_dims(
@@ -48,45 +49,66 @@ def create_data_object(
     height: int,
     width: int,
     y: T.Optional[np.ndarray] = None,
+    mask_y: T.Optional[np.ndarray] = None,
     bdist: T.Optional[np.ndarray] = None,
+    ori: T.Optional[np.ndarray] = None,
+    zero_padding: T.Optional[int] = 0,
     other: T.Optional[np.ndarray] = None,
     **kwargs
 ) -> Data:
     """Creates a training data object
     """
-    edge_indices_ = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
-    edge_attrs_ = torch.tensor(edge_attrs, dtype=torch.float)
+    edge_indices = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
+    edge_attrs = torch.tensor(edge_attrs, dtype=torch.float)
     x = torch.tensor(x, dtype=torch.float)
     xy = torch.tensor(xy, dtype=torch.float)
+
+    boxes = None
+    box_labels = None
+    box_masks = None
+    if mask_y is not None:
+        boxes = mask_y['boxes']
+        box_labels = mask_y['labels']
+        box_masks = mask_y['masks']
 
     if y is None:
         train_data = Data(
             x=x,
-            edge_index=edge_indices_,
-            edge_attrs=edge_attrs_,
+            edge_index=edge_indices,
+            edge_attrs=edge_attrs,
             pos=xy,
             height=height,
             width=width,
             ntime=ntime,
             nbands=nbands,
+            boxes=boxes,
+            box_labels=box_labels,
+            box_masks=box_masks,
+            zero_padding=zero_padding,
             **kwargs
         )
     else:
-        y_ = torch.tensor(y.flatten(), dtype=torch.float if 'float' in y.dtype.name else torch.long)
+        y = torch.tensor(y.flatten(), dtype=torch.float if 'float' in y.dtype.name else torch.long)
         bdist_ = torch.tensor(bdist.flatten(), dtype=torch.float)
+        ori_ = torch.tensor(ori.flatten(), dtype=torch.float)
 
         if other is None:
             train_data = Data(
                 x=x,
-                edge_index=edge_indices_,
-                edge_attrs=edge_attrs_,
-                y=y_,
+                edge_index=edge_indices,
+                edge_attrs=edge_attrs,
+                y=y,
                 bdist=bdist_,
+                ori=ori_,
                 pos=xy,
                 height=height,
                 width=width,
                 ntime=ntime,
                 nbands=nbands,
+                boxes=boxes,
+                box_labels=box_labels,
+                box_masks=box_masks,
+                zero_padding=zero_padding,
                 **kwargs
             )
         else:
@@ -94,16 +116,21 @@ def create_data_object(
 
             train_data = Data(
                 x=x,
-                edge_index=edge_indices_,
-                edge_attrs=edge_attrs_,
-                y=y_,
+                edge_index=edge_indices,
+                edge_attrs=edge_attrs,
+                y=y,
                 bdist=bdist_,
+                ori=ori_,
                 pos=xy,
                 other=other_,
                 height=height,
                 width=width,
                 ntime=ntime,
                 nbands=nbands,
+                boxes=boxes,
+                box_labels=box_labels,
+                box_masks=box_masks,
+                zero_padding=zero_padding,
                 **kwargs
             )
 

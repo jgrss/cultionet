@@ -1,19 +1,18 @@
 import typing as T
 from pathlib import Path
 import random
-import logging
 from functools import partial
 
 from ..errors import TensorShapeError
 from ..utils.logging import set_color_logger
+from ..utils.model_preprocessing import TqdmParallel
 
 import numpy as np
 import attr
 import torch
 from torch_geometric.data import Data, Dataset
 import psutil
-from tqdm.auto import tqdm
-from joblib import Parallel, delayed, parallel_backend
+from joblib import delayed, parallel_backend
 import rtree
 import geopandas as gpd
 
@@ -28,10 +27,37 @@ def add_dims(d: torch.Tensor) -> torch.Tensor:
     return d.unsqueeze(0)
 
 
+def update_data(
+    batch: Data,
+    idx: T.Optional[int] = None,
+    x: T.Optional[torch.Tensor] = None
+) -> Data:
+    image_id = None
+    if idx is not None:
+        if hasattr(batch, 'boxes'):
+            if batch.boxes is not None:
+                image_id = torch.zeros_like(batch.box_labels, dtype=torch.int64) + idx
+
+    if x is not None:
+        exclusion = ('x',)
+
+        return Data(
+            x=x,
+            image_id=image_id,
+            **{k: getattr(batch, k) for k in batch.keys if k not in exclusion}
+        )
+    else:
+        return Data(
+            image_id=image_id,
+            **{k: getattr(batch, k) for k in batch.keys}
+        )
+
+
 def zscores(
     batch: Data,
     data_means: torch.Tensor,
-    data_stds: torch.Tensor
+    data_stds: torch.Tensor,
+    idx: T.Optional[int] = None
 ) -> Data:
     """Normalizes data to z-scores
 
@@ -44,34 +70,26 @@ def zscores(
     """
     x = ((batch.x - add_dims(data_means)) / add_dims(data_stds))
 
-    return Data(x=x, **{k: getattr(batch, k) for k in batch.keys if k != 'x'})
+    return update_data(
+        batch=batch,
+        idx=idx,
+        x=x
+    )
 
 
 def _check_shape(
-    d1: int, d2: int, index: int, uid: str
+    d1: int,
+    h1: int,
+    w1: int,
+    d2: int,
+    h2: int,
+    w2: int,
+    index: int,
+    uid: str
 ) -> T.Tuple[bool, int, str]:
-    if d1 != d2:
+    if (d1 != d2) or (h1 != h2) or (w1 != w2):
         return False, index, uid
     return True, index, uid
-
-
-class TqdmParallel(Parallel):
-    """A tqdm progress bar for joblib Parallel tasks
-
-    Reference:
-        https://stackoverflow.com/questions/37804279/how-can-we-use-tqdm-in-a-parallel-execution-with-joblib
-    """
-    def __init__(self, tqdm_kwargs: dict):
-        self.tqdm_kwargs = tqdm_kwargs
-        super().__init__()
-
-    def __call__(self, *args, **kwargs):
-        with tqdm(**self.tqdm_kwargs) as self._pbar:
-            return Parallel.__call__(self, *args, **kwargs)
-
-    def print_progress(self):
-        self._pbar.n = self.n_completed_tasks
-        self._pbar.refresh()
 
 
 @attr.s
@@ -81,8 +99,18 @@ class EdgeDataset(Dataset):
     root: T.Union[str, Path, bytes] = attr.ib(default='.')
     transform: T.Any = attr.ib(default=None)
     pre_transform: T.Any = attr.ib(default=None)
-    data_means: T.Optional[torch.Tensor] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None)
-    data_stds: T.Optional[torch.Tensor] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None)
+    data_means: T.Optional[torch.Tensor] = attr.ib(
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
+    )
+    data_stds: T.Optional[torch.Tensor] = attr.ib(
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
+    )
+    crop_counts: T.Optional[torch.Tensor] = attr.ib(
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
+    )
+    edge_counts: T.Optional[torch.Tensor] = attr.ib(
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
+    )
     pattern: T.Optional[str] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(str)), default='data*.pt')
     processes: T.Optional[int] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=psutil.cpu_count())
     threads_per_worker: T.Optional[int] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=1)
@@ -217,12 +245,19 @@ class EdgeDataset(Dataset):
     def check_dims(
         self,
         expected_dim: int,
+        expected_height: int,
+        expected_width: int,
         delete_mismatches: bool = False,
         tqdm_color: str = 'ffffff'
     ):
         """Checks if all tensors in the dataset match in shape dimensions
         """
-        check_partial = partial(_check_shape, expected_dim)
+        check_partial = partial(
+            _check_shape,
+            expected_dim,
+            expected_height,
+            expected_width
+        )
 
         with parallel_backend(
             backend='loky',
@@ -238,7 +273,11 @@ class EdgeDataset(Dataset):
             ) as pool:
                 results = pool(
                     delayed(check_partial)(
-                        self[i].x.shape[1], i, self[i].train_id
+                        self[i].x.shape[1],
+                        self[i].height,
+                        self[i].width,
+                        i,
+                        self[i].train_id
                     ) for i in range(0, len(self))
                 )
         matches, indices, ids = list(map(list, zip(*results)))
@@ -287,6 +326,11 @@ class EdgeDataset(Dataset):
         """
         batch = torch.load(self.data_list_[idx])
         if isinstance(self.data_means, torch.Tensor):
-            return zscores(batch, self.data_means, self.data_stds)
+            batch = zscores(batch, self.data_means, self.data_stds, idx=idx)
         else:
-            return batch
+            batch = update_data(
+                batch=batch,
+                idx=idx
+            )
+
+        return batch

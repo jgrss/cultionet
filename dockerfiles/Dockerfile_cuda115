@@ -40,19 +40,18 @@ RUN pip install \
     torchvision \
     torchaudio --extra-index-url https://download.pytorch.org/whl/cu115
 
-RUN pip install \
+RUN TORCH_VERSION=`(python -c "import torch;print(torch.__version__)")` &&
+    pip install \
     torch-scatter \
     torch-sparse \
     torch-cluster \
     torch-spline-conv \
-    torch-geometric --extra-index-url https://data.pyg.org/whl/torch-1.11.0+cu115.html
+    torch-geometric --extra-index-url https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
 
 RUN GDAL_VERSION=$(gdal-config --version | awk -F'[.]' '{print $1"."$2"."$3}') && \
     pip install GDAL==$GDAL_VERSION --no-binary=gdal
 
 # Install cultionet
-RUN pip install --user git+https://github.com/jgrss/geowombat.git
-RUN pip install --user git+https://github.com/jgrss/tsaug.git
-RUN pip install --user git+https://github.com/jgrss/cultionet.git
+RUN pip install --user cultionet@git+https://github.com/jgrss/cultionet.git
 
 CMD ["cultionet"]

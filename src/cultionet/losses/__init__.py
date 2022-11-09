@@ -1,1 +1,6 @@
-from .losses import F1Score, MatthewsCorrcoef, QuantileLoss, TanimotoDistanceLoss
+from .losses import (
+    CrossEntropyLoss,
+    TanimotoDistanceLoss,
+    HuberLoss,
+    MSELoss
+)

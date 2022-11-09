@@ -2,6 +2,8 @@
 """
 import typing as T
 
+from . import model_utils
+
 import torch
 import torch.nn as nn
 from torch.nn import init
@@ -101,7 +103,6 @@ class ConvSTAR(nn.Module):
             hidden = [None] * self.n_layers
 
         input_ = x
-
         upd_hidden = []
 
         for layer_idx in range(self.n_layers):
@@ -123,9 +124,9 @@ class StarRNN(torch.nn.Module):
         self,
         input_dim: int = 3,
         hidden_dim: int = 64,
-        nclasses: int = 2,
+        num_classes_last: int = 2,
         nstage: int = 3,
-        kernel_size: T.Tuple[int, int] = (3, 3),
+        kernel_size: int = 3,
         n_layers: int = 6,
         cell: str = 'star'
     ):
@@ -136,59 +137,135 @@ class StarRNN(torch.nn.Module):
         self.nstage = nstage
         self.cell = cell
 
-        if self.cell == 'gru':
-            self.rnn = ConvGRU(input_size=input_dim,
-                               hidden_sizes=hidden_dim,
-                               kernel_sizes=kernel_size[0],
-                               n_layers=n_layers)
-        elif self.cell == 'star_res':
-            self.rnn = ConvSTAR_Res(input_size=input_dim,
-                                    hidden_sizes=hidden_dim,
-                                    kernel_sizes=kernel_size[0],
-                                    n_layers=n_layers)
-        else:
-            self.rnn = ConvSTAR(input_size=input_dim,
-                                hidden_sizes=hidden_dim,
-                                kernel_sizes=kernel_size[0],
-                                n_layers=n_layers)
+        self.rnn = ConvSTAR(
+            input_size=input_dim,
+            hidden_sizes=hidden_dim,
+            kernel_sizes=kernel_size,
+            n_layers=n_layers
+        )
 
-        self.final = torch.nn.Conv2d(hidden_dim, nclasses, (3, 3), padding=1)
+        self.final_local = torch.nn.Sequential(
+            torch.nn.Conv2d(hidden_dim, hidden_dim, 3, padding=1),
+            torch.nn.ELU(alpha=0.1, inplace=False)
+        )
+        self.final_last = torch.nn.Sequential(
+            torch.nn.Conv2d(hidden_dim, num_classes_last, 3, padding=1),
+            torch.nn.ELU(alpha=0.1, inplace=False)
+        )
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
-    def forward(self, x, hidden_s: T.Optional[torch.Tensor] = None):
-        # (b x t x c x h x w) -> (b x c x t x h x w)
-        x = x.permute(0, 2, 1, 3, 4)
-        b, c, t, h, w = x.shape
+    def forward(
+        self,
+        x,
+        hidden_s: T.Optional[torch.Tensor] = None
+    ) -> T.Tuple[torch.Tensor, torch.Tensor]:
+        # input shape = (B x C x T x H x W)
+        batch_size, __, time_size, height, width = x.shape
 
         # convRNN step
         # hidden_s is a list (number of layer) of hidden states of size [b x c x h x w]
         if hidden_s is None:
-            hidden_s = [torch.zeros((b, self.hidden_dim, h, w))] * self.n_layers
+            hidden_s = [
+                torch.zeros(
+                    (batch_size, self.hidden_dim, height, width),
+                    dtype=x.dtype,
+                    device=x.device
+                )
+            ] * self.n_layers
 
-        if torch.cuda.is_available():
-            for i in range(self.n_layers):
-                hidden_s[i] = hidden_s[i].to(x.device)
+        for iter_ in range(0, time_size):
+            hidden_s = self.rnn(x[:, :, iter_, :, :], hidden_s)
 
-        for iter in range(t):
-            hidden_s = self.rnn.forward(x[:, :, iter, :, :], hidden_s)
-
-        # if self.n_layers == 3:
-        #     local_1 = hidden_s[0]
-        #     local_2 = hidden_s[1]
-        # elif self.nstage == 3:
-        #     local_1 = hidden_s[1]
-        #     local_2 = hidden_s[3]
-        # elif self.nstage == 2:
-        #     local_1 = hidden_s[1]
-        #     local_2 = hidden_s[2]
-        # elif self.nstage == 1:
-        #     local_1 = hidden_s[-1]
-        #     local_2 = hidden_s[-1]
-
-        last = hidden_s[-1]
-        last = self.final(last)
+        if self.n_layers == 3:
+            # local_1 = hidden_s[0]
+            local_2 = hidden_s[1]
+        elif self.nstage == 3:
+            # local_1 = hidden_s[1]
+            local_2 = hidden_s[3]
+        elif self.nstage == 2:
+            # local_1 = hidden_s[1]
+            local_2 = hidden_s[2]
+        elif self.nstage == 1:
+            # local_1 = hidden_s[-1]
+            local_2 = hidden_s[-1]
+        local_2 = self.final_local(local_2)
+        last = self.final_last(hidden_s[-1])
 
         # The output is (B x C x H x W)
-        return last
+        return local_2, last
+
+
+class Refine(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        mid_channels: int,
+        out_channels: int,
+        dropout: float = 0.1
+    ):
+        super(Refine, self).__init__()
+
+        self.conv1 = torch.nn.Conv2d(
+            in_channels,
+            mid_channels,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+            bias=True
+        )
+        self.bn1 = torch.nn.BatchNorm2d(mid_channels)
+        self.relu = torch.nn.ReLU(inplace=False)
+
+        self.conv2 = torch.nn.Conv2d(
+            mid_channels,
+            mid_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=True,
+            padding_mode='replicate'
+        )
+        self.bn2 = torch.nn.BatchNorm2d(mid_channels)
+        self.drop2 = torch.nn.Dropout2d(dropout)
+
+        self.conv3 = torch.nn.Conv2d(
+            mid_channels,
+            mid_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=True,
+            padding_mode='replicate'
+        )
+        self.bn3 = torch.nn.BatchNorm2d(mid_channels)
+        self.drop3 = torch.nn.Dropout2d(dropout)
+
+        self.conv4 = torch.nn.Conv2d(
+            mid_channels,
+            out_channels,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+            bias=True
+        )
+
+    def forward(self, x: torch.Tensor):
+        out1 = self.conv1(x)
+        out1 = self.bn1(out1)
+        out1 = self.relu(out1)
+
+        out = self.conv2(out1)
+        out = self.bn2(out)
+        out = self.relu(out)
+        out = self.drop2(out)
+
+        out = self.conv3(out)
+        out = self.bn3(out)
+        out += out1
+        out = self.relu(out)
+        out = self.drop3(out)
+        out = self.conv4(out) + x[:, -2:]
+
+        return out
