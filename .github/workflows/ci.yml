@@ -37,17 +37,17 @@ jobs:
         run: |
           # Install Python GDAL
           pip install -U pip setuptools wheel
-          pip install "Cython>=0.29.*" "numpy<=1.21.0"
+          pip install -U Cython numpy<=1.21.0
           GDAL_VERSION=$(gdal-config --version | awk -F'[.]' '{print $1"."$2"."$3}')
           pip install GDAL==$GDAL_VERSION --no-binary=gdal
       - name: Install PyTorch
         run: |
           TORCH_CPU="https://download.pytorch.org/whl/cpu"
-          PYG_TORCH_CPU="https://data.pyg.org/whl/torch-1.12.0+cpu.html"
           pip install --upgrade --no-cache-dir setuptools>=0.59.0
           pip install torch torchvision torchaudio --extra-index-url $TORCH_CPU
+          TORCH_VERSION=$(python -c "import torch;print(torch.__version__)")
+          PYG_TORCH_CPU="https://data.pyg.org/whl/torch-${TORCH_VERSION}.html"
           pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f $PYG_TORCH_CPU
-          pip install torch-geometric-temporal>=0.54.0
           pip install torchmetrics>=0.7.0
         if: steps.cnetenv.outputs.cache-hit != 'true'
       - name: Install cultionet
