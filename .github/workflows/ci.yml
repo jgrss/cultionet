@@ -37,7 +37,7 @@ jobs:
         run: |
           # Install Python GDAL
           pip install -U pip setuptools wheel
-          pip install -U Cython numpy<=1.21.0
+          pip install -U Cython "numpy<=1.21.0"
           GDAL_VERSION=$(gdal-config --version | awk -F'[.]' '{print $1"."$2"."$3}')
           pip install GDAL==$GDAL_VERSION --no-binary=gdal
       - name: Install PyTorch
