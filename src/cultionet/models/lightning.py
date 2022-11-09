@@ -351,12 +351,6 @@ class CultioLitModel(pl.LightningModule):
             star_rnn_n_layers=star_rnn_n_layers,
             num_classes=self.num_classes
         )
-        self.crop_type_model = None
-        # if self.num_classes > 2:
-        #     self.crop_type_model = CropType(
-        #         in_channels=self.num_classes,
-        #         out_channels=self.num_classes
-        #     )
         self.configure_loss()
         self.configure_scorer()
 

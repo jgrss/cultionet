@@ -27,8 +27,7 @@ class CultioNet(torch.nn.Module):
         filters: int = 64,
         star_rnn_hidden_dim: int = 64,
         star_rnn_n_layers: int = 4,
-        num_classes: int = 2,
-        dropout: T.Optional[float] = 0.1
+        num_classes: int = 2
     ):
         super(CultioNet, self).__init__()
 
@@ -39,18 +38,20 @@ class CultioNet(torch.nn.Module):
         # Total number of bands
         self.ds_num_bands = int(self.ds_num_features / self.ds_num_time)
         self.filters = filters
+        self.num_classes = num_classes
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
-        # Star RNN layer (+filters x2)
+        # Star RNN layer (+star_rnn_hidden_dim +num_classes_last)
+        num_last_channels = self.num_classes if self.num_classes > 2 else star_rnn_hidden_dim
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
             hidden_dim=star_rnn_hidden_dim,
             n_layers=star_rnn_n_layers,
-            num_classes_last=self.filters
+            num_classes_last=num_last_channels
         )
-        base_in_channels = self.filters * 2
+        base_in_channels = star_rnn_hidden_dim + num_last_channels
         # Distance layers (+5)
         self.nunet3_model = NestedUNet3(
             in_channels=base_in_channels,
@@ -74,7 +75,13 @@ class CultioNet(torch.nn.Module):
     def forward(
         self, data: Data
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor
     ]:
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
@@ -91,13 +98,21 @@ class CultioNet(torch.nn.Module):
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
         # Crop/Non-crop and Crop types
-        logits_star_last = self.star_rnn(star_stream)
+        logits_star_local, logits_star_last = self.star_rnn(star_stream)
+        logits_star_local = self.cg(logits_star_local)
         logits_star_last = self.cg(logits_star_last)
 
         # (2) Distance stream
         logits_distance = self.nunet3_model(
             self.gc(
-                logits_star_last, batch_size, height, width
+                torch.cat(
+                    [
+                        logits_star_local, logits_star_last
+                    ], dim=1
+                ),
+                batch_size,
+                height,
+                width
             )
         )
         logits_distance_0 = self.cg(logits_distance['mask_0'])
@@ -109,6 +124,7 @@ class CultioNet(torch.nn.Module):
         # CONCAT
         h = torch.cat(
             [
+                logits_star_local,
                 logits_star_last,
                 logits_distance_0,
                 logits_distance_1,

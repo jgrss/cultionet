@@ -144,7 +144,11 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
 
-        self.final = torch.nn.Sequential(
+        self.final_local = torch.nn.Sequential(
+            torch.nn.Conv2d(hidden_dim, hidden_dim, 3, padding=1),
+            torch.nn.ELU(alpha=0.1, inplace=False)
+        )
+        self.final_last = torch.nn.Sequential(
             torch.nn.Conv2d(hidden_dim, num_classes_last, 3, padding=1),
             torch.nn.ELU(alpha=0.1, inplace=False)
         )
@@ -187,11 +191,11 @@ class StarRNN(torch.nn.Module):
             # local_1 = hidden_s[-1]
             local_2 = hidden_s[-1]
 
-        local_2 = self.final(local_2)
-        last = self.final(hidden_s[-1])
+        local_2 = self.final_local(local_2)
+        last = self.final_last(hidden_s[-1])
 
         # The output is (B x C x H x W)
-        return torch.cat([local_2, last], dim=1)
+        return local_2, last
 
 
 class Refine(torch.nn.Module):
