@@ -190,7 +190,6 @@ class StarRNN(torch.nn.Module):
         elif self.nstage == 1:
             # local_1 = hidden_s[-1]
             local_2 = hidden_s[-1]
-
         local_2 = self.final_local(local_2)
         last = self.final_last(hidden_s[-1])
 
