@@ -690,7 +690,8 @@ def predict(
         norm_batch = norm_batch.to('cuda')
         lit_model = lit_model.to('cuda')
     with torch.no_grad():
-        distance, edge, crop, crop_type = lit_model(norm_batch)
+        distance, dist_1, dist_2, dist_3, dist_4, edge, crop = lit_model(norm_batch)
+        crop_type = None
 
         if include_maskrcnn:
             # TODO: fix this -- separate Mask R-CNN model
@@ -779,7 +780,7 @@ def predict(
         crop=crop,
         crop_type=crop_type,
         instances=instances,
-        apply_softmax=True
+        apply_softmax=False
     )
     stack = mo.stack_outputs(w, w_pad)
     if include_maskrcnn:
