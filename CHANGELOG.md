@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.5.1 (2022-11-10)
+* Fixes model outputs during serial predictions ([#36](https://github.com/jgrss/cultionet/pull/36))
+
 ## v1.5.0 (2022-11-9)
 *  PR [#36](https://github.com/jgrss/cultionet/pull/36)
 *  Re-configures the model architecture to improve the distance transform predictions
