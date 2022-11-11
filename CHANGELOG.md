@@ -2,8 +2,11 @@
 
 <!--next-version-placeholder-->
 
+## v1.5.2 (2022-11-10)
+* Fixed in-memory predictions ([#38](https://github.com/jgrss/cultionet/pull/38))
+
 ## v1.5.1 (2022-11-10)
-* Fixes model outputs during serial predictions ([#36](https://github.com/jgrss/cultionet/pull/36))
+* Fixes model outputs during serial predictions ([#37](https://github.com/jgrss/cultionet/pull/37))
 
 ## v1.5.0 (2022-11-9)
 *  PR [#36](https://github.com/jgrss/cultionet/pull/36)
