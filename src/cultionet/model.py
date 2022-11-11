@@ -691,7 +691,7 @@ def predict(
         lit_model = lit_model.to('cuda')
     with torch.no_grad():
         distance, dist_1, dist_2, dist_3, dist_4, edge, crop = lit_model(norm_batch)
-        crop_type = None
+        crop_type = torch.zeros((crop.size(0), 2), dtype=crop.dtype)
 
         if include_maskrcnn:
             # TODO: fix this -- separate Mask R-CNN model
