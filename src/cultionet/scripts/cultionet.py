@@ -296,7 +296,7 @@ class BlockWriter(object):
         with filelock.FileLock('./dst.lock'):
             self.dst.write(
                 stack,
-                indexes=self.bands,
+                indexes=range(1, self.dst.profile['count']+1),
                 window=w
             )
 
@@ -334,9 +334,9 @@ class WriterModule(BlockWriter):
         self.device = device
         self.scale_factor = scale_factor
         self.include_maskrcnn = include_maskrcnn
-        self.bands = [1, 2, 3] + list(range(4, 4+num_classes-1))
-        if self.include_maskrcnn:
-            self.bands.append(self.bands[-1] + 1)
+        # self.bands = [1, 2, 3] #+ list(range(4, 4+num_classes-1))
+        # if self.include_maskrcnn:
+        #     self.bands.append(self.bands[-1] + 1)
 
         self.lit_model = cultionet.load_model(
             ckpt_file=self.ppaths.ckpt_file,
@@ -549,7 +549,7 @@ def predict_image(args):
                 'width': width,
                 # Orientation (+1) + distance (+1) + edge (+1) + crop (+1) crop types (+N)
                 # `num_classes` includes background
-                'count': 4 + num_classes if args.include_maskrcnn else 4 + num_classes - 1,
+                'count': 3 + num_classes - 1,
                 'dtype': 'uint16',
                 'blockxsize': 64 if 64 < width else width,
                 'blockysize': 64 if 64 < height else height,
