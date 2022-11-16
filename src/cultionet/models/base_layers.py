@@ -58,7 +58,7 @@ class PoolConv(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
-    
+
 
 class Permute(torch.nn.Module):
     def __init__(self, axis_order: T.Sequence[int]):
@@ -158,18 +158,16 @@ class DoubleConv(torch.nn.Module):
 
         conv1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
         conv2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
-        batchnorm_layer1 = torch.nn.BatchNorm2d(out_channels)
-        batchnorm_layer2 = torch.nn.BatchNorm2d(out_channels)
-        activate_layer1 = torch.nn.ELU(alpha=0.1, inplace=False)
-        activate_layer2 = torch.nn.ELU(alpha=0.1, inplace=False)
+        batchnorm_layer = torch.nn.BatchNorm2d(out_channels)
+        activate_layer = torch.nn.ELU(alpha=0.1, inplace=False)
 
         self.seq = torch.nn.Sequential(
             conv1,
-            batchnorm_layer1,
-            activate_layer1,
+            batchnorm_layer,
+            activate_layer,
             conv2,
-            batchnorm_layer2,
-            activate_layer2
+            batchnorm_layer,
+            activate_layer
         )
 
     def __call__(self, *args, **kwargs):

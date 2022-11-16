@@ -51,17 +51,18 @@ class CultioNet(torch.nn.Module):
             n_layers=star_rnn_n_layers,
             num_classes_last=num_last_channels
         )
-        base_in_channels = star_rnn_hidden_dim + num_last_channels
-        # Distance layers (+5)
-        self.nunet3_model = NestedUNet3(
+        base_in_channels = star_rnn_hidden_dim + star_rnn_hidden_dim + num_last_channels
+        # Distance layers (+6)
+        self.dist_model = NestedUNet3(
             in_channels=base_in_channels,
             out_channels=1,
             init_filter=self.filters,
-            deep_supervision=True
+            deep_supervision=True,
+            side_stream=True
         )
         # Nested UNet (+2 edges +2 crops)
-        self.nunet2_model = NestedUNet2(
-            in_channels=base_in_channels+5,
+        self.crop_model = NestedUNet2(
+            in_channels=base_in_channels+1+5,
             out_channels=2,
             out_side_channels=2,
             init_filter=self.filters,
@@ -98,23 +99,27 @@ class CultioNet(torch.nn.Module):
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
         # Crop/Non-crop and Crop types
-        logits_star_local, logits_star_last = self.star_rnn(star_stream)
-        logits_star_local = self.cg(logits_star_local)
+        logits_star_local_1, logits_star_local_2, logits_star_last = self.star_rnn(star_stream)
+        logits_star_local_1 = self.cg(logits_star_local_1)
+        logits_star_local_2 = self.cg(logits_star_local_2)
         logits_star_last = self.cg(logits_star_last)
 
+        # CONCAT
+        h = torch.cat(
+            [
+                logits_star_local_1,
+                logits_star_local_2,
+                logits_star_last
+            ], dim=1
+        )
+
         # (2) Distance stream
-        logits_distance = self.nunet3_model(
+        logits_distance = self.dist_model(
             self.gc(
-                torch.cat(
-                    [
-                        logits_star_local, logits_star_last
-                    ], dim=1
-                ),
-                batch_size,
-                height,
-                width
+                h, batch_size, height, width
             )
         )
+        logits_orientation = self.cg(logits_distance['side'])
         logits_distance_0 = self.cg(logits_distance['mask_0'])
         logits_distance_1 = self.cg(logits_distance['mask_1'])
         logits_distance_2 = self.cg(logits_distance['mask_2'])
@@ -124,8 +129,8 @@ class CultioNet(torch.nn.Module):
         # CONCAT
         h = torch.cat(
             [
-                logits_star_local,
-                logits_star_last,
+                h,
+                logits_orientation,
                 logits_distance_0,
                 logits_distance_1,
                 logits_distance_2,
@@ -134,8 +139,8 @@ class CultioNet(torch.nn.Module):
             ], dim=1
         )
 
-        # (3) Nested UNet for crop and edges
-        nunet_stream = self.nunet2_model(
+        # (3) Crop stream
+        nunet_stream = self.crop_model(
             self.gc(
                 h, batch_size, height, width
             )
@@ -143,7 +148,8 @@ class CultioNet(torch.nn.Module):
         logits_crop = self.cg(nunet_stream['mask'])
         logits_edges = self.cg(nunet_stream['boundary'])
 
-        return (
+        out = (
+            logits_orientation,
             logits_distance_0,
             logits_distance_1,
             logits_distance_2,
@@ -152,3 +158,9 @@ class CultioNet(torch.nn.Module):
             logits_edges,
             logits_crop
         )
+        if self.num_classes > 2:
+            out += (logits_star_last,)
+        else:
+            out += (None,)
+
+        return out

@@ -324,7 +324,6 @@ class NestedUNet2(torch.nn.Module):
             b3_1 = self.bound3_1(torch.cat([x2_2, self.up(b4_1, size=x2_2.shape[-2:])], dim=1))
             b2_1 = self.bound2_1(torch.cat([x1_3, self.up(b3_1, size=x1_3.shape[-2:])], dim=1))
 
-        if self.boundary_layer:
             # End of left stream
             b1_0 = self.bound1_0(torch.cat([x0_0, self.up(b2_0, size=x0_0.shape[-2:])], dim=1))
             # End of right stream
@@ -338,25 +337,29 @@ class NestedUNet2(torch.nn.Module):
         if self.linear_fc:
             mask = self.net_final(x0_4)
         else:
-            if self.boundary_layer:
-                if self.deep_supervision:
+            if self.deep_supervision:
+                # Average over skip connections
+                x0_1 = self.final_1(x0_1)
+                x0_2 = self.final_2(x0_2)
+                x0_3 = self.final_3(x0_3)
+                x0_4 = self.final_4(x0_4)
+                x0_4 = (x0_1 + x0_2 + x0_3 + x0_4) / 4.0
+                if self.boundary_layer:
                     # Connect boundary stream
                     b1_0 = self.bound_final_1(b1_0)
                     b0_4 = self.bound_final_2(b0_4)
                     b1_1 = self.bound_final_3(b1_1)
                     boundary = (b1_0 + b0_4 + b1_1) / 3.0
-                    # Average over skip connections
-                    x0_1 = self.final_1(x0_1)
-                    x0_2 = self.final_2(x0_2)
-                    x0_3 = self.final_3(x0_3)
-                    x0_4 = self.final_4(x0_4)
-                    x0_4 = (x0_1 + x0_2 + x0_3 + x0_4) / 4.0
+                    mask = self.net_final(torch.cat([x0_4, boundary], dim=1))
                 else:
+                    mask = self.net_final(x0_4)
+            else:
+                if self.boundary_layer:
                     # Connect boundary stream
                     boundary = self.bound_final(torch.cat([b1_0, b0_4, b1_1], dim=1))
-                mask = self.net_final(torch.cat([x0_4, boundary], dim=1))
-            else:
-                mask = self.net_final(x0_4)
+                    mask = self.net_final(torch.cat([x0_4, boundary], dim=1))
+                else:
+                    mask = self.net_final(x0_4)
 
         return {
             'mask': mask,
@@ -413,7 +416,8 @@ class NestedUNet3(torch.nn.Module):
         out_channels: int,
         init_filter: int = 64,
         deep_supervision: bool = False,
-        linear_fc: bool = False
+        linear_fc: bool = False,
+        side_stream: bool = False
     ):
         super(NestedUNet3, self).__init__()
 
@@ -429,6 +433,7 @@ class NestedUNet3(torch.nn.Module):
         ]
         up_channels = int(nb_filter[0] * 5)
 
+        self.side_stream = side_stream
         self.up = model_utils.UpSample()
 
         self.conv0_0 = SingleConv(in_channels, nb_filter[0])
@@ -468,6 +473,15 @@ class NestedUNet3(torch.nn.Module):
         self.conv3_1_0_4_con = SingleConv(up_channels, nb_filter[0])
         self.conv4_0_0_4_con = SingleConv(nb_filter[4], nb_filter[0])
         self.conv0_4 = SingleConv(up_channels, up_channels)
+
+        if self.side_stream:
+            self.convs4_0 = SingleConv(nb_filter[4]+up_channels, nb_filter[0])
+            self.convs3_1 = SingleConv(up_channels+nb_filter[0], nb_filter[0])
+            self.convs2_2 = SingleConv(up_channels+nb_filter[0], nb_filter[0])
+            self.convs1_3 = SingleConv(up_channels+nb_filter[0], nb_filter[0])
+            self.side_final = torch.nn.Conv2d(
+                nb_filter[0], out_channels, kernel_size=3, padding=1
+            )
 
         if linear_fc:
             self.final = torch.nn.Sequential(
@@ -646,5 +660,20 @@ class NestedUNet3(torch.nn.Module):
             }
         else:
             out = {'mask': mask}
+
+        if self.side_stream:
+            s4_0 = self.convs4_0(
+                torch.cat([x3_1, self.up(x4_0, size=x3_1.shape[-2:])], dim=1)
+            )
+            s3_1 = self.convs3_1(
+                torch.cat([x2_2, self.up(s4_0, size=x2_2.shape[-2:])], dim=1)
+            )
+            s2_2 = self.convs2_2(
+                torch.cat([x1_3, self.up(s3_1, size=x1_3.shape[-2:])], dim=1)
+            )
+            s1_3 = self.convs1_3(
+                torch.cat([x0_4, self.up(s2_2, size=x0_4.shape[-2:])], dim=1)
+            )
+            out['side'] = self.side_final(s1_3)
 
         return out
