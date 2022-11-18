@@ -21,6 +21,7 @@ from skimage.measure import regionprops
 from tqdm.auto import tqdm
 import torch
 from torch_geometric.data import Data
+import joblib
 from joblib import delayed, parallel_backend
 
 
@@ -320,12 +321,19 @@ def create_image_vars(
             band_names=list(range(1, len(image) + 1)),
             resampling=resampling
         ) as src_ts:
+            # 65535 'no data' values = nan
+            mask = xr.where(src_ts == 65535, np.nan, 1)
             # X variables
             time_series = (
-                (src_ts.astype('float64') * gain + offset)
-                .clip(0, 1)
-                .gw.compute(num_workers=num_workers)
-            )
+                    src_ts.gw.set_nodata(
+                    src_ts.gw.nodataval, 0,
+                    out_range=(0, 1),
+                    dtype='float64',
+                    scale_factor=gain,
+                    offset=offset
+                ) * mask
+            ).gw.compute(num_workers=num_workers)
+
             # Get the time and band count
             ntime, nbands = get_image_list_dims(image, src_ts)
             if grid_edges is not None:
@@ -783,7 +791,7 @@ def create_dataset(
                 )
                 def save_and_update(train_data: Data) -> None:
                     train_path = process_path / f'data_{train_data.train_id}.pt'
-                    torch.save(train_data, train_path)
+                    joblib.dump(train_data, train_path, compress=5)
 
                 for aug in transforms:
                     if aug.startswith('ts-'):

@@ -12,6 +12,7 @@ import attr
 import torch
 from torch_geometric.data import Data, Dataset
 import psutil
+import joblib
 from joblib import delayed, parallel_backend
 import rtree
 import geopandas as gpd
@@ -224,7 +225,7 @@ class EdgeDataset(Dataset):
         """
         self.rtree_index = rtree.index.Index()
         for idx, fn in enumerate(self.data_list_):
-            data = torch.load(fn)
+            data = self.load_file(fn)
             left = data.left
             bottom = data.bottom
             right = data.right
@@ -315,6 +316,9 @@ class EdgeDataset(Dataset):
 
         return train_ds, val_ds
 
+    def load_file(self, filename: T.Union[str, Path]) -> Data:
+        return joblib.load(filename)
+
     def get(self, idx):
         """Gets an individual data object from the dataset
 
@@ -324,7 +328,7 @@ class EdgeDataset(Dataset):
         Returns:
             A `torch_geometric` data object.
         """
-        batch = torch.load(self.data_list_[idx])
+        batch = self.load_file(self.data_list_[idx])
         if isinstance(self.data_means, torch.Tensor):
             batch = zscores(batch, self.data_means, self.data_stds, idx=idx)
         else:
