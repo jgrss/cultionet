@@ -29,7 +29,6 @@ def columns_to_nd(data, layers, rows, columns):
 class ModelOutputs(object):
     """A class for reshaping of the model output estimates
     """
-    ori: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     distance: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     edge: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
     crop: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
@@ -50,7 +49,6 @@ class ModelOutputs(object):
         self.nan_to_num()
         if (self.crop_type_probas is not None) and len(self.crop_type_probas.shape) == 3:
             stack_items = (
-                self.ori[None],
                 self.edge_dist[None],
                 self.edge_probas[None],
                 self.crop_probas[None]
@@ -63,7 +61,6 @@ class ModelOutputs(object):
             return np.vstack(stack_items)
         else:
             stack_items = (
-                self.ori,
                 self.edge_dist,
                 self.edge_probas,
                 self.crop_probas
@@ -103,8 +100,6 @@ class ModelOutputs(object):
             )
 
     def reshape(self, w: Window, w_pad: Window) -> None:
-        # Get the orientations
-        self.ori = self._clip_and_reshape(self.ori, w_pad)
         # Get the distance from edges
         self.edge_dist = self._clip_and_reshape(self.distance, w_pad)
 
@@ -149,7 +144,6 @@ class ModelOutputs(object):
             slice(i, i+w.height),
             slice(j, j+w.width)
         )
-        self.ori = self.ori[slicer]
         self.edge_dist = self.edge_dist[slicer]
         self.edge_probas = self.edge_probas[slicer]
         if len(self.crop_probas.shape) == 3:
@@ -167,15 +161,6 @@ class ModelOutputs(object):
 
     def nan_to_num(self):
         # Convert the data type to integer and set 'no data' values
-        self.ori = (
-            np.nan_to_num(
-                self.ori,
-                nan=-1.0,
-                neginf=-1.0,
-                posinf=-1.0
-            ).astype('float32')
-        )
-
         self.edge_dist = (
             np.nan_to_num(
                 self.edge_dist,
