@@ -540,7 +540,7 @@ class CultioLitModel(pl.LightningModule):
         return loss
 
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
-        ori, dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type = self(batch)
+        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type = self(batch)
         loss = self.calc_loss(
             batch,
             dist_0,
