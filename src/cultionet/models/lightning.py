@@ -682,7 +682,6 @@ class CultioLitModel(pl.LightningModule):
         if self.num_classes > 2:
             self.crop_type_loss = CrossEntropyLoss(
                 class_weights=self.class_weights,
-                ignore_index=0,
                 inputs_are_logits=True,
                 apply_transform=True,
                 device=self.device
