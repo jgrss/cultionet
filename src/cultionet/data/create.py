@@ -183,7 +183,7 @@ def is_grid_processed(
                 train_id = f'{group_id}_{grid}_{aug}_{i:03d}'
                 train_path = process_path / f'data_{train_id}.pt'
                 if train_path.is_file():
-                    train_data = torch.load(train_path)
+                    train_data = joblib.load(train_path)
                     if train_data.train_id == train_id:
                         batch_stored = True
 
@@ -191,7 +191,7 @@ def is_grid_processed(
             train_id = f'{group_id}_{grid}_{aug}'
             train_path = process_path / f'data_{train_id}.pt'
             if train_path.is_file():
-                train_data = torch.load(train_path)
+                train_data = joblib.load(train_path)
                 if train_data.train_id == train_id:
                     batch_stored = True
 
