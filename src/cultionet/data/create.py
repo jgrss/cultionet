@@ -456,7 +456,11 @@ def create_predict_dataset(
         name: str
     ) -> None:
         predict_path = write_path / f'data_{name}.pt'
-        torch.save(predict_data, predict_path)
+        joblib.dump(
+            predict_data,
+            predict_path,
+            compress=5
+        )
 
     def read_slice(darray: xr.DataArray, w_pad: Window):
         slicer = (
@@ -791,7 +795,11 @@ def create_dataset(
                 )
                 def save_and_update(train_data: Data) -> None:
                     train_path = process_path / f'data_{train_data.train_id}.pt'
-                    joblib.dump(train_data, train_path, compress=5)
+                    joblib.dump(
+                        train_data,
+                        train_path,
+                        compress=5
+                    )
 
                 for aug in transforms:
                     if aug.startswith('ts-'):
