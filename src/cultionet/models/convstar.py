@@ -124,8 +124,9 @@ class StarRNN(torch.nn.Module):
         self,
         input_dim: int = 3,
         hidden_dim: int = 64,
+        num_classes_l2: int = 2,
         num_classes_last: int = 2,
-        nstage: int = 3,
+        nstage: int = 2,
         kernel_size: int = 3,
         n_layers: int = 6,
         cell: str = 'star'
@@ -144,14 +145,12 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
 
-        self.final_local_1 = torch.nn.Sequential(
-            torch.nn.Conv2d(hidden_dim, hidden_dim, 3, padding=1),
-            torch.nn.ELU(alpha=0.1, inplace=False)
-        )
+        # Crop layer
         self.final_local_2 = torch.nn.Sequential(
-            torch.nn.Conv2d(hidden_dim, hidden_dim, 3, padding=1),
+            torch.nn.Conv2d(hidden_dim, num_classes_l2, 3, padding=1),
             torch.nn.ELU(alpha=0.1, inplace=False)
         )
+        # Crop-type layer
         self.final_last = torch.nn.Sequential(
             torch.nn.Conv2d(hidden_dim, num_classes_last, 3, padding=1),
             torch.nn.ELU(alpha=0.1, inplace=False)
@@ -194,7 +193,7 @@ class StarRNN(torch.nn.Module):
         elif self.nstage == 1:
             local_1 = hidden_s[-1]
             local_2 = hidden_s[-1]
-        local_1 = self.final_local_1(local_1)
+
         local_2 = self.final_local_2(local_2)
         last = self.final_last(hidden_s[-1])
 

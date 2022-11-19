@@ -43,15 +43,25 @@ class CultioNet(torch.nn.Module):
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
-        # Star RNN layer (+star_rnn_hidden_dim +num_classes_last)
-        num_last_channels = self.num_classes if self.num_classes > 2 else star_rnn_hidden_dim
+        # Star RNN layer (+star_rnn_hidden_dim +num_classes_l2 +num_classes_last)
+        # Crop classes
+        num_classes_l2 = 2
+        if self.num_classes > 2:
+            # Crop-type classes
+            num_classes_last = self.num_classes
+        else:
+            num_classes_last = 2
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
             hidden_dim=star_rnn_hidden_dim,
             n_layers=star_rnn_n_layers,
-            num_classes_last=num_last_channels
+            num_classes_l2=num_classes_l2,
+            num_classes_last=num_classes_last
         )
-        base_in_channels = star_rnn_hidden_dim + star_rnn_hidden_dim + num_last_channels
+        # Local 1 = hidden dimensions
+        # Local 2 = crop (0|1)
+        # Last = crop-type (2..N)
+        base_in_channels = star_rnn_hidden_dim + num_classes_l2 + num_classes_last
         # Distance layers (+5)
         self.dist_model = NestedUNet3(
             in_channels=base_in_channels,
@@ -98,16 +108,16 @@ class CultioNet(torch.nn.Module):
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
         # Crop/Non-crop and Crop types
-        logits_star_local_1, logits_star_local_2, logits_star_last = self.star_rnn(star_stream)
-        logits_star_local_1 = self.cg(logits_star_local_1)
-        logits_star_local_2 = self.cg(logits_star_local_2)
+        logits_star_l1, logits_star_l2, logits_star_last = self.star_rnn(star_stream)
+        logits_star_l1 = self.cg(logits_star_l1)
+        logits_star_l2 = self.cg(logits_star_l2)
         logits_star_last = self.cg(logits_star_last)
 
         # CONCAT
         h = torch.cat(
             [
-                logits_star_local_1,
-                logits_star_local_2,
+                logits_star_l1,
+                logits_star_l2,
                 logits_star_last
             ], dim=1
         )
@@ -155,8 +165,10 @@ class CultioNet(torch.nn.Module):
             logits_crop
         )
         if self.num_classes > 2:
-            out += (logits_star_last,)
+            # For crop-type, return level 2 (crop) and last layer (crop-type)
+            out += (logits_star_l2, logits_star_last,)
         else:
-            out += (None,)
+            # With no crop-type, return last layer (crop)
+            out += (logits_star_last, None,)
 
         return out
