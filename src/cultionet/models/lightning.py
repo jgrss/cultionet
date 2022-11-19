@@ -3,7 +3,6 @@ from pathlib import Path
 
 from ..losses import (
     CrossEntropyLoss,
-    HuberLoss,
     MSELoss,
     TanimotoDistanceLoss
 )
