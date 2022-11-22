@@ -560,7 +560,8 @@ def create_predict_dataset(
             image_list,
             stack_dim='band',
             band_names=list(range(1, len(image_list) + 1)),
-            resampling=resampling
+            resampling=resampling,
+            chunks=window_size + padding
         ) as src_ts:
             windows = get_window_offsets(
                 src_ts.gw.nrows,
