@@ -325,7 +325,7 @@ def create_image_vars(
             mask = xr.where(src_ts > 10_000, np.nan, 1)
             # X variables
             time_series = (
-                    src_ts.gw.set_nodata(
+                src_ts.gw.set_nodata(
                     src_ts.gw.nodataval, 0,
                     out_range=(0, 1),
                     dtype='float64',
@@ -561,7 +561,7 @@ def create_predict_dataset(
             stack_dim='band',
             band_names=list(range(1, len(image_list) + 1)),
             resampling=resampling,
-            chunks=window_size + padding
+            chunks=512
         ) as src_ts:
             windows = get_window_offsets(
                 src_ts.gw.nrows,
