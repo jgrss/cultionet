@@ -332,7 +332,7 @@ def create_image_vars(
                     scale_factor=gain,
                     offset=offset
                 ) * mask
-            ).gw.compute(num_workers=num_workers)
+            ).fillna(0).gw.compute(num_workers=num_workers)
 
             # Get the time and band count
             ntime, nbands = get_image_list_dims(image, src_ts)

@@ -98,6 +98,7 @@ class TanimotoDistanceLoss(ClassifierPreprocessing):
 class CrossEntropyLoss(object):
     """Cross entropy loss
     """
+    device: T.Optional[str] = attr.ib(default=None)
     class_weights: T.Optional[torch.Tensor] = attr.ib(
         default=None,
         validator=attr.validators.optional(validator=attr.validators.instance_of(torch.Tensor))
@@ -113,10 +114,6 @@ class CrossEntropyLoss(object):
     apply_transform: T.Optional[bool] = attr.ib(
         default=True,
         validator=attr.validators.optional(validator=attr.validators.instance_of(bool))
-    )
-    device: T.Optional[str] = attr.ib(
-        default='cpu',
-        validator=attr.validators.optional(validator=attr.validators.instance_of(str))
     )
 
     def __attrs_post_init__(self):

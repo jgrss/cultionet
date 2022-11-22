@@ -521,7 +521,7 @@ class CultioLitModel(pl.LightningModule):
             loss = loss + crop_l2_loss * 0.5
         if crop_type is not None:
             true_crop_type = torch.where(
-                (batch.y > 0) & (batch.y == self.edge_class), 0, crop_type
+                (batch.y > 0) & (batch.y == self.edge_class), 0, batch.y
             ).long()
             crop_type_loss = self.crop_type_loss(crop_type, true_crop_type)
             loss = loss + crop_type_loss
@@ -607,7 +607,7 @@ class CultioLitModel(pl.LightningModule):
         if crop_type is not None:
             crop_type_ypred = crop_type.argmax(dim=1).long()
             crop_type_ytrue = torch.where(
-                (batch.y > 0) & (batch.y == self.edge_class), 0, crop_type
+                (batch.y > 0) & (batch.y == self.edge_class), 0, batch.y
             ).long()
             crop_type_score = self.crop_type_f1(crop_type_ypred, crop_type_ytrue)
             metrics['crop_type_f1'] = crop_type_score
@@ -691,7 +691,9 @@ class CultioLitModel(pl.LightningModule):
         )
         if self.num_classes > 2:
             self.crop_type_loss = CrossEntropyLoss(
+                device=self.device,
                 class_weights=self.class_weights,
+                ignore_index=0,
                 inputs_are_logits=True,
                 apply_transform=True,
                 device=self.device
