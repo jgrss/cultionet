@@ -695,8 +695,7 @@ class CultioLitModel(pl.LightningModule):
                 class_weights=self.class_weights,
                 ignore_index=0,
                 inputs_are_logits=True,
-                apply_transform=True,
-                device=self.device
+                apply_transform=True
             )
 
     def configure_optimizers(self):
