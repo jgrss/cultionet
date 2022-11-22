@@ -322,7 +322,7 @@ def create_image_vars(
             resampling=resampling
         ) as src_ts:
             # 65535 'no data' values = nan
-            mask = xr.where(src_ts == 65535, np.nan, 1)
+            mask = xr.where(src_ts > 10_000, np.nan, 1)
             # X variables
             time_series = (
                     src_ts.gw.set_nodata(
