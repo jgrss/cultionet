@@ -486,7 +486,7 @@ class CultioLitModel(pl.LightningModule):
         true_edge = (batch.y == self.edge_class).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.
         true_crop = torch.where(
-            (batch.y > 0) & (batch.y < self.edge_class), 1, 0
+            (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
 
         dist_loss_0 = self.dist_loss_0(
@@ -581,7 +581,7 @@ class CultioLitModel(pl.LightningModule):
         # Get the true edge and crop labels
         edge_ytrue = batch.y.eq(self.edge_class).long()
         crop_ytrue = torch.where(
-            (batch.y > 0) & (batch.y < self.edge_class), 1, 0
+            (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
         # F1-score
         edge_score = self.edge_f1(edge_ypred, edge_ytrue)
