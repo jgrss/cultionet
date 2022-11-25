@@ -323,7 +323,8 @@ class CultioLitModel(pl.LightningModule):
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
         class_weights: T.Sequence[float] = None,
-        edge_weights: T.Sequence[float] = None
+        edge_weights: T.Sequence[float] = None,
+        edge_class: T.Optional[int] = None
     ):
         """Lightning model
 
@@ -345,7 +346,10 @@ class CultioLitModel(pl.LightningModule):
         self.num_time_features = num_time_features
         self.class_weights = class_weights
         self.edge_weights = edge_weights
-        self.edge_class = num_classes
+        if edge_class is not None:
+            self.edge_class = edge_class
+        else:
+            self.edge_class = num_classes
 
         self.cultionet_model = CultioNet(
             ds_features=num_features,
@@ -371,7 +375,6 @@ class CultioLitModel(pl.LightningModule):
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
-        torch.Tensor,
         T.Union[None, torch.Tensor]
     ]:
         """Performs a single model forward pass
@@ -381,9 +384,9 @@ class CultioLitModel(pl.LightningModule):
             edge: Probability of an edge [0,1].
             crop: Probability of crop [0,1].
         """
-        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_l2, crop_type = self.cultionet_model(batch)
+        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type = self.cultionet_model(batch)
 
-        return dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_l2, crop_type
+        return dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type
 
     @staticmethod
     def get_cuda_memory():
@@ -404,25 +407,23 @@ class CultioLitModel(pl.LightningModule):
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
-        torch.Tensor,
         T.Union[None, torch.Tensor]
     ]:
         """A prediction step for Lightning
         """
-        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_l2, crop_type = self.forward(
+        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type = self.forward(
             batch, batch_idx
         )
-        edge, crop, crop_l2, crop_type = self.predict_probas(
-            edge, crop, crop_l2, crop_type
+        edge, crop, crop_type = self.predict_probas(
+            edge, crop, crop_type
         )
 
-        return dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_l2, crop_type
+        return dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type
 
     def predict_probas(
         self,
         edge: torch.Tensor,
         crop: torch.Tensor,
-        crop_l2: T.Union[None, torch.Tensor],
         crop_type: T.Union[None, torch.Tensor]
     ) -> T.Tuple[
         torch.Tensor, torch.Tensor, T.Union[None, torch.Tensor], T.Union[None, torch.Tensor]
@@ -430,12 +431,10 @@ class CultioLitModel(pl.LightningModule):
         # Transform edge and crop logits to probabilities
         edge = F.softmax(edge, dim=1, dtype=edge.dtype)
         crop = F.softmax(crop, dim=1, dtype=crop.dtype)
-        if crop_l2 is not None:
-            crop_l2 = F.softmax(crop_l2, dim=1, dtype=crop_l2.dtype)
         if crop_type is not None:
             crop_type = F.softmax(crop_type, dim=1, dtype=crop_type.dtype)
 
-        return edge, crop, crop_l2, crop_type
+        return edge, crop, crop_type
 
     def on_validation_epoch_end(self, *args, **kwargs):
         """Save the model on validation end
@@ -458,7 +457,6 @@ class CultioLitModel(pl.LightningModule):
         dist_4: torch.Tensor,
         edge: torch.Tensor,
         crop: torch.Tensor,
-        crop_l2: torch.Tensor,
         crop_type: T.Union[None, torch.Tensor]
     ):
         """Calculates the loss for each layer
@@ -516,9 +514,6 @@ class CultioLitModel(pl.LightningModule):
             + edge_loss
             + crop_loss
         )
-        if crop_l2 is not None:
-            crop_l2_loss = self.crop_loss(crop_l2, true_crop)
-            loss = loss + crop_l2_loss * 0.5
         if crop_type is not None:
             true_crop_type = torch.where(
                 batch.y == self.edge_class, 0, batch.y
@@ -531,7 +526,7 @@ class CultioLitModel(pl.LightningModule):
     def training_step(self, batch: Data, batch_idx: int = None):
         """Executes one training step
         """
-        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_l2, crop_type = self(batch)
+        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type = self(batch)
         loss = self.calc_loss(
             batch,
             dist_0,
@@ -541,7 +536,6 @@ class CultioLitModel(pl.LightningModule):
             dist_4,
             edge,
             crop,
-            crop_l2,
             crop_type
         )
         self.log('loss', loss, on_step=False, on_epoch=True, prog_bar=True)
@@ -549,7 +543,7 @@ class CultioLitModel(pl.LightningModule):
         return loss
 
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
-        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_l2, crop_type = self(batch)
+        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type = self(batch)
         loss = self.calc_loss(
             batch,
             dist_0,
@@ -559,7 +553,6 @@ class CultioLitModel(pl.LightningModule):
             dist_4,
             edge,
             crop,
-            crop_l2,
             crop_type
         )
 
@@ -572,8 +565,8 @@ class CultioLitModel(pl.LightningModule):
             batch.bdist.contiguous().view(-1)
         )
         # Get the class probabilities
-        edge, crop, crop_l2, crop_type = self.predict_probas(
-            edge, crop, crop_l2, crop_type
+        edge, crop, crop_type = self.predict_probas(
+            edge, crop, crop_type
         )
         # Take the argmax of the class probabilities
         edge_ypred = edge.argmax(dim=1).long()
@@ -693,7 +686,6 @@ class CultioLitModel(pl.LightningModule):
             self.crop_type_loss = CrossEntropyLoss(
                 device=self.device,
                 class_weights=self.class_weights,
-                ignore_index=0,
                 inputs_are_logits=True,
                 apply_transform=True
             )

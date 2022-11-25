@@ -519,6 +519,20 @@ train:
         - !!null
         - simple
         - advanced
+  num_classes:
+    short: ''
+    long: num-classes
+    help: The number of classes (overrides file info)
+    kwargs:
+      default: !!null
+      type: '&int'
+  edge_class:
+    short: ''
+    long: edge-class
+    help: The edge class value (overrides file info)
+    kwargs:
+      default: !!null
+      type: '&int'
 
 predict:
   predict_year:
@@ -627,4 +641,11 @@ predict:
     help: A skip index to slice time series lists by
     kwargs:
       default: 0
+      type: '&int'
+  num_classes:
+    short: ''
+    long: num-classes
+    help: The number of classes (overrides file info)
+    kwargs:
+      default: !!null
       type: '&int'

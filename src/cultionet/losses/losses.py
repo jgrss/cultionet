@@ -103,10 +103,6 @@ class CrossEntropyLoss(object):
         default=None,
         validator=attr.validators.optional(validator=attr.validators.instance_of(torch.Tensor))
     )
-    ignore_index: T.Optional[int] = attr.ib(
-        default=None,
-        validator=attr.validators.optional(validator=attr.validators.instance_of(int))
-    )
     inputs_are_logits: T.Optional[bool] = attr.ib(
         default=True,
         validator=attr.validators.optional(validator=attr.validators.instance_of(bool))
@@ -119,13 +115,11 @@ class CrossEntropyLoss(object):
     def __attrs_post_init__(self):
         if self.device == 'cpu':
             self.loss_func = torch.nn.CrossEntropyLoss(
-                weight=self.class_weights,
-                ignore_index=self.ignore_index
+                weight=self.class_weights
             )
         else:
             self.loss_func = torch.nn.CrossEntropyLoss(
-                weight=self.class_weights,
-                ignore_index=self.ignore_index
+                weight=self.class_weights
             ).cuda()
 
     def __call__(self, *args, **kwargs):
