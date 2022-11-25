@@ -166,5 +166,7 @@ class CultioNet(torch.nn.Module):
         if self.num_classes > 2:
             # With no crop-type, return last layer (crop)
             out += (logits_star_last,)
+        else:
+            out += (None,)
 
         return out
