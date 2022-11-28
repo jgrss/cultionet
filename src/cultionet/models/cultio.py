@@ -3,6 +3,7 @@ import typing as T
 from . import model_utils
 from .nunet import NestedUNet2, NestedUNet3
 from .convstar import StarRNN
+from .dexined import DexiNed
 
 import torch
 from torch_geometric.data import Data
@@ -68,13 +69,18 @@ class CultioNet(torch.nn.Module):
             init_filter=self.filters,
             deep_supervision=True
         )
+        # DexiNed (+8)
+        self.edge_model = DexiNed(
+            in_channels=base_in_channels+5,
+            out_channels=2
+        )
         # Nested UNet (+2 edges +2 crops)
         self.crop_model = NestedUNet2(
-            in_channels=base_in_channels+5,
+            in_channels=base_in_channels+5+8,
             out_channels=2,
             out_side_channels=2,
             init_filter=self.filters,
-            boundary_layer=True,
+            boundary_layer=False,
             deep_supervision=True
         )
 
@@ -145,14 +151,32 @@ class CultioNet(torch.nn.Module):
             ], dim=1
         )
 
-        # (3) Crop stream
+        # (3) Edge stream
+        edge_stream = self.edge_model(
+            self.gc(
+                h, batch_size, height, width
+            )
+        )
+        logits_edge_blocks = self.cg(edge_stream['blocks'])
+        logits_edges = self.cg(edge_stream['final'])
+
+        # CONCAT
+        h = torch.cat(
+            [
+                h,
+                logits_edge_blocks,
+                logits_edges
+            ], dim=1
+        )
+
+        # (4) Crop stream
         nunet_stream = self.crop_model(
             self.gc(
                 h, batch_size, height, width
             )
         )
         logits_crop = self.cg(nunet_stream['mask'])
-        logits_edges = self.cg(nunet_stream['boundary'])
+        # logits_edges = self.cg(nunet_stream['boundary'])
 
         out = (
             logits_distance_0,
