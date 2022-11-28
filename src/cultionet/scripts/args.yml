@@ -649,3 +649,10 @@ predict:
     kwargs:
       default: !!null
       type: '&int'
+  edge_class:
+    short: ''
+    long: edge-class
+    help: The edge class value (overrides file info)
+    kwargs:
+      default: !!null
+      type: '&int'
