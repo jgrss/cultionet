@@ -611,6 +611,7 @@ def predict_lightning(
     filters: int,
     precision: int,
     num_classes: int,
+    edge_class: int,
     resampling: str,
     ref_res: float,
     compression: str
@@ -648,7 +649,9 @@ def predict_lightning(
     lit_kwargs = dict(
         num_features=dataset.num_features,
         num_time_features=dataset.num_time_features,
-        filters=filters
+        filters=filters,
+        num_classes=num_classes,
+        edge_class=edge_class
     )
 
     trainer = pl.Trainer(**trainer_kwargs)
