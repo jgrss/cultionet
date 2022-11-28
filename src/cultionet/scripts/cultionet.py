@@ -471,7 +471,8 @@ def predict_image(args):
     )
     # Load the z-score norm values
     data_values = torch.load(ppaths.norm_file)
-    num_classes = len(data_values.crop_counts)
+    with open(ppaths.classes_info_path, mode='r') as f:
+        class_info = json.load(f)
 
     if args.data_path is not None:
         ds = EdgeDataset(
@@ -489,7 +490,8 @@ def predict_image(args):
             device=args.device,
             filters=args.filters,
             precision=args.precision,
-            num_classes=num_classes,
+            num_classes=args.num_classes if args.num_classes is not None else class_info['max_crop_class'] + 1,
+            edge_class=args.edge_class if args.edge_class is not None else class_info['edge_class'],
             ref_res=ds[0].res,
             resampling=ds[0].resampling,
             compression=args.compression
@@ -792,7 +794,7 @@ def create_datasets(args):
         if args.destination != 'predict':
             class_info = {
                 'max_crop_class': args.max_crop_class,
-                'edge_class': args.max_crop_class+1
+                'edge_class': args.max_crop_class + 1
             }
             with open(ppaths.classes_info_path, mode='w') as f:
                 f.write(json.dumps(class_info))
@@ -1098,7 +1100,7 @@ def train_model(args):
         learning_rate=args.learning_rate,
         filters=args.filters,
         num_classes=args.num_classes if args.num_classes is not None else class_info['max_crop_class'] + 1,
-        edge_class=args.edge_class if args.edge_class is not None else class_info['edge_class'] + 1,
+        edge_class=args.edge_class if args.edge_class is not None else class_info['edge_class'],
         class_weights=class_weights,
         random_seed=args.random_seed,
         reset_model=args.reset_model,
