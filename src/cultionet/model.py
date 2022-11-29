@@ -341,10 +341,12 @@ def fit(
         early_stop_callback
     ]
     if stochastic_weight_averaging:
-        callbacks.append(StochasticWeightAveraging(
-            swa_lrs=stochastic_weight_averaging_lr,
-            swa_epoch_start=stochastic_weight_averaging_start
-        ))
+        callbacks.append(
+            StochasticWeightAveraging(
+                swa_lrs=stochastic_weight_averaging_lr,
+                swa_epoch_start=stochastic_weight_averaging_start
+            )
+        )
     if 0 < model_pruning <= 1:
         callbacks.append(
             ModelPruning('l1_unstructured', amount=model_pruning)
