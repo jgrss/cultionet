@@ -140,7 +140,7 @@ class NestedUNet2(torch.nn.Module):
         self.deep_supervision = deep_supervision
 
         init_filter = int(init_filter)
-        nb_filter = [
+        channels = [
             init_filter,
             init_filter*2,
             init_filter*4,
@@ -151,84 +151,84 @@ class NestedUNet2(torch.nn.Module):
         self.up = model_utils.UpSample()
 
         self.attention_0 = AttentionGate(
-            high_channels=nb_filter[3],
-            low_channels=nb_filter[4]
+            high_channels=channels[3],
+            low_channels=channels[4]
         )
         self.attention_1 = AttentionGate(
-            high_channels=nb_filter[2],
-            low_channels=nb_filter[3]
+            high_channels=channels[2],
+            low_channels=channels[3]
         )
         self.attention_2 = AttentionGate(
-            high_channels=nb_filter[1],
-            low_channels=nb_filter[2]
+            high_channels=channels[1],
+            low_channels=channels[2]
         )
         self.attention_3 = AttentionGate(
-            high_channels=nb_filter[0],
-            low_channels=nb_filter[1]
+            high_channels=channels[0],
+            low_channels=channels[1]
         )
 
         if boundary_layer:
             # Right stream
-            self.bound4_1 = DoubleConv(nb_filter[4]+nb_filter[3], nb_filter[3])
-            self.bound3_1 = DoubleConv(nb_filter[3]+nb_filter[2], nb_filter[2])
-            self.bound2_1 = DoubleConv(nb_filter[2]+nb_filter[1], nb_filter[1])
-            self.bound1_1 = DoubleConv(nb_filter[1]+nb_filter[0], nb_filter[0])
+            self.bound4_1 = DoubleConv(channels[4]+channels[3], channels[3])
+            self.bound3_1 = DoubleConv(channels[3]+channels[2], channels[2])
+            self.bound2_1 = DoubleConv(channels[2]+channels[1], channels[1])
+            self.bound1_1 = DoubleConv(channels[1]+channels[0], channels[0])
             # Left stream
-            self.bound4_0 = DoubleConv(nb_filter[4]+nb_filter[3], nb_filter[3])
-            self.bound3_0 = DoubleConv(nb_filter[3]+nb_filter[2], nb_filter[2])
-            self.bound2_0 = DoubleConv(nb_filter[2]+nb_filter[1], nb_filter[1])
-            self.bound1_0 = DoubleConv(nb_filter[1]+nb_filter[0], nb_filter[0])
+            self.bound4_0 = DoubleConv(channels[4]+channels[3], channels[3])
+            self.bound3_0 = DoubleConv(channels[3]+channels[2], channels[2])
+            self.bound2_0 = DoubleConv(channels[2]+channels[1], channels[1])
+            self.bound1_0 = DoubleConv(channels[1]+channels[0], channels[0])
             # Top stream
-            self.bound0_1 = DoubleConv(nb_filter[0]+nb_filter[0], nb_filter[0])
-            self.bound0_2 = DoubleConv(nb_filter[0]+nb_filter[0], nb_filter[0])
-            self.bound0_3 = DoubleConv(nb_filter[0]+nb_filter[0], nb_filter[0])
-            self.bound0_4 = DoubleConv(nb_filter[0]+nb_filter[0], nb_filter[0])
+            self.bound0_1 = DoubleConv(channels[0]+channels[0], channels[0])
+            self.bound0_2 = DoubleConv(channels[0]+channels[0], channels[0])
+            self.bound0_3 = DoubleConv(channels[0]+channels[0], channels[0])
+            self.bound0_4 = DoubleConv(channels[0]+channels[0], channels[0])
 
             if self.deep_supervision:
                 final_bound_in_channels = out_side_channels
                 self.bound_final_1 = torch.nn.Conv2d(
-                    nb_filter[0], out_side_channels, kernel_size=1, padding=0
+                    channels[0], out_side_channels, kernel_size=1, padding=0
                 )
                 self.bound_final_2 = torch.nn.Conv2d(
-                    nb_filter[0], out_side_channels, kernel_size=1, padding=0
+                    channels[0], out_side_channels, kernel_size=1, padding=0
                 )
                 self.bound_final_3 = torch.nn.Conv2d(
-                    nb_filter[0], out_side_channels, kernel_size=1, padding=0
+                    channels[0], out_side_channels, kernel_size=1, padding=0
                 )
             else:
-                final_bound_in_channels = nb_filter[0] + nb_filter[0] + nb_filter[0]
+                final_bound_in_channels = channels[0] + channels[0] + channels[0]
             self.bound_final = torch.nn.Conv2d(
                 final_bound_in_channels, out_side_channels,
                 kernel_size=1,
                 padding=0
             )
 
-        self.conv0_0 = DoubleResConv(in_channels, nb_filter[0])
-        self.conv1_0 = PoolConv(nb_filter[0], nb_filter[1], dropout=0.25)
-        self.conv2_0 = PoolConv(nb_filter[1], nb_filter[2], dropout=0.5)
-        self.conv3_0 = PoolConv(nb_filter[2], nb_filter[3], dropout=0.5)
-        self.conv4_0 = PoolConv(nb_filter[3], nb_filter[4], dropout=0.5)
+        self.conv0_0 = DoubleResConv(in_channels, channels[0])
+        self.conv1_0 = PoolConv(channels[0], channels[1], dropout=0.25)
+        self.conv2_0 = PoolConv(channels[1], channels[2], dropout=0.5)
+        self.conv3_0 = PoolConv(channels[2], channels[3], dropout=0.5)
+        self.conv4_0 = PoolConv(channels[3], channels[4], dropout=0.5)
 
-        self.conv0_1 = DoubleResConv(nb_filter[0]+nb_filter[1], nb_filter[0])
-        self.conv1_1 = DoubleConv(nb_filter[1]+nb_filter[2], nb_filter[1])
-        self.conv2_1 = DoubleConv(nb_filter[2]+nb_filter[3], nb_filter[2])
-        self.conv3_1 = DoubleConv(nb_filter[3]+nb_filter[4], nb_filter[3])
+        self.conv0_1 = DoubleResConv(channels[0]+channels[1], channels[0])
+        self.conv1_1 = DoubleConv(channels[1]+channels[2], channels[1])
+        self.conv2_1 = DoubleConv(channels[2]+channels[3], channels[2])
+        self.conv3_1 = DoubleConv(channels[3]+channels[4], channels[3])
 
-        self.conv0_2 = DoubleResConv(nb_filter[0]*2+nb_filter[1], nb_filter[0])
-        self.conv1_2 = DoubleConv(nb_filter[1]*2+nb_filter[2], nb_filter[1])
-        self.conv2_2 = DoubleConv(nb_filter[2]*2+nb_filter[3], nb_filter[2])
+        self.conv0_2 = DoubleResConv(channels[0]*2+channels[1], channels[0])
+        self.conv1_2 = DoubleConv(channels[1]*2+channels[2], channels[1])
+        self.conv2_2 = DoubleConv(channels[2]*2+channels[3], channels[2])
 
-        self.conv0_3 = DoubleResConv(nb_filter[0]*3+nb_filter[1], nb_filter[0])
-        self.conv1_3 = DoubleConv(nb_filter[1]*3+nb_filter[2], nb_filter[1])
+        self.conv0_3 = DoubleResConv(channels[0]*3+channels[1], channels[0])
+        self.conv1_3 = DoubleConv(channels[1]*3+channels[2], channels[1])
 
-        self.conv0_4 = DoubleResConv(nb_filter[0]*4+nb_filter[1], nb_filter[0])
+        self.conv0_4 = DoubleResConv(channels[0]*4+channels[1], channels[0])
 
         if self.linear_fc:
             self.net_final = torch.nn.Sequential(
                 torch.nn.ELU(alpha=0.1, inplace=False),
                 Permute((0, 2, 3, 1)),
                 torch.nn.Linear(
-                    nb_filter[0], out_channels
+                    channels[0], out_channels
                 ),
                 Permute((0, 3, 1, 2))
             )
@@ -237,19 +237,19 @@ class NestedUNet2(torch.nn.Module):
                 in_final_layers = out_channels
 
                 self.final_1 = torch.nn.Conv2d(
-                    nb_filter[0], out_channels, kernel_size=1, padding=0
+                    channels[0], out_channels, kernel_size=1, padding=0
                 )
                 self.final_2 = torch.nn.Conv2d(
-                    nb_filter[0], out_channels, kernel_size=1, padding=0
+                    channels[0], out_channels, kernel_size=1, padding=0
                 )
                 self.final_3 = torch.nn.Conv2d(
-                    nb_filter[0], out_channels, kernel_size=1, padding=0
+                    channels[0], out_channels, kernel_size=1, padding=0
                 )
                 self.final_4 = torch.nn.Conv2d(
-                    nb_filter[0], out_channels, kernel_size=1, padding=0
+                    channels[0], out_channels, kernel_size=1, padding=0
                 )
             else:
-                in_final_layers = nb_filter[0]
+                in_final_layers = channels[0]
 
             if boundary_layer:
                 in_final_layers += out_side_channels
@@ -424,63 +424,63 @@ class NestedUNet3(torch.nn.Module):
         self.deep_supervision = deep_supervision
 
         init_filter = int(init_filter)
-        nb_filter = [
+        channels = [
             init_filter,
             init_filter*2,
             init_filter*4,
             init_filter*8,
             init_filter*16
         ]
-        up_channels = int(nb_filter[0] * 5)
+        up_channels = int(channels[0] * 5)
 
         self.side_stream = side_stream
         self.up = model_utils.UpSample()
 
-        self.conv0_0 = SingleConv(in_channels, nb_filter[0])
-        self.conv1_0 = PoolConv(nb_filter[0], nb_filter[1], dropout=0.1)
-        self.conv2_0 = PoolConv(nb_filter[1], nb_filter[2], dropout=0.1)
-        self.conv3_0 = PoolConv(nb_filter[2], nb_filter[3], dropout=0.1)
-        self.conv4_0 = PoolConv(nb_filter[3], nb_filter[4], dropout=0.1)
+        self.conv0_0 = SingleConv(in_channels, channels[0])
+        self.conv1_0 = PoolConv(channels[0], channels[1], dropout=0.25)
+        self.conv2_0 = PoolConv(channels[1], channels[2], dropout=0.5)
+        self.conv3_0 = PoolConv(channels[2], channels[3], dropout=0.5)
+        self.conv4_0 = PoolConv(channels[3], channels[4], dropout=0.5)
 
         # Connect 3
-        self.conv0_0_3_1_con = PoolConvSingle(nb_filter[0], nb_filter[0], pool_size=8)
-        self.conv1_0_3_1_con = PoolConvSingle(nb_filter[1], nb_filter[0], pool_size=4)
-        self.conv2_0_3_1_con = PoolConvSingle(nb_filter[2], nb_filter[0], pool_size=2)
-        self.conv3_0_3_1_con = SingleConv(nb_filter[3], nb_filter[0])
-        self.conv4_0_3_1_con = SingleConv(nb_filter[4], nb_filter[0])
+        self.conv0_0_3_1_con = PoolConvSingle(channels[0], channels[0], pool_size=8)
+        self.conv1_0_3_1_con = PoolConvSingle(channels[1], channels[0], pool_size=4)
+        self.conv2_0_3_1_con = PoolConvSingle(channels[2], channels[0], pool_size=2)
+        self.conv3_0_3_1_con = SingleConv(channels[3], channels[0])
+        self.conv4_0_3_1_con = SingleConv(channels[4], channels[0])
         self.conv3_1 = SingleConv(up_channels, up_channels)
 
         # Connect 2
-        self.conv0_0_2_2_con = PoolConvSingle(nb_filter[0], nb_filter[0], pool_size=4)
-        self.conv1_0_2_2_con = PoolConvSingle(nb_filter[1], nb_filter[0], pool_size=2)
-        self.conv2_0_2_2_con = SingleConv(nb_filter[2], nb_filter[0])
-        self.conv3_1_2_2_con = SingleConv(up_channels, nb_filter[0])
-        self.conv4_0_2_2_con = SingleConv(nb_filter[4], nb_filter[0])
+        self.conv0_0_2_2_con = PoolConvSingle(channels[0], channels[0], pool_size=4)
+        self.conv1_0_2_2_con = PoolConvSingle(channels[1], channels[0], pool_size=2)
+        self.conv2_0_2_2_con = SingleConv(channels[2], channels[0])
+        self.conv3_1_2_2_con = SingleConv(up_channels, channels[0])
+        self.conv4_0_2_2_con = SingleConv(channels[4], channels[0])
         self.conv2_2 = SingleConv(up_channels, up_channels)
 
         # Connect 3
-        self.conv0_0_1_3_con = PoolConvSingle(nb_filter[0], nb_filter[0], pool_size=2)
-        self.conv1_0_1_3_con = SingleConv(nb_filter[1], nb_filter[0])
-        self.conv2_2_1_3_con = SingleConv(up_channels, nb_filter[0])
-        self.conv3_1_1_3_con = SingleConv(up_channels, nb_filter[0])
-        self.conv4_0_1_3_con = SingleConv(nb_filter[4], nb_filter[0])
+        self.conv0_0_1_3_con = PoolConvSingle(channels[0], channels[0], pool_size=2)
+        self.conv1_0_1_3_con = SingleConv(channels[1], channels[0])
+        self.conv2_2_1_3_con = SingleConv(up_channels, channels[0])
+        self.conv3_1_1_3_con = SingleConv(up_channels, channels[0])
+        self.conv4_0_1_3_con = SingleConv(channels[4], channels[0])
         self.conv1_3 = SingleConv(up_channels, up_channels)
 
         # Connect 4
-        self.conv0_0_0_4_con = SingleConv(nb_filter[0], nb_filter[0])
-        self.conv1_3_0_4_con = SingleConv(up_channels, nb_filter[0])
-        self.conv2_2_0_4_con = SingleConv(up_channels, nb_filter[0])
-        self.conv3_1_0_4_con = SingleConv(up_channels, nb_filter[0])
-        self.conv4_0_0_4_con = SingleConv(nb_filter[4], nb_filter[0])
+        self.conv0_0_0_4_con = SingleConv(channels[0], channels[0])
+        self.conv1_3_0_4_con = SingleConv(up_channels, channels[0])
+        self.conv2_2_0_4_con = SingleConv(up_channels, channels[0])
+        self.conv3_1_0_4_con = SingleConv(up_channels, channels[0])
+        self.conv4_0_0_4_con = SingleConv(channels[4], channels[0])
         self.conv0_4 = SingleConv(up_channels, up_channels)
 
         if self.side_stream:
-            self.convs4_0 = SingleConv(nb_filter[4]+up_channels, nb_filter[0])
-            self.convs3_1 = SingleConv(up_channels+nb_filter[0], nb_filter[0])
-            self.convs2_2 = SingleConv(up_channels+nb_filter[0], nb_filter[0])
-            self.convs1_3 = SingleConv(up_channels+nb_filter[0], nb_filter[0])
+            self.convs4_0 = SingleConv(channels[4]+up_channels, channels[0])
+            self.convs3_1 = SingleConv(up_channels+channels[0], channels[0])
+            self.convs2_2 = SingleConv(up_channels+channels[0], channels[0])
+            self.convs1_3 = SingleConv(up_channels+channels[0], channels[0])
             self.side_final = torch.nn.Conv2d(
-                nb_filter[0], out_channels, kernel_size=3, padding=1
+                channels[0], out_channels, kernel_size=3, padding=1
             )
 
         if linear_fc:
@@ -527,7 +527,7 @@ class NestedUNet3(torch.nn.Module):
                     torch.nn.ELU(alpha=0.1, inplace=False),
                     Permute((0, 2, 3, 1)),
                     torch.nn.Linear(
-                        nb_filter[4], out_channels
+                        channels[4], out_channels
                     ),
                     Permute((0, 3, 1, 2))
                 )
@@ -542,7 +542,7 @@ class NestedUNet3(torch.nn.Module):
                     up_channels, out_channels, kernel_size=3, padding=1
                 )
                 self.final_4 = torch.nn.Conv2d(
-                    nb_filter[4], out_channels, kernel_size=3, padding=1
+                    channels[4], out_channels, kernel_size=3, padding=1
                 )
 
         # Initialise weights

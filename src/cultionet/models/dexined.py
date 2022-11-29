@@ -176,55 +176,63 @@ class DexiNed(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        init_filter: int = 64
+        init_filter: int = 32
     ):
         super(DexiNed, self).__init__()
 
-        self.block_1 = DoubleConvBlock(in_channels, 32, 64)
-        self.block_2 = DoubleConvBlock(64, 128, use_act=False)
-        self.dblock_3 = _DenseBlock(2, 128, 256)
-        self.dblock_4 = _DenseBlock(3, 256, 512)
-        self.dblock_5 = _DenseBlock(3, 512, 512)
-        self.dblock_6 = _DenseBlock(3, 512, 256)
+        channels = [
+            init_filter,    # 32
+            init_filter*2,  # 64
+            init_filter*4,  # 128
+            init_filter*8,  # 256
+            init_filter*16  # 512
+        ]
+
+        self.block_1 = DoubleConvBlock(in_channels, channels[0], channels[1])
+        self.block_2 = DoubleConvBlock(channels[1], channels[2], use_act=False)
+        self.dblock_3 = _DenseBlock(2, channels[2], channels[3])
+        self.dblock_4 = _DenseBlock(3, channels[3], channels[4])
+        self.dblock_5 = _DenseBlock(3, channels[4], channels[4])
+        self.dblock_6 = _DenseBlock(3, channels[4], channels[3])
         self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
         # left skip connections, figure in Journal
-        self.side_1 = SingleConvBlock(64, 128, 2)
-        self.side_2 = SingleConvBlock(128, 256, 2)
-        self.side_3 = SingleConvBlock(256, 512, 2)
-        self.side_4 = SingleConvBlock(512, 512, 1)
-        self.side_5 = SingleConvBlock(512, 256, 1)
+        self.side_1 = SingleConvBlock(channels[1], channels[2], 2)
+        self.side_2 = SingleConvBlock(channels[2], channels[3], 2)
+        self.side_3 = SingleConvBlock(channels[3], channels[4], 2)
+        self.side_4 = SingleConvBlock(channels[4], channels[4], 1)
+        self.side_5 = SingleConvBlock(channels[4], channels[3], 1)
 
         # right skip connections, figure in Journal paper
-        self.pre_dense_2 = SingleConvBlock(128, 256, 2)
-        self.pre_dense_3 = SingleConvBlock(128, 256, 1)
-        self.pre_dense_4 = SingleConvBlock(256, 512, 1)
-        self.pre_dense_5 = SingleConvBlock(512, 512, 1)
-        self.pre_dense_6 = SingleConvBlock(512, 256, 1)
+        self.pre_dense_2 = SingleConvBlock(channels[2], channels[3], 2)
+        self.pre_dense_3 = SingleConvBlock(channels[2], channels[3], 1)
+        self.pre_dense_4 = SingleConvBlock(channels[3], channels[4], 1)
+        self.pre_dense_5 = SingleConvBlock(channels[4], channels[4], 1)
+        self.pre_dense_6 = SingleConvBlock(channels[4], channels[3], 1)
 
         self.up = model_utils.UpSample()
         self.up_block_1 = torch.nn.Sequential(
-            torch.nn.Conv2d(64, 1, 1),
+            torch.nn.Conv2d(channels[1], 1, 1),
             torch.nn.ReLU(inplace=False)
         )
         self.up_block_2 = torch.nn.Sequential(
-            torch.nn.Conv2d(128, 1, 1),
+            torch.nn.Conv2d(channels[2], 1, 1),
             torch.nn.ReLU(inplace=False)
         )
         self.up_block_3 = torch.nn.Sequential(
-            torch.nn.Conv2d(256, 1, 1),
+            torch.nn.Conv2d(channels[3], 1, 1),
             torch.nn.ReLU(inplace=False)
         )
         self.up_block_4 = torch.nn.Sequential(
-            torch.nn.Conv2d(512, 1, 1),
+            torch.nn.Conv2d(channels[4], 1, 1),
             torch.nn.ReLU(inplace=False)
         )
         self.up_block_5 = torch.nn.Sequential(
-            torch.nn.Conv2d(512, 1, 1),
+            torch.nn.Conv2d(channels[4], 1, 1),
             torch.nn.ReLU(inplace=False)
         )
         self.up_block_6 = torch.nn.Sequential(
-            torch.nn.Conv2d(256, 1, 1),
+            torch.nn.Conv2d(channels[3], 1, 1),
             torch.nn.ReLU(inplace=False)
         )
         self.block_cat = SingleConvBlock(6, out_channels, stride=1, use_bs=False)

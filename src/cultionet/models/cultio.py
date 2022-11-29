@@ -71,7 +71,8 @@ class CultioNet(torch.nn.Module):
         # DexiNed (+8)
         self.edge_model = DexiNed(
             in_channels=base_in_channels+5,
-            out_channels=2
+            out_channels=2,
+            init_filter=self.filters
         )
         # Nested UNet (+2 edges +2 crops)
         self.crop_model = NestedUNet2(
