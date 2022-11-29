@@ -460,7 +460,7 @@ train:
       action: store_true
   gradient_clip_val:
     short: ''
-    long: gradient-clip-val
+    long: gcv
     help: The gradient clip value
     kwargs:
       default: 1.0
@@ -480,8 +480,8 @@ train:
       default: 1e-5
       type: '&float'
   accumulate_grad_batches:
-    short: agb
-    long: accumulate-grad-batches
+    short: ''
+    long: agb
     help: Sets the number of batches to apply gradients after
     kwargs:
       default: 1
