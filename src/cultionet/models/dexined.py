@@ -39,7 +39,7 @@ class _DenseLayer(torch.nn.Sequential):
             )
         )
         self.add_module('norm1', torch.nn.BatchNorm2d(out_features))
-        self.add_module('relu1', torch.nn.ReLU(inplace=True))
+        self.add_module('relu1', torch.nn.LeakyReLU(inplace=True))
         self.add_module(
             'conv2',
             torch.nn.Conv2d(
@@ -54,7 +54,7 @@ class _DenseLayer(torch.nn.Sequential):
 
     def forward(self, x):
         x1, x2 = x
-        new_features = super(_DenseLayer, self).forward(F.relu(x1))
+        new_features = super(_DenseLayer, self).forward(F.leaky_relu(x1))
 
         return 0.5 * (new_features + x2), x2
 
@@ -73,6 +73,7 @@ class SingleConvBlock(torch.nn.Module):
         self, in_features, out_features, stride, use_bs=True
     ):
         super(SingleConvBlock, self).__init__()
+
         self.use_bn = use_bs
         self.conv = torch.nn.Conv2d(
             in_features,
@@ -94,6 +95,7 @@ class SingleConvBlock(torch.nn.Module):
 class UpConvBlock(torch.nn.Module):
     def __init__(self, in_features, up_scale):
         super(UpConvBlock, self).__init__()
+
         self.up_factor = 2
         self.constant_features = 16
 
@@ -110,7 +112,7 @@ class UpConvBlock(torch.nn.Module):
             pad = all_pads[up_scale]  # kernel_size-1
             out_features = self.compute_out_features(i, up_scale)
             layers.append(torch.nn.Conv2d(in_features, out_features, 1))
-            layers.append(torch.nn.ReLU(inplace=True))
+            layers.append(torch.nn.LeakyReLU(inplace=True))
             layers.append(
                 torch.nn.ConvTranspose2d(
                     out_features, out_features, kernel_size, stride=2, padding=pad
@@ -141,26 +143,26 @@ class DoubleConvBlock(torch.nn.Module):
         self.use_act = use_act
         if out_features is None:
             out_features = mid_features
-        self.conv1 = torch.nn.Conv2d(
-            in_features,
-            mid_features,
-            3,
-            padding=1,
-            stride=stride
+
+        self.activation = torch.nn.LeakyReLU(inplace=True)
+        self.seq = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_features,
+                mid_features,
+                3,
+                padding=1,
+                stride=stride
+            ),
+            torch.nn.BatchNorm2d(mid_features),
+            self.activation,
+            torch.nn.Conv2d(mid_features, out_features, 3, padding=1),
+            torch.nn.BatchNorm2d(out_features)
         )
-        self.bn1 = torch.nn.BatchNorm2d(mid_features)
-        self.conv2 = torch.nn.Conv2d(mid_features, out_features, 3, padding=1)
-        self.bn2 = torch.nn.BatchNorm2d(out_features)
-        self.relu = torch.nn.ReLU(inplace=True)
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.conv2(x)
-        x = self.bn2(x)
+        x = self.seq(x)
         if self.use_act:
-            x = self.relu(x)
+            x = self.activation(x)
 
         return x
 
@@ -213,27 +215,27 @@ class DexiNed(torch.nn.Module):
         self.up = model_utils.UpSample()
         self.up_block_1 = torch.nn.Sequential(
             torch.nn.Conv2d(channels[1], 1, 1),
-            torch.nn.ReLU(inplace=False)
+            torch.nn.LeakyReLU(inplace=False)
         )
         self.up_block_2 = torch.nn.Sequential(
             torch.nn.Conv2d(channels[2], 1, 1),
-            torch.nn.ReLU(inplace=False)
+            torch.nn.LeakyReLU(inplace=False)
         )
         self.up_block_3 = torch.nn.Sequential(
             torch.nn.Conv2d(channels[3], 1, 1),
-            torch.nn.ReLU(inplace=False)
+            torch.nn.LeakyReLU(inplace=False)
         )
         self.up_block_4 = torch.nn.Sequential(
             torch.nn.Conv2d(channels[4], 1, 1),
-            torch.nn.ReLU(inplace=False)
+            torch.nn.LeakyReLU(inplace=False)
         )
         self.up_block_5 = torch.nn.Sequential(
             torch.nn.Conv2d(channels[4], 1, 1),
-            torch.nn.ReLU(inplace=False)
+            torch.nn.LeakyReLU(inplace=False)
         )
         self.up_block_6 = torch.nn.Sequential(
             torch.nn.Conv2d(channels[3], 1, 1),
-            torch.nn.ReLU(inplace=False)
+            torch.nn.LeakyReLU(inplace=False)
         )
         self.block_cat = SingleConvBlock(6, out_channels, stride=1, use_bs=False)
 
@@ -242,7 +244,7 @@ class DexiNed(torch.nn.Module):
     def slice(self, tensor, slice_shape):
         t_shape = tensor.shape
         height, width = slice_shape
-        if t_shape[-1]!=slice_shape[-1]:
+        if t_shape[-1] != slice_shape[-1]:
             new_tensor = F.interpolate(
                 tensor, size=(height, width), mode='bicubic',align_corners=False)
         else:

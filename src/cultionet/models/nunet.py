@@ -80,7 +80,7 @@ class AttentionGate(torch.nn.Module):
             padding=0
         )
         add_layer = AttentionAdd()
-        activate_layer = torch.nn.ELU(alpha=0.1, inplace=False)
+        activate_layer = torch.nn.ELU(inplace=False)
         sigmoid_layer = torch.nn.Sigmoid()
 
         self.up = model_utils.UpSample()
@@ -225,7 +225,7 @@ class NestedUNet2(torch.nn.Module):
 
         if self.linear_fc:
             self.net_final = torch.nn.Sequential(
-                torch.nn.ELU(alpha=0.1, inplace=False),
+                torch.nn.ELU(inplace=False),
                 Permute((0, 2, 3, 1)),
                 torch.nn.Linear(
                     channels[0], out_channels
@@ -485,7 +485,7 @@ class NestedUNet3(torch.nn.Module):
 
         if linear_fc:
             self.final = torch.nn.Sequential(
-                torch.nn.ELU(alpha=0.1, inplace=False),
+                torch.nn.ELU(inplace=False),
                 Permute((0, 2, 3, 1)),
                 torch.nn.Linear(
                     up_channels, out_channels
@@ -500,7 +500,7 @@ class NestedUNet3(torch.nn.Module):
         if self.deep_supervision:
             if linear_fc:
                 self.final_1 = torch.nn.Sequential(
-                    torch.nn.ELU(alpha=0.1, inplace=False),
+                    torch.nn.ELU(inplace=False),
                     Permute((0, 2, 3, 1)),
                     torch.nn.Linear(
                         up_channels, out_channels
@@ -508,7 +508,7 @@ class NestedUNet3(torch.nn.Module):
                     Permute((0, 3, 1, 2))
                 )
                 self.final_2 = torch.nn.Sequential(
-                    torch.nn.ELU(alpha=0.1, inplace=False),
+                    torch.nn.ELU(inplace=False),
                     Permute((0, 2, 3, 1)),
                     torch.nn.Linear(
                         up_channels, out_channels
@@ -516,7 +516,7 @@ class NestedUNet3(torch.nn.Module):
                     Permute((0, 3, 1, 2))
                 )
                 self.final_3 = torch.nn.Sequential(
-                    torch.nn.ELU(alpha=0.1, inplace=False),
+                    torch.nn.ELU(inplace=False),
                     Permute((0, 2, 3, 1)),
                     torch.nn.Linear(
                         up_channels, out_channels
@@ -524,7 +524,7 @@ class NestedUNet3(torch.nn.Module):
                     Permute((0, 3, 1, 2))
                 )
                 self.final_4 = torch.nn.Sequential(
-                    torch.nn.ELU(alpha=0.1, inplace=False),
+                    torch.nn.ELU(inplace=False),
                     Permute((0, 2, 3, 1)),
                     torch.nn.Linear(
                         channels[4], out_channels
