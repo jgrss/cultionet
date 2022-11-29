@@ -317,7 +317,7 @@ class CultioLitModel(pl.LightningModule):
         num_classes: int = 2,
         filters: int = 64,
         star_rnn_hidden_dim: int = 64,
-        star_rnn_n_layers: int = 4,
+        star_rnn_n_layers: int = 6,
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-5,
         ckpt_name: str = 'last',
@@ -327,13 +327,6 @@ class CultioLitModel(pl.LightningModule):
         edge_class: T.Optional[int] = None
     ):
         """Lightning model
-
-        Args:
-            num_features
-            num_time_features
-            filters
-            learning_rate
-            weight_decay
         """
         super(CultioLitModel, self).__init__()
         self.save_hyperparameters()
@@ -486,6 +479,10 @@ class CultioLitModel(pl.LightningModule):
         true_crop = torch.where(
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
+        # Create pixel weights
+        pixel_weights = torch.where(
+            batch.y == self.edge_class, 1, 0.5
+        ).unsqueeze(1)
 
         dist_loss_0 = self.dist_loss_0(
             dist_0, batch.bdist
@@ -502,8 +499,8 @@ class CultioLitModel(pl.LightningModule):
         dist_loss_4 = self.dist_loss_4(
             dist_4, batch.bdist
         )
-        edge_loss = self.edge_loss(edge, true_edge)
-        crop_loss = self.crop_loss(crop, true_crop)
+        edge_loss = self.edge_loss(edge, true_edge, weight=pixel_weights)
+        crop_loss = self.crop_loss(crop, true_crop, weight=pixel_weights)
 
         loss = (
             + dist_loss_0

@@ -19,7 +19,6 @@ class CultioNet(torch.nn.Module):
         star_rnn_hidden_dim (int): The number of hidden features for the ConvSTAR layer.
         star_rnn_n_layers (int): The number of ConvSTAR layers.
         num_classes (int): The number of output classes.
-        dropout (Optional[float]): The dropout fraction for the transformer stream.
     """
     def __init__(
         self,

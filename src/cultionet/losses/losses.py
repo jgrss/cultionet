@@ -64,7 +64,12 @@ class TanimotoDistanceLoss(ClassifierPreprocessing):
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        weight: T.Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """Performs a single forward pass
 
         Args:
@@ -75,14 +80,16 @@ class TanimotoDistanceLoss(ClassifierPreprocessing):
             Tanimoto distance loss (float)
         """
         inputs, targets = self.preprocess(inputs, targets)
+        if weight is None:
+            weight = torch.ones((inputs.size(0), 1), dtype=inputs.dtype, device=inputs.device)
 
         weights = torch.reciprocal(torch.square(self.volume))
         new_weights = torch.where(torch.isinf(weights), torch.zeros_like(weights), weights)
         weights = torch.where(
             torch.isinf(weights), torch.ones_like(weights) * new_weights.max(), weights
         )
-        intersection = (targets * inputs).sum(dim=0)
-        sum_ = (targets * targets + inputs * inputs).sum(dim=0)
+        intersection = ((targets * inputs) * weight).sum(dim=0)
+        sum_ = ((targets * targets + inputs * inputs) * weight).sum(dim=0)
         num_ = (intersection * weights) + self.smooth
         den_ = ((sum_ - intersection) * weights) + self.smooth
         tanimoto = num_ / den_
@@ -171,32 +178,6 @@ class QuantileLoss(object):
         loss = torch.cat(losses, dim=1).sum(dim=1).mean()
 
         return loss
-
-
-@attr.s
-class AngularLoss(object):
-    """Angular loss
-    """
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """Performs a single forward pass
-
-        Args:
-            inputs: Predictions from model.
-            targets: Ground truth values.
-
-        Returns:
-            Loss (float)
-        """
-        loss = torch.sqrt(
-            2.0 - (2.0 * torch.cos(
-                inputs.contiguous().view(-1) - targets.contiguous().view(-1)
-            ))
-        )
-
-        return loss.mean()
 
 
 @attr.s
