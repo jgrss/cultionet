@@ -1164,7 +1164,7 @@ def main():
             process_dict = args_config[process]
         if process in ('skfoldcv', 'maskrcnn'):
             process_dict.update(args_config['train'])
-        if process in ('train', 'maskrcnn', 'predict'):
+        if process in ('train', 'maskrcnn', 'predict', 'skfoldcv'):
             process_dict.update(args_config['train_predict'])
         process_dict.update(args_config['dates'])
         for process_key, process_values in process_dict.items():
