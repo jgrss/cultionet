@@ -479,10 +479,6 @@ class CultioLitModel(pl.LightningModule):
         true_crop = torch.where(
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
-        # Create pixel weights
-        pixel_weights = torch.where(
-            batch.y == self.edge_class, 1, 0.5
-        ).unsqueeze(1)
 
         dist_loss_0 = self.dist_loss_0(
             dist_0, batch.bdist
@@ -499,8 +495,8 @@ class CultioLitModel(pl.LightningModule):
         dist_loss_4 = self.dist_loss_4(
             dist_4, batch.bdist
         )
-        edge_loss = self.edge_loss(edge, true_edge, weight=pixel_weights)
-        crop_loss = self.crop_loss(crop, true_crop, weight=pixel_weights)
+        edge_loss = self.edge_loss(edge, true_edge)
+        crop_loss = self.crop_loss(crop, true_crop)
 
         loss = (
             dist_loss_0

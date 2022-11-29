@@ -67,8 +67,7 @@ class TanimotoDistanceLoss(ClassifierPreprocessing):
     def forward(
         self,
         inputs: torch.Tensor,
-        targets: torch.Tensor,
-        weight: T.Optional[torch.Tensor] = None
+        targets: torch.Tensor
     ) -> torch.Tensor:
         """Performs a single forward pass
 
@@ -80,16 +79,14 @@ class TanimotoDistanceLoss(ClassifierPreprocessing):
             Tanimoto distance loss (float)
         """
         inputs, targets = self.preprocess(inputs, targets)
-        if weight is None:
-            weight = torch.ones((inputs.size(0), 1), dtype=inputs.dtype, device=inputs.device)
 
         weights = torch.reciprocal(torch.square(self.volume))
         new_weights = torch.where(torch.isinf(weights), torch.zeros_like(weights), weights)
         weights = torch.where(
             torch.isinf(weights), torch.ones_like(weights) * new_weights.max(), weights
         )
-        intersection = ((targets * inputs) * weight).sum(dim=0)
-        sum_ = ((targets * targets + inputs * inputs) * weight).sum(dim=0)
+        intersection = (targets * inputs).sum(dim=0)
+        sum_ = (targets * targets + inputs * inputs).sum(dim=0)
         num_ = (intersection * weights) + self.smooth
         den_ = ((sum_ - intersection) * weights) + self.smooth
         tanimoto = num_ / den_
