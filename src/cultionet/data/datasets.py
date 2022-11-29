@@ -202,7 +202,10 @@ class EdgeDataset(Dataset):
 
         self.spatial_partitions = spatial_partitions
 
-    def spatial_kfoldcv_iter(self) -> T.Tuple['EdgeDataset', 'EdgeDataset']:
+    def spatial_kfoldcv_iter(
+        self,
+        partition_column: str
+    ) -> T.Tuple[str, 'EdgeDataset', 'EdgeDataset']:
         """Yield generator to iterate over spatial partitions
         """
         for kfold in self.spatial_partitions.itertuples():
@@ -218,7 +221,7 @@ class EdgeDataset(Dataset):
                 else:
                     train_idx.append(i)
 
-            yield self[train_idx], self[test_idx]
+            yield str(kfold[partition_column]), self[train_idx], self[test_idx]
 
     def create_rtree(self):
         """Creates the Rtree spatial index

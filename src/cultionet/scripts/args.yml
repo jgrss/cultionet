@@ -354,6 +354,10 @@ skfoldcv:
     kwargs:
       default: 0
       type: '&int'
+  partition_column:
+    short: ''
+    long: partition-column
+    help: The partition column name
 
 train:
   val_frac:

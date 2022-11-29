@@ -317,7 +317,7 @@ class CultioLitModel(pl.LightningModule):
         num_classes: int = 2,
         filters: int = 64,
         star_rnn_hidden_dim: int = 64,
-        star_rnn_n_layers: int = 6,
+        star_rnn_n_layers: int = 3,
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-5,
         ckpt_name: str = 'last',
@@ -503,7 +503,7 @@ class CultioLitModel(pl.LightningModule):
         crop_loss = self.crop_loss(crop, true_crop, weight=pixel_weights)
 
         loss = (
-            + dist_loss_0
+            dist_loss_0
             + dist_loss_1 * 0.75
             + dist_loss_2 * 0.5
             + dist_loss_3 * 0.25

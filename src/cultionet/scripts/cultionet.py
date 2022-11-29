@@ -941,6 +941,9 @@ def train_maskrcnn(args):
 def spatial_kfoldcv(args):
     ppaths = setup_paths(args.project_path)
 
+    with open(ppaths.classes_info_path, mode='r') as f:
+        class_info = json.load(f)
+
     ds = EdgeDataset(
         ppaths.train_path,
         processes=args.processes,
@@ -952,8 +955,10 @@ def spatial_kfoldcv(args):
         splits=args.splits,
         processes=args.processes
     )
-    for k, (train_ds, test_ds) in enumerate(ds.spatial_kfoldcv_iter()):
-        logger.info(f"Fold {k} of {len(ds.spatial_partitions.index)}...")
+    for k, (partition_name, train_ds, test_ds) in enumerate(
+        ds.spatial_kfoldcv_iter(args.partition_column)
+    ):
+        logger.info(f"Fold {k} of {len(ds.spatial_partitions.index)}, partition {partition_name} ...")
         # Normalize the partition
         temp_ds = train_ds.split_train_val(val_frac=args.val_frac)[0]
         data_values = get_norm_values(
@@ -967,6 +972,12 @@ def spatial_kfoldcv(args):
         test_ds.data_means = data_values.mean
         test_ds.data_stds = data_values.std
 
+        # Get balanced class weights
+        # Reference: https://github.com/scikit-learn/scikit-learn/blob/f3f51f9b6/sklearn/utils/class_weight.py#L10
+        recip_freq = data_values.crop_counts[1:].sum() / ((len(data_values.crop_counts)-1) * data_values.crop_counts[1:])
+        class_weights = recip_freq[torch.arange(0, len(data_values.crop_counts)-1)]
+        class_weights = torch.tensor([0] + list(class_weights), dtype=torch.float)
+
         # Fit the model
         cultionet.fit(
             dataset=train_ds,
@@ -978,18 +989,21 @@ def spatial_kfoldcv(args):
             accumulate_grad_batches=args.accumulate_grad_batches,
             learning_rate=args.learning_rate,
             filters=args.filters,
+            num_classes=args.num_classes if args.num_classes is not None else class_info['max_crop_class'] + 1,
+            edge_class=args.edge_class if args.edge_class is not None else class_info['edge_class'],
+            class_weights=class_weights,
             random_seed=args.random_seed,
             reset_model=True,
             auto_lr_find=False,
             device=args.device,
             gradient_clip_val=args.gradient_clip_val,
             early_stopping_patience=args.patience,
-            weight_decay = args.weight_decay,
+            weight_decay=args.weight_decay,
             precision=args.precision,
             stochastic_weight_averaging=args.stochastic_weight_averaging,
             model_pruning=args.model_pruning
         )
-        (ppaths.ckpt_path / 'last.test').rename(ppaths.ckpt_path / f'fold-{k}.test')
+        (ppaths.ckpt_path / 'test.metrics').rename(ppaths.ckpt_path / f'fold-{k}-{partition_name}.metrics')
 
 
 def train_model(args):
@@ -1109,7 +1123,7 @@ def train_model(args):
         profiler=args.profiler,
         gradient_clip_val=args.gradient_clip_val,
         early_stopping_patience=args.patience,
-        weight_decay = args.weight_decay,
+        weight_decay=args.weight_decay,
         precision=args.precision,
         stochastic_weight_averaging=args.stochastic_weight_averaging,
         stochastic_weight_averaging_lr=args.stochastic_weight_averaging_lr,

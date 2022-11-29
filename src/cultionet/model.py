@@ -389,7 +389,7 @@ def fit(
             logged_metrics = trainer.logged_metrics
             for k, v in logged_metrics.items():
                 logged_metrics[k] = float(v)
-            with open(Path(trainer.logger.save_dir) / 'last.test', mode='w') as f:
+            with open(Path(trainer.logger.save_dir) / 'test.metrics', mode='w') as f:
                 f.write(json.dumps(logged_metrics))
 
 

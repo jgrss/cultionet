@@ -125,7 +125,7 @@ class StarRNN(torch.nn.Module):
         input_dim: int = 3,
         hidden_dim: int = 64,
         num_classes_last: int = 2,
-        nstage: int = 2,
+        n_stage: int = 3,
         kernel_size: int = 3,
         n_layers: int = 6,
         cell: str = 'star',
@@ -135,7 +135,7 @@ class StarRNN(torch.nn.Module):
 
         self.n_layers = n_layers
         self.hidden_dim = hidden_dim
-        self.nstage = nstage
+        self.n_stage = n_stage
         self.cell = cell
         self.crop_type_layer = crop_type_layer
 
@@ -146,9 +146,26 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
 
+        padding = int(kernel_size / 2)
+        self.final_1 = torch.nn.Sequential(
+            torch.nn.Conv2d(hidden_dim, hidden_dim, kernel_size, padding=padding),
+            torch.nn.BatchNorm2d(hidden_dim),
+            torch.nn.ELU(alpha=0.1, inplace=False)
+        )
+        self.final_2 = torch.nn.Sequential(
+            torch.nn.Conv2d(hidden_dim, hidden_dim, kernel_size, padding=padding),
+            torch.nn.BatchNorm2d(hidden_dim),
+            torch.nn.ELU(alpha=0.1, inplace=False)
+        )
         # Crop-type layer
         if self.crop_type_layer:
-            self.final_last = torch.nn.Conv2d(hidden_dim, num_classes_last, 3, padding=1)
+            self.final_last = torch.nn.Conv2d(hidden_dim, num_classes_last, kernel_size, padding=padding)
+        else:
+            self.final_last = torch.nn.Sequential(
+                torch.nn.Conv2d(hidden_dim, hidden_dim, kernel_size, padding=padding),
+                torch.nn.BatchNorm2d(hidden_dim),
+                torch.nn.ELU(alpha=0.1, inplace=False)
+            )
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -178,19 +195,19 @@ class StarRNN(torch.nn.Module):
         if self.n_layers == 3:
             local_1 = hidden_s[0]
             local_2 = hidden_s[1]
-        elif self.nstage == 3:
+        elif self.n_stage == 3:
             local_1 = hidden_s[1]
             local_2 = hidden_s[3]
-        elif self.nstage == 2:
+        elif self.n_stage == 2:
             local_1 = hidden_s[1]
             local_2 = hidden_s[2]
-        elif self.nstage == 1:
+        elif self.n_stage == 1:
             local_1 = hidden_s[-1]
             local_2 = hidden_s[-1]
 
-        last = hidden_s[-1]
-        if self.crop_type_layer:
-            last = self.final_last(last)
+        local_1 = self.final_1(local_1)
+        local_2 = self.final_2(local_2)
+        last = self.final_last(hidden_s[-1])
 
         # The output is (B x C x H x W)
         return local_1, local_2, last
