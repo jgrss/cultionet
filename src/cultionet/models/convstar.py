@@ -147,12 +147,7 @@ class StarRNN(torch.nn.Module):
         )
 
         padding = int(kernel_size / 2)
-        self.final_1 = torch.nn.Sequential(
-            torch.nn.Conv2d(hidden_dim, hidden_dim, kernel_size, padding=padding),
-            torch.nn.BatchNorm2d(hidden_dim),
-            torch.nn.ELU(alpha=0.1, inplace=False)
-        )
-        self.final_2 = torch.nn.Sequential(
+        self.final = torch.nn.Sequential(
             torch.nn.Conv2d(hidden_dim, hidden_dim, kernel_size, padding=padding),
             torch.nn.BatchNorm2d(hidden_dim),
             torch.nn.ELU(alpha=0.1, inplace=False)
@@ -192,25 +187,26 @@ class StarRNN(torch.nn.Module):
         for iter_ in range(0, time_size):
             hidden_s = self.rnn(x[:, :, iter_, :, :], hidden_s)
 
-        if self.n_layers == 3:
-            local_1 = hidden_s[0]
-            local_2 = hidden_s[1]
-        elif self.n_stage == 3:
-            local_1 = hidden_s[1]
-            local_2 = hidden_s[3]
-        elif self.n_stage == 2:
-            local_1 = hidden_s[1]
-            local_2 = hidden_s[2]
-        elif self.n_stage == 1:
-            local_1 = hidden_s[-1]
-            local_2 = hidden_s[-1]
+        # if self.n_layers == 3:
+        #     # local_1 = hidden_s[0]
+        #     local_2 = hidden_s[1]
+        # elif self.n_stage == 3:
+        #     # local_1 = hidden_s[1]
+        #     local_2 = hidden_s[3]
+        # elif self.n_stage == 2:
+        #     # local_1 = hidden_s[1]
+        #     local_2 = hidden_s[2]
+        # elif self.n_stage == 1:
+        #     # local_1 = hidden_s[-1]
+        #     local_2 = hidden_s[-1]
 
-        local_1 = self.final_1(local_1)
-        local_2 = self.final_2(local_2)
+        local = self.final(hidden_s[0])
+        for l in range(1, len(hidden_s)-1):
+            local += self.final(hidden_s[l])
         last = self.final_last(hidden_s[-1])
 
         # The output is (B x C x H x W)
-        return local_1, local_2, last
+        return local, last
 
 
 class Refine(torch.nn.Module):

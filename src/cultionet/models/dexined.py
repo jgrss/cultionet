@@ -8,21 +8,15 @@ import torch.nn.functional as F
 
 def weight_init(m):
     if isinstance(m, (torch.nn.Conv2d,)):
-        # torch.nn.init.xavier_uniform_(m.weight, gain=1.0)
         torch.nn.init.xavier_normal_(m.weight, gain=1.0)
-        # torch.nn.init.normal_(m.weight, mean=0.0, std=0.01)
         if m.weight.data.shape[1] == torch.Size([1]):
             torch.nn.init.normal_(m.weight, mean=0.0)
 
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
 
-    # for fusion layer
     if isinstance(m, (torch.nn.ConvTranspose2d,)):
-        # torch.nn.init.xavier_uniform_(m.weight, gain=1.0)
         torch.nn.init.xavier_normal_(m.weight, gain=1.0)
-        # torch.nn.init.normal_(m.weight, mean=0.0, std=0.01)
-
         if m.weight.data.shape[1] == torch.Size([1]):
             torch.nn.init.normal_(m.weight, std=0.1)
         if m.bias is not None:
@@ -188,7 +182,7 @@ class DexiNed(torch.nn.Module):
 
         self.block_1 = DoubleConvBlock(in_channels, 32, 64)
         self.block_2 = DoubleConvBlock(64, 128, use_act=False)
-        self.dblock_3 = _DenseBlock(2, 128, 256) # [128,256,100,100]
+        self.dblock_3 = _DenseBlock(2, 128, 256)
         self.dblock_4 = _DenseBlock(3, 256, 512)
         self.dblock_5 = _DenseBlock(3, 512, 512)
         self.dblock_6 = _DenseBlock(3, 512, 256)
@@ -199,7 +193,7 @@ class DexiNed(torch.nn.Module):
         self.side_2 = SingleConvBlock(128, 256, 2)
         self.side_3 = SingleConvBlock(256, 512, 2)
         self.side_4 = SingleConvBlock(512, 512, 1)
-        self.side_5 = SingleConvBlock(512, 256, 1) # Sory I forget to comment this line :(
+        self.side_5 = SingleConvBlock(512, 256, 1)
 
         # right skip connections, figure in Journal paper
         self.pre_dense_2 = SingleConvBlock(128, 256, 2)
@@ -233,13 +227,7 @@ class DexiNed(torch.nn.Module):
             torch.nn.Conv2d(256, 1, 1),
             torch.nn.ReLU(inplace=False)
         )
-        # self.up_block_1 = UpConvBlock(64, 1)
-        # self.up_block_2 = UpConvBlock(128, 1)
-        # self.up_block_3 = UpConvBlock(256, 2)
-        # self.up_block_4 = UpConvBlock(512, 3)
-        # self.up_block_5 = UpConvBlock(512, 4)
-        # self.up_block_6 = UpConvBlock(256, 4)
-        self.block_cat = SingleConvBlock(6, out_channels, stride=1, use_bs=False) # hed fusion method
+        self.block_cat = SingleConvBlock(6, out_channels, stride=1, use_bs=False)
 
         self.apply(weight_init)
 
@@ -270,7 +258,7 @@ class DexiNed(torch.nn.Module):
         # Block 3
         block_3_pre_dense = self.pre_dense_3(block_2_down)
         block_3, _ = self.dblock_3([block_2_add, block_3_pre_dense])
-        block_3_down = self.maxpool(block_3) # [128,256,50,50]
+        block_3_down = self.maxpool(block_3)
         block_3_add = block_3_down + block_2_side
         block_3_side = self.side_3(block_3_add)
 
@@ -283,7 +271,7 @@ class DexiNed(torch.nn.Module):
         block_4_side = self.side_4(block_4_add)
 
         # Block 5
-        block_5_pre_dense = self.pre_dense_5(block_4_down) #block_5_pre_dense_512 +block_4_down
+        block_5_pre_dense = self.pre_dense_5(block_4_down)
         block_5, _ = self.dblock_5([block_4_add, block_5_pre_dense])
         block_5_add = block_5 + block_4_side
 
@@ -301,8 +289,8 @@ class DexiNed(torch.nn.Module):
         results = [out_1, out_2, out_3, out_4, out_5, out_6]
 
         # concatenate multiscale outputs
-        block_cat = torch.cat(results, dim=1)  # Bx6xHxW
-        final = self.block_cat(block_cat)  # Bx1xHxW
+        block_cat = torch.cat(results, dim=1)  # B x 6 x H x W
+        final = self.block_cat(block_cat)  # B x 2 x H x W
 
         return {
             'blocks': block_cat,
