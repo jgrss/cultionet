@@ -69,18 +69,18 @@ class CultioNet(torch.nn.Module):
             deep_supervision=True
         )
         # DexiNed (+8)
-        self.edge_model = DexiNed(
-            in_channels=base_in_channels+5,
-            out_channels=2,
-            init_filter=self.filters
-        )
+        # self.edge_model = DexiNed(
+        #     in_channels=base_in_channels+5,
+        #     out_channels=2,
+        #     init_filter=self.filters
+        # )
         # Nested UNet (+2 edges +2 crops)
         self.crop_model = NestedUNet2(
-            in_channels=base_in_channels+5+8,
+            in_channels=base_in_channels+5,
             out_channels=2,
             out_side_channels=2,
             init_filter=self.filters,
-            boundary_layer=False,
+            boundary_layer=True,
             deep_supervision=True
         )
 
@@ -149,23 +149,23 @@ class CultioNet(torch.nn.Module):
             ], dim=1
         )
 
-        # (3) Edge stream
-        edge_stream = self.edge_model(
-            self.gc(
-                h, batch_size, height, width
-            )
-        )
-        logits_edge_blocks = self.cg(edge_stream['blocks'])
-        logits_edges = self.cg(edge_stream['final'])
+        # # (3) Edge stream
+        # edge_stream = self.edge_model(
+        #     self.gc(
+        #         h, batch_size, height, width
+        #     )
+        # )
+        # logits_edge_blocks = self.cg(edge_stream['blocks'])
+        # logits_edges = self.cg(edge_stream['final'])
 
-        # CONCAT
-        h = torch.cat(
-            [
-                h,
-                logits_edge_blocks,
-                logits_edges
-            ], dim=1
-        )
+        # # CONCAT
+        # h = torch.cat(
+        #     [
+        #         h,
+        #         logits_edge_blocks,
+        #         logits_edges
+        #     ], dim=1
+        # )
 
         # (4) Crop stream
         nunet_stream = self.crop_model(
@@ -174,7 +174,7 @@ class CultioNet(torch.nn.Module):
             )
         )
         logits_crop = self.cg(nunet_stream['mask'])
-        # logits_edges = self.cg(nunet_stream['boundary'])
+        logits_edges = self.cg(nunet_stream['boundary'])
 
         out = (
             logits_distance_0,
