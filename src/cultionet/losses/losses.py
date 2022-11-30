@@ -3,6 +3,7 @@ import typing as T
 import attr
 import torch
 import torch.nn.functional as F
+import torchmetrics
 
 
 class ClassifierPreprocessing(object):
@@ -226,4 +227,35 @@ class HuberLoss(object):
         return self.loss_func(
             inputs.contiguous().view(-1),
             targets.contiguous().view(-1)
+        )
+
+
+@attr.s
+class StructuralSimilarityLoss(object):
+    """Structural similarity loss
+    """
+    device: T.Optional[str] = attr.ib(default=None)
+
+    def __attrs_post_init__(self):
+        if self.device == 'cpu':
+            self.loss_func = torchmetrics.StructuralSimilarityIndexMeasure()
+        else:
+            self.loss_func = torchmetrics.StructuralSimilarityIndexMeasure().cuda()
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Performs a single forward pass
+
+        Args:
+            inputs: Predictions from model.
+            targets: Ground truth values.
+
+        Returns:
+            Loss (float)
+        """
+        return 1.0 - self.loss_func(
+            inputs,
+            targets
         )

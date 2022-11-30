@@ -360,16 +360,7 @@ class CultioLitModel(pl.LightningModule):
 
     def forward(
         self, batch: Data, batch_idx: int = None
-    ) -> T.Tuple[
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        T.Union[None, torch.Tensor]
-    ]:
+    ) -> T.Dict[str, torch.Tensor]:
         """Performs a single model forward pass
 
         Returns:
@@ -377,9 +368,7 @@ class CultioLitModel(pl.LightningModule):
             edge: Probability of an edge [0,1].
             crop: Probability of crop [0,1].
         """
-        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type = self.cultionet_model(batch)
-
-        return dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type
+        return self.cultionet_model(batch)
 
     @staticmethod
     def get_cuda_memory():
@@ -392,26 +381,20 @@ class CultioLitModel(pl.LightningModule):
         self,
         batch: Data,
         batch_idx: int = None
-    ) -> T.Tuple[
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        T.Union[None, torch.Tensor]
-    ]:
+    ) -> T.Dict[str, torch.Tensor]:
         """A prediction step for Lightning
         """
-        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type = self.forward(
-            batch, batch_idx
-        )
+        predictions = self.forward(batch, batch_idx)
         edge, crop, crop_type = self.predict_probas(
-            edge, crop, crop_type
+            predictions['edge'],
+            predictions['crop'],
+            predictions['crop_type']
         )
+        predictions['edge'] = edge
+        predictions['crop'] = crop
+        predictions['crop_type'] = crop_type
 
-        return dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type
+        return predictions
 
     def predict_probas(
         self,
@@ -419,7 +402,7 @@ class CultioLitModel(pl.LightningModule):
         crop: torch.Tensor,
         crop_type: T.Union[None, torch.Tensor]
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, T.Union[None, torch.Tensor], T.Union[None, torch.Tensor]
+        torch.Tensor, torch.Tensor, T.Union[None, torch.Tensor]
     ]:
         # Transform edge and crop logits to probabilities
         edge = F.softmax(edge, dim=1, dtype=edge.dtype)
@@ -443,14 +426,7 @@ class CultioLitModel(pl.LightningModule):
     def calc_loss(
         self,
         batch: T.Union[Data, T.List],
-        dist_0: torch.Tensor,
-        dist_1: torch.Tensor,
-        dist_2: torch.Tensor,
-        dist_3: torch.Tensor,
-        dist_4: torch.Tensor,
-        edge: torch.Tensor,
-        crop: torch.Tensor,
-        crop_type: T.Union[None, torch.Tensor]
+        predictions: T.Dict[str, torch.Tensor]
     ):
         """Calculates the loss for each layer
 
@@ -480,23 +456,23 @@ class CultioLitModel(pl.LightningModule):
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
 
-        dist_loss_0 = self.dist_loss_0(
-            dist_0, batch.bdist
+        dist_loss_0 = self.dist_loss(
+            predictions['dist_0'], batch.bdist
         )
-        dist_loss_1 = self.dist_loss_1(
-            dist_1, batch.bdist
+        dist_loss_1 = self.dist_loss(
+            predictions['dist_1'], batch.bdist
         )
-        dist_loss_2 = self.dist_loss_2(
-            dist_2, batch.bdist
+        dist_loss_2 = self.dist_loss(
+            predictions['dist_2'], batch.bdist
         )
-        dist_loss_3 = self.dist_loss_3(
-            dist_3, batch.bdist
+        dist_loss_3 = self.dist_loss(
+            predictions['dist_3'], batch.bdist
         )
-        dist_loss_4 = self.dist_loss_4(
-            dist_4, batch.bdist
+        dist_loss_4 = self.dist_loss(
+            predictions['dist_4'], batch.bdist
         )
-        edge_loss = self.edge_loss(edge, true_edge)
-        crop_loss = self.crop_loss(crop, true_crop)
+        edge_loss = self.edge_loss(predictions['edge'], true_edge)
+        crop_loss = self.crop_loss(predictions['crop'], true_crop)
 
         loss = (
             dist_loss_0
@@ -507,11 +483,13 @@ class CultioLitModel(pl.LightningModule):
             + edge_loss
             + crop_loss
         )
-        if crop_type is not None:
+        if predictions['crop_type'] is not None:
             true_crop_type = torch.where(
                 batch.y == self.edge_class, 0, batch.y
             ).long()
-            crop_type_loss = self.crop_type_loss(crop_type, true_crop_type)
+            crop_type_loss = self.crop_type_loss(
+                predictions['crop_type'], true_crop_type
+            )
             loss = loss + crop_type_loss
 
         return loss
@@ -519,47 +497,35 @@ class CultioLitModel(pl.LightningModule):
     def training_step(self, batch: Data, batch_idx: int = None):
         """Executes one training step
         """
-        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type = self(batch)
+        predictions = self(batch)
         loss = self.calc_loss(
             batch,
-            dist_0,
-            dist_1,
-            dist_2,
-            dist_3,
-            dist_4,
-            edge,
-            crop,
-            crop_type
+            predictions
         )
         self.log('loss', loss, on_step=False, on_epoch=True, prog_bar=True)
 
         return loss
 
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
-        dist_0, dist_1, dist_2, dist_3, dist_4, edge, crop, crop_type = self(batch)
+        predictions = self(batch)
         loss = self.calc_loss(
             batch,
-            dist_0,
-            dist_1,
-            dist_2,
-            dist_3,
-            dist_4,
-            edge,
-            crop,
-            crop_type
+            predictions
         )
 
         dist_mae = self.dist_mae(
-            dist_0.contiguous().view(-1),
+            predictions['dist_0'].contiguous().view(-1),
             batch.bdist.contiguous().view(-1)
         )
         dist_mse = self.dist_mse(
-            dist_0.contiguous().view(-1),
+            predictions['dist_0'].contiguous().view(-1),
             batch.bdist.contiguous().view(-1)
         )
         # Get the class probabilities
         edge, crop, crop_type = self.predict_probas(
-            edge, crop, crop_type
+            predictions['edge'],
+            predictions['crop'],
+            predictions['crop_type']
         )
         # Take the argmax of the class probabilities
         edge_ypred = edge.argmax(dim=1).long()
@@ -660,11 +626,7 @@ class CultioLitModel(pl.LightningModule):
             2, dtype=self.dtype, device=self.device
         )
 
-        self.dist_loss_0 = MSELoss()
-        self.dist_loss_1 = MSELoss()
-        self.dist_loss_2 = MSELoss()
-        self.dist_loss_3 = MSELoss()
-        self.dist_loss_4 = MSELoss()
+        self.dist_loss = MSELoss()
         self.edge_loss = TanimotoDistanceLoss(
             volume=self.volume,
             inputs_are_logits=True,

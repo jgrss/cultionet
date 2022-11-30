@@ -84,7 +84,6 @@ class AttentionGate(torch.nn.Module):
         sigmoid_layer = torch.nn.Sigmoid()
 
         self.up = model_utils.UpSample()
-
         self.seq = nn.Sequential(
             'x, g',
             [
@@ -111,7 +110,8 @@ class AttentionGate(torch.nn.Module):
             x: Lower dimension
         """
         h = self.seq(x, g)
-        h = self.up(h, size=x.shape[-2:], mode='bilinear')
+        if h.shape[-2:] != x.shape[-2:]:
+            h = self.up(h, size=x.shape[-2:], mode='bilinear')
 
         return self.final(x * h)
 
@@ -121,15 +121,16 @@ class NestedUNet2(torch.nn.Module):
 
     References:
         https://arxiv.org/pdf/1807.10165.pdf
+        https://arxiv.org/pdf/1804.03999.pdf
         https://github.com/4uiiurz1/pytorch-nested-unet/blob/master/archs.py
     """
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        out_side_channels: int,
         init_filter: int = 64,
-        boundary_layer: bool = True,
+        boundary_layer: bool = False,
+        out_side_channels: int = 2,
         linear_fc: bool = False,
         deep_supervision: bool = False
     ):

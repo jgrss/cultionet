@@ -68,25 +68,18 @@ class CultioNet(torch.nn.Module):
             init_filter=self.filters,
             deep_supervision=True
         )
-        # DexiNed (+8)
-        # self.edge_model = DexiNed(
-        #     in_channels=base_in_channels+5,
-        #     out_channels=2,
-        #     init_filter=self.filters
-        # )
+        # Edge layer (+2)
         self.edge_model = NestedUNet3(
             in_channels=base_in_channels+5,
             out_channels=2,
             init_filter=self.filters,
             deep_supervision=False
         )
-        # Nested UNet (+2 edges +2 crops)
+        # Crop layer (+2)
         self.crop_model = NestedUNet2(
             in_channels=base_in_channels+5+2,
             out_channels=2,
-            out_side_channels=2,
             init_filter=self.filters,
-            boundary_layer=False,
             deep_supervision=True
         )
 
@@ -95,15 +88,7 @@ class CultioNet(torch.nn.Module):
 
     def forward(
         self, data: Data
-    ) -> T.Tuple[
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor
-    ]:
+    ) -> T.Dict[str, torch.Tensor]:
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
@@ -156,18 +141,18 @@ class CultioNet(torch.nn.Module):
         )
 
         # (3) Edge stream
-        edge_stream = self.edge_model(
+        logits_edges = self.edge_model(
             self.gc(
                 h, batch_size, height, width
             )
         )
-        logits_edges = self.cg(edge_stream['mask'])
+        logits_edges = self.cg(logits_edges['mask'])
 
         # CONCAT
         h = torch.cat(
             [
                 h,
-                logits_edges
+                logits_edges,
             ], dim=1
         )
 
@@ -178,21 +163,19 @@ class CultioNet(torch.nn.Module):
             )
         )
         logits_crop = self.cg(nunet_stream['mask'])
-        # logits_edges = self.cg(nunet_stream['boundary'])
 
-        out = (
-            logits_distance_0,
-            logits_distance_1,
-            logits_distance_2,
-            logits_distance_3,
-            logits_distance_4,
-            logits_edges,
-            logits_crop
-        )
+        out = {
+            'dist_0': logits_distance_0,
+            'dist_1': logits_distance_1,
+            'dist_2': logits_distance_2,
+            'dist_3': logits_distance_3,
+            'dist_4': logits_distance_4,
+            'edge': logits_edges,
+            'crop': logits_crop,
+            'crop_type': None
+        }
         if self.num_classes > 2:
             # With no crop-type, return last layer (crop)
-            out += (logits_star_last,)
-        else:
-            out += (None,)
+            out['crop_type'] = logits_star_last
 
         return out
