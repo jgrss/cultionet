@@ -80,7 +80,7 @@ class AttentionGate(torch.nn.Module):
             padding=0
         )
         add_layer = AttentionAdd()
-        activate_layer = torch.nn.ELU(inplace=False)
+        activate_layer = torch.nn.LeakyReLU(inplace=False)
         sigmoid_layer = torch.nn.Sigmoid()
 
         self.up = model_utils.UpSample()
@@ -169,38 +169,30 @@ class NestedUNet2(torch.nn.Module):
 
         if boundary_layer:
             # Right stream
-            self.bound4_1 = DoubleConv(channels[4]+channels[3], channels[3])
-            self.bound3_1 = DoubleConv(channels[3]+channels[2], channels[2])
-            self.bound2_1 = DoubleConv(channels[2]+channels[1], channels[1])
-            self.bound1_1 = DoubleConv(channels[1]+channels[0], channels[0])
+            self.bound4_1 = DoubleConv(channels[4]+channels[4], channels[4])
+            self.bound3_1 = DoubleConv(channels[4]+channels[3]*2, channels[3])
+            self.bound2_1 = DoubleConv(channels[3]+channels[2]*2, channels[2])
+            self.bound1_1 = DoubleConv(channels[2]+channels[1]*2, channels[1])
+            self.bound0_1 = DoubleConv(channels[1]+channels[0]*2, channels[0])
             # Left stream
-            self.bound4_0 = DoubleConv(channels[4]+channels[3], channels[3])
-            self.bound3_0 = DoubleConv(channels[3]+channels[2], channels[2])
-            self.bound2_0 = DoubleConv(channels[2]+channels[1], channels[1])
-            self.bound1_0 = DoubleConv(channels[1]+channels[0], channels[0])
-            # Top stream
-            self.bound0_1 = DoubleConv(channels[0]+channels[0], channels[0])
-            self.bound0_2 = DoubleConv(channels[0]+channels[0], channels[0])
-            self.bound0_3 = DoubleConv(channels[0]+channels[0], channels[0])
-            self.bound0_4 = DoubleConv(channels[0]+channels[0], channels[0])
+            self.bound0_0 = DoubleConv(channels[0], channels[0])
+            self.bound0_0_pool = PoolConv(channels[0], channels[1], dropout=0.25)
+            self.bound1_0 = DoubleConv(channels[1]*2, channels[1])
+            self.bound1_0_pool = PoolConv(channels[1], channels[2], dropout=0.5)
+            self.bound2_0 = DoubleConv(channels[2]*2, channels[2])
+            self.bound2_0_pool = PoolConv(channels[2], channels[3], dropout=0.5)
+            self.bound3_0 = DoubleConv(channels[3]*2, channels[3])
+            self.bound3_0_pool = PoolConv(channels[3], channels[4], dropout=0.5)
+            self.bound4_0 = DoubleConv(channels[4]*2, channels[4])
 
-            if self.deep_supervision:
-                final_bound_in_channels = out_side_channels
-                self.bound_final_1 = torch.nn.Conv2d(
-                    channels[0], out_side_channels, kernel_size=1, padding=0
-                )
-                self.bound_final_2 = torch.nn.Conv2d(
-                    channels[0], out_side_channels, kernel_size=1, padding=0
-                )
-                self.bound_final_3 = torch.nn.Conv2d(
-                    channels[0], out_side_channels, kernel_size=1, padding=0
-                )
-            else:
-                final_bound_in_channels = channels[0] + channels[0] + channels[0]
-            self.bound_final = torch.nn.Conv2d(
-                final_bound_in_channels, out_side_channels,
-                kernel_size=1,
-                padding=0
+            self.bound_final = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    channels[0],
+                    out_side_channels,
+                    kernel_size=1,
+                    padding=0
+                ),
+                torch.nn.BatchNorm2d(out_side_channels)
             )
 
         self.conv0_0 = DoubleResConv(in_channels, channels[0])
@@ -225,7 +217,7 @@ class NestedUNet2(torch.nn.Module):
 
         if self.linear_fc:
             self.net_final = torch.nn.Sequential(
-                torch.nn.ELU(inplace=False),
+                torch.nn.LeakyReLU(inplace=False),
                 Permute((0, 2, 3, 1)),
                 torch.nn.Linear(
                     channels[0], out_channels
@@ -316,23 +308,17 @@ class NestedUNet2(torch.nn.Module):
 
         if self.boundary_layer:
             # Left stream
-            b4_0 = self.bound4_0(torch.cat([x3_0, self.up(x4_0, size=x3_0.shape[-2:])], dim=1))
-            b3_0 = self.bound3_0(torch.cat([x2_0, self.up(b4_0, size=x2_0.shape[-2:])], dim=1))
-            b2_0 = self.bound2_0(torch.cat([x1_0, self.up(b3_0, size=x1_0.shape[-2:])], dim=1))
+            b0_0 = self.bound0_0(x0_0)
+            b1_0 = self.bound1_0(torch.cat([x1_0, self.bound0_0_pool(b0_0)], dim=1))
+            b2_0 = self.bound2_0(torch.cat([x2_0, self.bound1_0_pool(b1_0)], dim=1))
+            b3_0 = self.bound3_0(torch.cat([x3_0, self.bound2_0_pool(b2_0)], dim=1))
+            b4_0 = self.bound4_0(torch.cat([x4_0, self.bound3_0_pool(b3_0)], dim=1))
             # Right stream
-            b4_1 = self.bound4_1(torch.cat([x3_1, self.up(x4_0, size=x3_1.shape[-2:])], dim=1))
-            b3_1 = self.bound3_1(torch.cat([x2_2, self.up(b4_1, size=x2_2.shape[-2:])], dim=1))
-            b2_1 = self.bound2_1(torch.cat([x1_3, self.up(b3_1, size=x1_3.shape[-2:])], dim=1))
-
-            # End of left stream
-            b1_0 = self.bound1_0(torch.cat([x0_0, self.up(b2_0, size=x0_0.shape[-2:])], dim=1))
-            # End of right stream
-            b1_1 = self.bound1_1(torch.cat([x0_4, self.up(b2_1, size=x0_4.shape[-2:])], dim=1))
-            # Top stream
-            b0_1 = self.bound0_1(torch.cat([x0_0, x0_1], dim=1))
-            b0_2 = self.bound0_2(torch.cat([b0_1, x0_2], dim=1))
-            b0_3 = self.bound0_3(torch.cat([b0_2, x0_3], dim=1))
-            b0_4 = self.bound0_4(torch.cat([b0_3, x0_4], dim=1))
+            b4_1 = self.bound4_1(torch.cat([b4_0, x4_0], dim=1))
+            b3_1 = self.bound3_1(torch.cat([x3_1, b3_0, self.up(b4_1, size=x3_1.shape[-2:])], dim=1))
+            b2_1 = self.bound2_1(torch.cat([x2_2, b2_0, self.up(b3_1, size=x2_2.shape[-2:])], dim=1))
+            b1_1 = self.bound1_1(torch.cat([x1_3, b1_0, self.up(b2_1, size=x1_3.shape[-2:])], dim=1))
+            boundary = self.bound0_1(torch.cat([x0_4, b0_0, self.up(b1_1, size=x0_4.shape[-2:])], dim=1))
 
         if self.linear_fc:
             mask = self.net_final(x0_4)
@@ -344,22 +330,11 @@ class NestedUNet2(torch.nn.Module):
                 x0_3 = self.final_3(x0_3)
                 x0_4 = self.final_4(x0_4)
                 x0_4 = (x0_1 + x0_2 + x0_3 + x0_4) / 4.0
-                if self.boundary_layer:
-                    # Connect boundary stream
-                    b1_0 = self.bound_final_1(b1_0)
-                    b0_4 = self.bound_final_2(b0_4)
-                    b1_1 = self.bound_final_3(b1_1)
-                    boundary = (b1_0 + b0_4 + b1_1) / 3.0
-                    mask = self.net_final(torch.cat([x0_4, boundary], dim=1))
-                else:
-                    mask = self.net_final(x0_4)
+            if self.boundary_layer:
+                boundary = self.bound_final(boundary)
+                mask = self.net_final(torch.cat([x0_4, boundary], dim=1))
             else:
-                if self.boundary_layer:
-                    # Connect boundary stream
-                    boundary = self.bound_final(torch.cat([b1_0, b0_4, b1_1], dim=1))
-                    mask = self.net_final(torch.cat([x0_4, boundary], dim=1))
-                else:
-                    mask = self.net_final(x0_4)
+                mask = self.net_final(x0_4)
 
         return {
             'mask': mask,
@@ -485,7 +460,7 @@ class NestedUNet3(torch.nn.Module):
 
         if linear_fc:
             self.final = torch.nn.Sequential(
-                torch.nn.ELU(inplace=False),
+                torch.nn.LeakyReLU(inplace=False),
                 Permute((0, 2, 3, 1)),
                 torch.nn.Linear(
                     up_channels, out_channels
@@ -500,7 +475,7 @@ class NestedUNet3(torch.nn.Module):
         if self.deep_supervision:
             if linear_fc:
                 self.final_1 = torch.nn.Sequential(
-                    torch.nn.ELU(inplace=False),
+                    torch.nn.LeakyReLU(inplace=False),
                     Permute((0, 2, 3, 1)),
                     torch.nn.Linear(
                         up_channels, out_channels
@@ -508,7 +483,7 @@ class NestedUNet3(torch.nn.Module):
                     Permute((0, 3, 1, 2))
                 )
                 self.final_2 = torch.nn.Sequential(
-                    torch.nn.ELU(inplace=False),
+                    torch.nn.LeakyReLU(inplace=False),
                     Permute((0, 2, 3, 1)),
                     torch.nn.Linear(
                         up_channels, out_channels
@@ -516,7 +491,7 @@ class NestedUNet3(torch.nn.Module):
                     Permute((0, 3, 1, 2))
                 )
                 self.final_3 = torch.nn.Sequential(
-                    torch.nn.ELU(inplace=False),
+                    torch.nn.LeakyReLU(inplace=False),
                     Permute((0, 2, 3, 1)),
                     torch.nn.Linear(
                         up_channels, out_channels
@@ -524,7 +499,7 @@ class NestedUNet3(torch.nn.Module):
                     Permute((0, 3, 1, 2))
                 )
                 self.final_4 = torch.nn.Sequential(
-                    torch.nn.ELU(inplace=False),
+                    torch.nn.LeakyReLU(inplace=False),
                     Permute((0, 2, 3, 1)),
                     torch.nn.Linear(
                         channels[4], out_channels

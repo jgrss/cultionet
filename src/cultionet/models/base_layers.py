@@ -19,7 +19,7 @@ class PoolConvSingle(torch.nn.Module):
             torch.nn.MaxPool2d(pool_size),
             torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
             torch.nn.BatchNorm2d(out_channels),
-            torch.nn.ELU(inplace=False)
+            torch.nn.LeakyReLU(inplace=False)
         )
 
     def __call__(self, *args, **kwargs):
@@ -96,7 +96,7 @@ class DoubleResConv(torch.nn.Module):
         conv1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
         conv2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=2, dilation=2)
         batchnorm_layer = torch.nn.BatchNorm2d(out_channels)
-        activate_layer = torch.nn.ELU(inplace=False)
+        activate_layer = torch.nn.LeakyReLU(inplace=False)
         add_layer = ResAdd()
 
         self.seq = nn.Sequential(
@@ -131,7 +131,7 @@ class SingleConv(torch.nn.Module):
 
         conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
         batchnorm_layer = torch.nn.BatchNorm2d(out_channels)
-        activate_layer = torch.nn.ELU(inplace=False)
+        activate_layer = torch.nn.LeakyReLU(inplace=False)
 
         self.seq = torch.nn.Sequential(
             conv,
@@ -159,7 +159,7 @@ class DoubleConv(torch.nn.Module):
         conv1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
         conv2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
         batchnorm_layer = torch.nn.BatchNorm2d(out_channels)
-        activate_layer = torch.nn.ELU(inplace=False)
+        activate_layer = torch.nn.LeakyReLU(inplace=False)
 
         self.seq = torch.nn.Sequential(
             conv1,

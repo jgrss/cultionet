@@ -150,7 +150,7 @@ class StarRNN(torch.nn.Module):
         self.final = torch.nn.Sequential(
             torch.nn.Conv2d(hidden_dim, hidden_dim, kernel_size, padding=padding),
             torch.nn.BatchNorm2d(hidden_dim),
-            torch.nn.ELU(inplace=False)
+            torch.nn.LeakyReLU(inplace=False)
         )
         # Crop-type layer
         if self.crop_type_layer:
@@ -161,7 +161,7 @@ class StarRNN(torch.nn.Module):
             self.final_last = torch.nn.Sequential(
                 torch.nn.Conv2d(hidden_dim, hidden_dim, kernel_size, padding=padding),
                 torch.nn.BatchNorm2d(hidden_dim),
-                torch.nn.ELU(inplace=False)
+                torch.nn.LeakyReLU(inplace=False)
             )
 
     def __call__(self, *args, **kwargs):
@@ -188,19 +188,6 @@ class StarRNN(torch.nn.Module):
 
         for iter_ in range(0, time_size):
             hidden_s = self.rnn(x[:, :, iter_, :, :], hidden_s)
-
-        # if self.n_layers == 3:
-        #     # local_1 = hidden_s[0]
-        #     local_2 = hidden_s[1]
-        # elif self.n_stage == 3:
-        #     # local_1 = hidden_s[1]
-        #     local_2 = hidden_s[3]
-        # elif self.n_stage == 2:
-        #     # local_1 = hidden_s[1]
-        #     local_2 = hidden_s[2]
-        # elif self.n_stage == 1:
-        #     # local_1 = hidden_s[-1]
-        #     local_2 = hidden_s[-1]
 
         local = self.final(hidden_s[0])
         for l in range(1, len(hidden_s)-1):
