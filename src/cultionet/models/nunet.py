@@ -169,20 +169,20 @@ class NestedUNet2(torch.nn.Module):
 
         if boundary_layer:
             # Right stream
-            self.bound4_1 = DoubleConv(channels[4]+channels[4], channels[4])
-            self.bound3_1 = DoubleConv(channels[4]+channels[3]*2, channels[3])
-            self.bound2_1 = DoubleConv(channels[3]+channels[2]*2, channels[2])
-            self.bound1_1 = DoubleConv(channels[2]+channels[1]*2, channels[1])
-            self.bound0_1 = DoubleConv(channels[1]+channels[0]*2, channels[0])
+            self.bound4_1 = DoubleConv(channels[4]+channels[4], channels[0])
+            self.bound3_1 = DoubleConv(channels[0]+channels[3]*2, channels[0])
+            self.bound2_1 = DoubleConv(channels[0]+channels[2]*2, channels[0])
+            self.bound1_1 = DoubleConv(channels[0]+channels[1]*2, channels[0])
+            self.bound0_1 = DoubleConv(channels[0]+channels[0]*2, channels[0])
             # Left stream
-            self.bound0_0 = DoubleConv(channels[0], channels[0])
-            self.bound0_0_pool = PoolConv(channels[0], channels[1], dropout=0.25)
+            self.bound0_0 = DoubleResConv(channels[0], channels[0])
+            self.bound0_0_pool = PoolConv(channels[0], channels[1])
             self.bound1_0 = DoubleConv(channels[1]*2, channels[1])
-            self.bound1_0_pool = PoolConv(channels[1], channels[2], dropout=0.5)
+            self.bound1_0_pool = PoolConv(channels[1], channels[2])
             self.bound2_0 = DoubleConv(channels[2]*2, channels[2])
-            self.bound2_0_pool = PoolConv(channels[2], channels[3], dropout=0.5)
+            self.bound2_0_pool = PoolConv(channels[2], channels[3])
             self.bound3_0 = DoubleConv(channels[3]*2, channels[3])
-            self.bound3_0_pool = PoolConv(channels[3], channels[4], dropout=0.5)
+            self.bound3_0_pool = PoolConv(channels[3], channels[4])
             self.bound4_0 = DoubleConv(channels[4]*2, channels[4])
 
             self.bound_final = torch.nn.Conv2d(
