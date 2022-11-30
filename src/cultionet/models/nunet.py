@@ -185,14 +185,11 @@ class NestedUNet2(torch.nn.Module):
             self.bound3_0_pool = PoolConv(channels[3], channels[4], dropout=0.5)
             self.bound4_0 = DoubleConv(channels[4]*2, channels[4])
 
-            self.bound_final = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    channels[0],
-                    out_side_channels,
-                    kernel_size=1,
-                    padding=0
-                ),
-                torch.nn.BatchNorm2d(out_side_channels)
+            self.bound_final = torch.nn.Conv2d(
+                channels[0],
+                out_side_channels,
+                kernel_size=1,
+                padding=0
             )
 
         self.conv0_0 = DoubleResConv(in_channels, channels[0])
