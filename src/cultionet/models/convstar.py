@@ -163,7 +163,7 @@ class StarRNN(torch.nn.Module):
                 torch.nn.Conv2d(
                     hidden_dim, num_classes_last, kernel_size, padding=padding
                 ),
-                torch.nn.BatchNorm2d(hidden_dim),
+                torch.nn.BatchNorm2d(num_classes_last),
                 torch.nn.LeakyReLU(inplace=False)
             )
         else:
