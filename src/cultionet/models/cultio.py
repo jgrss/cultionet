@@ -49,7 +49,7 @@ class CultioNet(torch.nn.Module):
             # Crop-type classes
             num_classes_last = self.num_classes
         else:
-            num_classes_last = star_rnn_hidden_dim
+            num_classes_last = 2
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
             hidden_dim=star_rnn_hidden_dim,
@@ -152,17 +152,17 @@ class CultioNet(torch.nn.Module):
         h = torch.cat(
             [
                 h,
-                logits_edges,
+                logits_edges
             ], dim=1
         )
 
         # (4) Crop stream
-        nunet_stream = self.crop_model(
+        logits_crop = self.crop_model(
             self.gc(
                 h, batch_size, height, width
             )
         )
-        logits_crop = self.cg(nunet_stream['mask'])
+        logits_crop = self.cg(logits_crop['mask'])
 
         out = {
             'dist_0': logits_distance_0,
@@ -172,10 +172,13 @@ class CultioNet(torch.nn.Module):
             'dist_4': logits_distance_4,
             'edge': logits_edges,
             'crop': logits_crop,
+            'crop_star': None,
             'crop_type': None
         }
         if self.num_classes > 2:
             # With no crop-type, return last layer (crop)
             out['crop_type'] = logits_star_last
+        else:
+            out['crop_star'] = logits_star_last
 
         return out
