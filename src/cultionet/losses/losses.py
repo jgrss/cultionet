@@ -108,14 +108,6 @@ class CrossEntropyLoss(object):
         default=None,
         validator=attr.validators.optional(validator=attr.validators.instance_of(torch.Tensor))
     )
-    inputs_are_logits: T.Optional[bool] = attr.ib(
-        default=True,
-        validator=attr.validators.optional(validator=attr.validators.instance_of(bool))
-    )
-    apply_transform: T.Optional[bool] = attr.ib(
-        default=True,
-        validator=attr.validators.optional(validator=attr.validators.instance_of(bool))
-    )
 
     def __attrs_post_init__(self):
         if self.device == 'cpu':
