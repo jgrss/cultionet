@@ -491,6 +491,9 @@ class CultioLitModel(pl.LightningModule):
                 predictions['crop_type'], true_crop_type
             )
             loss = loss + crop_type_loss
+        else:
+            crop_loss_star = self.crop_loss(predictions['crop_star'], true_crop)
+            loss = loss + crop_loss_star
 
         return loss
 
@@ -640,9 +643,7 @@ class CultioLitModel(pl.LightningModule):
         if self.num_classes > 2:
             self.crop_type_loss = CrossEntropyLoss(
                 device=self.device,
-                class_weights=self.class_weights,
-                inputs_are_logits=True,
-                apply_transform=True
+                class_weights=self.class_weights
             )
 
     def configure_optimizers(self):
