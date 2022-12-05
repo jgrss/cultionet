@@ -221,7 +221,7 @@ class EdgeDataset(Dataset):
                 else:
                     train_idx.append(i)
 
-            yield str(kfold[partition_column]), self[train_idx], self[test_idx]
+            yield str(getattr(kfold, partition_column)), self[train_idx], self[test_idx]
 
     def create_rtree(self):
         """Creates the Rtree spatial index
