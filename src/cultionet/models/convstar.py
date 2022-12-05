@@ -205,7 +205,7 @@ class StarRNN(torch.nn.Module):
         #     local += self.final(hidden_s[l])
         local = torch.cat(
             [
-                self.final(hidden_s[l]) for l in range(1, len(hidden_s)-1)
+                self.final(layer) for layer in hidden_s[:-1]
             ],
             dim=1
         )
