@@ -127,6 +127,10 @@ class EdgeDataset(Dataset):
         """Gets the list of data files"""
         self.data_list_ = list(Path(self.processed_dir).glob(self.pattern))
 
+    def cleanup(self):
+        for fn in self.data_list_:
+            fn.unlink()
+
     def shuffle_items(self):
         """Applies a random in-place shuffle to the data list"""
         random.shuffle(self.data_list_)

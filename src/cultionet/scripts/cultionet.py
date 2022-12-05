@@ -497,7 +497,8 @@ def predict_image(args):
             compression=args.compression
         )
 
-        # TODO: add optional .pt file cleanup
+        if args.delete_dataset:
+            ds.cleanup()
     else:
         try:
             tmp = int(args.grid_id)

@@ -660,3 +660,9 @@ predict:
     kwargs:
       default: !!null
       type: '&int'
+  delete_dataset:
+    short: ''
+    long: delete-dataset
+    help: Whether to delete the prediction dataset
+    kwargs:
+      action: store_true
