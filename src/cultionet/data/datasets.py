@@ -207,7 +207,7 @@ class EdgeDataset(Dataset):
                 qt.split()
             spatial_partitions = qt.to_frame()
 
-        self.spatial_partitions = spatial_partitions
+        self.spatial_partitions = spatial_partitions.to_crs('epsg:4326')
 
     def spatial_kfoldcv_iter(
         self,
