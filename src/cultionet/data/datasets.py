@@ -127,6 +127,9 @@ class EdgeDataset(Dataset):
         """Gets the list of data files"""
         self.data_list_ = list(Path(self.processed_dir).glob(self.pattern))
 
+        if not self.data_list_:
+            logger.exception(f"No .pt files were found with pattern {self.pattern}.")
+
     def cleanup(self):
         for fn in self.data_list_:
             fn.unlink()
