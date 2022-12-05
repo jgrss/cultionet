@@ -963,6 +963,7 @@ def spatial_kfoldcv(args):
         temp_ds = train_ds.split_train_val(val_frac=args.val_frac)[0]
         data_values = get_norm_values(
             dataset=temp_ds,
+            class_info=class_info,
             batch_size=args.batch_size,
             mean_color=args.mean_color,
             sse_color=args.sse_color
