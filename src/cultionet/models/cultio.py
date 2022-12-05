@@ -49,7 +49,7 @@ class CultioNet(torch.nn.Module):
             # Crop-type classes
             num_classes_last = self.num_classes
         else:
-            num_classes_last = 2
+            num_classes_last = star_rnn_hidden_dim
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
             hidden_dim=star_rnn_hidden_dim,

@@ -491,9 +491,9 @@ class CultioLitModel(pl.LightningModule):
                 predictions['crop_type'], true_crop_type
             )
             loss = loss + crop_type_loss
-        else:
-            crop_loss_star = self.crop_loss(predictions['crop_star'], true_crop)
-            loss = loss + crop_loss_star
+        # else:
+        #     crop_loss_star = self.crop_loss(predictions['crop_star'], true_crop)
+        #     loss = loss + crop_loss_star
 
         return loss
 

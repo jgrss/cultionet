@@ -169,10 +169,10 @@ class StarRNN(torch.nn.Module):
         else:
             self.final_last = torch.nn.Sequential(
                 torch.nn.Conv2d(
-                    hidden_dim, 2, kernel_size, padding=padding
+                    hidden_dim, hidden_dim, kernel_size, padding=padding
                 ),
                 torch.nn.LeakyReLU(inplace=False),
-                torch.nn.BatchNorm2d(2)
+                torch.nn.BatchNorm2d(hidden_dim)
             )
 
     def __call__(self, *args, **kwargs):
