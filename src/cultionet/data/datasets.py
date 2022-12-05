@@ -219,6 +219,9 @@ class EdgeDataset(Dataset):
             # Bounding box and indices of the kth fold
             bbox = kfold.geometry.bounds
             kfold_indices = list(self.rtree_index.contains(bbox))
+            if not kfold_indices:
+                logger.warning(f"Partition {kfold} does not have any data.")
+                continue
 
             train_idx = []
             test_idx = []
