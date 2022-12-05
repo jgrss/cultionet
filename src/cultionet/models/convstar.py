@@ -147,20 +147,32 @@ class StarRNN(torch.nn.Module):
         )
 
         padding = int(kernel_size / 2)
-        self.final = torch.nn.Conv2d(
-            hidden_dim,
-            hidden_dim,
-            kernel_size,
-            padding=padding
+        self.final = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                hidden_dim,
+                hidden_dim,
+                kernel_size,
+                padding=padding
+            ),
+            torch.nn.LeakyReLU(inplace=False),
+            torch.nn.BatchNorm2d(hidden_dim)
         )
         # Crop-type layer
         if self.crop_type_layer:
-            self.final_last = torch.nn.Conv2d(
-                hidden_dim, num_classes_last, kernel_size, padding=padding
+            self.final_last = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    hidden_dim, num_classes_last, kernel_size, padding=padding
+                ),
+                torch.nn.LeakyReLU(inplace=False),
+                torch.nn.BatchNorm2d(num_classes_last)
             )
         else:
-            self.final_last = torch.nn.Conv2d(
-                hidden_dim, 2, kernel_size, padding=padding
+            self.final_last = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    hidden_dim, 2, kernel_size, padding=padding
+                ),
+                torch.nn.LeakyReLU(inplace=False),
+                torch.nn.BatchNorm2d(2)
             )
 
     def __call__(self, *args, **kwargs):
@@ -188,9 +200,15 @@ class StarRNN(torch.nn.Module):
         for iter_ in range(0, time_size):
             hidden_s = self.rnn(x[:, :, iter_, :, :], hidden_s)
 
-        local = self.final(hidden_s[0])
-        for l in range(1, len(hidden_s)-1):
-            local += self.final(hidden_s[l])
+        # local = self.final(hidden_s[0])
+        # for l in range(1, len(hidden_s)-1):
+        #     local += self.final(hidden_s[l])
+        local = torch.cat(
+            [
+                self.final(hidden_s[l]) for l in range(1, len(hidden_s)-1)
+            ],
+            dim=1
+        )
         last = self.final_last(hidden_s[-1])
 
         # The output is (B x C x H x W)
