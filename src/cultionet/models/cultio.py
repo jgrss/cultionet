@@ -3,7 +3,6 @@ import typing as T
 from . import model_utils
 from .nunet import NestedUNet2, NestedUNet3
 from .convstar import StarRNN
-from .dexined import DexiNed
 
 import torch
 from torch_geometric.data import Data
