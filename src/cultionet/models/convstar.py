@@ -2,8 +2,6 @@
 """
 import typing as T
 
-from . import model_utils
-
 import torch
 import torch.nn as nn
 from torch.nn import init
