@@ -644,9 +644,7 @@ class CultioLitModel(pl.LightningModule):
         self.dist_loss = MSELoss()
         self.edge_loss = TanimotoDistLoss()
         self.crop_loss = FocalLoss(weight=self.class_weights)
-        self.crop_rnn_loss = CrossEntropyLoss(
-            weight=self.class_weights
-        )
+        self.crop_rnn_loss = TanimotoDistLoss()
         if self.num_classes > 2:
             self.crop_type_loss = CrossEntropyLoss(
                 weight=self.class_weights
