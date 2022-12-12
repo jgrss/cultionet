@@ -59,8 +59,8 @@ class CultioNet(torch.nn.Module):
         # Local 1 = hidden dimensions
         # Local 2 = crop (0|1)
         # Last = crop-type (2..N)
-        # base_in_channels = star_rnn_hidden_dim * (star_rnn_n_layers - 1) + num_classes_last
-        base_in_channels = star_rnn_hidden_dim + num_classes_last
+        base_in_channels = star_rnn_hidden_dim * (star_rnn_n_layers - 1) + num_classes_last
+        # base_in_channels = star_rnn_hidden_dim + num_classes_last
         # Distance layers (+5)
         dist_out_channels = 5
         self.dist_model = NestedUNet3(
