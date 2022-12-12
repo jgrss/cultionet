@@ -1010,7 +1010,12 @@ def spatial_kfoldcv(args):
             stochastic_weight_averaging=args.stochastic_weight_averaging,
             model_pruning=args.model_pruning
         )
-        (ppaths.ckpt_path / 'test.metrics').rename(ppaths.ckpt_path / f'fold-{k}-{partition_name}.metrics')
+        # Rename the test metric JSON file
+        (
+            ppaths.ckpt_path / 'test.metrics'
+        ).rename(
+            ppaths.ckpt_path / f"fold-{k}-{partition_name.replace(' ', '_')}.metrics"
+        )
 
 
 def train_model(args):
@@ -1105,9 +1110,17 @@ def train_model(args):
 
     # Get balanced class weights
     # Reference: https://github.com/scikit-learn/scikit-learn/blob/f3f51f9b6/sklearn/utils/class_weight.py#L10
-    recip_freq = data_values.crop_counts[1:].sum() / ((len(data_values.crop_counts)-1) * data_values.crop_counts[1:])
-    class_weights = recip_freq[torch.arange(0, len(data_values.crop_counts)-1)]
-    class_weights = torch.tensor([0] + list(class_weights), dtype=torch.float)
+    def get_class_weights(counts: torch.Tensor) -> torch.Tensor:
+        recip_freq = counts.sum() / (len(counts) * counts)
+        weights = recip_freq[torch.arange(0, len(counts))]
+
+        if torch.cuda.is_available():
+            return weights.to('cuda')
+        else:
+            return weights
+
+    class_weights = get_class_weights(data_values.crop_counts)
+    edge_weights = get_class_weights(data_values.edge_counts)
 
     # Fit the model
     cultionet.fit(
@@ -1123,6 +1136,7 @@ def train_model(args):
         num_classes=args.num_classes if args.num_classes is not None else class_info['max_crop_class'] + 1,
         edge_class=args.edge_class if args.edge_class is not None else class_info['edge_class'],
         class_weights=class_weights,
+        edge_weights=edge_weights,
         random_seed=args.random_seed,
         reset_model=args.reset_model,
         auto_lr_find=args.auto_lr_find,

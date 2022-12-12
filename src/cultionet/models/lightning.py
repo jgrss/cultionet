@@ -452,9 +452,6 @@ class CultioLitModel(pl.LightningModule):
                 publisher={Elsevier}
             }
         """
-        if self.volume.device != self.device:
-            self.configure_loss()
-
         true_edge = (batch.y == self.edge_class).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.
         true_crop = torch.where(
@@ -650,20 +647,13 @@ class CultioLitModel(pl.LightningModule):
             )
 
     def configure_loss(self):
-        self.volume = torch.ones(
-            2, dtype=self.dtype, device=self.device
-        )
-
         self.dist_loss = MSELoss()
         self.edge_boundary_loss = WeightedL1Loss()
-        self.edge_loss = TanimotoDistLoss(
-            volume=self.volume
-        )
-        self.crop_loss = FocalLoss()
+        self.edge_loss = TanimotoDistLoss(weight=self.edge_weights)
+        self.crop_loss = FocalLoss(weight=self.class_weights)
         if self.num_classes > 2:
             self.crop_type_loss = CrossEntropyLoss(
-                device=self.device,
-                class_weights=self.class_weights
+                weight=self.class_weights
             )
 
     def configure_optimizers(self):

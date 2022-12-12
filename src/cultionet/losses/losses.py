@@ -52,15 +52,13 @@ class TanimotoDistLoss(torch.nn.Module):
 
     def __init__(
         self,
-        volume: torch.Tensor,
         smooth: float = 1e-5,
-        class_weights: T.Optional[torch.Tensor] = None
+        weight: T.Optional[torch.Tensor] = None,
     ):
         super(TanimotoDistLoss, self).__init__()
 
-        self.volume = volume
         self.smooth = smooth
-        self.class_weights = class_weights
+        self.weight = weight
 
     def forward(
         self,
@@ -78,20 +76,15 @@ class TanimotoDistLoss(torch.nn.Module):
         """
         inputs, targets = self.preprocessor(inputs, targets)
 
-        weights = torch.reciprocal(torch.square(self.volume))
-        new_weights = torch.where(torch.isinf(weights), torch.zeros_like(weights), weights)
-        weights = torch.where(
-            torch.isinf(weights), torch.ones_like(weights) * new_weights.max(), weights
-        )
         intersection = (targets * inputs).sum(dim=0)
         sum_ = (targets * targets + inputs * inputs).sum(dim=0)
-        num_ = (intersection * weights) + self.smooth
-        den_ = ((sum_ - intersection) * weights) + self.smooth
+        num_ = intersection + self.smooth
+        den_ = (sum_ - intersection) + self.smooth
         tanimoto = num_ / den_
         loss = 1.0 - tanimoto
 
-        if self.class_weights is not None:
-            loss = loss * self.class_weights
+        if self.weight is not None:
+            loss = loss * self.weight
 
         return loss.sum()
 
@@ -101,15 +94,14 @@ class CrossEntropyLoss(torch.nn.Module):
     """
     def __init__(
         self,
+        weight: T.Optional[torch.Tensor] = None,
         reduction: T.Optional[str] = 'mean',
-        class_weights: T.Optional[torch.Tensor] = None
+        label_smoothing: T.Optional[float] = 0.1
     ):
-        self.reduction= reduction
-        self.class_weights = class_weights
-
         self.loss_func = torch.nn.CrossEntropyLoss(
-            weight=self.class_weights,
-            reduction=self.reduction
+            weight=weight,
+            reduction=reduction,
+            label_smoothing=label_smoothing
         )
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
@@ -122,7 +114,9 @@ class CrossEntropyLoss(torch.nn.Module):
         Returns:
             Loss (float)
         """
-        return self.loss_func(inputs, targets.contiguous().view(-1))
+        return self.loss_func(
+            inputs, targets
+        )
 
 
 class FocalLoss(torch.nn.Module):
@@ -132,19 +126,28 @@ class FocalLoss(torch.nn.Module):
         https://www.kaggle.com/code/bigironsphere/loss-function-library-keras-pytorch/notebook
     """
     sigmoid = torch.nn.Sigmoid()
-    cross_entropy_loss = torch.nn.CrossEntropyLoss(
-        reduction='none'
-    )
     preprocessor = LossPreprocessing(
         inputs_are_logits=True,
         apply_transform=True
     )
 
-    def __init__(self, alpha: float = 0.8, gamma: float = 2.0):
+    def __init__(
+        self,
+        alpha: float = 0.8,
+        gamma: float = 2.0,
+        weight: T.Optional[torch.Tensor] = None,
+        label_smoothing: T.Optional[float] = 0.1
+    ):
         super(FocalLoss, self).__init__()
 
         self.alpha = alpha
         self.gamma = gamma
+
+        self.cross_entropy_loss = torch.nn.CrossEntropyLoss(
+            weight=weight,
+            reduction='none',
+            label_smoothing=label_smoothing
+        )
 
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor
