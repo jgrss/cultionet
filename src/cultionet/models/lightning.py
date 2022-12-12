@@ -4,7 +4,6 @@ from pathlib import Path
 from ..losses import (
     CrossEntropyLoss,
     FocalLoss,
-    WeightedL1Loss,
     MSELoss,
     TanimotoDistLoss
 )
@@ -474,10 +473,6 @@ class CultioLitModel(pl.LightningModule):
             predictions['dist_4'], batch.bdist
         )
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
-        edge_boundary_loss = self.edge_boundary_loss(
-            self.softmax(predictions['edge'])[:, 1],
-            1.0 - batch.bdist
-        )
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
 
         loss = (
@@ -487,7 +482,6 @@ class CultioLitModel(pl.LightningModule):
             + dist_loss_3 * 0.25
             + dist_loss_4 * 0.1
             + edge_loss
-            + edge_boundary_loss
             + crop_loss
         )
         if predictions['crop_type'] is not None:
@@ -648,7 +642,6 @@ class CultioLitModel(pl.LightningModule):
 
     def configure_loss(self):
         self.dist_loss = MSELoss()
-        self.edge_boundary_loss = WeightedL1Loss()
         self.edge_loss = TanimotoDistLoss(weight=self.edge_weights)
         self.crop_loss = FocalLoss(weight=self.class_weights)
         if self.num_classes > 2:

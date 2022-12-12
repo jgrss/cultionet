@@ -1,6 +1,5 @@
 import typing as T
 
-import attr
 import torch
 import torch.nn.functional as F
 
@@ -45,11 +44,6 @@ class TanimotoDistLoss(torch.nn.Module):
     Copyright (c) 2017-2020 Matej Aleksandrov, Matej Batič, Matic Lubej, Grega Milčinski (Sinergise)
     Copyright (c) 2017-2020 Devis Peressutti, Jernej Puc, Anže Zupanc, Lojze Žust, Jovan Višnjić (Sinergise)
     """
-    preprocessor = LossPreprocessing(
-        inputs_are_logits=True,
-        apply_transform=True
-    )
-
     def __init__(
         self,
         smooth: float = 1e-5,
@@ -59,6 +53,11 @@ class TanimotoDistLoss(torch.nn.Module):
 
         self.smooth = smooth
         self.weight = weight
+
+        self.preprocessor = LossPreprocessing(
+            inputs_are_logits=True,
+            apply_transform=True
+        )
 
     def forward(
         self,
@@ -77,7 +76,7 @@ class TanimotoDistLoss(torch.nn.Module):
         inputs, targets = self.preprocessor(inputs, targets)
 
         intersection = (targets * inputs).sum(dim=0)
-        sum_ = (targets * targets + inputs * inputs).sum(dim=0)
+        sum_ = (targets**2 + inputs**2).sum(dim=0)
         num_ = intersection + self.smooth
         den_ = (sum_ - intersection) + self.smooth
         tanimoto = num_ / den_
@@ -125,12 +124,6 @@ class FocalLoss(torch.nn.Module):
     Reference:
         https://www.kaggle.com/code/bigironsphere/loss-function-library-keras-pytorch/notebook
     """
-    sigmoid = torch.nn.Sigmoid()
-    preprocessor = LossPreprocessing(
-        inputs_are_logits=True,
-        apply_transform=True
-    )
-
     def __init__(
         self,
         alpha: float = 0.8,
@@ -142,6 +135,12 @@ class FocalLoss(torch.nn.Module):
 
         self.alpha = alpha
         self.gamma = gamma
+
+        self.sigmoid = torch.nn.Sigmoid()
+        self.preprocessor = LossPreprocessing(
+            inputs_are_logits=True,
+            apply_transform=True
+        )
 
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss(
             weight=weight,
@@ -162,8 +161,7 @@ class FocalLoss(torch.nn.Module):
         return focal_loss.mean()
 
 
-@attr.s
-class QuantileLoss(object):
+class QuantileLoss(torch.nn.Module):
     """Loss function for quantile regression
 
     Reference:
@@ -173,10 +171,13 @@ class QuantileLoss(object):
 
     Copyright 2020 Jan Beitner
     """
-    quantiles: T.Tuple[float, float, float] = attr.ib(validator=attr.validators.instance_of(tuple))
+    def __init__(
+        self,
+        quantiles: T.Tuple[float, float, float]
+    ):
+        super(QuantileLoss, self).__init__()
 
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
+        self.quantiles = quantiles
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """Performs a single forward pass
@@ -230,9 +231,10 @@ class WeightedL1Loss(torch.nn.Module):
 class MSELoss(torch.nn.Module):
     """MSE loss
     """
-    loss_func = torch.nn.MSELoss()
     def __init__(self):
         super(MSELoss, self).__init__()
+
+        self.loss_func = torch.nn.MSELoss()
 
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor

@@ -793,9 +793,8 @@ def create_datasets(args):
                 continue
 
             if args.skip_index > 0:
-                image_list += ts_list[::args.skip_index]
-            else:
-                image_list += ts_list
+                ts_list = ts_list[::args.skip_index]
+            image_list += ts_list
 
         if args.destination != 'predict':
             class_info = {
