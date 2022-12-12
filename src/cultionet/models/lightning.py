@@ -6,7 +6,7 @@ from ..losses import (
     FocalLoss,
     WeightedL1Loss,
     MSELoss,
-    TanimotoDistanceLoss
+    TanimotoDistLoss
 )
 from .cultio import CultioNet
 from .maskcrnn import BFasterRCNN
@@ -656,16 +656,10 @@ class CultioLitModel(pl.LightningModule):
 
         self.dist_loss = MSELoss()
         self.edge_boundary_loss = WeightedL1Loss()
-        self.edge_loss = TanimotoDistanceLoss(
-            volume=self.volume,
-            inputs_are_logits=True,
-            apply_transform=True
+        self.edge_loss = TanimotoDistLoss(
+            volume=self.volume
         )
-        self.crop_loss = FocalLoss(
-            device=self.device,
-            inputs_are_logits=True,
-            apply_transform=True
-        )
+        self.crop_loss = FocalLoss()
         if self.num_classes > 2:
             self.crop_type_loss = CrossEntropyLoss(
                 device=self.device,

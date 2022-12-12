@@ -3,5 +3,5 @@ from .losses import (
     FocalLoss,
     WeightedL1Loss,
     MSELoss,
-    TanimotoDistanceLoss
+    TanimotoDistLoss
 )

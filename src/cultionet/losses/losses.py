@@ -3,11 +3,16 @@ import typing as T
 import attr
 import torch
 import torch.nn.functional as F
-import torchmetrics
 
 
-class ClassifierPreprocessing(object):
-    def preprocess(
+class LossPreprocessing(torch.nn.Module):
+    def __init__(self, inputs_are_logits: bool, apply_transform: bool):
+        super(LossPreprocessing, self).__init__()
+
+        self.inputs_are_logits = inputs_are_logits
+        self.apply_transform = apply_transform
+
+    def forward(
         self,
         inputs: torch.Tensor,
         targets: torch.Tensor
@@ -29,8 +34,7 @@ class ClassifierPreprocessing(object):
         return inputs, targets
 
 
-@attr.s
-class TanimotoDistanceLoss(ClassifierPreprocessing):
+class TanimotoDistLoss(torch.nn.Module):
     """Tanimoto distance loss
 
     Reference:
@@ -41,29 +45,22 @@ class TanimotoDistanceLoss(ClassifierPreprocessing):
     Copyright (c) 2017-2020 Matej Aleksandrov, Matej Batič, Matic Lubej, Grega Milčinski (Sinergise)
     Copyright (c) 2017-2020 Devis Peressutti, Jernej Puc, Anže Zupanc, Lojze Žust, Jovan Višnjić (Sinergise)
     """
-    volume: torch.Tensor = attr.ib(validator=attr.validators.instance_of(torch.Tensor))
-    smooth: T.Optional[float] = attr.ib(
-        default=1e-5,
-        validator=attr.validators.optional(validator=attr.validators.instance_of(float))
-    )
-    class_weights: T.Optional[torch.Tensor] = attr.ib(
-        default=None,
-        validator=attr.validators.optional(validator=attr.validators.instance_of(torch.Tensor))
-    )
-    inputs_are_logits: T.Optional[bool] = attr.ib(
-        default=True,
-        validator=attr.validators.optional(validator=attr.validators.instance_of(bool))
-    )
-    apply_transform: T.Optional[bool] = attr.ib(
-        default=True,
-        validator=attr.validators.optional(validator=attr.validators.instance_of(bool))
+    preprocessor = LossPreprocessing(
+        inputs_are_logits=True,
+        apply_transform=True
     )
 
-    def __attrs_post_init__(self):
-        super(TanimotoDistanceLoss, self).__init__()
+    def __init__(
+        self,
+        volume: torch.Tensor,
+        smooth: float = 1e-5,
+        class_weights: T.Optional[torch.Tensor] = None
+    ):
+        super(TanimotoDistLoss, self).__init__()
 
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
+        self.volume = volume
+        self.smooth = smooth
+        self.class_weights = class_weights
 
     def forward(
         self,
@@ -79,7 +76,7 @@ class TanimotoDistanceLoss(ClassifierPreprocessing):
         Returns:
             Tanimoto distance loss (float)
         """
-        inputs, targets = self.preprocess(inputs, targets)
+        inputs, targets = self.preprocessor(inputs, targets)
 
         weights = torch.reciprocal(torch.square(self.volume))
         new_weights = torch.where(torch.isinf(weights), torch.zeros_like(weights), weights)
@@ -99,38 +96,21 @@ class TanimotoDistanceLoss(ClassifierPreprocessing):
         return loss.sum()
 
 
-@attr.s
-class CrossEntropyLoss(object):
+class CrossEntropyLoss(torch.nn.Module):
     """Cross entropy loss
     """
-    device: T.Optional[str] = attr.ib(default=None)
-    class_weights: T.Optional[torch.Tensor] = attr.ib(
-        default=None,
-        validator=attr.validators.optional(
-            validator=attr.validators.instance_of(torch.Tensor)
-        )
-    )
-    reduction: T.Optional[str] = attr.ib(
-        default='mean',
-        validator=attr.validators.optional(
-            validator=attr.validators.instance_of(str)
-        )
-    )
+    def __init__(
+        self,
+        reduction: T.Optional[str] = 'mean',
+        class_weights: T.Optional[torch.Tensor] = None
+    ):
+        self.reduction= reduction
+        self.class_weights = class_weights
 
-    def __attrs_post_init__(self):
-        if self.device == 'cpu':
-            self.loss_func = torch.nn.CrossEntropyLoss(
-                weight=self.class_weights,
-                reduction=self.reduction
-            )
-        else:
-            self.loss_func = torch.nn.CrossEntropyLoss(
-                weight=self.class_weights,
-                reduction=self.reduction
-            ).cuda()
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
+        self.loss_func = torch.nn.CrossEntropyLoss(
+            weight=self.class_weights,
+            reduction=self.reduction
+        )
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """Performs a single forward pass
@@ -145,42 +125,32 @@ class CrossEntropyLoss(object):
         return self.loss_func(inputs, targets.contiguous().view(-1))
 
 
-@attr.s
-class FocalLoss(ClassifierPreprocessing):
+class FocalLoss(torch.nn.Module):
     """Focal loss
 
     Reference:
         https://www.kaggle.com/code/bigironsphere/loss-function-library-keras-pytorch/notebook
     """
-    device: T.Optional[str] = attr.ib(default=None)
-    alpha: T.Optional[float] = attr.ib(default=0.8)
-    gamma: T.Optional[float] = attr.ib(default=2.0)
-    inputs_are_logits: T.Optional[bool] = attr.ib(
-        default=True,
-        validator=attr.validators.optional(validator=attr.validators.instance_of(bool))
-    )
-    apply_transform: T.Optional[bool] = attr.ib(
-        default=True,
-        validator=attr.validators.optional(validator=attr.validators.instance_of(bool))
-    )
     sigmoid = torch.nn.Sigmoid()
+    cross_entropy_loss = torch.nn.CrossEntropyLoss(
+        reduction='none'
+    )
+    preprocessor = LossPreprocessing(
+        inputs_are_logits=True,
+        apply_transform=True
+    )
 
-    def __attrs_post_init__(self):
-        if self.device == 'cpu':
-            self.ce_loss = torch.nn.CrossEntropyLoss(
-                reduction='none'
-            )
-        else:
-            self.ce_loss = torch.nn.CrossEntropyLoss(
-                reduction='none'
-            ).cuda()
+    def __init__(self, alpha: float = 0.8, gamma: float = 2.0):
+        super(FocalLoss, self).__init__()
 
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
+        self.alpha = alpha
+        self.gamma = gamma
 
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        inputs, targets = self.preprocess(inputs, targets)
-        ce_loss = self.ce_loss(
+    def forward(
+        self, inputs: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
+        inputs, targets = self.preprocessor(inputs, targets)
+        ce_loss = self.cross_entropy_loss(
             inputs, targets.half()
         )
         ce_exp = torch.exp(-ce_loss)
@@ -227,6 +197,9 @@ class QuantileLoss(object):
 class WeightedL1Loss(torch.nn.Module):
     """Weighted L1Loss loss
     """
+    def __init__(self):
+        super(WeightedL1Loss, self).__init__()
+
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor
     ) -> torch.Tensor:
@@ -251,43 +224,16 @@ class WeightedL1Loss(torch.nn.Module):
         return loss
 
 
-@attr.s
-class MSELoss(object):
+class MSELoss(torch.nn.Module):
     """MSE loss
     """
-    def __attrs_post_init__(self):
-        self.loss_func = torch.nn.MSELoss()
+    loss_func = torch.nn.MSELoss()
+    def __init__(self):
+        super(MSELoss, self).__init__()
 
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """Performs a single forward pass
-
-        Args:
-            inputs: Predictions from model.
-            targets: Ground truth values.
-
-        Returns:
-            Loss (float)
-        """
-        return self.loss_func(
-            inputs.contiguous().view(-1),
-            targets.contiguous().view(-1)
-        )
-
-
-@attr.s
-class HuberLoss(object):
-    """Huber loss
-    """
-    def __attrs_post_init__(self):
-        self.loss_func = torch.nn.HuberLoss()
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, inputs: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
         """Performs a single forward pass
 
         Args:
