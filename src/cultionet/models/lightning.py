@@ -4,7 +4,7 @@ from pathlib import Path
 from ..losses import (
     CrossEntropyLoss,
     FocalLoss,
-    L1Loss,
+    WeightedL1Loss,
     MSELoss,
     TanimotoDistanceLoss
 )
@@ -478,7 +478,7 @@ class CultioLitModel(pl.LightningModule):
         )
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
         edge_boundary_loss = self.edge_boundary_loss(
-            self.softmax(predictions['edge'])[:, 1].contiguous().view(-1),
+            self.softmax(predictions['edge'])[:, 1],
             1.0 - batch.bdist
         )
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
@@ -655,7 +655,7 @@ class CultioLitModel(pl.LightningModule):
         )
 
         self.dist_loss = MSELoss()
-        self.edge_boundary_loss = L1Loss()
+        self.edge_boundary_loss = WeightedL1Loss()
         self.edge_loss = TanimotoDistanceLoss(
             volume=self.volume,
             inputs_are_logits=True,

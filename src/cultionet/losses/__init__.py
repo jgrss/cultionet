@@ -1,7 +1,7 @@
 from .losses import (
     CrossEntropyLoss,
     FocalLoss,
-    L1Loss,
+    WeightedL1Loss,
     MSELoss,
     TanimotoDistanceLoss
 )

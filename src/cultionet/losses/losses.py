@@ -224,17 +224,12 @@ class QuantileLoss(object):
         return loss
 
 
-@attr.s
-class L1Loss(object):
-    """L1Loss loss
+class WeightedL1Loss(torch.nn.Module):
+    """Weighted L1Loss loss
     """
-    def __attrs_post_init__(self):
-        self.loss_func = torch.nn.L1Loss()
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, inputs: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
         """Performs a single forward pass
 
         Args:
@@ -244,10 +239,16 @@ class L1Loss(object):
         Returns:
             Loss (float)
         """
-        return self.loss_func(
-            inputs.contiguous().view(-1),
-            targets.contiguous().view(-1)
+        inputs = inputs.contiguous().view(-1)
+        targets = targets.contiguous().view(-1)
+
+        mae = torch.abs(
+            inputs - targets
         )
+        weight = inputs + targets
+        loss = (mae * weight).mean()
+
+        return loss
 
 
 @attr.s
