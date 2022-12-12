@@ -3,51 +3,51 @@
 import typing as T
 
 import torch
-import torch.nn as nn
-from torch.nn import init
 from torch.autograd import Variable
 
 
-class ConvSTARCell(nn.Module):
+class ConvSTARCell(torch.nn.Module):
     """Generates a convolutional STAR cell
     """
     def __init__(self, input_size, hidden_size, kernel_size):
         super(ConvSTARCell, self).__init__()
 
         padding = int(kernel_size / 2.0)
+        self.sigmoid = torch.nn.Sigmoid()
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.gate = nn.Conv2d(input_size + hidden_size, hidden_size, kernel_size, padding=padding)
-        self.update = nn.Conv2d(input_size, hidden_size, kernel_size, padding=padding)
+        self.gate = torch.nn.Conv2d(
+            input_size + hidden_size, hidden_size, kernel_size, padding=padding
+        )
+        self.update = torch.nn.Conv2d(
+            input_size, hidden_size, kernel_size, padding=padding
+        )
 
-        init.orthogonal(self.update.weight)
-        init.orthogonal(self.gate.weight)
-        init.constant(self.update.bias, 0.0)
-        init.constant(self.gate.bias, 1.0)
+        torch.nn.init.orthogonal(self.update.weight)
+        torch.nn.init.orthogonal(self.gate.weight)
+        torch.nn.init.constant(self.update.bias, 0.0)
+        torch.nn.init.constant(self.gate.bias, 1.0)
 
-    def forward(self, input_, prev_state):
+    def forward(self, inputs, prev_state):
         # get batch and spatial sizes
-        batch_size = input_.data.size()[0]
-        spatial_size = input_.data.size()[2:]
+        batch_size = inputs.data.size()[0]
+        spatial_size = inputs.data.size()[2:]
 
         # generate empty prev_state, if None is provided
         if prev_state is None:
             state_size = [batch_size, self.hidden_size] + list(spatial_size)
-            if torch.cuda.is_available():
-                prev_state = Variable(torch.zeros(state_size)).to(input_.device)
-            else:
-                prev_state = Variable(torch.zeros(state_size))
+            prev_state = Variable(torch.zeros(state_size))
 
         # data size is [batch, channel, height, width]
-        stacked_inputs = torch.cat([input_, prev_state], dim=1)
-        gain = torch.sigmoid(self.gate(stacked_inputs))
-        update = torch.tanh(self.update(input_))
-        new_state = gain * prev_state + (1 - gain) * update
+        stacked_inputs = torch.cat([inputs, prev_state], dim=1)
+        gain = self.sigmoid(self.gate(stacked_inputs))
+        update = torch.tanh(self.update(inputs))
+        new_state = gain * prev_state + (1.0 - gain) * update
 
         return new_state
 
 
-class ConvSTAR(nn.Module):
+class ConvSTAR(torch.nn.Module):
     def __init__(self, input_size, hidden_sizes, kernel_sizes, n_layers):
         """Generates a multi-layer convolutional GRU. Preserves spatial dimensions across
         cells, only altering depth.
@@ -145,32 +145,20 @@ class StarRNN(torch.nn.Module):
         )
 
         padding = int(kernel_size / 2)
-        self.final = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                hidden_dim,
-                hidden_dim,
-                kernel_size,
-                padding=padding
-            ),
-            torch.nn.LeakyReLU(inplace=False),
-            torch.nn.BatchNorm2d(hidden_dim)
+        self.final = torch.nn.Conv2d(
+            hidden_dim,
+            hidden_dim,
+            kernel_size,
+            padding=padding
         )
         # Crop-type layer
         if self.crop_type_layer:
-            self.final_last = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    hidden_dim, num_classes_last, kernel_size, padding=padding
-                ),
-                torch.nn.LeakyReLU(inplace=False),
-                torch.nn.BatchNorm2d(num_classes_last)
+            self.final_last = torch.nn.Conv2d(
+                hidden_dim, num_classes_last, kernel_size, padding=padding
             )
         else:
-            self.final_last = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    hidden_dim, hidden_dim, kernel_size, padding=padding
-                ),
-                torch.nn.LeakyReLU(inplace=False),
-                torch.nn.BatchNorm2d(hidden_dim)
+            self.final_last = torch.nn.Conv2d(
+                hidden_dim, hidden_dim, kernel_size, padding=padding
             )
 
     def __call__(self, *args, **kwargs):
