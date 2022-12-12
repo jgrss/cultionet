@@ -3,6 +3,8 @@ from pathlib import Path
 
 from ..losses import (
     CrossEntropyLoss,
+    FocalLoss,
+    L1Loss,
     MSELoss,
     TanimotoDistanceLoss
 )
@@ -396,6 +398,9 @@ class CultioLitModel(pl.LightningModule):
 
         return predictions
 
+    def softmax(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
+        return F.softmax(x, dim=dim, dtype=x.dtype)
+
     def predict_probas(
         self,
         edge: torch.Tensor,
@@ -405,10 +410,10 @@ class CultioLitModel(pl.LightningModule):
         torch.Tensor, torch.Tensor, T.Union[None, torch.Tensor]
     ]:
         # Transform edge and crop logits to probabilities
-        edge = F.softmax(edge, dim=1, dtype=edge.dtype)
-        crop = F.softmax(crop, dim=1, dtype=crop.dtype)
+        edge = self.softmax(edge)
+        crop = self.softmax(crop)
         if crop_type is not None:
-            crop_type = F.softmax(crop_type, dim=1, dtype=crop_type.dtype)
+            crop_type = self.softmax(crop_type)
 
         return edge, crop, crop_type
 
@@ -472,6 +477,10 @@ class CultioLitModel(pl.LightningModule):
             predictions['dist_4'], batch.bdist
         )
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
+        edge_boundary_loss = self.edge_boundary_loss(
+            self.softmax(predictions['edge'])[:, 1].contiguous().view(-1),
+            1.0 - batch.bdist
+        )
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
 
         loss = (
@@ -481,6 +490,7 @@ class CultioLitModel(pl.LightningModule):
             + dist_loss_3 * 0.25
             + dist_loss_4 * 0.1
             + edge_loss
+            + edge_boundary_loss
             + crop_loss
         )
         if predictions['crop_type'] is not None:
@@ -491,9 +501,9 @@ class CultioLitModel(pl.LightningModule):
                 predictions['crop_type'], true_crop_type
             )
             loss = loss + crop_type_loss
-        # else:
-        #     crop_loss_star = self.crop_loss(predictions['crop_star'], true_crop)
-        #     loss = loss + crop_loss_star
+        else:
+            crop_loss_star = self.crop_loss(predictions['crop_star'], true_crop)
+            loss = loss + crop_loss_star
 
         return loss
 
@@ -547,6 +557,9 @@ class CultioLitModel(pl.LightningModule):
         # Dice
         edge_dice = self.edge_dice(edge_ypred, edge_ytrue)
         crop_dice = self.crop_dice(crop_ypred, crop_ytrue)
+        # Jaccard/IoU
+        edge_jaccard = self.edge_jaccard(edge_ypred, edge_ytrue)
+        crop_jaccard = self.crop_jaccard(crop_ypred, crop_ytrue)
 
         metrics = {
             'loss': loss,
@@ -558,6 +571,8 @@ class CultioLitModel(pl.LightningModule):
             'crop_mcc': crop_mcc,
             'edge_dice': edge_dice,
             'crop_dice': crop_dice,
+            'edge_jaccard': edge_jaccard,
+            'crop_jaccard': crop_jaccard
         }
         if crop_type is not None:
             crop_type_ypred = crop_type.argmax(dim=1).long()
@@ -602,7 +617,9 @@ class CultioLitModel(pl.LightningModule):
             'temcc': eval_metrics['edge_mcc'],
             'tcmcc': eval_metrics['crop_mcc'],
             'tedice': eval_metrics['edge_dice'],
-            'tcdice': eval_metrics['crop_dice']
+            'tcdice': eval_metrics['crop_dice'],
+            'tejaccard': eval_metrics['edge_jaccard'],
+            'tcjaccard': eval_metrics['crop_jaccard']
         }
         if 'crop_type_f1' in eval_metrics:
             metrics['tctf1'] = eval_metrics['crop_type_f1']
@@ -619,6 +636,14 @@ class CultioLitModel(pl.LightningModule):
         self.crop_mcc = torchmetrics.MatthewsCorrCoef(num_classes=2)
         self.edge_dice = torchmetrics.Dice(num_classes=2, average='micro')
         self.crop_dice = torchmetrics.Dice(num_classes=2, average='micro')
+        self.edge_jaccard = torchmetrics.JaccardIndex(
+            average='micro',
+            num_classes=2
+        )
+        self.crop_jaccard = torchmetrics.JaccardIndex(
+            average='micro',
+            num_classes=2
+        )
         if self.num_classes > 2:
             self.crop_type_f1 = torchmetrics.F1Score(
                 num_classes=self.num_classes, average='weighted', ignore_index=0
@@ -630,13 +655,14 @@ class CultioLitModel(pl.LightningModule):
         )
 
         self.dist_loss = MSELoss()
+        self.edge_boundary_loss = L1Loss()
         self.edge_loss = TanimotoDistanceLoss(
             volume=self.volume,
             inputs_are_logits=True,
             apply_transform=True
         )
-        self.crop_loss = TanimotoDistanceLoss(
-            volume=self.volume,
+        self.crop_loss = FocalLoss(
+            device=self.device,
             inputs_are_logits=True,
             apply_transform=True
         )
@@ -662,6 +688,10 @@ class CultioLitModel(pl.LightningModule):
 
         return {
             'optimizer': optimizer,
-            'scheduler': lr_scheduler,
-            'monitor': 'val_loss'
+            'lr_scheduler': {
+                'scheduler': lr_scheduler,
+                'monitor': 'val_loss',
+                'interval': 'epoch',
+                'frequency': 1
+            },
         }

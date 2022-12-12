@@ -48,7 +48,7 @@ class CultioNet(torch.nn.Module):
             # Crop-type classes
             num_classes_last = self.num_classes
         else:
-            num_classes_last = star_rnn_hidden_dim
+            num_classes_last = 2
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
             hidden_dim=star_rnn_hidden_dim,
@@ -59,9 +59,10 @@ class CultioNet(torch.nn.Module):
         # Local 1 = hidden dimensions
         # Local 2 = crop (0|1)
         # Last = crop-type (2..N)
-        base_in_channels = star_rnn_hidden_dim * (star_rnn_n_layers - 1) + num_classes_last
-        # base_in_channels = star_rnn_hidden_dim + num_classes_last
+        # base_in_channels = star_rnn_hidden_dim * (star_rnn_n_layers - 1) + num_classes_last
+        base_in_channels = star_rnn_hidden_dim + num_classes_last
         # Distance layers (+5)
+        dist_out_channels = 5
         self.dist_model = NestedUNet3(
             in_channels=base_in_channels,
             out_channels=1,
@@ -69,16 +70,18 @@ class CultioNet(torch.nn.Module):
             deep_supervision=True
         )
         # Edge layer (+2)
+        edge_out_channels = 2
         self.edge_model = NestedUNet3(
-            in_channels=base_in_channels+5,
-            out_channels=2,
+            in_channels=base_in_channels+dist_out_channels,
+            out_channels=edge_out_channels,
             init_filter=self.filters,
             deep_supervision=False
         )
         # Crop layer (+2)
+        crop_out_channels = 2
         self.crop_model = NestedUNet2(
-            in_channels=base_in_channels+5+2,
-            out_channels=2,
+            in_channels=base_in_channels+dist_out_channels+edge_out_channels,
+            out_channels=crop_out_channels,
             init_filter=self.filters,
             deep_supervision=True
         )
@@ -178,7 +181,7 @@ class CultioNet(torch.nn.Module):
         if self.num_classes > 2:
             # With no crop-type, return last layer (crop)
             out['crop_type'] = logits_star_last
-        # else:
-        #     out['crop_star'] = logits_star_last
+        else:
+            out['crop_star'] = logits_star_last
 
         return out

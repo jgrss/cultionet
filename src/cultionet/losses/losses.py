@@ -106,17 +106,27 @@ class CrossEntropyLoss(object):
     device: T.Optional[str] = attr.ib(default=None)
     class_weights: T.Optional[torch.Tensor] = attr.ib(
         default=None,
-        validator=attr.validators.optional(validator=attr.validators.instance_of(torch.Tensor))
+        validator=attr.validators.optional(
+            validator=attr.validators.instance_of(torch.Tensor)
+        )
+    )
+    reduction: T.Optional[str] = attr.ib(
+        default='mean',
+        validator=attr.validators.optional(
+            validator=attr.validators.instance_of(str)
+        )
     )
 
     def __attrs_post_init__(self):
         if self.device == 'cpu':
             self.loss_func = torch.nn.CrossEntropyLoss(
-                weight=self.class_weights
+                weight=self.class_weights,
+                reduction=self.reduction
             )
         else:
             self.loss_func = torch.nn.CrossEntropyLoss(
-                weight=self.class_weights
+                weight=self.class_weights,
+                reduction=self.reduction
             ).cuda()
 
     def __call__(self, *args, **kwargs):
@@ -133,6 +143,50 @@ class CrossEntropyLoss(object):
             Loss (float)
         """
         return self.loss_func(inputs, targets.contiguous().view(-1))
+
+
+@attr.s
+class FocalLoss(ClassifierPreprocessing):
+    """Focal loss
+
+    Reference:
+        https://www.kaggle.com/code/bigironsphere/loss-function-library-keras-pytorch/notebook
+    """
+    device: T.Optional[str] = attr.ib(default=None)
+    alpha: T.Optional[float] = attr.ib(default=0.8)
+    gamma: T.Optional[float] = attr.ib(default=2.0)
+    inputs_are_logits: T.Optional[bool] = attr.ib(
+        default=True,
+        validator=attr.validators.optional(validator=attr.validators.instance_of(bool))
+    )
+    apply_transform: T.Optional[bool] = attr.ib(
+        default=True,
+        validator=attr.validators.optional(validator=attr.validators.instance_of(bool))
+    )
+    sigmoid = torch.nn.Sigmoid()
+
+    def __attrs_post_init__(self):
+        if self.device == 'cpu':
+            self.ce_loss = torch.nn.CrossEntropyLoss(
+                reduction='none'
+            )
+        else:
+            self.ce_loss = torch.nn.CrossEntropyLoss(
+                reduction='none'
+            ).cuda()
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        inputs, targets = self.preprocess(inputs, targets)
+        ce_loss = self.ce_loss(
+            inputs, targets.half()
+        )
+        ce_exp = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1.0 - ce_exp)**self.gamma * ce_loss
+
+        return focal_loss.mean()
 
 
 @attr.s
@@ -168,6 +222,32 @@ class QuantileLoss(object):
         loss = torch.cat(losses, dim=1).sum(dim=1).mean()
 
         return loss
+
+
+@attr.s
+class L1Loss(object):
+    """L1Loss loss
+    """
+    def __attrs_post_init__(self):
+        self.loss_func = torch.nn.L1Loss()
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Performs a single forward pass
+
+        Args:
+            inputs: Predictions from model.
+            targets: Ground truth values.
+
+        Returns:
+            Loss (float)
+        """
+        return self.loss_func(
+            inputs.contiguous().view(-1),
+            targets.contiguous().view(-1)
+        )
 
 
 @attr.s
@@ -219,35 +299,4 @@ class HuberLoss(object):
         return self.loss_func(
             inputs.contiguous().view(-1),
             targets.contiguous().view(-1)
-        )
-
-
-@attr.s
-class StructuralSimilarityLoss(object):
-    """Structural similarity loss
-    """
-    device: T.Optional[str] = attr.ib(default=None)
-
-    def __attrs_post_init__(self):
-        if self.device == 'cpu':
-            self.loss_func = torchmetrics.StructuralSimilarityIndexMeasure()
-        else:
-            self.loss_func = torchmetrics.StructuralSimilarityIndexMeasure().cuda()
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """Performs a single forward pass
-
-        Args:
-            inputs: Predictions from model.
-            targets: Ground truth values.
-
-        Returns:
-            Loss (float)
-        """
-        return 1.0 - self.loss_func(
-            inputs,
-            targets
         )

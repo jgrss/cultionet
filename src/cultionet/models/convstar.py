@@ -14,6 +14,7 @@ class ConvSTARCell(torch.nn.Module):
 
         padding = int(kernel_size / 2.0)
         self.sigmoid = torch.nn.Sigmoid()
+        self.tanh = torch.nn.Tanh()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.gate = torch.nn.Conv2d(
@@ -41,7 +42,7 @@ class ConvSTARCell(torch.nn.Module):
         # data size is [batch, channel, height, width]
         stacked_inputs = torch.cat([inputs, prev_state], dim=1)
         gain = self.sigmoid(self.gate(stacked_inputs))
-        update = torch.tanh(self.update(inputs))
+        update = self.tanh(self.update(inputs))
         new_state = gain * prev_state + (1.0 - gain) * update
 
         return new_state
@@ -158,7 +159,7 @@ class StarRNN(torch.nn.Module):
             )
         else:
             self.final_last = torch.nn.Conv2d(
-                hidden_dim, hidden_dim, kernel_size, padding=padding
+                hidden_dim, 2, kernel_size, padding=padding
             )
 
     def __call__(self, *args, **kwargs):
@@ -186,15 +187,15 @@ class StarRNN(torch.nn.Module):
         for iter_ in range(0, time_size):
             hidden_s = self.rnn(x[:, :, iter_, :, :], hidden_s)
 
-        # local = self.final(hidden_s[0])
-        # for l in range(1, len(hidden_s)-1):
-        #     local += self.final(hidden_s[l])
-        local = torch.cat(
-            [
-                self.final(layer) for layer in hidden_s[:-1]
-            ],
-            dim=1
-        )
+        local = self.final(hidden_s[0])
+        for l in range(1, len(hidden_s)-1):
+            local += self.final(hidden_s[l])
+        # local = torch.cat(
+        #     [
+        #         self.final(layer) for layer in hidden_s[:-1]
+        #     ],
+        #     dim=1
+        # )
         last = self.final_last(hidden_s[-1])
 
         # The output is (B x C x H x W)

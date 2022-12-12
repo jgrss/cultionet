@@ -747,11 +747,16 @@ def create_datasets(args):
             if not grids.is_file():
                 logger.warning(f'{grids} does not exist.')
                 continue
+
+            df_grids = gpd.read_file(grids)
+
             if not edges.is_file():
                 edges = ppaths.edge_training_path / f'{region}_poly_{end_year}.gpkg'
-            # Open GeoDataFrames
-            df_grids = gpd.read_file(grids)
-            df_edges = gpd.read_file(edges)
+            if not edges.is_file():
+                # No training polygons
+                df_edges = gpd.GeoDataFrame(data=[], geometry=[], crs=df_grids.crs)
+            else:
+                df_edges = gpd.read_file(edges)
 
         image_list = []
         for image_vi in model_preprocessing.VegetationIndices(
