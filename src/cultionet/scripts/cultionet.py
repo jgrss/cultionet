@@ -1068,11 +1068,12 @@ def train_model(args):
         if args.recalc_zscores:
             ppaths.norm_file.unlink()
     if not ppaths.norm_file.is_file():
-        if (args.spatial_partitions is not None) and (args.partition_name is None):
+        if args.spatial_partitions is not None:
             train_ds = ds.split_train_val_by_partition(
                 spatial_partitions=args.spatial_partitions,
                 partition_column=args.partition_column,
-                val_frac=args.val_frac
+                val_frac=args.val_frac,
+                partition_name=args.partition_name
             )[0]
         else:
             train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
@@ -1097,16 +1098,6 @@ def train_model(args):
         edge_counts=data_values.edge_counts,
         random_seed=args.random_seed
     )
-    if (args.spatial_partitions is not None) and (args.partition_name is not None):
-        # Subset the dataset to a defined geography
-        ds.get_spatial_partitions(
-            spatial_partitions=args.spatial_partitions
-        )
-        partition_indices = ds.query_partition_by_name(
-            args.partition_column,
-            args.partition_name
-        )
-        ds = ds.split_indices(partition_indices, return_all=False)
 
     # Check for a test dataset
     test_ds = None

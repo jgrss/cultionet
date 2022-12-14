@@ -282,11 +282,12 @@ def fit(
     ckpt_file = Path(ckpt_file)
 
     # Split the dataset into train/validation
-    if (spatial_partitions is not None) and (partition_name is None):
+    if spatial_partitions is not None:
         train_ds, val_ds = dataset.split_train_val_by_partition(
             spatial_partitions=spatial_partitions,
             partition_column=partition_column,
-            val_frac=val_frac
+            val_frac=val_frac,
+            partition_name=partition_name
         )
     else:
         train_ds, val_ds = dataset.split_train_val(val_frac=val_frac)

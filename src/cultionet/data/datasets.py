@@ -370,7 +370,11 @@ class EdgeDataset(Dataset):
         return len(self.processed_file_names)
 
     def split_train_val_by_partition(
-        self, spatial_partitions: str, partition_column: str, val_frac: float
+        self,
+        spatial_partitions: str,
+        partition_column: str,
+        val_frac: float,
+        partition_name: T.Optional[str] = None,
     ) -> T.Tuple['EdgeDataset', 'EdgeDataset']:
         self.get_spatial_partitions(spatial_partitions=spatial_partitions)
         train_indices = []
@@ -382,6 +386,9 @@ class EdgeDataset(Dataset):
             total=len(self.spatial_partitions.index),
             desc='Sampling partitions'
         ):
+            if partition_name is not None:
+                if str(getattr(row, partition_column)) != partition_name:
+                    continue
             # Query grid centroids within the partition
             indices = self.query_partition_by_name(
                 partition_column,
