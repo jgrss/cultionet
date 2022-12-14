@@ -342,11 +342,21 @@ maskrcnn:
       default: 3
       type: '&int'
 
-skfoldcv:
+shared_partitions:
   spatial_partitions:
     short: ''
     long: spatial-partitions
-    help: The spatial partitions for spatil k-fold cross-validation
+    help: The spatial partitions for spatial k-fold cross-validation or regional training
+  partition_column:
+    short: ''
+    long: partition-column
+    help: The partition column name
+  partition_name:
+    short: ''
+    long: partition-name
+    help: A partition name query used as "{partition_column} == 'partition_name'"
+
+skfoldcv:
   splits:
     short: ''
     long: splits
@@ -354,10 +364,6 @@ skfoldcv:
     kwargs:
       default: 0
       type: '&int'
-  partition_column:
-    short: ''
-    long: partition-column
-    help: The partition column name
 
 train:
   val_frac:

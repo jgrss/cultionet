@@ -40,6 +40,7 @@ import ray
 from ray.actor import ActorHandle
 from tqdm import tqdm
 from tqdm.dask import TqdmCallback
+from pytorch_lightning import seed_everything
 
 
 logger = set_color_logger(__name__)
@@ -479,7 +480,8 @@ def predict_image(args):
             ppaths.predict_path,
             data_means=data_values.mean,
             data_stds=data_values.std,
-            pattern=f'data_{args.region}_{args.predict_year}*.pt'
+            pattern=f'data_{args.region}_{args.predict_year}*.pt',
+            random_seed=args.random_seed
         )
         cultionet.predict_lightning(
             reference_image=args.reference_image,
@@ -844,6 +846,8 @@ def create_datasets(args):
 
 
 def train_maskrcnn(args):
+    seed_everything(args.random_seed, workers=True)
+
     # This is a helper function to manage paths
     ppaths = setup_paths(args.project_path, ckpt_name='maskrcnn.ckpt')
 
@@ -855,7 +859,8 @@ def train_maskrcnn(args):
         ds = EdgeDataset(
             ppaths.train_path,
             processes=args.processes,
-            threads_per_worker=args.threads
+            threads_per_worker=args.threads,
+            random_seed=args.random_seed
         )
     # Check dimensions
     if args.expected_dim is not None:
@@ -868,7 +873,6 @@ def train_maskrcnn(args):
         except TensorShapeError as e:
             raise ValueError(e)
     # Get the normalization means and std. deviations on the train data
-    cultionet.model.seed_everything(args.random_seed, workers=True)
     # Calculate the values needed to transform to z-scores, using
     # the training data
     if ppaths.norm_file.is_file():
@@ -891,7 +895,8 @@ def train_maskrcnn(args):
     ds = EdgeDataset(
         ppaths.train_path,
         data_means=data_values.mean,
-        data_stds=data_values.std
+        data_stds=data_values.std,
+        random_seed=args.random_seed
     )
     # Check for a test dataset
     test_ds = None
@@ -899,7 +904,8 @@ def train_maskrcnn(args):
         test_ds = EdgeDataset(
             ppaths.test_path,
             data_means=data_values.mean,
-            data_stds=data_values.std
+            data_stds=data_values.std,
+            random_seed=args.random_seed
         )
         if args.expected_dim is not None:
             try:
@@ -952,13 +958,13 @@ def spatial_kfoldcv(args):
     ds = EdgeDataset(
         ppaths.train_path,
         processes=args.processes,
-        threads_per_worker=args.threads
+        threads_per_worker=args.threads,
+        random_seed=args.random_seed
     )
     # Read or create the spatial partitions (folds)
-    ds.get_skfoldcv_partitions(
+    ds.get_spatial_partitions(
         spatial_partitions=args.spatial_partitions,
-        splits=args.splits,
-        processes=args.processes
+        splits=args.splits
     )
     for k, (partition_name, train_ds, test_ds) in enumerate(
         ds.spatial_kfoldcv_iter(args.partition_column)
@@ -1018,6 +1024,8 @@ def spatial_kfoldcv(args):
 
 
 def train_model(args):
+    seed_everything(args.random_seed, workers=True)
+
     # This is a helper function to manage paths
     ppaths = setup_paths(args.project_path)
 
@@ -1032,7 +1040,8 @@ def train_model(args):
         ds = EdgeDataset(
             ppaths.train_path,
             processes=args.processes,
-            threads_per_worker=args.threads
+            threads_per_worker=args.threads,
+            random_seed=args.random_seed
         )
     # Check dimensions
     if args.expected_dim is not None:
@@ -1049,17 +1058,24 @@ def train_model(args):
         ds = EdgeDataset(
             ppaths.train_path,
             processes=args.processes,
-            threads_per_worker=args.threads
+            threads_per_worker=args.threads,
+            random_seed=args.random_seed
         )
     # Get the normalization means and std. deviations on the train data
-    cultionet.model.seed_everything(args.random_seed, workers=True)
     # Calculate the values needed to transform to z-scores, using
     # the training data
     if ppaths.norm_file.is_file():
         if args.recalc_zscores:
             ppaths.norm_file.unlink()
     if not ppaths.norm_file.is_file():
-        train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
+        if (args.spatial_partitions is not None) and (args.partition_name is None):
+            train_ds = ds.split_train_val_by_partition(
+                spatial_partitions=args.spatial_partitions,
+                partition_column=args.partition_column,
+                val_frac=args.val_frac
+            )[0]
+        else:
+            train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
         data_values = get_norm_values(
             dataset=train_ds,
             class_info=class_info,
@@ -1078,8 +1094,20 @@ def train_model(args):
         data_means=data_values.mean,
         data_stds=data_values.std,
         crop_counts=data_values.crop_counts,
-        edge_counts=data_values.edge_counts
+        edge_counts=data_values.edge_counts,
+        random_seed=args.random_seed
     )
+    if (args.spatial_partitions is not None) and (args.partition_name is not None):
+        # Subset the dataset to a defined geography
+        ds.get_spatial_partitions(
+            spatial_partitions=args.spatial_partitions
+        )
+        partition_indices = ds.query_partition_by_name(
+            args.partition_column,
+            args.partition_name
+        )
+        ds = ds.split_indices(partition_indices, return_all=False)
+
     # Check for a test dataset
     test_ds = None
     if list((ppaths.test_process_path).glob('*.pt')):
@@ -1088,7 +1116,8 @@ def train_model(args):
             data_means=data_values.mean,
             data_stds=data_values.std,
             crop_counts=data_values.crop_counts,
-            edge_counts=data_values.edge_counts
+            edge_counts=data_values.edge_counts,
+            random_seed=args.random_seed
         )
         if args.expected_dim is not None:
             try:
@@ -1104,7 +1133,8 @@ def train_model(args):
                 data_means=data_values.mean,
                 data_stds=data_values.std,
                 crop_counts=data_values.crop_counts,
-                edge_counts=data_values.edge_counts
+                edge_counts=data_values.edge_counts,
+                random_seed=args.random_seed
             )
 
     # Get balanced class weights
@@ -1127,6 +1157,9 @@ def train_model(args):
         ckpt_file=ppaths.ckpt_file,
         test_dataset=test_ds,
         val_frac=args.val_frac,
+        spatial_partitions=args.spatial_partitions,
+        partition_name=args.partition_name,
+        partition_column=args.partition_column,
         batch_size=args.batch_size,
         epochs=args.epochs,
         accumulate_grad_batches=args.accumulate_grad_batches,
@@ -1186,6 +1219,7 @@ def main():
             process_dict.update(args_config['train'])
         if process in ('train', 'maskrcnn', 'predict', 'skfoldcv'):
             process_dict.update(args_config['train_predict'])
+            process_dict.update(args_config['shared_partitions'])
         process_dict.update(args_config['dates'])
         for process_key, process_values in process_dict.items():
             if 'kwargs' in process_values:

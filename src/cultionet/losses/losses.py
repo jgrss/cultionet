@@ -136,12 +136,10 @@ class FocalLoss(torch.nn.Module):
         self.alpha = alpha
         self.gamma = gamma
 
-        self.sigmoid = torch.nn.Sigmoid()
         self.preprocessor = LossPreprocessing(
             inputs_are_logits=True,
             apply_transform=True
         )
-
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss(
             weight=weight,
             reduction='none',

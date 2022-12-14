@@ -20,7 +20,6 @@ from rasterio.windows import Window
 import torch
 from torch_geometric.data import Data
 import pytorch_lightning as pl
-from pytorch_lightning import seed_everything
 from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
@@ -102,7 +101,6 @@ def fit_maskrcnn(
     ckpt_file = Path(ckpt_file)
 
     # Split the dataset into train/validation
-    seed_everything(random_seed, workers=True)
     train_ds, val_ds = dataset.split_train_val(val_frac=val_frac)
 
     # Setup the data module
@@ -218,6 +216,9 @@ def fit(
     ckpt_file: T.Union[str, Path],
     test_dataset: T.Optional[EdgeDataset] = None,
     val_frac: T.Optional[float] = 0.2,
+    spatial_partitions: T.Optional[T.Union[str, Path]] = None,
+    partition_name: T.Optional[str] = None,
+    partition_column: T.Optional[str] = None,
     batch_size: T.Optional[int] = 4,
     accumulate_grad_batches: T.Optional[int] = 1,
     filters: T.Optional[int] = 64,
@@ -251,6 +252,9 @@ def fit(
         test_dataset (Optional[EdgeDataset]): A test dataset to evaluate on. If given, early stopping
             will switch from the validation dataset to the test dataset.
         val_frac (Optional[float]): The fraction of data to use for model validation.
+        spatial_partitions (Optional[str | Path]): A spatial partitions file.
+        partition_name (Optional[str]): The spatial partition file column query name.
+        partition_column (Optional[str]): The spatial partition file column name.
         batch_size (Optional[int]): The data batch size.
         filters (Optional[int]): The number of initial model filters.
         learning_rate (Optional[float]): The model learning rate.
@@ -278,8 +282,14 @@ def fit(
     ckpt_file = Path(ckpt_file)
 
     # Split the dataset into train/validation
-    seed_everything(random_seed, workers=True)
-    train_ds, val_ds = dataset.split_train_val(val_frac=val_frac)
+    if (spatial_partitions is not None) and (partition_name is None):
+        train_ds, val_ds = dataset.split_train_val_by_partition(
+            spatial_partitions=spatial_partitions,
+            partition_column=partition_column,
+            val_frac=val_frac
+        )
+    else:
+        train_ds, val_ds = dataset.split_train_val(val_frac=val_frac)
 
     # Setup the data module
     data_module = EdgeDataModule(
