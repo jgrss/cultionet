@@ -475,13 +475,15 @@ def predict_image(args):
     with open(ppaths.classes_info_path, mode='r') as f:
         class_info = json.load(f)
 
+    num_classes = args.num_classes if args.num_classes is not None else class_info['max_crop_class'] + 1
+    edge_class = args.edge_class if args.edge_class is not None else class_info['edge_class']
+
     if args.data_path is not None:
         ds = EdgeDataset(
             ppaths.predict_path,
             data_means=data_values.mean,
             data_stds=data_values.std,
-            pattern=f'data_{args.region}_{args.predict_year}*.pt',
-            random_seed=args.random_seed
+            pattern=f'data_{args.region}_{args.predict_year}*.pt'
         )
         cultionet.predict_lightning(
             reference_image=args.reference_image,
@@ -492,8 +494,8 @@ def predict_image(args):
             device=args.device,
             filters=args.filters,
             precision=args.precision,
-            num_classes=args.num_classes if args.num_classes is not None else class_info['max_crop_class'] + 1,
-            edge_class=args.edge_class if args.edge_class is not None else class_info['edge_class'],
+            num_classes=num_classes,
+            edge_class=edge_class,
             ref_res=ds[0].res,
             resampling=ds[0].resampling,
             compression=args.compression
