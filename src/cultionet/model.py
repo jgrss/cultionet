@@ -426,7 +426,7 @@ def fit(
         gradient_clip_algorithm='value',
         check_val_every_n_epoch=1,
         min_epochs=5 if epochs >= 5 else epochs,
-        max_epochs=epochs,
+        max_epochs=10,
         precision=32,
         devices=1 if device == 'gpu' else None,
         num_processes=0,

@@ -40,9 +40,6 @@ class AttentionAdd(torch.nn.Module):
     def __init__(self):
         super(AttentionAdd, self).__init__()
 
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
     def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
         if x.shape != g.shape:
             x = F.interpolate(
@@ -99,9 +96,6 @@ class AttentionGate(torch.nn.Module):
             torch.nn.Conv2d(high_channels, high_channels, 1, padding=0),
             torch.nn.BatchNorm2d(high_channels)
         )
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
 
     def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
         """
@@ -255,9 +249,6 @@ class NestedUNet2(torch.nn.Module):
         for m in self.modules():
             if isinstance(m, (torch.nn.Conv2d, torch.nn.BatchNorm2d)):
                 m.apply(weights_init_kaiming)
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
 
     def forward(
         self, x: torch.Tensor
@@ -523,9 +514,6 @@ class NestedUNet3(torch.nn.Module):
             if isinstance(m, (torch.nn.Conv2d, torch.nn.BatchNorm2d)):
                 m.apply(weights_init_kaiming)
 
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
     def forward(
         self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
@@ -755,32 +743,32 @@ class NestedUNet3Psi(torch.nn.Module):
                 up_channels, out_mask_channels, kernel_size=3, padding=1
             )
 
-        self.final_dist = torch.nn.Conv2d(
-            up_channels,
-            out_dist_channels,
-            kernel_size=3,
-            padding=1
+        self.final_dist = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                up_channels,
+                out_dist_channels,
+                kernel_size=1,
+                padding=0
+            ),
+            torch.nn.Sigmoid()
         )
         self.final_edge = torch.nn.Conv2d(
             up_channels,
             out_edge_channels,
-            kernel_size=3,
-            padding=1
+            kernel_size=1,
+            padding=0
         )
         self.final_mask = torch.nn.Conv2d(
             up_channels,
             out_mask_channels,
-            kernel_size=3,
-            padding=1
+            kernel_size=1,
+            padding=0
         )
 
         # Initialise weights
         for m in self.modules():
             if isinstance(m, (torch.nn.Conv2d, torch.nn.BatchNorm2d)):
                 m.apply(weights_init_kaiming)
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
 
     def forward(
         self, x: torch.Tensor
