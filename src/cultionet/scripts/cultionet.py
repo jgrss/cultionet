@@ -767,10 +767,10 @@ def create_datasets(args):
             image_vis=config['image_vis']
         ).image_vis:
             # Set the full path to the images
-            if str(ppaths.image_path).endswith('time_series_vars'):
-                vi_path = ppaths.image_path / region / image_vi
-            else:
-                vi_path = ppaths.image_path / region / 'brdf_ts' / 'ms' / image_vi
+            vi_path = ppaths.image_path / args.feature_pattern.format(
+                region=region,
+                image_vi=image_vi
+            )
 
             if not vi_path.is_dir():
                 logger.warning(f'{str(vi_path)} does not exist')
