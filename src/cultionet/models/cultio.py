@@ -1,7 +1,7 @@
 import typing as T
 
 from . import model_utils
-from .nunet import NestedUNet2, NestedUNet3
+from .nunet import NestedUNet3Psi
 from .convstar import StarRNN
 
 import torch
@@ -62,28 +62,12 @@ class CultioNet(torch.nn.Module):
         base_in_channels = star_rnn_hidden_dim * (star_rnn_n_layers - 1) + num_classes_last
         # base_in_channels = star_rnn_hidden_dim + num_classes_last
         # Distance layers (+5)
-        dist_out_channels = 5
-        self.dist_model = NestedUNet3(
+        self.mask_model = NestedUNet3Psi(
             in_channels=base_in_channels,
-            out_channels=1,
-            init_filter=self.filters,
-            deep_supervision=True
-        )
-        # Edge layer (+2)
-        edge_out_channels = 2
-        self.edge_model = NestedUNet3(
-            in_channels=base_in_channels+dist_out_channels,
-            out_channels=edge_out_channels,
-            init_filter=self.filters,
-            deep_supervision=False
-        )
-        # Crop layer (+2)
-        crop_out_channels = 2
-        self.crop_model = NestedUNet2(
-            in_channels=base_in_channels+dist_out_channels+edge_out_channels,
-            out_channels=crop_out_channels,
-            init_filter=self.filters,
-            deep_supervision=True
+            out_dist_channels=1,
+            out_edge_channels=2,
+            out_mask_channels=2,
+            init_filter=self.filters
         )
 
     def __call__(self, *args, **kwargs):
@@ -119,60 +103,18 @@ class CultioNet(torch.nn.Module):
             ], dim=1
         )
 
-        # (2) Distance stream
-        logits_distance = self.dist_model(
+        # (2) Main stream
+        logits = self.mask_model(
             self.gc(
                 h, batch_size, height, width
             )
         )
-        logits_distance_0 = self.cg(logits_distance['mask_0'])
-        logits_distance_1 = self.cg(logits_distance['mask_1'])
-        logits_distance_2 = self.cg(logits_distance['mask_2'])
-        logits_distance_3 = self.cg(logits_distance['mask_3'])
-        logits_distance_4 = self.cg(logits_distance['mask_4'])
-
-        # CONCAT
-        h = torch.cat(
-            [
-                h,
-                logits_distance_0,
-                logits_distance_1,
-                logits_distance_2,
-                logits_distance_3,
-                logits_distance_4
-            ], dim=1
-        )
-
-        # (3) Edge stream
-        logits_edges = self.edge_model(
-            self.gc(
-                h, batch_size, height, width
-            )
-        )
-        logits_edges = self.cg(logits_edges['mask'])
-
-        # CONCAT
-        h = torch.cat(
-            [
-                h,
-                logits_edges
-            ], dim=1
-        )
-
-        # (4) Crop stream
-        logits_crop = self.crop_model(
-            self.gc(
-                h, batch_size, height, width
-            )
-        )
-        logits_crop = self.cg(logits_crop['mask'])
-
+        logits_distance = self.cg(logits['dist'])
+        logits_edges = self.cg(logits['edge'])
+        logits_crop = self.cg(logits['mask'])
+        import ipdb; ipdb.set_trace()
         out = {
-            'dist_0': logits_distance_0,
-            'dist_1': logits_distance_1,
-            'dist_2': logits_distance_2,
-            'dist_3': logits_distance_3,
-            'dist_4': logits_distance_4,
+            'dist': logits_distance,
             'edge': logits_edges,
             'crop': logits_crop,
             'crop_star': None,

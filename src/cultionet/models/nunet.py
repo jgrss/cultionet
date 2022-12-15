@@ -663,7 +663,9 @@ class NestedUNet3Psi(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        out_channels: int,
+        out_dist_channels: int = 1,
+        out_edge_channels: int = 2,
+        out_mask_channels: int = 2,
         init_filter: int = 64,
         deep_supervision: bool = False
     ):
@@ -721,23 +723,29 @@ class NestedUNet3Psi(torch.nn.Module):
         self.conv4_0_0_4_con = SingleConv(channels[4], channels[0])
         self.conv0_4 = SingleConv(up_channels, up_channels)
 
-        self.final = torch.nn.Conv2d(
-            up_channels, out_channels, kernel_size=3, padding=1
+        self.final_mask = torch.nn.Conv2d(
+            up_channels, out_mask_channels, kernel_size=3, padding=1
+        )
+        self.final_edge = torch.nn.Conv2d(
+            up_channels, out_edge_channels, kernel_size=3, padding=1
+        )
+        self.final_dist = torch.nn.Conv2d(
+            up_channels, out_dist_channels, kernel_size=3, padding=1
         )
 
-        if self.deep_supervision:
-            self.final_1 = torch.nn.Conv2d(
-                up_channels, out_channels, kernel_size=3, padding=1
-            )
-            self.final_2 = torch.nn.Conv2d(
-                up_channels, out_channels, kernel_size=3, padding=1
-            )
-            self.final_3 = torch.nn.Conv2d(
-                up_channels, out_channels, kernel_size=3, padding=1
-            )
-            self.final_4 = torch.nn.Conv2d(
-                channels[4], out_channels, kernel_size=3, padding=1
-            )
+        # if self.deep_supervision:
+        #     self.final_1 = torch.nn.Conv2d(
+        #         up_channels, out_channels, kernel_size=3, padding=1
+        #     )
+        #     self.final_2 = torch.nn.Conv2d(
+        #         up_channels, out_channels, kernel_size=3, padding=1
+        #     )
+        #     self.final_3 = torch.nn.Conv2d(
+        #         up_channels, out_channels, kernel_size=3, padding=1
+        #     )
+        #     self.final_4 = torch.nn.Conv2d(
+        #         channels[4], out_channels, kernel_size=3, padding=1
+        #     )
 
         # Initialise weights
         for m in self.modules():
@@ -946,9 +954,9 @@ class NestedUNet3Psi(torch.nn.Module):
             )
         )
 
-        mask = self.final(x0_4_mask)
-        edge = self.final(x0_4_edge)
-        dist = self.final(x0_4_dist)
+        mask = self.final_mask(x0_4_mask)
+        edge = self.final_edge(x0_4_edge)
+        dist = self.final_dist(x0_4_dist)
 
         # if self.deep_supervision:
         #     mask_1 = self.final_1(self.up(x1_3, size=x0_0.shape[-2:]))
