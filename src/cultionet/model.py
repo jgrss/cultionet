@@ -637,7 +637,7 @@ class LightningGTiffWriter(BasePredictionWriter):
     def write_on_batch_end(
         self, trainer, pl_module, prediction, batch_indices, batch, batch_idx, dataloader_idx
     ):
-        distance = prediction['dist_0']
+        distance = prediction['dist']
         edge = prediction['edge']
         crop = prediction['crop']
         crop_type = prediction['crop_type']

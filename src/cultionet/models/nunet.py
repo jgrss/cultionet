@@ -669,7 +669,7 @@ class NestedUNet3Psi(torch.nn.Module):
         init_filter: int = 64,
         deep_supervision: bool = False
     ):
-        super(NestedUNet3, self).__init__()
+        super(NestedUNet3Psi, self).__init__()
 
         self.deep_supervision = deep_supervision
 
@@ -723,29 +723,56 @@ class NestedUNet3Psi(torch.nn.Module):
         self.conv4_0_0_4_con = SingleConv(channels[4], channels[0])
         self.conv0_4 = SingleConv(up_channels, up_channels)
 
-        self.final_mask = torch.nn.Conv2d(
-            up_channels, out_mask_channels, kernel_size=3, padding=1
+        if self.deep_supervision:
+            # Distance
+            self.final_dist_1 = torch.nn.Conv2d(
+                up_channels, out_dist_channels, kernel_size=3, padding=1
+            )
+            self.final_dist_2 = torch.nn.Conv2d(
+                up_channels, out_dist_channels, kernel_size=3, padding=1
+            )
+            self.final_dist_3 = torch.nn.Conv2d(
+                up_channels, out_dist_channels, kernel_size=3, padding=1
+            )
+            # Edge
+            self.final_edge_1 = torch.nn.Conv2d(
+                up_channels, out_edge_channels, kernel_size=3, padding=1
+            )
+            self.final_edge_2 = torch.nn.Conv2d(
+                up_channels, out_edge_channels, kernel_size=3, padding=1
+            )
+            self.final_edge_3 = torch.nn.Conv2d(
+                up_channels, out_edge_channels, kernel_size=3, padding=1
+            )
+            # Mask
+            self.final_mask_1 = torch.nn.Conv2d(
+                up_channels, out_mask_channels, kernel_size=3, padding=1
+            )
+            self.final_mask_2 = torch.nn.Conv2d(
+                up_channels, out_mask_channels, kernel_size=3, padding=1
+            )
+            self.final_mask_3 = torch.nn.Conv2d(
+                up_channels, out_mask_channels, kernel_size=3, padding=1
+            )
+
+        self.final_dist = torch.nn.Conv2d(
+            up_channels,
+            out_dist_channels,
+            kernel_size=3,
+            padding=1
         )
         self.final_edge = torch.nn.Conv2d(
-            up_channels, out_edge_channels, kernel_size=3, padding=1
+            up_channels,
+            out_edge_channels,
+            kernel_size=3,
+            padding=1
         )
-        self.final_dist = torch.nn.Conv2d(
-            up_channels, out_dist_channels, kernel_size=3, padding=1
+        self.final_mask = torch.nn.Conv2d(
+            up_channels,
+            out_mask_channels,
+            kernel_size=3,
+            padding=1
         )
-
-        # if self.deep_supervision:
-        #     self.final_1 = torch.nn.Conv2d(
-        #         up_channels, out_channels, kernel_size=3, padding=1
-        #     )
-        #     self.final_2 = torch.nn.Conv2d(
-        #         up_channels, out_channels, kernel_size=3, padding=1
-        #     )
-        #     self.final_3 = torch.nn.Conv2d(
-        #         up_channels, out_channels, kernel_size=3, padding=1
-        #     )
-        #     self.final_4 = torch.nn.Conv2d(
-        #         channels[4], out_channels, kernel_size=3, padding=1
-        #     )
 
         # Initialise weights
         for m in self.modules():
@@ -954,28 +981,38 @@ class NestedUNet3Psi(torch.nn.Module):
             )
         )
 
-        mask = self.final_mask(x0_4_mask)
-        edge = self.final_edge(x0_4_edge)
         dist = self.final_dist(x0_4_dist)
+        edge = self.final_edge(x0_4_edge)
+        mask = self.final_mask(x0_4_mask)
 
-        # if self.deep_supervision:
-        #     mask_1 = self.final_1(self.up(x1_3, size=x0_0.shape[-2:]))
-        #     mask_2 = self.final_2(self.up(x2_2, size=x0_0.shape[-2:]))
-        #     mask_3 = self.final_3(self.up(x3_1, size=x0_0.shape[-2:]))
-        #     mask_4 = self.final_4(self.up(x4_0, size=x0_0.shape[-2:]))
-
-        #     out = {
-        #         'mask_0': mask,
-        #         'mask_1': mask_1,
-        #         'mask_2': mask_2,
-        #         'mask_3': mask_3,
-        #         'mask_4': mask_4
-        #     }
-        # else:
         out = {
             'mask': mask,
             'edge': edge,
             'dist': dist
         }
+
+        if self.deep_supervision:
+            # Distance
+            dist_1 = self.final_dist_1(self.up(x1_3_dist, size=x0_0.shape[-2:]))
+            dist_2 = self.final_dist_2(self.up(x2_2_dist, size=x0_0.shape[-2:]))
+            dist_3 = self.final_dist_3(self.up(x3_1_dist, size=x0_0.shape[-2:]))
+            # Edge
+            edge_1 = self.final_edge_1(self.up(x1_3_edge, size=x0_0.shape[-2:]))
+            edge_2 = self.final_edge_2(self.up(x2_2_edge, size=x0_0.shape[-2:]))
+            edge_3 = self.final_edge_3(self.up(x3_1_edge, size=x0_0.shape[-2:]))
+            # Mask
+            mask_1 = self.final_mask_1(self.up(x1_3_mask, size=x0_0.shape[-2:]))
+            mask_2 = self.final_mask_2(self.up(x2_2_mask, size=x0_0.shape[-2:]))
+            mask_3 = self.final_mask_3(self.up(x3_1_mask, size=x0_0.shape[-2:]))
+
+            out['dist_1'] = dist_1
+            out['dist_2'] = dist_2
+            out['dist_3'] = dist_3
+            out['edge_1'] = edge_1
+            out['edge_2'] = edge_2
+            out['edge_3'] = edge_3
+            out['mask_1'] = mask_1
+            out['mask_2'] = mask_2
+            out['mask_3'] = mask_3
 
         return out

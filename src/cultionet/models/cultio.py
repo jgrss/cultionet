@@ -61,7 +61,6 @@ class CultioNet(torch.nn.Module):
         # Last = crop-type (2..N)
         base_in_channels = star_rnn_hidden_dim * (star_rnn_n_layers - 1) + num_classes_last
         # base_in_channels = star_rnn_hidden_dim + num_classes_last
-        # Distance layers (+5)
         self.mask_model = NestedUNet3Psi(
             in_channels=base_in_channels,
             out_dist_channels=1,
@@ -103,7 +102,7 @@ class CultioNet(torch.nn.Module):
             ], dim=1
         )
 
-        # (2) Main stream
+        # Main stream
         logits = self.mask_model(
             self.gc(
                 h, batch_size, height, width
@@ -112,7 +111,7 @@ class CultioNet(torch.nn.Module):
         logits_distance = self.cg(logits['dist'])
         logits_edges = self.cg(logits['edge'])
         logits_crop = self.cg(logits['mask'])
-        import ipdb; ipdb.set_trace()
+
         out = {
             'dist': logits_distance,
             'edge': logits_edges,

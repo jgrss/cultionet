@@ -280,7 +280,7 @@ train_predict:
     long: filters
     help: The number of model input filters
     kwargs:
-      default: 32
+      default: 64
       type: '&int'
   device:
     short: ''

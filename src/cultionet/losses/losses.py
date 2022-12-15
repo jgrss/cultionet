@@ -274,8 +274,10 @@ class BoundaryLoss(torch.nn.Module):
         """Performs a single forward pass
 
         Args:
-            inputs: Predictions from model.
-            targets: Ground truth values.
+            inputs: Predicted probabilities.
+            targets: Ground truth inverse distance transform, where distances
+                along edges are 1.
+            data: Data object used to extract dimensions.
 
         Returns:
             Loss (float)

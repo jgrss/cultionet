@@ -564,24 +564,10 @@ class CultioLitModel(pl.LightningModule):
         batch: T.Union[Data, T.List],
         predictions: T.Dict[str, torch.Tensor]
     ):
-        """Calculates the loss for each layer
+        """Calculates the loss
 
         Returns:
             Average loss
-
-        Reference:
-            @article{waldner2020deep,
-                title={
-                    Deep learning on edge: Extracting field boundaries from
-                    satellite images with a convolutional neural network
-                },
-                author={Waldner, Fran{\c{c}}ois and Diakogiannis, Foivos I},
-                journal={Remote Sensing of Environment},
-                volume={245},
-                pages={111741},
-                year={2020},
-                publisher={Elsevier}
-            }
         """
         true_edge = (batch.y == self.edge_class).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.
@@ -589,39 +575,21 @@ class CultioLitModel(pl.LightningModule):
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
 
-        dist_loss_0 = self.dist_loss(
-            predictions['dist_0'], batch.bdist
-        )
-        dist_loss_1 = self.dist_loss(
-            predictions['dist_1'], batch.bdist
-        )
-        dist_loss_2 = self.dist_loss(
-            predictions['dist_2'], batch.bdist
-        )
-        dist_loss_3 = self.dist_loss(
-            predictions['dist_3'], batch.bdist
-        )
-        dist_loss_4 = self.dist_loss(
-            predictions['dist_4'], batch.bdist
-        )
+        dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
+        crop_loss = self.crop_loss(predictions['crop'], true_crop)
         boundary_mask = torch.where(
             (true_crop == 1) | (true_edge == 1), 1.0 - batch.bdist, 0
         )
         boundary_loss = self.boundary_loss(
             self.softmax(predictions['edge'])[:, 1], boundary_mask, batch
         )
-        crop_loss = self.crop_loss(predictions['crop'], true_crop)
 
         loss = (
-            dist_loss_0
-            + dist_loss_1 * 0.75
-            + dist_loss_2 * 0.5
-            + dist_loss_3 * 0.25
-            + dist_loss_4 * 0.1
+            dist_loss
             + edge_loss
-            + boundary_loss
             + crop_loss
+            + boundary_loss
         )
         if predictions['crop_type'] is not None:
             true_crop_type = torch.where(
@@ -657,11 +625,11 @@ class CultioLitModel(pl.LightningModule):
         )
 
         dist_mae = self.dist_mae(
-            predictions['dist_0'].contiguous().view(-1),
+            predictions['dist'].contiguous().view(-1),
             batch.bdist.contiguous().view(-1)
         )
         dist_mse = self.dist_mse(
-            predictions['dist_0'].contiguous().view(-1),
+            predictions['dist'].contiguous().view(-1),
             batch.bdist.contiguous().view(-1)
         )
         # Get the class probabilities
