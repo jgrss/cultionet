@@ -401,8 +401,8 @@ class TemperatureScaling(pl.LightningModule):
         optimizer = torch.optim.LBFGS(
             [self.edge_temperature, self.crop_temperature],
             lr=self.learning_rate,
-            max_iter=10_000,
-            line_search_fn='strong_wolfe'
+            max_iter=100,
+            line_search_fn=None
         )
 
         return {
