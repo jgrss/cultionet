@@ -59,8 +59,8 @@ class CultioNet(torch.nn.Module):
         # Local 1 = hidden dimensions
         # Local 2 = crop (0|1)
         # Last = crop-type (2..N)
-        base_in_channels = star_rnn_hidden_dim * (star_rnn_n_layers - 1) + num_classes_last
-        # base_in_channels = star_rnn_hidden_dim + num_classes_last
+        # base_in_channels = star_rnn_hidden_dim * (star_rnn_n_layers - 1) + num_classes_last
+        base_in_channels = star_rnn_hidden_dim + num_classes_last
         self.mask_model = NestedUNet3Psi(
             in_channels=base_in_channels,
             out_dist_channels=1,
@@ -68,9 +68,6 @@ class CultioNet(torch.nn.Module):
             out_mask_channels=2,
             init_filter=self.filters
         )
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
 
     def forward(
         self, data: Data
