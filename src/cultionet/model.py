@@ -450,6 +450,8 @@ def fit(
             model=CultioLitModel.load_from_checkpoint(
                 checkpoint_path=str(ckpt_file)
             ),
+            learning_rate=0.1,
+            max_iter=20,
             class_weights=class_weights,
             edge_class=edge_class
         )

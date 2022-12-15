@@ -319,7 +319,8 @@ class TemperatureScaling(pl.LightningModule):
     def __init__(
         self,
         model: CultioNet = None,
-        learning_rate: float = 1e-3,
+        learning_rate: float = 0.01,
+        max_iter: float = 20,
         class_weights: T.Sequence[float] = None,
         edge_class: T.Optional[int] = None
     ):
@@ -330,6 +331,7 @@ class TemperatureScaling(pl.LightningModule):
 
         self.model = model
         self.learning_rate = learning_rate
+        self.max_iter = max_iter
         self.class_weights = class_weights
         self.edge_class = edge_class
 
@@ -401,7 +403,7 @@ class TemperatureScaling(pl.LightningModule):
         optimizer = torch.optim.LBFGS(
             [self.edge_temperature, self.crop_temperature],
             lr=self.learning_rate,
-            max_iter=100,
+            max_iter=self.max_iter,
             line_search_fn=None
         )
 
