@@ -401,14 +401,28 @@ class TemperatureScaling(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.LBFGS(
-            [self.edge_temperature, self.crop_temperature],
+            [
+                self.edge_temperature,
+                self.crop_temperature
+            ],
             lr=self.learning_rate,
             max_iter=self.max_iter,
             line_search_fn=None
         )
+        lr_scheduler = ReduceLROnPlateau(
+            optimizer,
+            factor=0.1,
+            patience=5
+        )
 
         return {
-            'optimizer': optimizer
+            'optimizer': optimizer,
+            'lr_scheduler': {
+                'scheduler': lr_scheduler,
+                'monitor': 'loss',
+                'interval': 'epoch',
+                'frequency': 1
+            },
         }
 
 
@@ -493,7 +507,6 @@ class CultioLitModel(pl.LightningModule):
         """A prediction step for Lightning
         """
         predictions = self.forward(batch, batch_idx)
-        import ipdb; ipdb.set_trace()
         if self.edge_temperature is not None:
             predictions['edge'] = scale_logits(
                 predictions['edge'],

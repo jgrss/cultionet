@@ -731,21 +731,20 @@ def predict_lightning(
         log_every_n_steps=0,
         logger=False
     )
-    lit_kwargs = dict(
-        num_features=dataset.num_features,
-        num_time_features=dataset.num_time_features,
-        filters=filters,
-        num_classes=num_classes,
-        edge_class=edge_class,
-        edge_temperature=edge_temperature,
-        crop_temperature=crop_temperature
-    )
+    # lit_kwargs = dict(
+    #     num_features=dataset.num_features,
+    #     num_time_features=dataset.num_time_features,
+    #     filters=filters,
+    #     num_classes=num_classes,
+    #     edge_class=edge_class,
+    #     edge_temperature=edge_temperature,
+    #     crop_temperature=crop_temperature
+    # )
 
     trainer = pl.Trainer(**trainer_kwargs)
-    lit_model = (
-        CultioLitModel(**lit_kwargs)
-        .load_from_checkpoint(checkpoint_path=str(ckpt_file))
-    )
+    lit_model = CultioLitModel.load_from_checkpoint(checkpoint_path=str(ckpt_file))
+    setattr(lit_model, 'edge_temperature', edge_temperature)
+    setattr(lit_model, 'crop_temperature', crop_temperature)
 
     # Make predictions
     trainer.predict(
