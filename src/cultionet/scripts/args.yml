@@ -126,6 +126,12 @@ create:
     kwargs:
       default: y
       choices: ['y', 'n']
+  feature_pattern:
+    short: ''
+    long: feature-pattern
+    help: The feature path pattern
+    kwargs:
+      default: '{region}/brdf_ts/ms/{image_vi}'
   instance_seg:
     short: ''
     long: instance-seg
