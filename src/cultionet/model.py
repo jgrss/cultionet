@@ -9,7 +9,7 @@ import numpy as np
 from .data.const import SCALE_FACTOR
 from .data.datasets import EdgeDataset, zscores
 from .data.modules import EdgeDataModule
-from .models.lightning import CultioLitModel, MaskRCNNLitModel
+from .models.lightning import CultioLitModel, MaskRCNNLitModel, TemperatureScaling
 from .utils.reshape import ModelOutputs
 from .utils.logging import set_color_logger
 
@@ -301,6 +301,12 @@ def fit(
         num_workers=0,
         shuffle=True
     )
+    temperature_data_module = EdgeDataModule(
+        train_ds=val_ds,
+        batch_size=batch_size,
+        num_workers=0,
+        shuffle=True
+    )
 
     # Setup the Lightning model
     lit_model = CultioLitModel(
@@ -384,6 +390,52 @@ def fit(
         deterministic=False,
         benchmark=False
     )
+    temperature_ckpt_file = ckpt_file.parent / 'temperature' / ckpt_file.name
+    temperature_ckpt_file.parent.mkdir(parents=True, exist_ok=True)
+    # Temperature checkpoints
+    temperature_cb_train_loss = ModelCheckpoint(
+        dirpath=temperature_ckpt_file.parent,
+        filename=temperature_ckpt_file.stem,
+        save_last=True,
+        save_top_k=save_top_k,
+        mode='min',
+        monitor='loss',
+        every_n_train_steps=0,
+        every_n_epochs=1
+    )
+    # Early stopping
+    temperature_early_stop_callback = EarlyStopping(
+        monitor='loss',
+        min_delta=early_stopping_min_delta,
+        patience=5,
+        mode='min',
+        check_on_train_epoch_end=False
+    )
+    temperature_callbacks = [
+        lr_monitor,
+        temperature_cb_train_loss,
+        temperature_early_stop_callback
+    ]
+    temperature_trainer = pl.Trainer(
+        default_root_dir=str(temperature_ckpt_file.parent),
+        callbacks=temperature_callbacks,
+        enable_checkpointing=True,
+        auto_lr_find=auto_lr_find,
+        auto_scale_batch_size=False,
+        gradient_clip_val=gradient_clip_val,
+        gradient_clip_algorithm='value',
+        check_val_every_n_epoch=1,
+        min_epochs=5 if epochs >= 5 else epochs,
+        max_epochs=epochs,
+        precision=32,
+        devices=1 if device == 'gpu' else None,
+        num_processes=0,
+        accelerator=device,
+        log_every_n_steps=10,
+        profiler=profiler,
+        deterministic=False,
+        benchmark=False
+    )
 
     if auto_lr_find:
         trainer.tune(model=lit_model, datamodule=data_module)
@@ -392,6 +444,19 @@ def fit(
             model=lit_model,
             datamodule=data_module,
             ckpt_path=ckpt_file if ckpt_file.is_file() else None
+        )
+        # Calibrate the logits
+        temperature_model = TemperatureScaling(
+            model=CultioLitModel.load_from_checkpoint(
+                checkpoint_path=str(ckpt_file)
+            ),
+            class_weights=class_weights,
+            edge_class=edge_class
+        )
+        temperature_trainer.fit(
+            model=temperature_model,
+            datamodule=temperature_data_module,
+            ckpt_path=temperature_ckpt_file if temperature_ckpt_file.is_file() else None
         )
         if test_dataset is not None:
             trainer.test(
@@ -630,7 +695,9 @@ def predict_lightning(
     edge_class: int,
     resampling: str,
     ref_res: float,
-    compression: str
+    compression: str,
+    edge_temperature: T.Optional[torch.Tensor] = None,
+    crop_temperature: T.Optional[torch.Tensor] = None
 ):
     reference_image = Path(reference_image)
     out_path = Path(out_path)
@@ -667,7 +734,9 @@ def predict_lightning(
         num_time_features=dataset.num_time_features,
         filters=filters,
         num_classes=num_classes,
-        edge_class=edge_class
+        edge_class=edge_class,
+        edge_temperature=edge_temperature,
+        crop_temperature=crop_temperature
     )
 
     trainer = pl.Trainer(**trainer_kwargs)

@@ -1,5 +1,6 @@
 import typing as T
 from pathlib import Path
+import json
 
 from ..losses import (
     CrossEntropyLoss,
@@ -310,6 +311,105 @@ class MaskRCNNLitModel(pl.LightningModule):
         }
 
 
+def scale_logits(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    return x / t
+
+
+class TemperatureScaling(pl.LightningModule):
+    def __init__(
+        self,
+        model: CultioNet = None,
+        learning_rate: float = 1e-3,
+        class_weights: T.Sequence[float] = None,
+        edge_class: T.Optional[int] = None
+    ):
+        super(TemperatureScaling, self).__init__()
+
+        self.edge_temperature = torch.nn.Parameter(torch.ones(1))
+        self.crop_temperature = torch.nn.Parameter(torch.ones(1))
+
+        self.model = model
+        self.learning_rate = learning_rate
+        self.class_weights = class_weights
+        self.edge_class = edge_class
+
+        self.model.eval()
+        self.model.freeze()
+        self.configure_loss()
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        return scale_logits(x, t)
+
+    def calc_loss(
+        self,
+        batch: T.Union[Data, T.List],
+        predictions: torch.Tensor
+    ):
+        edge = self(predictions['edge'], self.edge_temperature)
+        crop = self(predictions['crop'], self.crop_temperature)
+
+        true_edge = (batch.y == self.edge_class).long()
+        # in case of multi-class, `true_crop` = 1, 2, etc.
+        true_crop = torch.where(
+            (batch.y > 0) & (batch.y != self.edge_class), 1, 0
+        ).long()
+
+        edge_loss = self.edge_loss(edge, true_edge)
+        crop_loss = self.crop_loss(crop, true_crop)
+
+        loss = edge_loss + crop_loss
+
+        return loss
+
+    def training_step(self, batch: Data, batch_idx: int = None):
+        """Executes one training step
+        """
+        with torch.no_grad():
+            predictions = self.model(batch)
+
+        loss = self.calc_loss(
+            batch,
+            predictions
+        )
+        metrics = {
+            'loss': loss,
+            'edge_t': self.edge_temperature,
+            'crop_t': self.crop_temperature
+        }
+        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
+
+        return metrics
+
+    def on_train_epoch_end(self, *args, **kwargs):
+        """Save the scaling parameters on training end
+        """
+        if self.logger.save_dir is not None:
+            scale_file = Path(self.logger.save_dir) / 'temperature.scales'
+
+            temperature_scales = {
+                'edge': self.edge_temperature.item(),
+                'crop': self.crop_temperature.item()
+            }
+            with open(scale_file, mode='w') as f:
+                f.write(json.dumps(temperature_scales))
+
+    def configure_loss(self):
+        self.edge_loss = TanimotoDistLoss()
+        self.crop_loss = FocalLoss(weight=self.class_weights)
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.LBFGS(
+            [self.edge_temperature, self.crop_temperature],
+            lr=self.learning_rate,
+            max_iter=10_000,
+            line_search_fn='strong_wolfe'
+        )
+
+        return {
+            'optimizer': optimizer
+        }
+
+
 class CultioLitModel(pl.LightningModule):
     def __init__(
         self,
@@ -325,11 +425,14 @@ class CultioLitModel(pl.LightningModule):
         model_name: str = 'cultionet',
         class_weights: T.Sequence[float] = None,
         edge_weights: T.Sequence[float] = None,
-        edge_class: T.Optional[int] = None
+        edge_class: T.Optional[int] = None,
+        edge_temperature: T.Optional[float] = None,
+        crop_temperature: T.Optional[float] = None
     ):
         """Lightning model
         """
         super(CultioLitModel, self).__init__()
+
         self.save_hyperparameters()
 
         self.learning_rate = learning_rate
@@ -340,6 +443,8 @@ class CultioLitModel(pl.LightningModule):
         self.num_time_features = num_time_features
         self.class_weights = class_weights
         self.edge_weights = edge_weights
+        self.edge_temperature = edge_temperature
+        self.crop_temperature = crop_temperature
         if edge_class is not None:
             self.edge_class = edge_class
         else:
@@ -386,6 +491,17 @@ class CultioLitModel(pl.LightningModule):
         """A prediction step for Lightning
         """
         predictions = self.forward(batch, batch_idx)
+        import ipdb; ipdb.set_trace()
+        if self.edge_temperature is not None:
+            predictions['edge'] = scale_logits(
+                predictions['edge'],
+                self.edge_temperature
+            )
+        if self.crop_temperature is not None:
+            predictions['crop'] = scale_logits(
+                predictions['crop'],
+                self.crop_temperature
+            )
         edge, crop, crop_type = self.predict_probas(
             predictions['edge'],
             predictions['crop'],

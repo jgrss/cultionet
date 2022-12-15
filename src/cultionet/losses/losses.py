@@ -97,6 +97,8 @@ class CrossEntropyLoss(torch.nn.Module):
         reduction: T.Optional[str] = 'mean',
         label_smoothing: T.Optional[float] = 0.1
     ):
+        super(CrossEntropyLoss, self).__init__()
+        
         self.loss_func = torch.nn.CrossEntropyLoss(
             weight=weight,
             reduction=reduction,
