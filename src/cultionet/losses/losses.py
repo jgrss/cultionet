@@ -1,7 +1,10 @@
 import typing as T
 
+from ..models import model_utils
+
 import torch
 import torch.nn.functional as F
+from torch_geometric.data import Data
 
 
 class LossPreprocessing(torch.nn.Module):
@@ -98,7 +101,7 @@ class CrossEntropyLoss(torch.nn.Module):
         label_smoothing: T.Optional[float] = 0.1
     ):
         super(CrossEntropyLoss, self).__init__()
-        
+
         self.loss_func = torch.nn.CrossEntropyLoss(
             weight=weight,
             reduction=reduction,
@@ -252,3 +255,40 @@ class MSELoss(torch.nn.Module):
             inputs.contiguous().view(-1),
             targets.contiguous().view(-1)
         )
+
+
+class BoundaryLoss(torch.nn.Module):
+    """Boundary (surface) loss
+
+    Reference:
+        https://github.com/LIVIAETS/boundary-loss
+    """
+    def __init__(self):
+        super(BoundaryLoss, self).__init__()
+
+        self.gc = model_utils.GraphToConv()
+
+    def forward(
+        self, inputs: torch.Tensor, targets: torch.Tensor, data: Data
+    ) -> torch.Tensor:
+        """Performs a single forward pass
+
+        Args:
+            inputs: Predictions from model.
+            targets: Ground truth values.
+
+        Returns:
+            Loss (float)
+        """
+        height = int(data.height) if data.batch is None else int(data.height[0])
+        width = int(data.width) if data.batch is None else int(data.width[0])
+        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
+
+        inputs = self.gc(
+            inputs.unsqueeze(1), batch_size, height, width
+        )
+        targets = self.gc(
+            targets.unsqueeze(1), batch_size, height, width
+        )
+
+        return torch.einsum('bchw, bchw -> bchw', inputs, targets).mean()
