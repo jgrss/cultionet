@@ -1,7 +1,7 @@
 import typing as T
 
 from . import model_utils
-from .nunet import NestedUNet3Psi
+from .nunet import ResUNet3PsiAttention
 from .convstar import StarRNN
 
 import torch
@@ -61,7 +61,7 @@ class CultioNet(torch.nn.Module):
         # Last = crop-type (2..N)
         base_in_channels = star_rnn_hidden_dim * (star_rnn_n_layers - 1) + num_classes_last
         # base_in_channels = star_rnn_hidden_dim + num_classes_last
-        self.mask_model = NestedUNet3Psi(
+        self.mask_model = ResUNet3PsiAttention(
             in_channels=base_in_channels,
             out_dist_channels=1,
             out_edge_channels=2,

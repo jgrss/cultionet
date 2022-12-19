@@ -41,7 +41,7 @@ class MaskRCNNLitModel(pl.LightningModule):
         cultionet_num_classes: int,
         ckpt_name: str = 'maskrcnn',
         model_name: str = 'maskrcnn',
-        learning_rate: float = 0.001,
+        learning_rate: float = 1e-3,
         weight_decay: float = 1e-5,
         resize_height: int = 201,
         resize_width: int = 201,
@@ -578,15 +578,15 @@ class CultioLitModel(pl.LightningModule):
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
-        # boundary_mask = torch.where(
-        #     (true_crop == 1) | (true_edge == 1), 1.0 - batch.bdist, 0
-        # )
-        # boundary_loss = self.boundary_loss(
-        #     self.softmax(predictions['edge'])[:, 1], boundary_mask, batch
-        # )
-
+        boundary_mask = torch.where(
+            (true_crop == 1) | (true_edge == 1), 1.0 - batch.bdist, 0
+        )
+        boundary_loss = self.boundary_loss(
+            self.softmax(predictions['edge'])[:, 1], boundary_mask, batch
+        )
         loss = (
-            dist_loss
+            boundary_loss * 0.5
+            + dist_loss
             + edge_loss
             + crop_loss
         )
@@ -749,9 +749,7 @@ class CultioLitModel(pl.LightningModule):
     def configure_loss(self):
         self.dist_loss = MSELoss()
         self.edge_loss = TanimotoDistLoss()
-        # self.boundary_loss = BoundaryLoss()
-        # self.crop_loss = FocalLoss(weight=self.class_weights)
-        # self.crop_rnn_loss = FocalLoss(weight=self.class_weights)
+        self.boundary_loss = BoundaryLoss()
         self.crop_loss = TanimotoDistLoss()
         self.crop_rnn_loss = TanimotoDistLoss()
         if self.num_classes > 2:

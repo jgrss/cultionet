@@ -187,9 +187,6 @@ class StarRNN(torch.nn.Module):
         for iter_ in range(0, time_size):
             hidden_s = self.rnn(x[:, :, iter_, :, :], hidden_s)
 
-        # local = self.final(hidden_s[0])
-        # for l in range(1, len(hidden_s)-1):
-        #     local += self.final(hidden_s[l])
         local = torch.cat(
             [
                 self.final(layer) for layer in hidden_s[:-1]

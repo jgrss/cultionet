@@ -5,6 +5,7 @@ from ..models import model_utils
 import torch
 import torch.nn.functional as F
 from torch_geometric.data import Data
+import torchmetrics
 
 
 class LossPreprocessing(torch.nn.Module):
@@ -294,3 +295,48 @@ class BoundaryLoss(torch.nn.Module):
         )
 
         return torch.einsum('bchw, bchw -> bchw', inputs, targets).mean()
+
+
+class MultiScaleSSIMLoss(torch.nn.Module):
+    """Multi-scale Structural Similarity Index Measure loss
+    """
+    def __init__(self):
+        super(MultiScaleSSIMLoss, self).__init__()
+
+        self.gc = model_utils.GraphToConv()
+        self.msssim = torchmetrics.MultiScaleStructuralSimilarityIndexMeasure(
+            gaussian_kernel=False,
+            kernel_size=3,
+            data_range=1.0,
+            k1=1e-4,
+            k2=9e-4
+        )
+
+    def forward(
+        self, inputs: torch.Tensor, targets: torch.Tensor, data: Data
+    ) -> torch.Tensor:
+        """Performs a single forward pass
+
+        Args:
+            inputs: Predicted probabilities.
+            targets: Ground truth inverse distance transform, where distances
+                along edges are 1.
+            data: Data object used to extract dimensions.
+
+        Returns:
+            Loss (float)
+        """
+        height = int(data.height) if data.batch is None else int(data.height[0])
+        width = int(data.width) if data.batch is None else int(data.width[0])
+        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
+
+        inputs = self.gc(
+            inputs.unsqueeze(1), batch_size, height, width
+        )
+        targets = self.gc(
+            targets.unsqueeze(1), batch_size, height, width
+        ).to(dtype=inputs.dtype)
+
+        loss = 1.0 - self.msssim(inputs, targets)
+
+        return loss

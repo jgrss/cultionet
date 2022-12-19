@@ -2,7 +2,7 @@ from .losses import (
     BoundaryLoss,
     CrossEntropyLoss,
     FocalLoss,
-    WeightedL1Loss,
+    MultiScaleSSIMLoss,
     MSELoss,
     TanimotoDistLoss
 )
