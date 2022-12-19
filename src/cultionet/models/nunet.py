@@ -61,9 +61,8 @@ class AttentionGate(torch.nn.Module):
         conv_x = torch.nn.Conv2d(
             high_channels,
             high_channels,
-            kernel_size=3,
-            padding=1,
-            stride=2
+            kernel_size=1,
+            padding=0
         )
         conv_g = torch.nn.Conv2d(
             low_channels,
@@ -98,8 +97,8 @@ class AttentionGate(torch.nn.Module):
     def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            g: Higher dimension
-            x: Lower dimension
+            x: Higher dimension
+            g: Lower dimension
         """
         h = self.seq(x, g)
         if h.shape[-2:] != x.shape[-2:]:
@@ -996,55 +995,57 @@ class ResUNet3PsiAttention(torch.nn.Module):
         self.conv3_0 = PoolResidualConv(channels[2], channels[3], dropout=0.5)
         self.conv4_0 = PoolResidualConv(channels[3], channels[4], dropout=0.5)
 
-        self.attention_init_3_1 = AttentionGate(
-            high_channels=channels[0],
-            low_channels=channels[0]
+        self.attention_3_1 = nn.Sequential(
+            'x, g',
+            [
+                (SingleConv(up_channels, up_channels), 'x -> x'),
+                (
+                    AttentionGate(
+                        high_channels=up_channels,
+                        low_channels=channels[0]
+                    ),
+                    'x, g -> x'
+                )
+            ]
         )
-        self.attention_init_2_2 = AttentionGate(
-            high_channels=channels[0],
-            low_channels=channels[0]
+        self.attention_2_2 = nn.Sequential(
+            'x, g',
+            [
+                (SingleConv(up_channels, up_channels), 'x -> x'),
+                (
+                    AttentionGate(
+                        high_channels=up_channels,
+                        low_channels=channels[0]
+                    ),
+                    'x, g -> x'
+                )
+            ]
         )
-        self.attention_init_1_3 = AttentionGate(
-            high_channels=channels[0],
-            low_channels=channels[0]
+        self.attention_1_3 = nn.Sequential(
+            'x, g',
+            [
+                (SingleConv(up_channels, up_channels), 'x -> x'),
+                (
+                    AttentionGate(
+                        high_channels=up_channels,
+                        low_channels=channels[0]
+                    ),
+                    'x, g -> x'
+                )
+            ]
         )
-        self.attention_init_0_4 = AttentionGate(
-            high_channels=channels[0],
-            low_channels=channels[0]
-        )
-        # Distance
-        self.attention_dist_3_1 = AttentionGate(
-            high_channels=up_channels,
-            low_channels=channels[0]
-        )
-        self.attention_dist_2_2 = AttentionGate(
-            high_channels=up_channels,
-            low_channels=channels[0]
-        )
-        self.attention_dist_1_3 = AttentionGate(
-            high_channels=up_channels,
-            low_channels=channels[0]
-        )
-        self.attention_dist_0_4 = AttentionGate(
-            high_channels=up_channels,
-            low_channels=channels[0]
-        )
-        # Edge
-        self.attention_edge_3_1 = AttentionGate(
-            high_channels=up_channels,
-            low_channels=channels[0]
-        )
-        self.attention_edge_2_2 = AttentionGate(
-            high_channels=up_channels,
-            low_channels=channels[0]
-        )
-        self.attention_edge_1_3 = AttentionGate(
-            high_channels=up_channels,
-            low_channels=channels[0]
-        )
-        self.attention_edge_0_4 = AttentionGate(
-            high_channels=up_channels,
-            low_channels=channels[0]
+        self.attention_0_4 = nn.Sequential(
+            'x, g',
+            [
+                (SingleConv(up_channels, up_channels), 'x -> x'),
+                (
+                    AttentionGate(
+                        high_channels=up_channels,
+                        low_channels=channels[0]
+                    ),
+                    'x, g -> x'
+                )
+            ]
         )
 
         # Connect 3
@@ -1054,6 +1055,7 @@ class ResUNet3PsiAttention(torch.nn.Module):
         self.conv3_0_3_1_con = SingleConv(channels[3], channels[0])
         self.conv4_0_3_1_con = SingleConv(channels[4], channels[0])
         self.conv3_1 = SingleConv(up_channels, up_channels)
+        self.conv3_1_skip_attn = SingleConv(up_channels*2+channels[0], up_channels)
         self.conv3_1_skip = SingleConv(up_channels*2, up_channels)
 
         # Connect 2
@@ -1063,6 +1065,7 @@ class ResUNet3PsiAttention(torch.nn.Module):
         self.conv3_1_2_2_con = SingleConv(up_channels, channels[0])
         self.conv4_0_2_2_con = SingleConv(channels[4], channels[0])
         self.conv2_2 = SingleConv(up_channels, up_channels)
+        self.conv2_2_skip_attn = SingleConv(up_channels*2+channels[0], up_channels)
         self.conv2_2_skip = SingleConv(up_channels*2, up_channels)
 
         # Connect 3
@@ -1072,6 +1075,7 @@ class ResUNet3PsiAttention(torch.nn.Module):
         self.conv3_1_1_3_con = SingleConv(up_channels, channels[0])
         self.conv4_0_1_3_con = SingleConv(channels[4], channels[0])
         self.conv1_3 = SingleConv(up_channels, up_channels)
+        self.conv1_3_skip_attn = SingleConv(up_channels*2+channels[0], up_channels)
         self.conv1_3_skip = SingleConv(up_channels*2, up_channels)
 
         # Connect 4
@@ -1081,6 +1085,7 @@ class ResUNet3PsiAttention(torch.nn.Module):
         self.conv3_1_0_4_con = SingleConv(up_channels, channels[0])
         self.conv4_0_0_4_con = SingleConv(channels[4], channels[0])
         self.conv0_4 = SingleConv(up_channels, up_channels)
+        self.conv0_4_skip_attn = SingleConv(up_channels*2+channels[0], up_channels)
         self.conv0_4_skip = SingleConv(up_channels*2, up_channels)
 
         self.final_dist = torch.nn.Conv2d(
@@ -1128,7 +1133,6 @@ class ResUNet3PsiAttention(torch.nn.Module):
         x2_0_x3_1_con = self.conv2_0_3_1_con(x2_0)
         x3_0_x3_1_con = self.conv3_0_3_1_con(x3_0)
         x4_0_x3_1_con = self.conv4_0_3_1_con(self.up(x4_0, size=x3_0.shape[-2:]))
-        x3_0_x3_1_con = self.attention_init_3_1(x3_0_x3_1_con, x4_0_x3_1_con)
         h3_1 = torch.cat(
             [
                 x0_0_x3_1_con,
@@ -1140,17 +1144,21 @@ class ResUNet3PsiAttention(torch.nn.Module):
             dim=1
         )
         x3_1_dist = self.conv3_1(h3_1)
-        x3_1_dist = self.attention_dist_3_1(x3_1_dist, x4_0_x3_1_con)
-        x3_1_edge = self.conv3_1_skip(
+        x3_1_dist_attn = torch.cat(
+            [
+                self.attention_3_1(x3_1_dist, x4_0_x3_1_con),
+                x4_0_x3_1_con
+            ], dim=1
+        )
+        x3_1_edge = self.conv3_1_skip_attn(
             torch.cat(
                 [
                     h3_1,
-                    x3_1_dist
+                    x3_1_dist_attn
                 ],
                 dim=1
             )
         )
-        x3_1_edge = self.attention_edge_3_1(x3_1_edge, x4_0_x3_1_con)
         x3_1_mask = self.conv3_1_skip(
             torch.cat(
                 [
@@ -1169,7 +1177,6 @@ class ResUNet3PsiAttention(torch.nn.Module):
         x3_1_x2_2_con_edge = self.conv3_1_2_2_con(self.up(x3_1_edge, size=x2_0.shape[-2:]))
         x3_1_x2_2_con_mask = self.conv3_1_2_2_con(self.up(x3_1_mask, size=x2_0.shape[-2:]))
         x4_0_x2_2_con = self.conv4_0_2_2_con(self.up(x4_0, size=x2_0.shape[-2:]))
-        x2_0_x2_2_con = self.attention_init_2_2(x2_0_x2_2_con, x3_1_x2_2_con_dist)
         h2_2 = torch.cat(
             [
                 x0_0_x2_2_con,
@@ -1188,18 +1195,22 @@ class ResUNet3PsiAttention(torch.nn.Module):
                 dim=1
             )
         )
-        x2_2_dist = self.attention_dist_2_2(x2_2_dist, x3_1_x2_2_con_edge)
-        x2_2_edge = self.conv2_2_skip(
+        x2_2_dist_attn = torch.cat(
+            [
+                self.attention_2_2(x2_2_dist, x3_1_x2_2_con_dist),
+                x3_1_x2_2_con_dist
+            ], dim=1
+        )
+        x2_2_edge = self.conv2_2_skip_attn(
             torch.cat(
                 [
                     h2_2,
-                    x2_2_dist,
+                    x2_2_dist_attn,
                     x3_1_x2_2_con_edge
                 ],
                 dim=1
             )
         )
-        x2_2_edge = self.attention_edge_2_2(x2_2_edge, x3_1_x2_2_con_mask)
         x2_2_mask = self.conv2_2_skip(
             torch.cat(
                 [
@@ -1221,7 +1232,6 @@ class ResUNet3PsiAttention(torch.nn.Module):
         x2_2_x1_3_con_mask = self.conv2_2_1_3_con(self.up(x2_2_mask, size=x1_0.shape[-2:]))
         x3_1_x1_3_con_mask = self.conv3_1_1_3_con(self.up(x3_1_mask, size=x1_0.shape[-2:]))
         x4_0_x1_3_con = self.conv4_0_1_3_con(self.up(x4_0, size=x1_0.shape[-2:]))
-        x1_0_x1_3_con = self.attention_init_1_3(x1_0_x1_3_con, x2_2_x1_3_con_dist)
         h1_3 = torch.cat(
             [
                 x0_0_x1_3_con,
@@ -1240,19 +1250,23 @@ class ResUNet3PsiAttention(torch.nn.Module):
                 dim=1
             )
         )
-        x1_3_dist = self.attention_dist_1_3(x1_3_dist, x2_2_x1_3_con_edge)
-        x1_3_edge = self.conv1_3_skip(
+        x1_3_dist_attn = torch.cat(
+            [
+                self.attention_1_3(x1_3_dist, x2_2_x1_3_con_dist),
+                x2_2_x1_3_con_dist
+            ], dim=1
+        )
+        x1_3_edge = self.conv1_3_skip_attn(
             torch.cat(
                 [
                     h1_3,
-                    x1_3_dist,
+                    x1_3_dist_attn,
                     x3_1_x1_3_con_edge,
                     x2_2_x1_3_con_edge
                 ],
                 dim=1
             )
         )
-        x1_3_edge = self.attention_edge_1_3(x1_3_edge, x2_2_x1_3_con_mask)
         x1_3_mask = self.conv1_3_skip(
             torch.cat(
                 [
@@ -1280,7 +1294,6 @@ class ResUNet3PsiAttention(torch.nn.Module):
         x2_2_x0_4_con_mask = self.conv2_2_0_4_con(self.up(x2_2_mask, size=x0_0.shape[-2:]))
         x3_1_x0_4_con_mask = self.conv3_1_0_4_con(self.up(x3_1_mask, size=x0_0.shape[-2:]))
         x4_0_x0_4_con = self.conv4_0_0_4_con(self.up(x4_0, size=x0_0.shape[-2:]))
-        x0_0_x0_4_con = self.attention_init_0_4(x0_0_x0_4_con, x1_3_x0_4_con_dist)
         h0_4 = torch.cat(
             [
                 x0_0_x0_4_con,
@@ -1299,12 +1312,17 @@ class ResUNet3PsiAttention(torch.nn.Module):
                 dim=1
             )
         )
-        x0_4_dist = self.attention_dist_0_4(x0_4_dist, x1_3_x0_4_con_edge)
-        x0_4_edge = self.conv0_4_skip(
+        x0_4_dist_attn = torch.cat(
+            [
+                self.attention_1_3(x0_4_dist, x1_3_x0_4_con_dist),
+                x1_3_x0_4_con_dist
+            ], dim=1
+        )
+        x0_4_edge = self.conv0_4_skip_attn(
             torch.cat(
                 [
                     h0_4,
-                    x0_4_dist,
+                    x0_4_dist_attn,
                     x3_1_x0_4_con_edge,
                     x2_2_x0_4_con_edge,
                     x1_3_x0_4_con_edge
@@ -1312,7 +1330,6 @@ class ResUNet3PsiAttention(torch.nn.Module):
                 dim=1
             )
         )
-        x0_4_edge = self.attention_edge_0_4(x0_4_edge, x1_3_x0_4_con_mask)
         x0_4_mask = self.conv0_4_skip(
             torch.cat(
                 [
