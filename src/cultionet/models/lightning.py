@@ -434,10 +434,10 @@ class CultioLitModel(pl.LightningModule):
         num_time_features: int = None,
         num_classes: int = 2,
         filters: int = 64,
-        star_rnn_hidden_dim: int = 32,
+        star_rnn_hidden_dim: int = 64,
         star_rnn_n_layers: int = 4,
         learning_rate: float = 1e-3,
-        weight_decay: float = 1e-5,
+        weight_decay: float = 0.1,
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
         class_weights: T.Sequence[float] = None,
@@ -578,15 +578,13 @@ class CultioLitModel(pl.LightningModule):
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
-        boundary_mask = torch.where(
-            (true_crop == 1) | (true_edge == 1), 1.0 - batch.bdist, 0
-        )
-        boundary_loss = self.boundary_loss(
-            self.softmax(predictions['edge'])[:, 1], boundary_mask, batch
-        )
-        loss = (
-            boundary_loss * 0.5
-            + dist_loss
+        # boundary_mask = torch.where(
+        #     (true_crop == 1) | (true_edge == 1), 1.0 - batch.bdist, 0
+        # )
+        # boundary_loss = self.boundary_loss(
+        #     self.softmax(predictions['edge'])[:, 1], boundary_mask, batch
+        # )
+        loss = (dist_loss
             + edge_loss
             + crop_loss
         )
@@ -749,7 +747,7 @@ class CultioLitModel(pl.LightningModule):
     def configure_loss(self):
         self.dist_loss = MSELoss()
         self.edge_loss = TanimotoDistLoss()
-        self.boundary_loss = BoundaryLoss()
+        # self.boundary_loss = BoundaryLoss()
         self.crop_loss = TanimotoDistLoss()
         self.crop_rnn_loss = TanimotoDistLoss()
         if self.num_classes > 2:
@@ -763,7 +761,7 @@ class CultioLitModel(pl.LightningModule):
             params_list,
             lr=self.learning_rate,
             weight_decay=self.weight_decay,
-            eps=1e-4
+            eps=1e-8
         )
         lr_scheduler = ReduceLROnPlateau(
             optimizer,
