@@ -124,9 +124,11 @@ class ResidualConv(torch.nn.Module):
         self.final = nn.Sequential(
             'h, x',
             [
-                (torch.nn.Conv2d(
-                    in_channels, out_channels, kernel_size=3, padding=1
-                ), 'x -> x'),
+                (
+                    torch.nn.Conv2d(
+                        in_channels, out_channels, kernel_size=3, padding=1
+                    ), 'x -> x'
+                ),
                 (torch.nn.BatchNorm2d(out_channels), 'x -> x'),
                 (Add(), 'x, h -> h')
             ]
