@@ -692,7 +692,8 @@ class UNet3Psi(torch.nn.Module):
         self.conv3_1_2_2_con = SingleConv(up_channels, channels[0])
         self.conv4_0_2_2_con = SingleConv(channels[4], channels[0])
         self.conv2_2 = SingleConv(up_channels, up_channels)
-        self.conv2_2_skip = SingleConv(up_channels*2, up_channels)
+        self.conv2_2_skip_edge = SingleConv(up_channels*2, up_channels)
+        self.conv2_2_skip_mask = SingleConv(up_channels*2, up_channels)
 
         # Connect 3
         self.conv0_0_1_3_con = PoolConvSingle(channels[0], channels[0], pool_size=2)
@@ -701,7 +702,8 @@ class UNet3Psi(torch.nn.Module):
         self.conv3_1_1_3_con = SingleConv(up_channels, channels[0])
         self.conv4_0_1_3_con = SingleConv(channels[4], channels[0])
         self.conv1_3 = SingleConv(up_channels, up_channels)
-        self.conv1_3_skip = SingleConv(up_channels*2, up_channels)
+        self.conv1_3_skip_edge = SingleConv(up_channels*2, up_channels)
+        self.conv1_3_skip_mask = SingleConv(up_channels*2, up_channels)
 
         # Connect 4
         self.conv0_0_0_4_con = SingleConv(channels[0], channels[0])
@@ -710,7 +712,8 @@ class UNet3Psi(torch.nn.Module):
         self.conv3_1_0_4_con = SingleConv(up_channels, channels[0])
         self.conv4_0_0_4_con = SingleConv(channels[4], channels[0])
         self.conv0_4 = SingleConv(up_channels, up_channels)
-        self.conv0_4_skip = SingleConv(up_channels*2, up_channels)
+        self.conv0_4_skip_edge = SingleConv(up_channels*2, up_channels)
+        self.conv0_4_skip_mask = SingleConv(up_channels*2, up_channels)
 
         self.final_dist = torch.nn.Conv2d(
             up_channels,
@@ -813,7 +816,7 @@ class UNet3Psi(torch.nn.Module):
                 dim=1
             )
         )
-        x2_2_edge = self.conv2_2_skip(
+        x2_2_edge = self.conv2_2_skip_edge(
             torch.cat(
                 [
                     h2_2,
@@ -823,7 +826,7 @@ class UNet3Psi(torch.nn.Module):
                 dim=1
             )
         )
-        x2_2_mask = self.conv2_2_skip(
+        x2_2_mask = self.conv2_2_skip_mask(
             torch.cat(
                 [
                     h2_2,
@@ -862,7 +865,7 @@ class UNet3Psi(torch.nn.Module):
                 dim=1
             )
         )
-        x1_3_edge = self.conv1_3_skip(
+        x1_3_edge = self.conv1_3_skip_edge(
             torch.cat(
                 [
                     h1_3,
@@ -873,7 +876,7 @@ class UNet3Psi(torch.nn.Module):
                 dim=1
             )
         )
-        x1_3_mask = self.conv1_3_skip(
+        x1_3_mask = self.conv1_3_skip_mask(
             torch.cat(
                 [
                     h1_3,
@@ -918,7 +921,7 @@ class UNet3Psi(torch.nn.Module):
                 dim=1
             )
         )
-        x0_4_edge = self.conv0_4_skip(
+        x0_4_edge = self.conv0_4_skip_edge(
             torch.cat(
                 [
                     h0_4,
@@ -930,7 +933,7 @@ class UNet3Psi(torch.nn.Module):
                 dim=1
             )
         )
-        x0_4_mask = self.conv0_4_skip(
+        x0_4_mask = self.conv0_4_skip_mask(
             torch.cat(
                 [
                     h0_4,
