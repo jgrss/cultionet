@@ -406,13 +406,15 @@ class ResidualConv(torch.nn.Module):
         out_channels: int,
         fractal_attention: bool = False,
         channel_attention: bool = False,
-        dilations: T.List[int] = None
+        dilations: T.List[int] = None,
+        gamma: torch.Tensor = None
     ):
         super(ResidualConv, self).__init__()
 
         assert not all([fractal_attention, channel_attention]), \
             'Only one attention method should be used.'
 
+        self.gamma = gamma
         if dilations is None:
             dilations = [2]
 
@@ -434,9 +436,9 @@ class ResidualConv(torch.nn.Module):
                     dilation=dilation
                 )
             ]
-        self.fractal = None
+        self.fractal_weights = None
         if fractal_attention:
-            self.fractal = FractalAttention(
+            self.fractal_weights = FractalAttention(
                 in_channels=in_channels,
                 out_channels=out_channels
             )
@@ -454,13 +456,14 @@ class ResidualConv(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.seq(x) + self.expand(x)
 
-        if self.fractal is not None:
-            f = self.fractal(x)
-            out = out * f
-        else:
-            import ipdb; ipdb.set_trace()
+        if self.fractal_weights is not None:
+            # Fractal attention
+            attention = self.fractal_weights(x)
+            attention *= self.gamma
+            attention += 1.0
+            out *= attention
 
-        return f
+        return out
 
 
 class ResidualConvRCAB(torch.nn.Module):
@@ -525,6 +528,7 @@ class PoolResidualConv(torch.nn.Module):
         pool_size: int = 2,
         dropout: T.Optional[float] = None,
         dilations: T.List[int] = None,
+        gamma: torch.Tensor = None,
         fractal_attention: bool = False,
         channel_attention: bool = False,
         res_blocks: int = 0
@@ -561,7 +565,8 @@ class PoolResidualConv(torch.nn.Module):
                     out_channels,
                     fractal_attention=fractal_attention,
                     channel_attention=channel_attention,
-                    dilations=dilations
+                    dilations=dilations,
+                    gamma=gamma
                 )
             ]
 
