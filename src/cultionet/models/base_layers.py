@@ -31,61 +31,72 @@ class Squeeze(torch.nn.Module):
         return x.squeeze()
 
 
-def conv_batchnorm_activate2d(
-    in_channels: int,
-    out_channels: int,
-    kernel_size: int,
-    padding: int = 0,
-    dilation: int = 1,
-    add_activation: bool = True
-):
-    layers = [
-        torch.nn.Conv2d(
-            in_channels,
-            out_channels,
-            kernel_size=kernel_size,
-            padding=padding,
-            dilation=dilation
-        ),
-        torch.nn.BatchNorm2d(out_channels)
-    ]
-    if add_activation:
-        layers += [torch.nn.LeakyReLU(inplace=False)]
+class ConvBlock2d(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        padding: int = 0,
+        dilation: int = 1,
+        add_activation: bool = True
+    ):
+        super(ConvBlock2d, self).__init__()
 
-    return torch.nn.Sequential(*layers)
-
-
-def conv_batchnorm_activate3d(
-    in_channels: int,
-    in_time: int,
-    out_channels: int,
-    kernel_size: int,
-    padding: int = 0,
-    dilation: int = 1,
-    add_activation: bool = True,
-    squeeze: bool = True
-):
-    layers = [
-        torch.nn.Conv3d(
-            in_channels,
-            out_channels,
-            kernel_size=kernel_size,
-            padding=padding,
-            dilation=dilation
-        )
-    ]
-    if squeeze:
-        layers += [
-            Squeeze(),
-            torch.nn.BatchNorm2d(in_time)
+        self.seq = [
+            torch.nn.Conv2d(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=padding,
+                dilation=dilation,
+                bias=False
+            ),
+            torch.nn.BatchNorm2d(out_channels)
         ]
-    else:
-        layers += [torch.nn.BatchNorm3d(out_channels)]
+        if add_activation:
+            self.seq += [torch.nn.LeakyReLU(inplace=False)]
 
-    if add_activation:
-        layers += [torch.nn.LeakyReLU(inplace=False)]
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
 
-    return torch.nn.Sequential(*layers)
+
+class ConvBlock3d(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        in_time: int,
+        out_channels: int,
+        kernel_size: int,
+        padding: int = 0,
+        dilation: int = 1,
+        add_activation: bool = True,
+        squeeze: bool = True
+    ):
+        super(ConvBlock3d, self).__init__()
+
+        self.seq = [
+            torch.nn.Conv3d(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=padding,
+                dilation=dilation,
+                bias=False
+            )
+        ]
+        if squeeze:
+            self.seq += [
+                Squeeze(),
+                torch.nn.BatchNorm2d(in_time)
+            ]
+        else:
+            self.seq += [torch.nn.BatchNorm3d(out_channels)]
+        if add_activation:
+            self.seq += [torch.nn.LeakyReLU(inplace=False)]
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
 
 
 class AttentionAdd(torch.nn.Module):
@@ -140,7 +151,7 @@ class AttentionGate(torch.nn.Module):
                 (torch.nn.Sigmoid(), 'x -> x')
             ]
         )
-        self.final = conv_batchnorm_activate2d(
+        self.final = ConvBlock2d(
             in_channels=high_channels,
             out_channels=high_channels,
             kernel_size=1,
@@ -193,13 +204,13 @@ class DoubleConv(torch.nn.Module):
         super(DoubleConv, self).__init__()
 
         self.seq = torch.nn.Sequential(
-            conv_batchnorm_activate2d(
+            ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1
             ),
-            conv_batchnorm_activate2d(
+            ConvBlock2d(
                 in_channels=out_channels,
                 out_channels=out_channels,
                 kernel_size=3,
@@ -224,7 +235,7 @@ class PoolConvSingle(torch.nn.Module):
 
         self.seq = torch.nn.Sequential(
             torch.nn.MaxPool2d(pool_size),
-            conv_batchnorm_activate2d(
+            ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=3,
@@ -276,13 +287,13 @@ class ResidualConv(torch.nn.Module):
         super(ResidualConv, self).__init__()
 
         layers = [
-            conv_batchnorm_activate2d(
+            ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1
             ),
-            conv_batchnorm_activate2d(
+            ConvBlock2d(
                 in_channels=out_channels,
                 out_channels=out_channels,
                 kernel_size=3,
@@ -294,7 +305,7 @@ class ResidualConv(torch.nn.Module):
             layers += [ChannelAttention(channels=out_channels)]
 
         self.seq = torch.nn.Sequential(*layers)
-        self.expand = conv_batchnorm_activate2d(
+        self.expand = ConvBlock2d(
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=1,
@@ -344,7 +355,7 @@ class ResidualConvRCAB(torch.nn.Module):
         ]
 
         self.seq = torch.nn.Sequential(*layers)
-        self.expand = conv_batchnorm_activate2d(
+        self.expand = ConvBlock2d(
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=1,
@@ -416,7 +427,7 @@ class SingleConv(torch.nn.Module):
     ):
         super(SingleConv, self).__init__()
 
-        self.seq = conv_batchnorm_activate2d(
+        self.seq = ConvBlock2d(
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=3,
@@ -439,7 +450,7 @@ class TemporalConv(torch.nn.Module):
         super(TemporalConv, self).__init__()
 
         layers = [
-            conv_batchnorm_activate3d(
+            ConvBlock3d(
                 in_channels=in_channels,
                 in_time=in_time,
                 out_channels=out_channels,
@@ -447,7 +458,7 @@ class TemporalConv(torch.nn.Module):
                 padding=1,
                 squeeze=False
             ),
-            conv_batchnorm_activate3d(
+            ConvBlock3d(
                 in_channels=out_channels,
                 in_time=in_time,
                 out_channels=out_channels,
