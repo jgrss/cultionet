@@ -1,9 +1,8 @@
 import typing as T
 
 from . import model_utils
-from .nunet import ResUNet3PsiAttention
+from .nunet import UNet3Psi
 from .convstar import StarRNN
-from .base_layers import TemporalConv
 
 import torch
 from torch_geometric.data import Data
@@ -64,14 +63,21 @@ class CultioNet(torch.nn.Module):
             + star_rnn_hidden_dim * (star_rnn_n_layers - 1)
             + num_classes_last
         )
-        self.mask_model = ResUNet3PsiAttention(
+        self.mask_model = UNet3Psi(
             in_channels=base_in_channels,
             out_dist_channels=1,
             out_edge_channels=2,
             out_mask_channels=2,
-            init_filter=self.filters,
-            attention=False
+            init_filter=self.filters
         )
+        # self.mask_model = ResUNet3PsiAttention(
+        #     in_channels=base_in_channels,
+        #     out_dist_channels=1,
+        #     out_edge_channels=2,
+        #     out_mask_channels=2,
+        #     init_filter=self.filters,
+        #     attention=False
+        # )
 
     def forward(
         self, data: Data
