@@ -903,6 +903,7 @@ class ResUNet3PsiAttention(torch.nn.Module):
         out_edge_channels: int = 2,
         out_mask_channels: int = 2,
         init_filter: int = 64,
+        dilations: T.List[int] = None,
         attention: bool = False,
         res_blocks: int = 0
     ):
@@ -919,32 +920,41 @@ class ResUNet3PsiAttention(torch.nn.Module):
             init_filter*16
         ]
         up_channels = int(channels[0] * 5)
+        if dilations is None:
+            dilations = [2, 3]
 
         self.up = model_utils.UpSample()
 
-        self.conv0_0 = ResidualConv(in_channels, channels[0])
+        self.conv0_0 = ResidualConv(in_channels, channels[0], dilations=dilations)
         self.conv1_0 = PoolResidualConv(
-            channels[0], channels[1], dropout=0.25, channel_attention=self.attention, res_blocks=res_blocks
+            channels[0], channels[1], dropout=0.25,
+            channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
         self.conv2_0 = PoolResidualConv(
-            channels[1], channels[2], dropout=0.5, channel_attention=self.attention, res_blocks=res_blocks
+            channels[1], channels[2], dropout=0.5,
+            channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
         self.conv3_0 = PoolResidualConv(
-            channels[2], channels[3], dropout=0.5, channel_attention=self.attention, res_blocks=res_blocks
+            channels[2], channels[3], dropout=0.5,
+            channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
         self.conv4_0 = PoolResidualConv(
-            channels[3], channels[4], dropout=0.5, channel_attention=self.attention, res_blocks=res_blocks
+            channels[3], channels[4], dropout=0.5,
+            channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
 
         # Connect 3
         self.conv0_0_3_1_con = PoolResidualConv(
-            channels[0], channels[0], pool_size=8, channel_attention=self.attention, res_blocks=res_blocks
+            channels[0], channels[0], pool_size=8,
+            channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
         self.conv1_0_3_1_con = PoolResidualConv(
-            channels[1], channels[0], pool_size=4, channel_attention=self.attention, res_blocks=res_blocks
+            channels[1], channels[0], pool_size=4,
+            channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
         self.conv2_0_3_1_con = PoolResidualConv(
-            channels[2], channels[0], pool_size=2, channel_attention=self.attention, res_blocks=res_blocks
+            channels[2], channels[0], pool_size=2,
+            channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
         self.conv3_0_3_1_con = SingleConv(channels[3], channels[0])
         self.conv4_0_3_1_con = SingleConv(channels[4], channels[0])
@@ -954,10 +964,12 @@ class ResUNet3PsiAttention(torch.nn.Module):
 
         # Connect 2
         self.conv0_0_2_2_con = PoolResidualConv(
-            channels[0], channels[0], pool_size=4, channel_attention=self.attention, res_blocks=res_blocks
+            channels[0], channels[0], pool_size=4,
+            channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
         self.conv1_0_2_2_con = PoolResidualConv(
-            channels[1], channels[0], pool_size=2, channel_attention=self.attention, res_blocks=res_blocks
+            channels[1], channels[0], pool_size=2,
+            channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
         self.conv2_0_2_2_con = SingleConv(channels[2], channels[0])
         self.conv3_1_2_2_con = SingleConv(up_channels, channels[0])
@@ -968,7 +980,8 @@ class ResUNet3PsiAttention(torch.nn.Module):
 
         # Connect 3
         self.conv0_0_1_3_con = PoolResidualConv(
-            channels[0], channels[0], pool_size=2, channel_attention=self.attention, res_blocks=res_blocks
+            channels[0], channels[0], pool_size=2,
+            channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
         self.conv1_0_1_3_con = SingleConv(channels[1], channels[0])
         self.conv2_2_1_3_con = SingleConv(up_channels, channels[0])

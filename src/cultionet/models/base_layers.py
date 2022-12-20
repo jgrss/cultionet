@@ -284,9 +284,13 @@ class ResidualConv(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        channel_attention: bool = False
+        channel_attention: bool = False,
+        dilations: T.List[int] = None
     ):
         super(ResidualConv, self).__init__()
+
+        if dilations is None:
+            dilations = [2]
 
         layers = [
             ConvBlock2d(
@@ -294,15 +298,18 @@ class ResidualConv(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1
-            ),
-            ConvBlock2d(
-                in_channels=out_channels,
-                out_channels=out_channels,
-                kernel_size=3,
-                padding=2,
-                dilation=2
             )
         ]
+        for dilation in dilations:
+            layers += [
+                ConvBlock2d(
+                    in_channels=out_channels,
+                    out_channels=out_channels,
+                    kernel_size=3,
+                    padding=dilation,
+                    dilation=dilation
+                )
+            ]
         if channel_attention:
             layers += [ChannelAttention(channels=out_channels)]
 
@@ -326,7 +333,8 @@ class ResidualConvRCAB(torch.nn.Module):
         in_channels: int,
         out_channels: int,
         channel_attention: bool = False,
-        res_blocks: int = 2
+        res_blocks: int = 2,
+        dilations: T.List[int] = None
     ):
         super(ResidualConvRCAB, self).__init__()
 
@@ -344,7 +352,8 @@ class ResidualConvRCAB(torch.nn.Module):
                 ResidualConv(
                     in_channels=out_channels,
                     out_channels=out_channels,
-                    channel_attention=channel_attention
+                    channel_attention=channel_attention,
+                    dilations=dilations
                 )
             ]
         layers += [
@@ -377,6 +386,7 @@ class PoolResidualConv(torch.nn.Module):
         out_channels: int,
         pool_size: int = 2,
         dropout: T.Optional[float] = None,
+        dilations: T.List[int] = None,
         channel_attention: bool = False,
         res_blocks: int = 0
     ):
@@ -409,7 +419,8 @@ class PoolResidualConv(torch.nn.Module):
                 ResidualConv(
                     in_channels,
                     out_channels,
-                    channel_attention=channel_attention
+                    channel_attention=channel_attention,
+                    dilations=dilations
                 )
             ]
 
