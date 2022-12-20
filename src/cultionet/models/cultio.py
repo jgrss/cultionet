@@ -1,7 +1,7 @@
 import typing as T
 
 from . import model_utils
-from .nunet import UNet3Psi, ResUNet3PsiAttention
+from .nunet import UNet3Psi, ResUNet3Psi
 from .convstar import StarRNN
 
 import torch
@@ -70,7 +70,7 @@ class CultioNet(torch.nn.Module):
         #     out_mask_channels=2,
         #     init_filter=self.filters
         # )
-        self.mask_model = ResUNet3PsiAttention(
+        self.mask_model = ResUNet3Psi(
             in_channels=base_in_channels,
             out_dist_channels=1,
             out_edge_channels=2,
