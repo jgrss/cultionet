@@ -261,17 +261,11 @@ class PoolConv(torch.nn.Module):
     ):
         super(PoolConv, self).__init__()
 
+        layers = [torch.nn.MaxPool2d(pool_size)]
         if dropout is not None:
-            self.seq = torch.nn.Sequential(
-                torch.nn.MaxPool2d(pool_size),
-                torch.nn.Dropout(dropout),
-                DoubleConv(in_channels, out_channels)
-            )
-        else:
-            self.seq = torch.nn.Sequential(
-                torch.nn.MaxPool2d(pool_size),
-                DoubleConv(in_channels, out_channels)
-            )
+            layers += [torch.nn.Dropout(dropout)]
+        layers += [DoubleConv(in_channels, out_channels)]
+        self.seq = torch.nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
