@@ -569,7 +569,7 @@ class CultioLitModel(pl.LightningModule):
         """Calculates the loss
 
         Returns:
-            Average loss
+            Total loss
         """
         true_edge = (batch.y == self.edge_class).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.

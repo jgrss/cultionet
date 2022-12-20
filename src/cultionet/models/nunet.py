@@ -8,6 +8,7 @@ import typing as T
 
 from . import model_utils
 from .base_layers import (
+    AttentionGate,
     SingleConv,
     DoubleConv,
     ResidualConv,
@@ -18,7 +19,6 @@ from .base_layers import (
 )
 
 import torch
-import torch.nn.functional as F
 from torch_geometric import nn
 
 
@@ -35,76 +35,6 @@ def weights_init_kaiming(m):
     elif classname.find('BatchNorm') != -1:
         torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
         torch.nn.init.constant_(m.bias.data, 0.0)
-
-
-class AttentionAdd(torch.nn.Module):
-    def __init__(self):
-        super(AttentionAdd, self).__init__()
-
-    def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
-        if x.shape != g.shape:
-            x = F.interpolate(
-                x, size=g.shape[-2:], mode='bilinear', align_corners=True
-            )
-
-        return x + g
-
-
-class AttentionGate(torch.nn.Module):
-    def __init__(
-        self,
-        high_channels: int,
-        low_channels: int
-    ):
-        super(AttentionGate, self).__init__()
-
-        conv_x = torch.nn.Conv2d(
-            high_channels,
-            high_channels,
-            kernel_size=1,
-            padding=0
-        )
-        conv_g = torch.nn.Conv2d(
-            low_channels,
-            high_channels,
-            kernel_size=1,
-            padding=0,
-        )
-        conv1d = torch.nn.Conv2d(
-            high_channels,
-            1,
-            kernel_size=1,
-            padding=0
-        )
-        self.up = model_utils.UpSample()
-
-        self.seq = nn.Sequential(
-            'x, g',
-            [
-                (conv_x, 'x -> x'),
-                (conv_g, 'g -> g'),
-                (AttentionAdd(), 'x, g -> x'),
-                (torch.nn.LeakyReLU(inplace=False), 'x -> x'),
-                (conv1d, 'x -> x'),
-                (torch.nn.Sigmoid(), 'x -> x')
-            ]
-        )
-        self.final = torch.nn.Sequential(
-            torch.nn.Conv2d(high_channels, high_channels, 1, padding=0),
-            torch.nn.BatchNorm2d(high_channels)
-        )
-
-    def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: Higher dimension
-            g: Lower dimension
-        """
-        h = self.seq(x, g)
-        if h.shape[-2:] != x.shape[-2:]:
-            h = self.up(h, size=x.shape[-2:], mode='bilinear')
-
-        return self.final(x * h)
 
 
 class UNet2(torch.nn.Module):
@@ -975,12 +905,13 @@ class ResUNet3PsiAttention(torch.nn.Module):
         out_mask_channels: int = 2,
         init_filter: int = 64,
         deep_supervision: bool = False,
-        attention_layers: bool = False
+        attention: bool = False,
+        res_blocks: int = 0
     ):
         super(ResUNet3PsiAttention, self).__init__()
 
         self.deep_supervision = deep_supervision
-        self.attention_layers = attention_layers
+        self.attention = attention
 
         init_filter = int(init_filter)
         channels = [
@@ -996,121 +927,58 @@ class ResUNet3PsiAttention(torch.nn.Module):
 
         self.conv0_0 = SingleConv(in_channels, channels[0])
         self.conv1_0 = PoolResidualConv(
-            channels[0], channels[1], dropout=0.25, channel_attention=self.attention_layers
+            channels[0], channels[1], dropout=0.25, channel_attention=self.attention, res_blocks=res_blocks
         )
         self.conv2_0 = PoolResidualConv(
-            channels[1], channels[2], dropout=0.5, channel_attention=self.attention_layers
+            channels[1], channels[2], dropout=0.5, channel_attention=self.attention, res_blocks=res_blocks
         )
         self.conv3_0 = PoolResidualConv(
-            channels[2], channels[3], dropout=0.5, channel_attention=self.attention_layers
+            channels[2], channels[3], dropout=0.5, channel_attention=self.attention, res_blocks=res_blocks
         )
         self.conv4_0 = PoolResidualConv(
-            channels[3], channels[4], dropout=0.5, channel_attention=self.attention_layers
+            channels[3], channels[4], dropout=0.5, channel_attention=self.attention, res_blocks=res_blocks
         )
-
-        if self.attention_layers:
-            self.attention_3_1 = nn.Sequential(
-                'x, g',
-                [
-                    (SingleConv(up_channels, up_channels), 'x -> x'),
-                    (
-                        AttentionGate(
-                            high_channels=up_channels,
-                            low_channels=channels[0]
-                        ),
-                        'x, g -> x'
-                    )
-                ]
-            )
-            self.attention_2_2 = nn.Sequential(
-                'x, g',
-                [
-                    (SingleConv(up_channels, up_channels), 'x -> x'),
-                    (
-                        AttentionGate(
-                            high_channels=up_channels,
-                            low_channels=channels[0]
-                        ),
-                        'x, g -> x'
-                    )
-                ]
-            )
-            self.attention_1_3 = nn.Sequential(
-                'x, g',
-                [
-                    (SingleConv(up_channels, up_channels), 'x -> x'),
-                    (
-                        AttentionGate(
-                            high_channels=up_channels,
-                            low_channels=channels[0]
-                        ),
-                        'x, g -> x'
-                    )
-                ]
-            )
-            self.attention_0_4 = nn.Sequential(
-                'x, g',
-                [
-                    (SingleConv(up_channels, up_channels), 'x -> x'),
-                    (
-                        AttentionGate(
-                            high_channels=up_channels,
-                            low_channels=channels[0]
-                        ),
-                        'x, g -> x'
-                    )
-                ]
-            )
 
         # Connect 3
         self.conv0_0_3_1_con = PoolResidualConv(
-            channels[0], channels[0], pool_size=8, channel_attention=self.attention_layers
+            channels[0], channels[0], pool_size=8, channel_attention=self.attention, res_blocks=res_blocks
         )
         self.conv1_0_3_1_con = PoolResidualConv(
-            channels[1], channels[0], pool_size=4, channel_attention=self.attention_layers
+            channels[1], channels[0], pool_size=4, channel_attention=self.attention, res_blocks=res_blocks
         )
         self.conv2_0_3_1_con = PoolResidualConv(
-            channels[2], channels[0], pool_size=2, channel_attention=self.attention_layers
+            channels[2], channels[0], pool_size=2, channel_attention=self.attention, res_blocks=res_blocks
         )
         self.conv3_0_3_1_con = SingleConv(channels[3], channels[0])
         self.conv4_0_3_1_con = SingleConv(channels[4], channels[0])
         self.conv3_1 = SingleConv(up_channels, up_channels)
-        if self.attention_layers:
-            self.conv3_1_skip1 = SingleConv(up_channels*2+channels[0], up_channels)
-        else:
-            self.conv3_1_skip1 = SingleConv(up_channels*2, up_channels)
+        self.conv3_1_skip1 = SingleConv(up_channels*2, up_channels)
         self.conv3_1_skip2 = SingleConv(up_channels*2, up_channels)
 
         # Connect 2
         self.conv0_0_2_2_con = PoolResidualConv(
-            channels[0], channels[0], pool_size=4, channel_attention=self.attention_layers
+            channels[0], channels[0], pool_size=4, channel_attention=self.attention, res_blocks=res_blocks
         )
         self.conv1_0_2_2_con = PoolResidualConv(
-            channels[1], channels[0], pool_size=2, channel_attention=self.attention_layers
+            channels[1], channels[0], pool_size=2, channel_attention=self.attention, res_blocks=res_blocks
         )
         self.conv2_0_2_2_con = SingleConv(channels[2], channels[0])
         self.conv3_1_2_2_con = SingleConv(up_channels, channels[0])
         self.conv4_0_2_2_con = SingleConv(channels[4], channels[0])
         self.conv2_2 = SingleConv(up_channels, up_channels)
-        if self.attention_layers:
-            self.conv2_2_skip1 = SingleConv(up_channels*2+channels[0], up_channels)
-        else:
-            self.conv2_2_skip1 = SingleConv(up_channels*2, up_channels)
+        self.conv2_2_skip1 = SingleConv(up_channels*2, up_channels)
         self.conv2_2_skip2 = SingleConv(up_channels*2, up_channels)
 
         # Connect 3
         self.conv0_0_1_3_con = PoolResidualConv(
-            channels[0], channels[0], pool_size=2, channel_attention=self.attention_layers
+            channels[0], channels[0], pool_size=2, channel_attention=self.attention, res_blocks=res_blocks
         )
         self.conv1_0_1_3_con = SingleConv(channels[1], channels[0])
         self.conv2_2_1_3_con = SingleConv(up_channels, channels[0])
         self.conv3_1_1_3_con = SingleConv(up_channels, channels[0])
         self.conv4_0_1_3_con = SingleConv(channels[4], channels[0])
         self.conv1_3 = SingleConv(up_channels, up_channels)
-        if self.attention_layers:
-            self.conv1_3_skip1 = SingleConv(up_channels*2+channels[0], up_channels)
-        else:
-            self.conv1_3_skip1 = SingleConv(up_channels*2, up_channels)
+        self.conv1_3_skip1 = SingleConv(up_channels*2, up_channels)
         self.conv1_3_skip2 = SingleConv(up_channels*2, up_channels)
 
         # Connect 4
@@ -1120,10 +988,7 @@ class ResUNet3PsiAttention(torch.nn.Module):
         self.conv3_1_0_4_con = SingleConv(up_channels, channels[0])
         self.conv4_0_0_4_con = SingleConv(channels[4], channels[0])
         self.conv0_4 = SingleConv(up_channels, up_channels)
-        if self.attention_layers:
-            self.conv0_4_skip1 = SingleConv(up_channels*2+channels[0], up_channels)
-        else:
-            self.conv0_4_skip1 = SingleConv(up_channels*2, up_channels)
+        self.conv0_4_skip1 = SingleConv(up_channels*2, up_channels)
         self.conv0_4_skip2 = SingleConv(up_channels*2, up_channels)
 
         self.final_dist = torch.nn.Conv2d(
@@ -1182,20 +1047,11 @@ class ResUNet3PsiAttention(torch.nn.Module):
             dim=1
         )
         x3_1_dist = self.conv3_1(h3_1)
-        if self.attention_layers:
-            x3_1_dist_h = torch.cat(
-                [
-                    self.attention_3_1(x3_1_dist, x4_0_x3_1_con),
-                    x4_0_x3_1_con
-                ], dim=1
-            )
-        else:
-            x3_1_dist_h = x3_1_dist
         x3_1_edge = self.conv3_1_skip1(
             torch.cat(
                 [
                     h3_1,
-                    x3_1_dist_h
+                    x3_1_dist
                 ],
                 dim=1
             )
@@ -1236,20 +1092,11 @@ class ResUNet3PsiAttention(torch.nn.Module):
                 dim=1
             )
         )
-        if self.attention_layers:
-            x2_2_dist_h = torch.cat(
-                [
-                    self.attention_2_2(x2_2_dist, x3_1_x2_2_con_dist),
-                    x3_1_x2_2_con_dist
-                ], dim=1
-            )
-        else:
-            x2_2_dist_h = x2_2_dist
         x2_2_edge = self.conv2_2_skip1(
             torch.cat(
                 [
                     h2_2,
-                    x2_2_dist_h,
+                    x2_2_dist,
                     x3_1_x2_2_con_edge
                 ],
                 dim=1
@@ -1294,20 +1141,11 @@ class ResUNet3PsiAttention(torch.nn.Module):
                 dim=1
             )
         )
-        if self.attention_layers:
-            x1_3_dist_h = torch.cat(
-                [
-                    self.attention_1_3(x1_3_dist, x2_2_x1_3_con_dist),
-                    x2_2_x1_3_con_dist
-                ], dim=1
-            )
-        else:
-            x1_3_dist_h = x1_3_dist
         x1_3_edge = self.conv1_3_skip1(
             torch.cat(
                 [
                     h1_3,
-                    x1_3_dist_h,
+                    x1_3_dist,
                     x3_1_x1_3_con_edge,
                     x2_2_x1_3_con_edge
                 ],
@@ -1359,20 +1197,11 @@ class ResUNet3PsiAttention(torch.nn.Module):
                 dim=1
             )
         )
-        if self.attention_layers:
-            x0_4_dist_h = torch.cat(
-                [
-                    self.attention_0_4(x0_4_dist, x1_3_x0_4_con_dist),
-                    x1_3_x0_4_con_dist
-                ], dim=1
-            )
-        else:
-            x0_4_dist_h = x0_4_dist
         x0_4_edge = self.conv0_4_skip1(
             torch.cat(
                 [
                     h0_4,
-                    x0_4_dist_h,
+                    x0_4_dist,
                     x3_1_x0_4_con_edge,
                     x2_2_x0_4_con_edge,
                     x1_3_x0_4_con_edge
