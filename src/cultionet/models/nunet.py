@@ -922,7 +922,7 @@ class ResUNet3PsiAttention(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
-        self.conv0_0 = SingleConv(in_channels, channels[0])
+        self.conv0_0 = ResidualConv(in_channels, channels[0])
         self.conv1_0 = PoolResidualConv(
             channels[0], channels[1], dropout=0.25, channel_attention=self.attention, res_blocks=res_blocks
         )

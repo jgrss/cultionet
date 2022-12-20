@@ -43,7 +43,7 @@ class ConvBlock2d(torch.nn.Module):
     ):
         super(ConvBlock2d, self).__init__()
 
-        self.seq = [
+        layers = [
             torch.nn.Conv2d(
                 in_channels,
                 out_channels,
@@ -55,7 +55,9 @@ class ConvBlock2d(torch.nn.Module):
             torch.nn.BatchNorm2d(out_channels)
         ]
         if add_activation:
-            self.seq += [torch.nn.LeakyReLU(inplace=False)]
+            layers += [torch.nn.LeakyReLU(inplace=False)]
+
+        self.seq = torch.nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
