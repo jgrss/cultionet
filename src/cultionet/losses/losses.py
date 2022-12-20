@@ -42,6 +42,7 @@ class TanimotoComplementLoss(torch.nn.Module):
 
     References:
         https://www.mdpi.com/2072-4292/14/22/5738
+        https://arxiv.org/abs/2009.02062
         https://github.com/waldnerf/decode/blob/main/FracTAL_ResUNet/nn/loss/ftnmt_loss.py
     """
     def __init__(
