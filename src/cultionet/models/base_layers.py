@@ -325,8 +325,8 @@ class ResidualConvRCAB(torch.nn.Module):
             torch.nn.Conv2d(
                 in_channels,
                 out_channels,
-                kernel_size=3,
-                padding=1
+                kernel_size=1,
+                padding=0
             )
         ]
 
@@ -380,6 +380,7 @@ class PoolResidualConv(torch.nn.Module):
                     res_blocks=res_blocks
                 )
             ]
+
         else:
             layers += [
                 ResidualConv(
