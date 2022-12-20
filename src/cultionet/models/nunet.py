@@ -905,7 +905,8 @@ class ResUNet3Psi(torch.nn.Module):
         out_mask_channels: int = 2,
         init_filter: int = 64,
         dilations: T.List[int] = None,
-        attention: bool = False
+        attention: bool = False,
+        attention_gamma: torch.Tensor = None
     ):
         super(ResUNet3Psi, self).__init__()
 
@@ -927,159 +928,233 @@ class ResUNet3Psi(torch.nn.Module):
 
         self.conv0_0 = ResidualConv(
             in_channels, channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv1_0 = PoolResidualConv(
             channels[0], channels[1], dropout=0.25,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv2_0 = PoolResidualConv(
             channels[1], channels[2], dropout=0.5,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv3_0 = PoolResidualConv(
             channels[2], channels[3], dropout=0.5,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv4_0 = PoolResidualConv(
             channels[3], channels[4], dropout=0.5,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
 
         # Connect 3
         self.conv0_0_3_1_con = PoolResidualConv(
             channels[0], channels[0], pool_size=8,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv1_0_3_1_con = PoolResidualConv(
             channels[1], channels[0], pool_size=4,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv2_0_3_1_con = PoolResidualConv(
             channels[2], channels[0], pool_size=2,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv3_0_3_1_con = ResidualConv(
             channels[3], channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv4_0_3_1_con = ResidualConv(
             channels[4], channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv3_1 = ResidualConv(
             up_channels, up_channels,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv3_1_skip1 = ResidualConv(
             up_channels*2, up_channels,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv3_1_skip2 = ResidualConv(
             up_channels*2, up_channels,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
 
         # Connect 2
         self.conv0_0_2_2_con = PoolResidualConv(
             channels[0], channels[0], pool_size=4,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv1_0_2_2_con = PoolResidualConv(
             channels[1], channels[0], pool_size=2,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv2_0_2_2_con = ResidualConv(
             channels[2], channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv3_1_2_2_con = ResidualConv(
             up_channels, channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv4_0_2_2_con = ResidualConv(
             channels[4], channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv2_2 = ResidualConv(
             up_channels, up_channels,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv2_2_skip1 = ResidualConv(
             up_channels*2, up_channels,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv2_2_skip2 = ResidualConv(
             up_channels*2, up_channels,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
 
         # Connect 3
         self.conv0_0_1_3_con = PoolResidualConv(
             channels[0], channels[0], pool_size=2,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv1_0_1_3_con = ResidualConv(
             channels[1], channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv2_2_1_3_con = ResidualConv(
             up_channels, channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv3_1_1_3_con = ResidualConv(
             up_channels, channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv4_0_1_3_con = ResidualConv(
             channels[4], channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv1_3 = ResidualConv(
             up_channels, up_channels,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv1_3_skip1 = ResidualConv(
             up_channels*2, up_channels,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv1_3_skip2 = ResidualConv(
             up_channels*2, up_channels,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
 
         # Connect 4
         self.conv0_0_0_4_con = ResidualConv(
             channels[0], channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv1_3_0_4_con = ResidualConv(
             up_channels, channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv2_2_0_4_con = ResidualConv(
             up_channels, channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv3_1_0_4_con = ResidualConv(
             up_channels, channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv4_0_0_4_con = ResidualConv(
             channels[4], channels[0],
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv0_4 = ResidualConv(
             up_channels, up_channels,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv0_4_skip1 = ResidualConv(
             up_channels*2, up_channels,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
         self.conv0_4_skip2 = ResidualConv(
             up_channels*2, up_channels,
-            fractal_attention=self.attention, dilations=dilations
+            fractal_attention=self.attention,
+            dilations=dilations,
+            gamma=attention_gamma
         )
 
         self.final_dist = torch.nn.Sequential(
