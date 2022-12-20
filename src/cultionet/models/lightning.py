@@ -7,7 +7,8 @@ from ..losses import (
     CrossEntropyLoss,
     FocalLoss,
     MSELoss,
-    TanimotoDistLoss
+    TanimotoDistLoss,
+    TanimotoComplementLoss
 )
 from .cultio import CultioNet
 from .maskcrnn import BFasterRCNN
@@ -433,8 +434,8 @@ class CultioLitModel(pl.LightningModule):
         num_features: int = None,
         num_time_features: int = None,
         num_classes: int = 2,
-        filters: int = 64,
-        star_rnn_hidden_dim: int = 64,
+        filters: int = 32,
+        star_rnn_hidden_dim: int = 32,
         star_rnn_n_layers: int = 4,
         learning_rate: float = 1e-3,
         weight_decay: float = 0.01,
@@ -587,7 +588,7 @@ class CultioLitModel(pl.LightningModule):
             self.softmax(predictions['edge'])[:, 1], boundary_mask, batch
         )
         loss = (
-            boundary_loss * 0.5
+            boundary_loss
             + dist_loss
             + edge_loss
             + crop_loss
@@ -749,11 +750,11 @@ class CultioLitModel(pl.LightningModule):
             )
 
     def configure_loss(self):
-        self.dist_loss = MSELoss()
-        self.edge_loss = TanimotoDistLoss()
+        self.dist_loss = TanimotoComplementLoss(targets_are_labels=False)
+        self.edge_loss = TanimotoComplementLoss()
         self.boundary_loss = BoundaryLoss()
-        self.crop_loss = TanimotoDistLoss()
-        self.crop_rnn_loss = TanimotoDistLoss()
+        self.crop_loss = TanimotoComplementLoss()
+        self.crop_rnn_loss = TanimotoComplementLoss()
         if self.num_classes > 2:
             self.crop_type_loss = CrossEntropyLoss(
                 weight=self.class_weights
