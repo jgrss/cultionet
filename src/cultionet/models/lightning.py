@@ -442,6 +442,7 @@ class CultioLitModel(pl.LightningModule):
         eps: float = 1e-8,
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
+        model_type: str = 'ResUNet3Psi',
         class_weights: T.Sequence[float] = None,
         edge_weights: T.Sequence[float] = None,
         edge_class: T.Optional[int] = None,
@@ -471,13 +472,18 @@ class CultioLitModel(pl.LightningModule):
             self.edge_class = num_classes
         self.depth = 1
 
+        self.attention_gamma = None
+        if model_type == 'ResUNet3Psi':
+            self.attention_gamma = torch.nn.Parameter(torch.ones(1))
         self.cultionet_model = CultioNet(
             ds_features=num_features,
             ds_time_features=num_time_features,
             filters=filters,
             star_rnn_hidden_dim=star_rnn_hidden_dim,
             star_rnn_n_layers=star_rnn_n_layers,
-            num_classes=self.num_classes
+            num_classes=self.num_classes,
+            model_type=model_type,
+            attention_gamma=self.attention_gamma
         )
         self.configure_loss()
         self.configure_scorer()
