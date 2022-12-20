@@ -37,6 +37,72 @@ class LossPreprocessing(torch.nn.Module):
         return inputs, targets
 
 
+class TanimotoComplementLoss(torch.nn.Module):
+    """Tanimoto distance loss
+
+    References:
+        https://www.mdpi.com/2072-4292/14/22/5738
+        https://github.com/waldnerf/decode/blob/main/FracTAL_ResUNet/nn/loss/ftnmt_loss.py
+    """
+    def __init__(
+        self,
+        smooth: float = 1e-5,
+        depth: int = 5,
+        targets_are_labels: bool = True
+    ):
+        super(TanimotoComplementLoss, self).__init__()
+
+        self.smooth = smooth
+        self.depth = depth
+        self.targets_are_labels = targets_are_labels
+
+        self.preprocessor = LossPreprocessing(
+            inputs_are_logits=True,
+            apply_transform=True
+        )
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor
+    ) -> torch.Tensor:
+        """Performs a single forward pass
+
+        Args:
+            inputs: Predictions from model (probabilities or labels).
+            targets: Ground truth values.
+
+        Returns:
+            Tanimoto distance loss (float)
+        """
+        if self.targets_are_labels:
+            inputs, targets = self.preprocessor(inputs, targets)
+            length = inputs.shape[1]
+        else:
+            if len(inputs.shape) == 1:
+                inputs = inputs.unsqueeze(1)
+            if len(targets.shape) == 1:
+                targets = targets.unsqueeze(1)
+            length = 1
+
+        def tanimoto(y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
+            scale = 1.0 / self.depth
+            tpl = (y * yhat).sum(dim=0)
+            numerator = tpl + self.smooth
+            sq_sum = (y**2 + yhat**2).sum(dim=0)
+            denominator = torch.zeros(length, dtype=inputs.dtype).to(device=inputs.device)
+            for d in range(0, self.depth):
+                a = 2**d
+                b = -(2.0 * a - 1.0)
+                denominator += torch.reciprocal((a * sq_sum) + (b * tpl) + self.smooth)
+
+            return numerator * denominator * scale
+
+        score = tanimoto(targets, inputs)
+
+        return (1.0 - score).mean()
+
+
 class TanimotoDistLoss(torch.nn.Module):
     """Tanimoto distance loss
 
@@ -79,11 +145,11 @@ class TanimotoDistLoss(torch.nn.Module):
         """
         inputs, targets = self.preprocessor(inputs, targets)
 
-        intersection = (targets * inputs).sum(dim=0)
-        sum_ = (targets**2 + inputs**2).sum(dim=0)
-        num_ = intersection + self.smooth
-        den_ = (sum_ - intersection) + self.smooth
-        tanimoto = num_ / den_
+        tpl = (targets * inputs).sum(dim=0)
+        sq_sum = (targets**2 + inputs**2).sum(dim=0)
+        numerator = tpl + self.smooth
+        denominator = (sq_sum - tpl) + self.smooth
+        tanimoto = numerator / denominator
         loss = 1.0 - tanimoto
 
         if self.weight is not None:
