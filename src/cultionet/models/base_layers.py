@@ -279,7 +279,8 @@ class ResidualConv(torch.nn.Module):
             conv_batchnorm_activate2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
-                kernel_size=1
+                kernel_size=3,
+                padding=1
             ),
             conv_batchnorm_activate2d(
                 in_channels=out_channels,
@@ -287,11 +288,6 @@ class ResidualConv(torch.nn.Module):
                 kernel_size=3,
                 padding=2,
                 dilation=2
-            ),
-            conv_batchnorm_activate2d(
-                in_channels=out_channels,
-                out_channels=out_channels,
-                kernel_size=1
             )
         ]
         if channel_attention:
@@ -325,8 +321,8 @@ class ResidualConvRCAB(torch.nn.Module):
             torch.nn.Conv2d(
                 in_channels,
                 out_channels,
-                kernel_size=1,
-                padding=0
+                kernel_size=3,
+                padding=1
             )
         ]
 
@@ -338,6 +334,14 @@ class ResidualConvRCAB(torch.nn.Module):
                     channel_attention=channel_attention
                 )
             ]
+        layers += [
+            torch.nn.Conv2d(
+                out_channels,
+                out_channels,
+                kernel_size=3,
+                padding=1
+            )
+        ]
 
         self.seq = torch.nn.Sequential(*layers)
         self.expand = conv_batchnorm_activate2d(
@@ -378,6 +382,12 @@ class PoolResidualConv(torch.nn.Module):
                     out_channels,
                     channel_attention=channel_attention,
                     res_blocks=res_blocks
+                ),
+                torch.nn.Conv2d(
+                    out_channels,
+                    out_channels,
+                    kernel_size=3,
+                    padding=1
                 )
             ]
 
