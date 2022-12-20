@@ -57,16 +57,16 @@ class CultioNet(torch.nn.Module):
             num_classes_last=num_classes_last,
             crop_type_layer=True if self.num_classes > 2 else False
         )
-        # self.temporal_conv = TemporalConv(
-        #     in_channels=self.ds_num_bands,
-        #     in_time=self.ds_num_time,
-        #     out_channels=1
-        # )
+        self.temporal_conv = TemporalConv(
+            in_channels=self.ds_num_bands,
+            in_time=self.ds_num_time,
+            out_channels=1
+        )
         # Local 1 = hidden dimensions
         # Local 2 = crop (0|1)
         # Last = crop-type (2..N)
         base_in_channels = (
-            # self.ds_num_time
+            self.ds_num_time
             + star_rnn_hidden_dim * (star_rnn_n_layers - 1)
             + num_classes_last
         )
@@ -102,12 +102,13 @@ class CultioNet(torch.nn.Module):
         logits_star_l2 = self.cg(logits_star_l2)
         logits_star_last = self.cg(logits_star_last)
 
-        # logits_conv3d = self.temporal_conv(time_stream)
-        # logits_conv3d = self.cg(logits_conv3d)
+        logits_conv3d = self.temporal_conv(time_stream)
+        logits_conv3d = self.cg(logits_conv3d)
 
         # CONCAT
         h = torch.cat(
             [
+                logits_conv3d,
                 logits_star_l2,
                 logits_star_last
             ], dim=1
