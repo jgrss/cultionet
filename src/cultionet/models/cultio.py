@@ -77,7 +77,7 @@ class CultioNet(torch.nn.Module):
             out_mask_channels=2,
             init_filter=self.filters,
             attention=True,
-            res_blocks=0
+            res_blocks=2
         )
 
     def forward(
