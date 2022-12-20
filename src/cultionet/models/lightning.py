@@ -469,6 +469,7 @@ class CultioLitModel(pl.LightningModule):
             self.edge_class = edge_class
         else:
             self.edge_class = num_classes
+        self.depth = 1
 
         self.cultionet_model = CultioNet(
             ds_features=num_features,
@@ -550,6 +551,24 @@ class CultioLitModel(pl.LightningModule):
             crop_type = self.softmax(crop_type)
 
         return edge, crop, crop_type
+
+    def on_train_epoch_start(self):
+        """
+        Set the depth for the d hyperparameter in the Tanimoto loss
+
+        Source:
+            https://arxiv.org/pdf/2009.02062.pdf
+        """
+        # Get the current learning rate from the optimizer
+        lr = self.optimizers().optimizer.param_groups[0]['lr']
+        if lr == self.learning_rate:
+            self.depth = 1
+        elif 1e-5 < lr < 1e-3:
+            self.depth = 10
+        else:
+            self.depth = 20
+
+        self.configure_loss()
 
     def on_validation_epoch_end(self, *args, **kwargs):
         """Save the model on validation end
@@ -750,11 +769,14 @@ class CultioLitModel(pl.LightningModule):
             )
 
     def configure_loss(self):
-        self.dist_loss = TanimotoComplementLoss(targets_are_labels=False)
-        self.edge_loss = TanimotoComplementLoss()
+        self.dist_loss = TanimotoComplementLoss(
+            depth=self.depth,
+            targets_are_labels=False
+        )
+        self.edge_loss = TanimotoComplementLoss(depth=self.depth)
         self.boundary_loss = BoundaryLoss()
-        self.crop_loss = TanimotoComplementLoss()
-        self.crop_rnn_loss = TanimotoComplementLoss()
+        self.crop_loss = TanimotoComplementLoss(depth=self.depth)
+        self.crop_rnn_loss = TanimotoComplementLoss(depth=self.depth)
         if self.num_classes > 2:
             self.crop_type_loss = CrossEntropyLoss(
                 weight=self.class_weights
