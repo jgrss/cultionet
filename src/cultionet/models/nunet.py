@@ -886,7 +886,7 @@ class UNet3Psi(torch.nn.Module):
         return out
 
 
-class ResUNet3PsiAttention(torch.nn.Module):
+class ResUNet3Psi(torch.nn.Module):
     """Residual UNet+++ with Psi-Net (Multi-head streams) and Attention
 
     References:
@@ -905,7 +905,7 @@ class ResUNet3PsiAttention(torch.nn.Module):
         attention: bool = False,
         res_blocks: int = 0
     ):
-        super(ResUNet3PsiAttention, self).__init__()
+        super(ResUNet3Psi, self).__init__()
 
         self.attention = attention
 
@@ -954,11 +954,11 @@ class ResUNet3PsiAttention(torch.nn.Module):
             channels[2], channels[0], pool_size=2,
             channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
-        self.conv3_0_3_1_con = SingleConv(channels[3], channels[0])
-        self.conv4_0_3_1_con = SingleConv(channels[4], channels[0])
-        self.conv3_1 = SingleConv(up_channels, up_channels)
-        self.conv3_1_skip1 = SingleConv(up_channels*2, up_channels)
-        self.conv3_1_skip2 = SingleConv(up_channels*2, up_channels)
+        self.conv3_0_3_1_con = ResidualConv(channels[3], channels[0], dilations=dilations)
+        self.conv4_0_3_1_con = ResidualConv(channels[4], channels[0], dilations=dilations)
+        self.conv3_1 = ResidualConv(up_channels, up_channels, dilations=dilations)
+        self.conv3_1_skip1 = ResidualConv(up_channels*2, up_channels, dilations=dilations)
+        self.conv3_1_skip2 = ResidualConv(up_channels*2, up_channels, dilations=dilations)
 
         # Connect 2
         self.conv0_0_2_2_con = PoolResidualConv(
@@ -969,35 +969,35 @@ class ResUNet3PsiAttention(torch.nn.Module):
             channels[1], channels[0], pool_size=2,
             channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
-        self.conv2_0_2_2_con = SingleConv(channels[2], channels[0])
-        self.conv3_1_2_2_con = SingleConv(up_channels, channels[0])
-        self.conv4_0_2_2_con = SingleConv(channels[4], channels[0])
-        self.conv2_2 = SingleConv(up_channels, up_channels)
-        self.conv2_2_skip1 = SingleConv(up_channels*2, up_channels)
-        self.conv2_2_skip2 = SingleConv(up_channels*2, up_channels)
+        self.conv2_0_2_2_con = ResidualConv(channels[2], channels[0], dilations=dilations)
+        self.conv3_1_2_2_con = ResidualConv(up_channels, channels[0], dilations=dilations)
+        self.conv4_0_2_2_con = ResidualConv(channels[4], channels[0], dilations=dilations)
+        self.conv2_2 = ResidualConv(up_channels, up_channels, dilations=dilations)
+        self.conv2_2_skip1 = ResidualConv(up_channels*2, up_channels, dilations=dilations)
+        self.conv2_2_skip2 = ResidualConv(up_channels*2, up_channels, dilations=dilations)
 
         # Connect 3
         self.conv0_0_1_3_con = PoolResidualConv(
             channels[0], channels[0], pool_size=2,
             channel_attention=self.attention, res_blocks=res_blocks, dilations=dilations
         )
-        self.conv1_0_1_3_con = SingleConv(channels[1], channels[0])
-        self.conv2_2_1_3_con = SingleConv(up_channels, channels[0])
-        self.conv3_1_1_3_con = SingleConv(up_channels, channels[0])
-        self.conv4_0_1_3_con = SingleConv(channels[4], channels[0])
-        self.conv1_3 = SingleConv(up_channels, up_channels)
-        self.conv1_3_skip1 = SingleConv(up_channels*2, up_channels)
-        self.conv1_3_skip2 = SingleConv(up_channels*2, up_channels)
+        self.conv1_0_1_3_con = ResidualConv(channels[1], channels[0], dilations=dilations)
+        self.conv2_2_1_3_con = ResidualConv(up_channels, channels[0], dilations=dilations)
+        self.conv3_1_1_3_con = ResidualConv(up_channels, channels[0], dilations=dilations)
+        self.conv4_0_1_3_con = ResidualConv(channels[4], channels[0], dilations=dilations)
+        self.conv1_3 = ResidualConv(up_channels, up_channels, dilations=dilations)
+        self.conv1_3_skip1 = ResidualConv(up_channels*2, up_channels, dilations=dilations)
+        self.conv1_3_skip2 = ResidualConv(up_channels*2, up_channels, dilations=dilations)
 
         # Connect 4
-        self.conv0_0_0_4_con = SingleConv(channels[0], channels[0])
-        self.conv1_3_0_4_con = SingleConv(up_channels, channels[0])
-        self.conv2_2_0_4_con = SingleConv(up_channels, channels[0])
-        self.conv3_1_0_4_con = SingleConv(up_channels, channels[0])
-        self.conv4_0_0_4_con = SingleConv(channels[4], channels[0])
-        self.conv0_4 = SingleConv(up_channels, up_channels)
-        self.conv0_4_skip1 = SingleConv(up_channels*2, up_channels)
-        self.conv0_4_skip2 = SingleConv(up_channels*2, up_channels)
+        self.conv0_0_0_4_con = ResidualConv(channels[0], channels[0], dilations=dilations)
+        self.conv1_3_0_4_con = ResidualConv(up_channels, channels[0], dilations=dilations)
+        self.conv2_2_0_4_con = ResidualConv(up_channels, channels[0], dilations=dilations)
+        self.conv3_1_0_4_con = ResidualConv(up_channels, channels[0], dilations=dilations)
+        self.conv4_0_0_4_con = ResidualConv(channels[4], channels[0], dilations=dilations)
+        self.conv0_4 = ResidualConv(up_channels, up_channels, dilations=dilations)
+        self.conv0_4_skip1 = ResidualConv(up_channels*2, up_channels, dilations=dilations)
+        self.conv0_4_skip2 = ResidualConv(up_channels*2, up_channels, dilations=dilations)
 
         self.final_dist = torch.nn.Conv2d(
             up_channels,
