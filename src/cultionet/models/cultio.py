@@ -26,7 +26,9 @@ class CultioNet(torch.nn.Module):
         filters: int = 64,
         star_rnn_hidden_dim: int = 64,
         star_rnn_n_layers: int = 4,
-        num_classes: int = 2
+        num_classes: int = 2,
+        model_type: str = 'UNet3Psi',
+        attention_gamma: torch.Tensor = None
     ):
         super(CultioNet, self).__init__()
 
@@ -63,21 +65,26 @@ class CultioNet(torch.nn.Module):
             + star_rnn_hidden_dim * (star_rnn_n_layers - 1)
             + num_classes_last
         )
-        # self.mask_model = UNet3Psi(
-        #     in_channels=base_in_channels,
-        #     out_dist_channels=1,
-        #     out_edge_channels=2,
-        #     out_mask_channels=2,
-        #     init_filter=self.filters
-        # )
-        self.mask_model = ResUNet3Psi(
-            in_channels=base_in_channels,
-            out_dist_channels=1,
-            out_edge_channels=2,
-            out_mask_channels=2,
-            init_filter=self.filters,
-            attention=True
-        )
+        if model_type == 'UNet3Psi':
+            self.mask_model = UNet3Psi(
+                in_channels=base_in_channels,
+                out_dist_channels=1,
+                out_edge_channels=2,
+                out_mask_channels=2,
+                init_filter=self.filters
+            )
+        elif model_type == 'ResUNet3Psi':
+            self.mask_model = ResUNet3Psi(
+                in_channels=base_in_channels,
+                out_dist_channels=1,
+                out_edge_channels=2,
+                out_mask_channels=2,
+                init_filter=self.filters,
+                attention=True,
+                attention_gamma=attention_gamma
+            )
+        else:
+            raise NameError('Model type not supported.')
 
     def forward(
         self, data: Data
