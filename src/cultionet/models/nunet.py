@@ -19,7 +19,6 @@ from .base_layers import (
 )
 
 import torch
-from torch_geometric import nn
 
 
 def weights_init_kaiming(m):
@@ -904,13 +903,11 @@ class ResUNet3PsiAttention(torch.nn.Module):
         out_edge_channels: int = 2,
         out_mask_channels: int = 2,
         init_filter: int = 64,
-        deep_supervision: bool = False,
         attention: bool = False,
         res_blocks: int = 0
     ):
         super(ResUNet3PsiAttention, self).__init__()
 
-        self.deep_supervision = deep_supervision
         self.attention = attention
 
         init_filter = int(init_filter)
