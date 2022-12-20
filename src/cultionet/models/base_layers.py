@@ -173,6 +173,132 @@ class AttentionGate(torch.nn.Module):
         return self.final(x * h)
 
 
+class TanimotoComplement(torch.nn.Module):
+    """Tanimoto distance
+
+    References:
+        https://www.mdpi.com/2072-4292/14/22/5738
+        https://arxiv.org/abs/2009.02062
+        https://github.com/waldnerf/decode/blob/main/FracTAL_ResUNet/nn/layers/ftnmt.py
+    """
+    def __init__(
+        self,
+        smooth: float = 1e-5,
+        depth: int = 5,
+        dim: T.Union[int, T.Sequence[int]] = 0,
+        targets_are_labels: bool = True
+    ):
+        super(TanimotoComplement, self).__init__()
+
+        self.smooth = smooth
+        self.depth = depth
+        self.dim = dim
+        self.targets_are_labels = targets_are_labels
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor
+    ) -> torch.Tensor:
+        """Performs a single forward pass
+
+        Args:
+            inputs: Predictions from model (probabilities or labels).
+            targets: Ground truth values.
+
+        Returns:
+            Tanimoto distance loss (float)
+        """
+        if self.depth == 1:
+            scale = 1.0
+        else:
+            scale = 1.0 / self.depth
+
+        def tanimoto(y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
+            tpl = torch.sum(y * yhat, dim=self.dim, keepdim=True)
+            numerator = tpl + self.smooth
+            sq_sum = torch.sum(y**2 + yhat**2, dim=self.dim, keepdim=True)
+            denominator = torch.zeros(1, dtype=inputs.dtype).to(device=inputs.device)
+            for d in range(0, self.depth):
+                a = 2**d
+                b = -(2.0 * a - 1.0)
+                denominator = denominator + torch.reciprocal((a * sq_sum) + (b * tpl) + self.smooth)
+
+            return numerator * denominator * scale
+
+        l1 = tanimoto(targets, inputs)
+        l2 = tanimoto(1.0 - targets, 1.0 - inputs)
+        score = (l1 + l2) * 0.5
+
+        return score
+
+
+class FractalAttention(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        depth: int = 5
+    ):
+        """
+        Reference:
+            https://arxiv.org/pdf/2009.02062.pdf
+        """
+        super(FractalAttention, self).__init__()
+
+        self.query = torch.nn.Sequential(
+            ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1,
+                add_activation=False
+            ),
+            torch.nn.Sigmoid()
+        )
+        self.key = torch.nn.Sequential(
+            ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1,
+                add_activation=False
+            ),
+            torch.nn.Sigmoid()
+        )
+        self.values = torch.nn.Sequential(
+            ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1,
+                add_activation=False
+            ),
+            torch.nn.Sigmoid()
+        )
+
+        self.spatial_sim = TanimotoComplement(depth=depth, dim=1)
+        self.channel_sim = TanimotoComplement(depth=depth, dim=[2, 3])
+        self.norm = torch.nn.BatchNorm2d(out_channels)
+
+    def forward(
+        self, x: torch.Tensor) -> torch.Tensor:
+        q = self.query(x)
+        k = self.key(x)
+        v = self.values(x)
+
+        attention_spatial = self.spatial_sim(q, k)
+        v_spatial = attention_spatial * v
+
+        attention_channel = self.channel_sim(q, k)
+        v_channel = attention_channel * v
+
+        v_channel_spatial = (v_spatial + v_channel) * 0.5
+        v_channel_spatial = self.norm(v_channel_spatial)
+
+        return v_channel_spatial
+
+
 class ChannelAttention(torch.nn.Module):
     """Residual Channel Attention Block
 
@@ -278,10 +404,14 @@ class ResidualConv(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
+        fractal_attention: bool = False,
         channel_attention: bool = False,
         dilations: T.List[int] = None
     ):
         super(ResidualConv, self).__init__()
+
+        assert not all([fractal_attention, channel_attention]), \
+            'Only one attention method should be used.'
 
         if dilations is None:
             dilations = [2]
@@ -304,6 +434,12 @@ class ResidualConv(torch.nn.Module):
                     dilation=dilation
                 )
             ]
+        self.fractal = None
+        if fractal_attention:
+            self.fractal = FractalAttention(
+                in_channels=in_channels,
+                out_channels=out_channels
+            )
         if channel_attention:
             layers += [ChannelAttention(channels=out_channels)]
 
@@ -316,7 +452,15 @@ class ResidualConv(torch.nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.seq(x) + self.expand(x)
+        out = self.seq(x) + self.expand(x)
+
+        if self.fractal is not None:
+            f = self.fractal(x)
+            out = out * f
+        else:
+            import ipdb; ipdb.set_trace()
+
+        return f
 
 
 class ResidualConvRCAB(torch.nn.Module):
@@ -381,6 +525,7 @@ class PoolResidualConv(torch.nn.Module):
         pool_size: int = 2,
         dropout: T.Optional[float] = None,
         dilations: T.List[int] = None,
+        fractal_attention: bool = False,
         channel_attention: bool = False,
         res_blocks: int = 0
     ):
@@ -397,6 +542,7 @@ class PoolResidualConv(torch.nn.Module):
                 ResidualConvRCAB(
                     in_channels,
                     out_channels,
+                    fractal_attention=fractal_attention,
                     channel_attention=channel_attention,
                     res_blocks=res_blocks
                 ),
@@ -413,6 +559,7 @@ class PoolResidualConv(torch.nn.Module):
                 ResidualConv(
                     in_channels,
                     out_channels,
+                    fractal_attention=fractal_attention,
                     channel_attention=channel_attention,
                     dilations=dilations
                 )
