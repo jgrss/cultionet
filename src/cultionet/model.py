@@ -615,22 +615,26 @@ class LightningGTiffWriter(BasePredictionWriter):
                 int(batch.width[batch_index])-int(batch.col_pad_after[batch_index])
             )
         )
-        distance_batch = distance_batch.reshape(
-            int(batch.height[batch_index]), int(batch.width[batch_index])
-        )[pad_slice2d].contiguous().view(-1)[:, None]
         rheight = pad_slice2d[0].stop - pad_slice2d[0].start
         rwidth = pad_slice2d[1].stop - pad_slice2d[1].start
-        edge_batch = edge_batch.t().reshape(
-            int(batch.height[batch_index]), int(batch.width[batch_index])
-        )[pad_slice2d].contiguous().view(-1)[:, None]
-        crop_batch = crop_batch.t().reshape(
-            2, int(batch.height[batch_index]), int(batch.width[batch_index])
-        )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, 2)
+        def reshaper(x: torch.Tensor, channel_dims: int) -> torch.Tensor:
+            if channel_dims == 1:
+                return x.reshape(
+                    int(batch.height[batch_index]), int(batch.width[batch_index])
+                )[pad_slice2d].contiguous().view(-1)[:, None]
+            else:
+                return x.t().reshape(
+                    channel_dims,
+                    int(batch.height[batch_index]),
+                    int(batch.width[batch_index])
+                )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, channel_dims)
+
+        distance_batch = reshaper(distance_batch, channel_dims=1)
+        edge_batch = reshaper(edge_batch, channel_dims=2)
+        crop_batch = reshaper(crop_batch, channel_dims=2)
         if crop_type_batch is not None:
             num_classes = crop_type_batch.size(1)
-            crop_type_batch = crop_type_batch.t().reshape(
-                num_classes, int(batch.height[batch_index]), int(batch.width[batch_index])
-            )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, num_classes)
+            crop_type_batch = reshaper(crop_type_batch, channel_dims=num_classes)
 
         return distance_batch, edge_batch, crop_batch, crop_type_batch
 
