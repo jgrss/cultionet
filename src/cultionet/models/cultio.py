@@ -27,8 +27,7 @@ class CultioNet(torch.nn.Module):
         star_rnn_hidden_dim: int = 64,
         star_rnn_n_layers: int = 4,
         num_classes: int = 2,
-        model_type: str = 'UNet3Psi',
-        attention_gamma: torch.Tensor = None
+        model_type: str = 'UNet3Psi'
     ):
         super(CultioNet, self).__init__()
 
@@ -80,7 +79,7 @@ class CultioNet(torch.nn.Module):
                 out_edge_channels=2,
                 out_mask_channels=2,
                 init_filter=self.filters,
-                attention=True
+                attention=False
             )
         else:
             raise NameError('Model type not supported.')
