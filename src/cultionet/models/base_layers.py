@@ -174,12 +174,34 @@ class AttentionGate(torch.nn.Module):
 
 
 class TanimotoComplement(torch.nn.Module):
-    """Tanimoto distance
+    """Tanimoto distance with complement
 
-    References:
-        https://www.mdpi.com/2072-4292/14/22/5738
-        https://arxiv.org/abs/2009.02062
-        https://github.com/waldnerf/decode/blob/main/FracTAL_ResUNet/nn/layers/ftnmt.py
+    Adapted from publications and source code below:
+
+        CSIRO BSTD/MIT LICENSE
+
+        Redistribution and use in source and binary forms, with or without modification, are permitted provided that
+        the following conditions are met:
+
+        1. Redistributions of source code must retain the above copyright notice, this list of conditions and the
+            following disclaimer.
+        2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and
+            the following disclaimer in the documentation and/or other materials provided with the distribution.
+        3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or
+            promote products derived from this software without specific prior written permission.
+
+        THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+        INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+        DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+        SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+        SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+        WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+        USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+        References:
+            https://www.mdpi.com/2072-4292/14/22/5738
+            https://arxiv.org/abs/2009.02062
+            https://github.com/waldnerf/decode/blob/main/FracTAL_ResUNet/nn/layers/ftnmt.py
     """
     def __init__(
         self,
@@ -234,16 +256,40 @@ class TanimotoComplement(torch.nn.Module):
 
 
 class FractalAttention(torch.nn.Module):
+    """Fractal Tanimoto Attention Layer (FracTAL)
+
+    Adapted from publications and source code below:
+
+        CSIRO BSTD/MIT LICENSE
+
+        Redistribution and use in source and binary forms, with or without modification, are permitted provided that
+        the following conditions are met:
+
+        1. Redistributions of source code must retain the above copyright notice, this list of conditions and the
+            following disclaimer.
+        2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and
+            the following disclaimer in the documentation and/or other materials provided with the distribution.
+        3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or
+            promote products derived from this software without specific prior written permission.
+
+        THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+        INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+        DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+        SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+        SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+        WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+        USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+        Reference:
+            https://arxiv.org/pdf/2009.02062.pdf
+            https://github.com/waldnerf/decode/blob/9e922a2082e570e248eaee10f7a1f2f0bd852b42/FracTAL_ResUNet/nn/units/fractal_resnet.py
+    """
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
         depth: int = 5
     ):
-        """
-        Reference:
-            https://arxiv.org/pdf/2009.02062.pdf
-        """
         super(FractalAttention, self).__init__()
 
         self.query = torch.nn.Sequential(
@@ -281,8 +327,7 @@ class FractalAttention(torch.nn.Module):
         self.channel_sim = TanimotoComplement(depth=depth, dim=[2, 3])
         self.norm = torch.nn.BatchNorm2d(out_channels)
 
-    def forward(
-        self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         q = self.query(x)
         k = self.key(x)
         v = self.values(x)
