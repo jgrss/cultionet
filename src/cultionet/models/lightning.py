@@ -532,6 +532,18 @@ class CultioLitModel(pl.LightningModule):
 
         return predictions
 
+    def get_true_labels(
+        self, batch: Data
+    ) -> T.Tuple[torch.Tensor, torch.Tensor]:
+        edge_true = torch.where(
+            batch.y == self.edge_class, 1, 0
+        ).long()
+        crop_true = torch.where(
+            (batch.y > 0) & (batch.y != self.edge_class), 1, 0
+        ).long()
+
+        return edge_true, crop_true
+
     def softmax(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
         return F.softmax(x, dim=dim, dtype=x.dtype)
 
@@ -595,9 +607,7 @@ class CultioLitModel(pl.LightningModule):
         Returns:
             Total loss
         """
-        true_edge = batch.y.eq(self.edge_class).long()
-        # in case of multi-class, `true_crop` = 1, 2, etc.
-        true_crop = (batch.y.gt(0) & batch.y.ne(self.edge_class)).long()
+        true_edge, true_crop = self.get_true_labels(batch)
 
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
@@ -661,10 +671,7 @@ class CultioLitModel(pl.LightningModule):
             )
         )
         # Get the true edge and crop labels
-        edge_ytrue = batch.y.eq(self.edge_class).long()
-        crop_ytrue = torch.where(
-            (batch.y > 0) & (batch.y != self.edge_class), 1, 0
-        ).long()
+        edge_ytrue, crop_ytrue = self.get_true_labels(batch)
         # F1-score
         edge_score = self.edge_f1(edge_ypred, edge_ytrue)
         crop_score = self.crop_f1(crop_ypred, crop_ytrue)
