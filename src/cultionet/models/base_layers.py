@@ -372,9 +372,7 @@ class SigmoidCrisp(torch.nn.Module):
         Reference:
             https://github.com/waldnerf/decode/blob/9e922a2082e570e248eaee10f7a1f2f0bd852b42/FracTAL_ResUNet/nn/activations/sigmoid_crisp.py
     """
-    def __init__(
-        self, smooth: float = 1e-2
-    ):
+    def __init__(self, smooth: float = 1e-2):
         super(SigmoidCrisp, self).__init__()
 
         self.smooth = smooth
