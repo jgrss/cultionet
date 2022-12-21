@@ -514,20 +514,18 @@ class CultioLitModel(pl.LightningModule):
         """
         predictions = self.forward(batch, batch_idx)
         if self.edge_temperature is not None:
-            if predictions['edge'].shape[1] > 1:
-                predictions['edge'] = scale_logits(
-                    predictions['edge'],
-                    self.edge_temperature
-                )
+            predictions['edge'] = scale_logits(
+                predictions['edge'],
+                self.edge_temperature
+            )
         if self.crop_temperature is not None:
             predictions['crop'] = scale_logits(
                 predictions['crop'],
                 self.crop_temperature
             )
-        if predictions['edge'].shape[1] > 1:
-            predictions['edge'] = self.logits_to_probas(
-                predictions['edge']
-            )
+        predictions['edge'] = self.logits_to_probas(
+            predictions['edge']
+        )
         predictions['crop'] = self.logits_to_probas(
             predictions['crop']
         )
@@ -601,7 +599,7 @@ class CultioLitModel(pl.LightningModule):
             (true_crop == 1) | (true_edge == 1), 1.0 - batch.bdist, 0
         )
         boundary_loss = self.boundary_loss(
-            predictions['edge'] if predictions['edge'].shape[1] == 1 else predictions['edge'][:, 1],
+            self.softmax(predictions['edge'], dim=1)[:, 1],
             boundary_mask,
             batch
         )
@@ -653,6 +651,9 @@ class CultioLitModel(pl.LightningModule):
             batch.bdist.contiguous().view(-1)
         )
         # Get the class probabilities
+        edge = self.logits_to_probas(
+            predictions['edge']
+        )
         crop = self.logits_to_probas(
             predictions['crop']
         )
@@ -660,13 +661,7 @@ class CultioLitModel(pl.LightningModule):
             predictions['crop_type']
         )
         # Take the argmax of the class probabilities
-        if predictions['edge'].shape[1] == 1:
-            edge_ypred = (predictions['edge'] > 0.5).long()
-        else:
-            edge = self.logits_to_probas(
-                predictions['edge']
-            )
-            edge_ypred = edge.argmax(dim=1).long()
+        edge_ypred = edge.argmax(dim=1).long()
         crop_ypred = crop.argmax(dim=1).long()
         # Get the true edge and crop labels
         edge_ytrue = batch.y.eq(self.edge_class).long()
