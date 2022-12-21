@@ -63,6 +63,35 @@ class ConvBlock2d(torch.nn.Module):
         return self.seq(x)
 
 
+class ResBlock2d(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        padding: int = 0,
+        dilation: int = 1
+    ):
+        super(ResBlock2d, self).__init__()
+
+        layers = [
+            torch.nn.BatchNorm2d(in_channels),
+            torch.nn.LeakyReLU(inplace=False),
+            torch.nn.Conv2d(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=padding,
+                dilation=dilation
+            )
+        ]
+
+        self.seq = torch.nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
+
+
 class ConvBlock3d(torch.nn.Module):
     def __init__(
         self,
@@ -421,7 +450,7 @@ class PoolConvSingle(torch.nn.Module):
 
 
 class PoolConv(torch.nn.Module):
-    """Max pooling with dropout
+    """Max pooling with (optional) dropout
     """
     def __init__(
         self,
@@ -449,6 +478,7 @@ class ResidualConv(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
+        init_conv: bool = False,
         fractal_attention: bool = False,
         channel_attention: bool = False,
         dilations: T.List[int] = None
@@ -458,27 +488,40 @@ class ResidualConv(torch.nn.Module):
         assert not all([fractal_attention, channel_attention]), \
             'Only one attention method should be used.'
 
-        if dilations is None:
-            dilations = [2]
+        init_in_channels = in_channels
 
-        layers = [
-            ConvBlock2d(
+        layers = []
+        if init_conv:
+            layers = [
+                torch.nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=3,
+                    padding=1
+                )
+            ]
+            in_channels = out_channels
+
+        layers += [
+            ResBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1
             )
         ]
-        for dilation in dilations:
-            layers += [
-                ConvBlock2d(
-                    in_channels=out_channels,
-                    out_channels=out_channels,
-                    kernel_size=3,
-                    padding=dilation,
-                    dilation=dilation
-                )
-            ]
+        if dilations is not None:
+            for dilation in dilations:
+                layers += [
+                    ResBlock2d(
+                        in_channels=out_channels,
+                        out_channels=out_channels,
+                        kernel_size=3,
+                        padding=dilation,
+                        dilation=dilation
+                    )
+                ]
+
         self.fractal_weights = None
         if fractal_attention:
             self.fractal_weights = FractalAttention(
@@ -490,21 +533,21 @@ class ResidualConv(torch.nn.Module):
             layers += [ChannelAttention(channels=out_channels)]
 
         self.seq = torch.nn.Sequential(*layers)
-        self.expand = ConvBlock2d(
-            in_channels=in_channels,
+        self.skip = ConvBlock2d(
+            in_channels=init_in_channels,
             out_channels=out_channels,
             kernel_size=1,
             add_activation=False
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.seq(x) + self.expand(x)
+        out = self.seq(x) + self.skip(x)
 
         if self.fractal_weights is not None:
             # Fractal attention
-            attention = self.fractal_weights(x)
-            attention *= self.gamma
-            attention += 1.0
+            attention= self.fractal_weights(x)
+            # 1 + γA
+            attention = attention * self.gamma + 1.0
             out *= attention
 
         return out
