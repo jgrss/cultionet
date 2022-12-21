@@ -109,7 +109,11 @@ class ModelOutputs(object):
                 self.edge, dim=1, dtype=self.crop_type.dtype
             )[:, 1]
         else:
-            self.edge_probas = self.edge[:, 1]
+            if self.edge.shape[1] > 1:
+                # Two-class output
+                self.edge_probas = self.edge[:, 1]
+            else:
+                self.edge_probas = self.edge
         self.edge_probas = self._clip_and_reshape(self.edge_probas, w_pad)
 
         # Get the crop probabilities
