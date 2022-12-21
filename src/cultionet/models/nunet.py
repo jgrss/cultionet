@@ -643,14 +643,11 @@ class UNet3Psi(torch.nn.Module):
         self.conv0_4_skip_edge = DoubleConv(up_channels*2, up_channels)
         self.conv0_4_skip_mask = DoubleConv(up_channels*2, up_channels)
 
-        self.final_dist = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                out_dist_channels,
-                kernel_size=1,
-                padding=0
-            ),
-            torch.nn.Sigmoid()
+        self.final_dist = torch.nn.Conv2d(
+            up_channels,
+            out_dist_channels,
+            kernel_size=1,
+            padding=0
         )
         self.final_edge = torch.nn.Conv2d(
             up_channels,
