@@ -597,59 +597,56 @@ class UNet3Psi(torch.nn.Module):
         self.up = model_utils.UpSample()
 
         self.conv0_0 = SingleConv(in_channels, channels[0])
-        self.conv1_0 = PoolConvSingle(channels[0], channels[1], dropout=0.25)
-        self.conv2_0 = PoolConvSingle(channels[1], channels[2], dropout=0.5)
-        self.conv3_0 = PoolConvSingle(channels[2], channels[3], dropout=0.5)
-        self.conv4_0 = PoolConvSingle(channels[3], channels[4], dropout=0.5)
+        self.conv1_0 = PoolConv(channels[0], channels[1])
+        self.conv2_0 = PoolConv(channels[1], channels[2])
+        self.conv3_0 = PoolConv(channels[2], channels[3])
+        self.conv4_0 = PoolConv(channels[3], channels[4])
 
         # Connect 3
-        self.conv0_0_3_1_con = PoolConvSingle(channels[0], channels[0], pool_size=8)
-        self.conv1_0_3_1_con = PoolConvSingle(channels[1], channels[0], pool_size=4)
-        self.conv2_0_3_1_con = PoolConvSingle(channels[2], channels[0], pool_size=2)
-        self.conv3_0_3_1_con = SingleConv(channels[3], channels[0])
-        self.conv4_0_3_1_con = SingleConv(channels[4], channels[0])
-        self.conv3_1 = SingleConv(up_channels, up_channels)
-        self.conv3_1_skip_edge = SingleConv(up_channels*2, up_channels)
-        self.conv3_1_skip_mask = SingleConv(up_channels*2, up_channels)
+        self.conv0_0_3_1_con = PoolConv(channels[0], channels[0], pool_size=8)
+        self.conv1_0_3_1_con = PoolConv(channels[1], channels[0], pool_size=4)
+        self.conv2_0_3_1_con = PoolConv(channels[2], channels[0], pool_size=2)
+        self.conv3_0_3_1_con = DoubleConv(channels[3], channels[0])
+        self.conv4_0_3_1_con = DoubleConv(channels[4], channels[0])
+        self.conv3_1 = DoubleConv(up_channels, up_channels)
+        self.conv3_1_skip_edge = DoubleConv(up_channels*2, up_channels)
+        self.conv3_1_skip_mask = DoubleConv(up_channels*2, up_channels)
 
         # Connect 2
-        self.conv0_0_2_2_con = PoolConvSingle(channels[0], channels[0], pool_size=4)
-        self.conv1_0_2_2_con = PoolConvSingle(channels[1], channels[0], pool_size=2)
-        self.conv2_0_2_2_con = SingleConv(channels[2], channels[0])
-        self.conv3_1_2_2_con = SingleConv(up_channels, channels[0])
-        self.conv4_0_2_2_con = SingleConv(channels[4], channels[0])
-        self.conv2_2 = SingleConv(up_channels, up_channels)
-        self.conv2_2_skip_edge = SingleConv(up_channels*2, up_channels)
-        self.conv2_2_skip_mask = SingleConv(up_channels*2, up_channels)
+        self.conv0_0_2_2_con = PoolConv(channels[0], channels[0], pool_size=4)
+        self.conv1_0_2_2_con = PoolConv(channels[1], channels[0], pool_size=2)
+        self.conv2_0_2_2_con = DoubleConv(channels[2], channels[0])
+        self.conv3_1_2_2_con = DoubleConv(up_channels, channels[0])
+        self.conv4_0_2_2_con = DoubleConv(channels[4], channels[0])
+        self.conv2_2 = DoubleConv(up_channels, up_channels)
+        self.conv2_2_skip_edge = DoubleConv(up_channels*2, up_channels)
+        self.conv2_2_skip_mask = DoubleConv(up_channels*2, up_channels)
 
         # Connect 3
-        self.conv0_0_1_3_con = PoolConvSingle(channels[0], channels[0], pool_size=2)
-        self.conv1_0_1_3_con = SingleConv(channels[1], channels[0])
-        self.conv2_2_1_3_con = SingleConv(up_channels, channels[0])
-        self.conv3_1_1_3_con = SingleConv(up_channels, channels[0])
-        self.conv4_0_1_3_con = SingleConv(channels[4], channels[0])
-        self.conv1_3 = SingleConv(up_channels, up_channels)
-        self.conv1_3_skip_edge = SingleConv(up_channels*2, up_channels)
-        self.conv1_3_skip_mask = SingleConv(up_channels*2, up_channels)
+        self.conv0_0_1_3_con = PoolConv(channels[0], channels[0], pool_size=2)
+        self.conv1_0_1_3_con = DoubleConv(channels[1], channels[0])
+        self.conv2_2_1_3_con = DoubleConv(up_channels, channels[0])
+        self.conv3_1_1_3_con = DoubleConv(up_channels, channels[0])
+        self.conv4_0_1_3_con = DoubleConv(channels[4], channels[0])
+        self.conv1_3 = DoubleConv(up_channels, up_channels)
+        self.conv1_3_skip_edge = DoubleConv(up_channels*2, up_channels)
+        self.conv1_3_skip_mask = DoubleConv(up_channels*2, up_channels)
 
         # Connect 4
-        self.conv0_0_0_4_con = SingleConv(channels[0], channels[0])
-        self.conv1_3_0_4_con = SingleConv(up_channels, channels[0])
-        self.conv2_2_0_4_con = SingleConv(up_channels, channels[0])
-        self.conv3_1_0_4_con = SingleConv(up_channels, channels[0])
-        self.conv4_0_0_4_con = SingleConv(channels[4], channels[0])
-        self.conv0_4 = SingleConv(up_channels, up_channels)
-        self.conv0_4_skip_edge = SingleConv(up_channels*2, up_channels)
-        self.conv0_4_skip_mask = SingleConv(up_channels*2, up_channels)
+        self.conv0_0_0_4_con = DoubleConv(channels[0], channels[0])
+        self.conv1_3_0_4_con = DoubleConv(up_channels, channels[0])
+        self.conv2_2_0_4_con = DoubleConv(up_channels, channels[0])
+        self.conv3_1_0_4_con = DoubleConv(up_channels, channels[0])
+        self.conv4_0_0_4_con = DoubleConv(channels[4], channels[0])
+        self.conv0_4 = DoubleConv(up_channels, up_channels)
+        self.conv0_4_skip_edge = DoubleConv(up_channels*2, up_channels)
+        self.conv0_4_skip_mask = DoubleConv(up_channels*2, up_channels)
 
-        self.final_dist = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                out_dist_channels,
-                kernel_size=1,
-                padding=0
-            ),
-            torch.nn.Sigmoid()
+        self.final_dist = torch.nn.Conv2d(
+            up_channels,
+            out_dist_channels,
+            kernel_size=1,
+            padding=0
         )
         self.final_edge = torch.nn.Conv2d(
             up_channels,
@@ -926,9 +923,10 @@ class ResUNet3Psi(torch.nn.Module):
         self.up = model_utils.UpSample()
 
         self.conv0_0 = ResidualConv(
-            in_channels, channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
+            in_channels,
+            channels[0],
+            init_conv=True,
+            fractal_attention=self.attention
         )
         self.conv1_0 = PoolResidualConv(
             channels[0], channels[1],
@@ -946,7 +944,7 @@ class ResUNet3Psi(torch.nn.Module):
             dilations=dilations
         )
         self.conv4_0 = PoolResidualConv(
-            channels[3], channels[4], 
+            channels[3], channels[4],
             fractal_attention=self.attention,
             dilations=dilations
         )
