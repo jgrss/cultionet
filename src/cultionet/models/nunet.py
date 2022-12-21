@@ -9,13 +9,14 @@ import typing as T
 from . import model_utils
 from .base_layers import (
     AttentionGate,
-    SingleConv,
+    ConvBlock2d,
     DoubleConv,
-    ResidualConv,
     Permute,
     PoolConv,
     PoolResidualConv,
-    PoolConvSingle
+    PoolConvSingle,
+    ResidualConv,
+    SingleConv
 )
 
 import torch
