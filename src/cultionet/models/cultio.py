@@ -68,7 +68,7 @@ class CultioNet(torch.nn.Module):
             self.mask_model = UNet3Psi(
                 in_channels=base_in_channels,
                 out_dist_channels=1,
-                out_edge_channels=2,
+                out_edge_channels=1,
                 out_mask_channels=2,
                 init_filter=self.filters
             )
