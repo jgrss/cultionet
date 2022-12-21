@@ -99,14 +99,15 @@ class TanimotoComplementLoss(torch.nn.Module):
             Tanimoto distance loss (float)
         """
         if self.targets_are_labels:
-            inputs, targets = self.preprocessor(inputs, targets)
-            length = inputs.shape[1]
-        else:
-            if len(inputs.shape) == 1:
-                inputs = inputs.unsqueeze(1)
-            if len(targets.shape) == 1:
-                targets = targets.unsqueeze(1)
-            length = 1
+            if inputs.shape[1] > 1:
+                inputs, targets = self.preprocessor(inputs, targets)
+
+        if len(inputs.shape) == 1:
+            inputs = inputs.unsqueeze(1)
+        if len(targets.shape) == 1:
+            targets = targets.unsqueeze(1)
+
+        length = inputs.shape[1]
 
         def tanimoto(y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
             scale = 1.0 / self.depth
