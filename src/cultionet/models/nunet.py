@@ -931,22 +931,22 @@ class ResUNet3Psi(torch.nn.Module):
             dilations=dilations
         )
         self.conv1_0 = PoolResidualConv(
-            channels[0], channels[1], dropout=0.25,
+            channels[0], channels[1],
             fractal_attention=self.attention,
             dilations=dilations
         )
         self.conv2_0 = PoolResidualConv(
-            channels[1], channels[2], dropout=0.5,
+            channels[1], channels[2],
             fractal_attention=self.attention,
             dilations=dilations
         )
         self.conv3_0 = PoolResidualConv(
-            channels[2], channels[3], dropout=0.5,
+            channels[2], channels[3],
             fractal_attention=self.attention,
             dilations=dilations
         )
         self.conv4_0 = PoolResidualConv(
-            channels[3], channels[4], dropout=0.5,
+            channels[3], channels[4], 
             fractal_attention=self.attention,
             dilations=dilations
         )
