@@ -125,6 +125,8 @@ class TanimotoComplementLoss(torch.nn.Module):
             return numerator * denominator * scale
 
         score = tanimoto(targets, inputs)
+        if inputs.shape[1] == 1:
+            score = (score + tanimoto(1.0 - targets, 1.0 - inputs)) * 0.5
 
         return (1.0 - score).mean()
 
