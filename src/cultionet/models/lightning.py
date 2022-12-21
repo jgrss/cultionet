@@ -597,9 +597,7 @@ class CultioLitModel(pl.LightningModule):
         """
         true_edge = batch.y.eq(self.edge_class).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.
-        true_crop = torch.where(
-            (batch.y > 0) & (batch.y != self.edge_class), 1, 0
-        ).long()
+        true_crop = (batch.y.gt(0) & batch.y.ne(self.edge_class)).long()
 
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
