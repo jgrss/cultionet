@@ -218,7 +218,7 @@ def fit(
     partition_name: T.Optional[str] = None,
     partition_column: T.Optional[str] = None,
     batch_size: T.Optional[int] = 4,
-    num_workers: T.Optional[int] = 2,
+    load_batch_workers: T.Optional[int] = 2,
     accumulate_grad_batches: T.Optional[int] = 1,
     filters: T.Optional[int] = 64,
     num_classes: T.Optional[int] = 2,
@@ -254,6 +254,7 @@ def fit(
         partition_name (Optional[str]): The spatial partition file column query name.
         partition_column (Optional[str]): The spatial partition file column name.
         batch_size (Optional[int]): The data batch size.
+        load_batch_workers (Optional[int]): The number of parallel batches to load.
         filters (Optional[int]): The number of initial model filters.
         learning_rate (Optional[float]): The model learning rate.
         epochs (Optional[int]): The number of epochs.
@@ -295,13 +296,13 @@ def fit(
         val_ds=val_ds,
         test_ds=test_dataset,
         batch_size=batch_size,
-        num_workers=num_workers,
+        num_workers=load_batch_workers,
         shuffle=True
     )
     temperature_data_module = EdgeDataModule(
         train_ds=val_ds,
         batch_size=batch_size,
-        num_workers=0,
+        num_workers=load_batch_workers,
         shuffle=True
     )
 
@@ -691,6 +692,7 @@ def predict_lightning(
     ckpt: Path,
     dataset: EdgeDataset,
     batch_size: int,
+    load_batch_workers: int,
     device: str,
     precision: int,
     num_classes: int,
@@ -708,7 +710,7 @@ def predict_lightning(
     data_module = EdgeDataModule(
         predict_ds=dataset,
         batch_size=batch_size,
-        num_workers=0,
+        num_workers=load_batch_workers,
         shuffle=False
     )
     pred_writer = LightningGTiffWriter(

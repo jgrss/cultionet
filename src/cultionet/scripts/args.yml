@@ -303,6 +303,13 @@ train_predict:
     kwargs:
       default: 4
       type: '&int'
+  load_batch_workers:
+    short: ''
+    long: load-batch-workers
+    help: The number of parallel batches to load
+    kwargs:
+      default: 2
+      type: '&int'
   precision:
     short: ''
     long: precision
