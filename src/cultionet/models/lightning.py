@@ -328,7 +328,6 @@ class TemperatureScaling(pl.LightningModule):
     ):
         super(TemperatureScaling, self).__init__()
 
-        self.edge_temperature = torch.nn.Parameter(torch.ones(1))
         self.crop_temperature = torch.nn.Parameter(torch.ones(1))
 
         self.model = model
@@ -349,19 +348,14 @@ class TemperatureScaling(pl.LightningModule):
         batch: T.Union[Data, T.List],
         predictions: torch.Tensor
     ):
-        edge = self(predictions['edge'], self.edge_temperature)
         crop = self(predictions['crop'], self.crop_temperature)
 
-        true_edge = (batch.y == self.edge_class).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.
         true_crop = torch.where(
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
 
-        edge_loss = self.edge_loss(edge, true_edge)
-        crop_loss = self.crop_loss(crop, true_crop)
-
-        loss = edge_loss + crop_loss
+        loss = self.crop_loss(crop, true_crop)
 
         return loss
 
@@ -377,8 +371,7 @@ class TemperatureScaling(pl.LightningModule):
         )
         metrics = {
             'loss': loss,
-            'edge_t': self.edge_temperature,
-            'crop_t': self.crop_temperature
+            'crop_temp': self.crop_temperature
         }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
@@ -391,20 +384,17 @@ class TemperatureScaling(pl.LightningModule):
             scale_file = Path(self.logger.save_dir) / 'temperature.scales'
 
             temperature_scales = {
-                'edge': self.edge_temperature.item(),
                 'crop': self.crop_temperature.item()
             }
             with open(scale_file, mode='w') as f:
                 f.write(json.dumps(temperature_scales))
 
     def configure_loss(self):
-        self.edge_loss = TanimotoDistLoss()
-        self.crop_loss = FocalLoss(weight=self.class_weights)
+        self.crop_loss = TanimotoComplementLoss(depth=1)
 
     def configure_optimizers(self):
         optimizer = torch.optim.LBFGS(
             [
-                self.edge_temperature,
                 self.crop_temperature
             ],
             lr=self.learning_rate,
@@ -472,9 +462,6 @@ class CultioLitModel(pl.LightningModule):
             self.edge_class = num_classes
         self.depth = 1
 
-        self.attention_gamma = None
-        if model_type == 'ResUNet3Psi':
-            self.attention_gamma = torch.nn.Parameter(torch.ones(1))
         self.cultionet_model = CultioNet(
             ds_features=num_features,
             ds_time_features=num_time_features,
@@ -482,8 +469,7 @@ class CultioLitModel(pl.LightningModule):
             star_rnn_hidden_dim=star_rnn_hidden_dim,
             star_rnn_n_layers=star_rnn_n_layers,
             num_classes=self.num_classes,
-            model_type=model_type,
-            attention_gamma=self.attention_gamma
+            model_type=model_type
         )
         self.configure_loss()
         self.configure_scorer()
@@ -499,7 +485,7 @@ class CultioLitModel(pl.LightningModule):
         Returns:
             distance: Normalized distance from boundaries [0,1].
             edge: Probability of an edge [0,1].
-            crop: Probability of crop [0,1].
+            crop: Logits of crop|non-crop.
         """
         return self.cultionet_model(batch)
 
@@ -528,12 +514,12 @@ class CultioLitModel(pl.LightningModule):
                 predictions['crop'],
                 self.crop_temperature
             )
-        edge, crop, crop_type = self.predict_probas(
-            predictions['edge'],
-            predictions['crop'],
+        crop = self.logits_to_probas(
+            predictions['crop']
+        )
+        crop_type = self.logits_to_probas(
             predictions['crop_type']
         )
-        predictions['edge'] = edge
         predictions['crop'] = crop
         predictions['crop_type'] = crop_type
 
@@ -542,21 +528,16 @@ class CultioLitModel(pl.LightningModule):
     def softmax(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
         return F.softmax(x, dim=dim, dtype=x.dtype)
 
-    def predict_probas(
-        self,
-        edge: torch.Tensor,
-        crop: torch.Tensor,
-        crop_type: T.Union[None, torch.Tensor]
+    def logits_to_probas(
+        self, x: torch.Tensor
     ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, T.Union[None, torch.Tensor]
+        T.Union[None, torch.Tensor]
     ]:
-        # Transform edge and crop logits to probabilities
-        edge = self.softmax(edge)
-        crop = self.softmax(crop)
-        if crop_type is not None:
-            crop_type = self.softmax(crop_type)
+        if x is not None:
+            # Transform logits to probabilities
+            x = self.softmax(x)
 
-        return edge, crop, crop_type
+        return x
 
     def on_train_epoch_start(self):
         """
@@ -610,7 +591,7 @@ class CultioLitModel(pl.LightningModule):
             (true_crop == 1) | (true_edge == 1), 1.0 - batch.bdist, 0
         )
         boundary_loss = self.boundary_loss(
-            self.softmax(predictions['edge'])[:, 1], boundary_mask, batch
+            predictions['edge'], boundary_mask, batch
         )
         loss = (
             boundary_loss
@@ -660,13 +641,14 @@ class CultioLitModel(pl.LightningModule):
             batch.bdist.contiguous().view(-1)
         )
         # Get the class probabilities
-        edge, crop, crop_type = self.predict_probas(
-            predictions['edge'],
-            predictions['crop'],
+        crop = self.logits_to_probas(
+            predictions['crop']
+        )
+        crop_type = self.logits_to_probas(
             predictions['crop_type']
         )
         # Take the argmax of the class probabilities
-        edge_ypred = edge.argmax(dim=1).long()
+        edge_ypred = (predictions['edge'] > 0.5).long()
         crop_ypred = crop.argmax(dim=1).long()
         # Get the true edge and crop labels
         edge_ytrue = batch.y.eq(self.edge_class).long()
