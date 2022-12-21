@@ -77,11 +77,10 @@ class CultioNet(torch.nn.Module):
             self.mask_model = ResUNet3Psi(
                 in_channels=base_in_channels,
                 out_dist_channels=1,
-                out_edge_channels=2,
+                out_edge_channels=1,
                 out_mask_channels=2,
                 init_filter=self.filters,
-                attention=True,
-                attention_gamma=attention_gamma
+                attention=True
             )
         else:
             raise NameError('Model type not supported.')
