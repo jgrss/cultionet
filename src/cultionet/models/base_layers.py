@@ -472,7 +472,7 @@ class PoolConv(torch.nn.Module):
 
 
 class ResidualConv(torch.nn.Module):
-    """A residual convolution layer with (optional) RCAB
+    """A residual convolution layer with (optional) attention
     """
     def __init__(
         self,
