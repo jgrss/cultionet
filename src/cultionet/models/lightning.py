@@ -505,23 +505,26 @@ class CultioLitModel(pl.LightningModule):
         """
         predictions = self.forward(batch, batch_idx)
         if self.edge_temperature is not None:
-            predictions['edge'] = scale_logits(
-                predictions['edge'],
-                self.edge_temperature
-            )
+            if predictions['edge'].shape[1] > 1:
+                predictions['edge'] = scale_logits(
+                    predictions['edge'],
+                    self.edge_temperature
+                )
         if self.crop_temperature is not None:
             predictions['crop'] = scale_logits(
                 predictions['crop'],
                 self.crop_temperature
             )
-        crop = self.logits_to_probas(
+        if predictions['edge'].shape[1] > 1:
+            predictions['edge'] = self.logits_to_probas(
+                predictions['edge']
+            )
+        predictions['crop'] = self.logits_to_probas(
             predictions['crop']
         )
-        crop_type = self.logits_to_probas(
+        predictions['crop_type'] = self.logits_to_probas(
             predictions['crop_type']
         )
-        predictions['crop'] = crop
-        predictions['crop_type'] = crop_type
 
         return predictions
 
@@ -530,9 +533,7 @@ class CultioLitModel(pl.LightningModule):
 
     def logits_to_probas(
         self, x: torch.Tensor
-    ) -> T.Tuple[
-        T.Union[None, torch.Tensor]
-    ]:
+    ) -> T.Union[None, torch.Tensor]:
         if x is not None:
             # Transform logits to probabilities
             x = self.softmax(x)
@@ -648,7 +649,13 @@ class CultioLitModel(pl.LightningModule):
             predictions['crop_type']
         )
         # Take the argmax of the class probabilities
-        edge_ypred = (predictions['edge'] > 0.5).long()
+        if predictions['edge'].shape[1] == 1:
+            edge_ypred = (predictions['edge'] > 0.5).long()
+        else:
+            edge = self.logits_to_probas(
+                predictions['edge']
+            )
+            edge_ypred = edge.argmax(dim=1).long()
         crop_ypred = crop.argmax(dim=1).long()
         # Get the true edge and crop labels
         edge_ytrue = batch.y.eq(self.edge_class).long()
