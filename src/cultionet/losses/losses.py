@@ -99,7 +99,9 @@ class TanimotoComplementLoss(torch.nn.Module):
             Tanimoto distance loss (float)
         """
         if self.targets_are_labels:
+            # Discrete targets
             if inputs.shape[1] > 1:
+                # Softmax and One-hot encoding
                 inputs, targets = self.preprocessor(inputs, targets)
 
         if len(inputs.shape) == 1:
