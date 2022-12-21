@@ -691,10 +691,8 @@ def predict_lightning(
     dataset: EdgeDataset,
     batch_size: int,
     device: str,
-    filters: int,
     precision: int,
     num_classes: int,
-    edge_class: int,
     resampling: str,
     ref_res: float,
     compression: str,
@@ -731,15 +729,6 @@ def predict_lightning(
         log_every_n_steps=0,
         logger=False
     )
-    # lit_kwargs = dict(
-    #     num_features=dataset.num_features,
-    #     num_time_features=dataset.num_time_features,
-    #     filters=filters,
-    #     num_classes=num_classes,
-    #     edge_class=edge_class,
-    #     edge_temperature=edge_temperature,
-    #     crop_temperature=crop_temperature
-    # )
 
     trainer = pl.Trainer(**trainer_kwargs)
     lit_model = CultioLitModel.load_from_checkpoint(checkpoint_path=str(ckpt_file))
