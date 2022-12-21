@@ -539,12 +539,24 @@ class CultioLitModel(pl.LightningModule):
     def softmax(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
         return F.softmax(x, dim=dim, dtype=x.dtype)
 
+    def probas_to_labels(
+        self, x: torch.Tensor, thresh: float = 0.5
+    ) -> torch.Tensor:
+        if x.shape[1] == 1:
+            labels = x.gt(thresh).long()
+        else:
+            labels = x.argmax(dim=1).long()
+
+        return labels
+
     def logits_to_probas(
         self, x: torch.Tensor
     ) -> T.Union[None, torch.Tensor]:
         if x is not None:
-            # Transform logits to probabilities
-            x = self.softmax(x)
+            # Single-dimension inputs are sigmoid probabilities
+            if x.shape[1] > 1:
+                # Transform logits to probabilities
+                x = self.softmax(x)
 
         return x
 
@@ -596,17 +608,15 @@ class CultioLitModel(pl.LightningModule):
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
-        boundary_mask = torch.where(
-            (true_crop == 1) | (true_edge == 1), 1.0 - batch.bdist, 0
-        )
-        boundary_loss = self.boundary_loss(
-            self.softmax(predictions['edge'], dim=1)[:, 1],
-            boundary_mask,
-            batch
-        )
+        # boundary_mask = (1.0 - batch.bdist) * (batch.y > 0).long()
+        # boundary_loss = self.boundary_loss(
+        #     predictions['edge'], #self.softmax(predictions['edge'], dim=1)[:, 1],
+        #     boundary_mask,
+        #     batch
+        # )
+
         loss = (
-            boundary_loss
-            + dist_loss
+            dist_loss
             + edge_loss
             + crop_loss
         )
@@ -651,19 +661,17 @@ class CultioLitModel(pl.LightningModule):
             predictions['dist'].contiguous().view(-1),
             batch.bdist.contiguous().view(-1)
         )
-        # Get the class probabilities
-        edge = self.logits_to_probas(
-            predictions['edge']
+        # Get the class labels
+        edge_ypred = self.probas_to_labels(
+            self.logits_to_probas(
+                predictions['edge']
+            )
         )
-        crop = self.logits_to_probas(
-            predictions['crop']
+        crop_ypred = self.probas_to_labels(
+            self.logits_to_probas(
+                predictions['crop']
+            )
         )
-        crop_type = self.logits_to_probas(
-            predictions['crop_type']
-        )
-        # Take the argmax of the class probabilities
-        edge_ypred = edge.argmax(dim=1).long()
-        crop_ypred = crop.argmax(dim=1).long()
         # Get the true edge and crop labels
         edge_ytrue = batch.y.eq(self.edge_class).long()
         crop_ytrue = torch.where(
@@ -695,8 +703,12 @@ class CultioLitModel(pl.LightningModule):
             'edge_jaccard': edge_jaccard,
             'crop_jaccard': crop_jaccard
         }
-        if crop_type is not None:
-            crop_type_ypred = crop_type.argmax(dim=1).long()
+        if predictions['crop_type'] is not None:
+            crop_type_ypred = self.probas_to_labels(
+                self.logits_to_probas(
+                    predictions['crop_type']
+                )
+            )
             crop_type_ytrue = torch.where(
                 batch.y == self.edge_class, 0, batch.y
             ).long()
@@ -776,7 +788,7 @@ class CultioLitModel(pl.LightningModule):
             targets_are_labels=False
         )
         self.edge_loss = TanimotoComplementLoss(depth=self.depth)
-        self.boundary_loss = BoundaryLoss()
+        # self.boundary_loss = BoundaryLoss()
         self.crop_loss = TanimotoComplementLoss(depth=self.depth)
         self.crop_rnn_loss = TanimotoComplementLoss(depth=self.depth)
         if self.num_classes > 2:
