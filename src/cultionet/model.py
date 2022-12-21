@@ -51,7 +51,6 @@ def fit_maskrcnn(
     early_stopping_patience: T.Optional[int] = 7,
     early_stopping_min_delta: T.Optional[float] = 0.01,
     gradient_clip_val: T.Optional[float] = 1.0,
-    random_seed: T.Optional[int] = 0,
     reset_model: T.Optional[bool] = False,
     auto_lr_find: T.Optional[bool] = False,
     device: T.Optional[str] = 'gpu',
@@ -83,7 +82,6 @@ def fit_maskrcnn(
         early_stopping_patience (Optional[int]): The patience (epochs) before early stopping.
         early_stopping_min_delta (Optional[float]): The minimum change threshold before early stopping.
         gradient_clip_val (Optional[float]): A gradient clip limit.
-        random_seed (Optional[int]): A random seed.
         reset_model (Optional[bool]): Whether to reset an existing model. Otherwise, pick up from last epoch of
             an existing model.
         auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
@@ -220,6 +218,7 @@ def fit(
     partition_name: T.Optional[str] = None,
     partition_column: T.Optional[str] = None,
     batch_size: T.Optional[int] = 4,
+    num_workers: T.Optional[int] = 2,
     accumulate_grad_batches: T.Optional[int] = 1,
     filters: T.Optional[int] = 64,
     num_classes: T.Optional[int] = 2,
@@ -232,7 +231,6 @@ def fit(
     early_stopping_patience: T.Optional[int] = 7,
     early_stopping_min_delta: T.Optional[float] = 0.01,
     gradient_clip_val: T.Optional[float] = 1.0,
-    random_seed: T.Optional[int] = 0,
     reset_model: T.Optional[bool] = False,
     auto_lr_find: T.Optional[bool] = False,
     device: T.Optional[str] = 'gpu',
@@ -263,7 +261,6 @@ def fit(
         early_stopping_patience (Optional[int]): The patience (epochs) before early stopping.
         early_stopping_min_delta (Optional[float]): The minimum change threshold before early stopping.
         gradient_clip_val (Optional[float]): A gradient clip limit.
-        random_seed (Optional[int]): A random seed.
         reset_model (Optional[bool]): Whether to reset an existing model. Otherwise, pick up from last epoch of
             an existing model.
         auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
@@ -298,7 +295,7 @@ def fit(
         val_ds=val_ds,
         test_ds=test_dataset,
         batch_size=batch_size,
-        num_workers=0,
+        num_workers=num_workers,
         shuffle=True
     )
     temperature_data_module = EdgeDataModule(
