@@ -604,12 +604,6 @@ class CultioLitModel(pl.LightningModule):
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
-        # boundary_mask = (1.0 - batch.bdist) * (batch.y > 0).long()
-        # boundary_loss = self.boundary_loss(
-        #     predictions['edge'], #self.softmax(predictions['edge'], dim=1)[:, 1],
-        #     boundary_mask,
-        #     batch
-        # )
 
         loss = (
             dist_loss
@@ -784,7 +778,6 @@ class CultioLitModel(pl.LightningModule):
             targets_are_labels=False
         )
         self.edge_loss = TanimotoComplementLoss(depth=self.depth)
-        # self.boundary_loss = BoundaryLoss()
         self.crop_loss = TanimotoComplementLoss(depth=self.depth)
         self.crop_rnn_loss = TanimotoComplementLoss(depth=self.depth)
         if self.num_classes > 2:
