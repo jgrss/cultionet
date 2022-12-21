@@ -578,7 +578,7 @@ class UNet3Psi(torch.nn.Module):
         self,
         in_channels: int,
         out_dist_channels: int = 1,
-        out_edge_channels: int = 1,
+        out_edge_channels: int = 2,
         out_mask_channels: int = 2,
         init_filter: int = 64
     ):
@@ -651,14 +651,11 @@ class UNet3Psi(torch.nn.Module):
             ),
             torch.nn.Sigmoid()
         )
-        self.final_edge = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                out_edge_channels,
-                kernel_size=1,
-                padding=0
-            ),
-            torch.nn.Sigmoid()
+        self.final_edge = torch.nn.Conv2d(
+            up_channels,
+            out_edge_channels,
+            kernel_size=1,
+            padding=0
         )
         self.final_mask = torch.nn.Conv2d(
             up_channels,
@@ -904,7 +901,7 @@ class ResUNet3Psi(torch.nn.Module):
         self,
         in_channels: int,
         out_dist_channels: int = 1,
-        out_edge_channels: int = 1,
+        out_edge_channels: int = 2,
         out_mask_channels: int = 2,
         init_filter: int = 64,
         dilations: T.List[int] = None,
@@ -1132,14 +1129,11 @@ class ResUNet3Psi(torch.nn.Module):
             ),
             torch.nn.Sigmoid()
         )
-        self.final_edge = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                out_edge_channels,
-                kernel_size=1,
-                padding=0
-            ),
-            torch.nn.Sigmoid()
+        self.final_edge = torch.nn.Conv2d(
+            up_channels,
+            out_edge_channels,
+            kernel_size=1,
+            padding=0
         )
         self.final_mask = torch.nn.Conv2d(
             up_channels,
