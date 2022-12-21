@@ -4,7 +4,8 @@ import json
 
 from ..losses import (
     CrossEntropyLoss,
-    TanimotoComplementLoss
+    MSELoss,
+    TanimotoDistLoss
 )
 from .cultio import CultioNet
 from .maskcrnn import BFasterRCNN
@@ -393,8 +394,8 @@ class TemperatureScaling(pl.LightningModule):
                 f.write(json.dumps(temperature_scales))
 
     def configure_loss(self):
-        self.edge_loss = TanimotoComplementLoss(depth=1)
-        self.crop_loss = TanimotoComplementLoss(depth=1)
+        self.edge_loss = TanimotoDistLoss()
+        self.crop_loss = TanimotoDistLoss()
 
     def configure_optimizers(self):
         optimizer = torch.optim.LBFGS(
@@ -778,13 +779,10 @@ class CultioLitModel(pl.LightningModule):
             )
 
     def configure_loss(self):
-        self.dist_loss = TanimotoComplementLoss(
-            depth=self.depth,
-            targets_are_labels=False
-        )
-        self.edge_loss = TanimotoComplementLoss(depth=self.depth)
-        self.crop_loss = TanimotoComplementLoss(depth=self.depth)
-        self.crop_rnn_loss = TanimotoComplementLoss(depth=self.depth)
+        self.dist_loss = MSELoss()
+        self.edge_loss = TanimotoDistLoss()
+        self.crop_loss = TanimotoDistLoss()
+        self.crop_rnn_loss = TanimotoDistLoss()
         if self.num_classes > 2:
             self.crop_type_loss = CrossEntropyLoss(
                 weight=self.class_weights
