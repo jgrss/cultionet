@@ -439,6 +439,7 @@ class CultioLitModel(pl.LightningModule):
         learning_rate: float = 1e-3,
         weight_decay: float = 0.01,
         eps: float = 1e-8,
+        depth: int = 5,
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
         model_type: str = 'ResUNet3Psi',
@@ -469,7 +470,7 @@ class CultioLitModel(pl.LightningModule):
             self.edge_class = edge_class
         else:
             self.edge_class = num_classes
-        self.depth = 1
+        self.depth = depth
 
         self.cultionet_model = CultioNet(
             ds_features=num_features,
@@ -547,23 +548,23 @@ class CultioLitModel(pl.LightningModule):
 
         return x
 
-    def on_train_epoch_start(self):
-        """
-        Set the depth for the d hyperparameter in the Tanimoto loss
+    # def on_train_epoch_start(self):
+    #     """
+    #     Set the depth for the d hyperparameter in the Tanimoto loss
 
-        Source:
-            https://arxiv.org/pdf/2009.02062.pdf
-        """
-        # Get the current learning rate from the optimizer
-        lr = self.optimizers().optimizer.param_groups[0]['lr']
-        if lr == self.learning_rate:
-            self.depth = 1
-        elif 1e-5 < lr < 1e-3:
-            self.depth = 10
-        else:
-            self.depth = 20
+    #     Source:
+    #         https://arxiv.org/pdf/2009.02062.pdf
+    #     """
+    #     # Get the current learning rate from the optimizer
+    #     lr = self.optimizers().optimizer.param_groups[0]['lr']
+    #     if lr == self.learning_rate:
+    #         self.depth = 1
+    #     elif 1e-5 < lr < 1e-3:
+    #         self.depth = 10
+    #     else:
+    #         self.depth = 20
 
-        self.configure_loss()
+    #     self.configure_loss()
 
     def on_validation_epoch_end(self, *args, **kwargs):
         """Save the model on validation end
