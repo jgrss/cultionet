@@ -493,7 +493,7 @@ class CultioLitModel(pl.LightningModule):
 
         Returns:
             distance: Normalized distance from boundaries [0,1].
-            edge: Probability of an edge [0,1].
+            edge: Logits of edge|non-edge.
             crop: Logits of crop|non-crop.
         """
         return self.cultionet_model(batch)
