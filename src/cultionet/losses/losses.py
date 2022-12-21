@@ -183,7 +183,7 @@ class TanimotoDistLoss(torch.nn.Module):
         if self.weight is not None:
             loss = loss * self.weight
 
-        return loss.sum()
+        return loss.mean()
 
 
 class CrossEntropyLoss(torch.nn.Module):
