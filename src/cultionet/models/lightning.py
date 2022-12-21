@@ -328,6 +328,7 @@ class TemperatureScaling(pl.LightningModule):
     ):
         super(TemperatureScaling, self).__init__()
 
+        self.edge_temperature = torch.nn.Parameter(torch.ones(1))
         self.crop_temperature = torch.nn.Parameter(torch.ones(1))
 
         self.model = model
@@ -348,14 +349,18 @@ class TemperatureScaling(pl.LightningModule):
         batch: T.Union[Data, T.List],
         predictions: torch.Tensor
     ):
+        edge = self(predictions['edge'], self.edge_temperature)
         crop = self(predictions['crop'], self.crop_temperature)
 
+        true_edge = batch.y.eq(self.edge_class).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.
         true_crop = torch.where(
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
 
-        loss = self.crop_loss(crop, true_crop)
+        edge_loss = self.edge_loss(edge, true_edge)
+        crop_loss = self.crop_loss(crop, true_crop)
+        loss = edge_loss + crop_loss
 
         return loss
 
@@ -371,6 +376,7 @@ class TemperatureScaling(pl.LightningModule):
         )
         metrics = {
             'loss': loss,
+            'edge_temp': self.edge_temperature,
             'crop_temp': self.crop_temperature
         }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
@@ -384,17 +390,20 @@ class TemperatureScaling(pl.LightningModule):
             scale_file = Path(self.logger.save_dir) / 'temperature.scales'
 
             temperature_scales = {
+                'edge': self.edge_temperature.item(),
                 'crop': self.crop_temperature.item()
             }
             with open(scale_file, mode='w') as f:
                 f.write(json.dumps(temperature_scales))
 
     def configure_loss(self):
+        self.edge_loss = TanimotoComplementLoss(depth=1)
         self.crop_loss = TanimotoComplementLoss(depth=1)
 
     def configure_optimizers(self):
         optimizer = torch.optim.LBFGS(
             [
+                self.edge_temperature,
                 self.crop_temperature
             ],
             lr=self.learning_rate,
@@ -579,7 +588,7 @@ class CultioLitModel(pl.LightningModule):
         Returns:
             Total loss
         """
-        true_edge = (batch.y == self.edge_class).long()
+        true_edge = batch.y.eq(self.edge_class).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.
         true_crop = torch.where(
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
@@ -592,7 +601,9 @@ class CultioLitModel(pl.LightningModule):
             (true_crop == 1) | (true_edge == 1), 1.0 - batch.bdist, 0
         )
         boundary_loss = self.boundary_loss(
-            predictions['edge'], boundary_mask, batch
+            predictions['edge'] if predictions['edge'].shape[1] == 1 else predictions['edge'][:, 1],
+            boundary_mask,
+            batch
         )
         loss = (
             boundary_loss
