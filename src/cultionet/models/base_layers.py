@@ -344,50 +344,6 @@ class FractalAttention(torch.nn.Module):
         return v_channel_spatial
 
 
-class SigmoidCrisp(torch.nn.Module):
-    """Sigmoid activation with crisp learning
-
-    Adapted from publications and source code below:
-
-        CSIRO BSTD/MIT LICENSE
-
-        Redistribution and use in source and binary forms, with or without modification, are permitted provided that
-        the following conditions are met:
-
-        1. Redistributions of source code must retain the above copyright notice, this list of conditions and the
-            following disclaimer.
-        2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and
-            the following disclaimer in the documentation and/or other materials provided with the distribution.
-        3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or
-            promote products derived from this software without specific prior written permission.
-
-        THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
-        INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-        DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-        SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-        SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-        WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
-        USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-        Reference:
-            https://github.com/waldnerf/decode/blob/9e922a2082e570e248eaee10f7a1f2f0bd852b42/FracTAL_ResUNet/nn/activations/sigmoid_crisp.py
-    """
-    def __init__(self, smooth: float = 1e-2):
-        super(SigmoidCrisp, self).__init__()
-
-        self.smooth = smooth
-        self.gamma = torch.nn.Parameter(torch.ones(1))
-        self.sigmoid = torch.nn.Sigmoid()
-        self.final = torch.nn.Sigmoid()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.sigmoid(x) + self.smooth
-        out = torch.reciprocal(out)
-        out = self.final(x * out)
-
-        return out
-
-
 class ChannelAttention(torch.nn.Module):
     """Residual Channel Attention Block
 
