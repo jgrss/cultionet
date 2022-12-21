@@ -528,7 +528,7 @@ class ResidualConv(torch.nn.Module):
         self.fractal_weights = None
         if fractal_attention:
             self.fractal_weights = FractalAttention(
-                in_channels=in_channels,
+                in_channels=init_in_channels,
                 out_channels=out_channels
             )
             self.gamma = torch.nn.Parameter(torch.ones(1))
