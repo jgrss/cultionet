@@ -621,8 +621,8 @@ class LightningGTiffWriter(BasePredictionWriter):
         rheight = pad_slice2d[0].stop - pad_slice2d[0].start
         rwidth = pad_slice2d[1].stop - pad_slice2d[1].start
         edge_batch = edge_batch.t().reshape(
-            int(batch.height[batch_index]), int(batch.width[batch_index])
-        )[pad_slice2d].contiguous().view(-1)[:, None]
+            2, int(batch.height[batch_index]), int(batch.width[batch_index])
+        )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, 2)
         crop_batch = crop_batch.t().reshape(
             2, int(batch.height[batch_index]), int(batch.width[batch_index])
         )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, 2)
