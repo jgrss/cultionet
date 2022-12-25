@@ -62,7 +62,7 @@ class CultioNet(torch.nn.Module):
         # Last = crop-type (2..N)
         base_in_channels = (
             + star_rnn_hidden_dim * (star_rnn_n_layers - 1)
-            + num_classes_last
+            + star_rnn_hidden_dim
         )
         if model_type == 'UNet3Psi':
             self.mask_model = UNet3Psi(
@@ -102,22 +102,22 @@ class CultioNet(torch.nn.Module):
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
         # Crop/Non-crop and Crop types
-        logits_star_l2, logits_star_last = self.star_rnn(time_stream)
-        logits_star_l2 = self.cg(logits_star_l2)
+        logits_star_last = self.star_rnn(time_stream)
+        # logits_star_l2 = self.cg(logits_star_l2)
         logits_star_last = self.cg(logits_star_last)
 
         # CONCAT
-        h = torch.cat(
-            [
-                logits_star_l2,
-                logits_star_last
-            ], dim=1
-        )
+        # h = torch.cat(
+        #     [
+        #         logits_star_l2,
+        #         logits_star_last
+        #     ], dim=1
+        # )
 
         # Main stream
         logits = self.mask_model(
             self.gc(
-                h, batch_size, height, width
+                logits_star_last, batch_size, height, width
             )
         )
         logits_distance = self.cg(logits['dist'])
