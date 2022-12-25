@@ -1118,35 +1118,23 @@ class ResUNet3Psi(torch.nn.Module):
             dilations=dilations
         )
 
-        self.final_dist = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                out_dist_channels,
-                kernel_size=1,
-                padding=0
-            ),
-            torch.nn.BatchNorm2d(out_dist_channels),
-            torch.nn.ReLU(inplace=False)
+        self.final_dist = torch.nn.Conv2d(
+            up_channels,
+            out_dist_channels,
+            kernel_size=1,
+            padding=0
         )
-        self.final_edge = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                out_edge_channels,
-                kernel_size=1,
-                padding=0
-            ),
-            torch.nn.BatchNorm2d(out_edge_channels),
-            torch.nn.ReLU(inplace=False),
+        self.final_edge = torch.nn.Conv2d(
+            up_channels,
+            out_edge_channels,
+            kernel_size=1,
+            padding=0
         )
-        self.final_mask = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                out_mask_channels,
-                kernel_size=1,
-                padding=0
-            ),
-            torch.nn.BatchNorm2d(out_mask_channels),
-            torch.nn.ReLU(inplace=False),
+        self.final_mask = torch.nn.Conv2d(
+            up_channels,
+            out_mask_channels,
+            kernel_size=1,
+            padding=0
         )
 
         # Initialise weights
