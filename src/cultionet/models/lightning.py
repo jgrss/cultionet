@@ -432,7 +432,7 @@ class CultioLitModel(pl.LightningModule):
         num_classes: int = 2,
         filters: int = 32,
         star_rnn_hidden_dim: int = 32,
-        star_rnn_n_layers: int = 6,
+        star_rnn_n_layers: int = 4,
         learning_rate: float = 1e-3,
         weight_decay: float = 0.01,
         eps: float = 1e-8,
@@ -627,9 +627,15 @@ class CultioLitModel(pl.LightningModule):
                 predictions['crop_type'], true_crop_type
             )
             loss = loss + crop_type_loss
-        # else:
-        #     crop_loss_star = self.crop_rnn_loss(predictions['crop_star'], true_crop)
-        #     loss = loss + crop_loss_star
+        else:
+            true_crop = torch.where(
+                true_crop == 1, 1,
+                torch.where(
+                    true_edge == 1, 2, 0
+                )
+            )
+            crop_loss_star = self.crop_rnn_loss(predictions['crop_star'], true_crop)
+            loss = loss + crop_loss_star
 
         return loss
 
@@ -782,6 +788,7 @@ class CultioLitModel(pl.LightningModule):
         self.dist_loss = MSELoss()
         self.edge_loss = TanimotoDistLoss()
         self.crop_loss = TanimotoDistLoss()
+        self.crop_rnn_loss = TanimotoDistLoss()
         if self.num_classes > 2:
             self.crop_type_loss = CrossEntropyLoss(
                 weight=self.class_weights
