@@ -287,6 +287,52 @@ class TanimotoComplement(torch.nn.Module):
         return score
 
 
+class TanimotoDist(torch.nn.Module):
+    """Tanimoto distance
+
+    Reference:
+        https://github.com/sentinel-hub/eo-flow/blob/master/eoflow/models/losses.py
+
+    MIT License
+
+    Copyright (c) 2017-2020 Matej Aleksandrov, Matej Batič, Matic Lubej, Grega Milčinski (Sinergise)
+    Copyright (c) 2017-2020 Devis Peressutti, Jernej Puc, Anže Zupanc, Lojze Žust, Jovan Višnjić (Sinergise)
+    """
+    def __init__(
+        self,
+        smooth: float = 1e-5,
+        weight: T.Optional[torch.Tensor] = None,
+        dim: T.Union[int, T.Sequence[int]] = 0
+    ):
+        super(TanimotoDist, self).__init__()
+
+        self.smooth = smooth
+        self.weight = weight
+        self.dim = dim
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor
+    ) -> torch.Tensor:
+        """Performs a single forward pass
+
+        Args:
+            inputs: Predictions from model (probabilities, logits or labels).
+            targets: Ground truth values.
+
+        Returns:
+            Tanimoto distance loss (float)
+        """
+        tpl = torch.sum(targets * inputs, dim=self.dim, keepdim=True)
+        sq_sum = torch.sum(targets**2 + inputs**2, dim=self.dim, keepdim=True)
+        numerator = tpl + self.smooth
+        denominator = (sq_sum - tpl) + self.smooth
+        tanimoto = numerator / denominator
+
+        return tanimoto.mean()
+
+
 class FractalAttention(torch.nn.Module):
     """Fractal Tanimoto Attention Layer (FracTAL)
 
@@ -355,8 +401,8 @@ class FractalAttention(torch.nn.Module):
             torch.nn.Sigmoid()
         )
 
-        self.spatial_sim = TanimotoComplement(depth=depth, dim=1)
-        self.channel_sim = TanimotoComplement(depth=depth, dim=[2, 3])
+        self.spatial_sim = TanimotoDist(dim=1)
+        self.channel_sim = TanimotoDist(dim=[2, 3])
         self.norm = torch.nn.BatchNorm2d(out_channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -495,14 +541,12 @@ class ResidualConv(torch.nn.Module):
 
         layers = []
         if init_conv:
-            layers = [
-                torch.nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    kernel_size=3,
-                    padding=1
-                )
-            ]
+            layers = ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1
+            )
             in_channels = out_channels
 
         layers += [
@@ -551,7 +595,7 @@ class ResidualConv(torch.nn.Module):
             attention= self.fractal_weights(x)
             # 1 + γA
             attention = attention * self.gamma + 1.0
-            out *= attention
+            out = out * attention
 
         return out
 
