@@ -18,10 +18,16 @@ class ConvSTARCell(torch.nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.gate = torch.nn.Conv2d(
-            input_size + hidden_size, hidden_size, kernel_size, padding=padding
+            input_size + hidden_size,
+            hidden_size,
+            kernel_size,
+            padding=padding
         )
         self.update = torch.nn.Conv2d(
-            input_size, hidden_size, kernel_size, padding=padding
+            input_size,
+            hidden_size,
+            kernel_size,
+            padding=padding
         )
 
         torch.nn.init.orthogonal(self.update.weight)
