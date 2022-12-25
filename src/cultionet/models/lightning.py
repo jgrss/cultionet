@@ -431,7 +431,7 @@ class CultioLitModel(pl.LightningModule):
         num_time_features: int = None,
         num_classes: int = 2,
         filters: int = 32,
-        star_rnn_hidden_dim: int = 64,
+        star_rnn_hidden_dim: int = 32,
         star_rnn_n_layers: int = 4,
         learning_rate: float = 1e-3,
         weight_decay: float = 0.01,
@@ -793,8 +793,7 @@ class CultioLitModel(pl.LightningModule):
             params_list,
             lr=self.learning_rate,
             weight_decay=self.weight_decay,
-            eps=self.eps,
-            amsgrad=True
+            eps=self.eps
         )
         lr_scheduler = ReduceLROnPlateau(
             optimizer,
