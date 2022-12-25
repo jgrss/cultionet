@@ -146,17 +146,17 @@ class StarRNN(torch.nn.Module):
         )
 
         padding = int(kernel_size / 2)
-        self.final = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                hidden_dim,
-                hidden_dim,
-                kernel_size,
-                padding=padding,
-                bias=False
-            ),
-            torch.nn.BatchNorm2d(hidden_dim),
-            torch.nn.ReLU(inplace=False)
-        )
+        # self.final = torch.nn.Sequential(
+        #     torch.nn.Conv2d(
+        #         hidden_dim,
+        #         hidden_dim,
+        #         kernel_size,
+        #         padding=padding,
+        #         bias=False
+        #     ),
+        #     torch.nn.BatchNorm2d(hidden_dim),
+        #     torch.nn.ReLU(inplace=False)
+        # )
         # Crop-type layer
         if self.crop_type_layer:
             self.final_last = torch.nn.Conv2d(
