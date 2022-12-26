@@ -926,66 +926,72 @@ class ResUNet3Psi(torch.nn.Module):
         self.conv0_0 = ResidualConv(
             in_channels,
             channels[0],
-            init_conv=True,
-            fractal_attention=self.attention
+            init_conv=True
         )
         self.conv1_0 = PoolResidualConv(
-            channels[0], channels[1],
-            fractal_attention=self.attention,
+            channels[0],
+            channels[1],
             dilations=dilations
         )
         self.conv2_0 = PoolResidualConv(
-            channels[1], channels[2],
-            fractal_attention=self.attention,
+            channels[1],
+            channels[2],
             dilations=dilations
         )
         self.conv3_0 = PoolResidualConv(
-            channels[2], channels[3],
-            fractal_attention=self.attention,
+            channels[2],
+            channels[3],
             dilations=dilations
         )
         self.conv4_0 = PoolResidualConv(
-            channels[3], channels[4],
-            fractal_attention=self.attention,
+            channels[3],
+            channels[4],
             dilations=dilations
         )
 
         # Connect 3
-        self.conv0_0_3_1_con = PoolResidualConv(
-            channels[0], channels[0], pool_size=8,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv1_0_3_1_con = PoolResidualConv(
-            channels[1], channels[0], pool_size=4,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv2_0_3_1_con = PoolResidualConv(
-            channels[2], channels[0], pool_size=2,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv3_0_3_1_con = ResidualConv(
-            channels[3], channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv4_0_3_1_con = ResidualConv(
-            channels[4], channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv3_1 = ResidualConv(
-            up_channels, up_channels,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
+        def stack_3_1():
+            conv0_0_3_1_con = PoolResidualConv(
+                channels[0], channels[0], pool_size=8,
+                dilations=dilations
+            )
+            conv1_0_3_1_con = PoolResidualConv(
+                channels[1], channels[0], pool_size=4,
+                dilations=dilations
+            )
+            conv2_0_3_1_con = PoolResidualConv(
+                channels[2], channels[0], pool_size=2,
+                dilations=dilations
+            )
+            conv3_0_3_1_con = ResidualConv(
+                channels[3], channels[0],
+                fractal_attention=self.attention,
+                dilations=dilations
+            )
+            conv4_0_3_1_con = ResidualConv(
+                channels[4], channels[0],
+                fractal_attention=self.attention,
+                dilations=dilations
+            )
+            
+
+            return {
+                0: conv0_0_3_1_con,
+                1: conv1_0_3_1_con,
+                2: conv2_0_3_1_con,
+                3: conv3_0_3_1_con,
+                4: conv4_0_3_1_con,
+                5: conv3_1
+            }
+
+        self.con3_1_con_dist = stack_3_1()
+        self.con3_1_con_edge = stack_3_1()
+        self.con3_1_con_mask = stack_3_1()
         self.conv3_1_skip1 = ResidualConv(
-            up_channels*2, up_channels,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
+                up_channels*2, up_channels,
+                fractal_attention=self.attention,
+                dilations=dilations
+            )
         self.conv3_1_skip2 = ResidualConv(
             up_channels*2, up_channels,
             fractal_attention=self.attention,
@@ -995,12 +1001,10 @@ class ResUNet3Psi(torch.nn.Module):
         # Connect 2
         self.conv0_0_2_2_con = PoolResidualConv(
             channels[0], channels[0], pool_size=4,
-            fractal_attention=self.attention,
             dilations=dilations
         )
         self.conv1_0_2_2_con = PoolResidualConv(
             channels[1], channels[0], pool_size=2,
-            fractal_attention=self.attention,
             dilations=dilations
         )
         self.conv2_0_2_2_con = ResidualConv(
@@ -1037,12 +1041,10 @@ class ResUNet3Psi(torch.nn.Module):
         # Connect 3
         self.conv0_0_1_3_con = PoolResidualConv(
             channels[0], channels[0], pool_size=2,
-            fractal_attention=self.attention,
             dilations=dilations
         )
         self.conv1_0_1_3_con = ResidualConv(
             channels[1], channels[0],
-            fractal_attention=self.attention,
             dilations=dilations
         )
         self.conv2_2_1_3_con = ResidualConv(
@@ -1158,22 +1160,22 @@ class ResUNet3Psi(torch.nn.Module):
         x4_0 = self.conv4_0(x3_0)
 
         # 1/8 connection
-        x0_0_x3_1_con = self.conv0_0_3_1_con(x0_0)
-        x1_0_x3_1_con = self.conv1_0_3_1_con(x1_0)
-        x2_0_x3_1_con = self.conv2_0_3_1_con(x2_0)
-        x3_0_x3_1_con = self.conv3_0_3_1_con(x3_0)
-        x4_0_x3_1_con = self.conv4_0_3_1_con(self.up(x4_0, size=x3_0.shape[-2:]))
-        h3_1 = torch.cat(
+        x0_0_x3_1_con_dist = self.con3_1_con_dist[0](x0_0)
+        x1_0_x3_1_con_dist = self.con3_1_con_dist[1](x1_0)
+        x2_0_x3_1_con_dist = self.con3_1_con_dist[2](x2_0)
+        x3_0_x3_1_con_dist = self.con3_1_con_dist[3](x3_0)
+        x4_0_x3_1_con_dist = self.con3_1_con_dist[4](self.up(x4_0, size=x3_0.shape[-2:]))
+        h3_1_dist = torch.cat(
             [
-                x0_0_x3_1_con,
-                x1_0_x3_1_con,
-                x2_0_x3_1_con,
-                x3_0_x3_1_con,
-                x4_0_x3_1_con
+                x0_0_x3_1_con_dist,
+                x1_0_x3_1_con_dist,
+                x2_0_x3_1_con_dist,
+                x3_0_x3_1_con_dist,
+                x4_0_x3_1_con_dist
             ],
             dim=1
         )
-        x3_1_dist = self.conv3_1(h3_1)
+        x3_1_dist = self.conv3_1(h3_1_dist)
         x3_1_edge = self.conv3_1_skip1(
             torch.cat(
                 [
