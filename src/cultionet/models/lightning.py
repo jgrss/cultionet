@@ -784,7 +784,7 @@ class CultioLitModel(pl.LightningModule):
             )
 
     def configure_loss(self):
-        self.dist_loss = MSELoss()
+        self.dist_loss = TanimotoDistLoss()
         self.edge_loss = TanimotoDistLoss()
         self.crop_loss = TanimotoDistLoss()
         # self.crop_rnn_loss = TanimotoDistLoss()

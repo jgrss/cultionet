@@ -980,11 +980,14 @@ class ResUNet3Psi(torch.nn.Module):
             attention=attention
         )
 
-        self.final_dist = torch.nn.Conv2d(
-            up_channels,
-            out_dist_channels,
-            kernel_size=1,
-            padding=0
+        self.final_dist = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                up_channels,
+                out_dist_channels,
+                kernel_size=1,
+                padding=0
+            ),
+            torch.nn.Sigmoid()
         )
         self.final_edge = torch.nn.Conv2d(
             up_channels,

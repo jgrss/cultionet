@@ -26,7 +26,7 @@ class LossPreprocessing(torch.nn.Module):
                     'The targets should be ordered values of equal length to the inputs 2nd dimension.'
                 )
             if self.apply_transform:
-                inputs = F.softmax(inputs, dim=1, dtype=inputs.dtype)
+                inputs = F.softmax(inputs, dim=1, dtype=inputs.dtype).clip(0, 1)
             targets = F.one_hot(
                 targets.contiguous().view(-1), inputs.shape[1]
             ).float()
@@ -143,14 +143,11 @@ class TanimotoDistLoss(torch.nn.Module):
     Copyright (c) 2017-2020 Devis Peressutti, Jernej Puc, Anže Zupanc, Lojze Žust, Jovan Višnjić (Sinergise)
     """
     def __init__(
-        self,
-        smooth: float = 1e-5,
-        weight: T.Optional[torch.Tensor] = None,
+        self, smooth: float = 1e-5
     ):
         super(TanimotoDistLoss, self).__init__()
 
         self.smooth = smooth
-        self.weight = weight
 
         self.preprocessor = LossPreprocessing(
             inputs_are_logits=True,
@@ -171,17 +168,27 @@ class TanimotoDistLoss(torch.nn.Module):
         Returns:
             Tanimoto distance loss (float)
         """
-        inputs, targets = self.preprocessor(inputs, targets)
+        if inputs.shape[1] > 1:
+            inputs, targets = self.preprocessor(inputs, targets)
 
-        tpl = (targets * inputs).sum(dim=0)
-        sq_sum = (targets**2 + inputs**2).sum(dim=0)
-        numerator = tpl + self.smooth
-        denominator = (sq_sum - tpl) + self.smooth
-        tanimoto = numerator / denominator
-        loss = 1.0 - tanimoto
+        if len(inputs.shape) == 1:
+            inputs = inputs.unsqueeze(1)
+        if len(targets.shape) == 1:
+            targets = targets.unsqueeze(1)
 
-        if self.weight is not None:
-            loss = loss * self.weight
+        def tanimoto_loss(yhat: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            tpl = (yhat * y).sum(dim=0)
+            sq_sum = (yhat**2 + y**2).sum(dim=0)
+            numerator = tpl + self.smooth
+            denominator = (sq_sum - tpl) + self.smooth
+            tanimoto = numerator / denominator
+            loss = 1.0 - tanimoto
+
+            return loss
+
+        loss = tanimoto_loss(inputs, targets)
+        if inputs.shape[1] == 1:
+            loss = (loss + tanimoto_loss(1.0 - inputs, 1.0 - targets)) * 0.5
 
         return loss.mean()
 
