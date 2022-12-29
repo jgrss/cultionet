@@ -530,22 +530,12 @@ class ResidualConvInit(torch.nn.Module):
     ):
         super(ResidualConvInit, self).__init__()
 
-        layers = [
-            ConvBlock2d(
-                in_channels=in_channels,
-                out_channels=out_channels,
-                kernel_size=3,
-                padding=1
-            ),
-            torch.nn.Conv2d(
-                out_channels,
-                out_channels,
-                kernel_size=3,
-                padding=1
-            )
-        ]
-
-        self.seq = torch.nn.Sequential(*layers)
+        self.seq = ConvBlock2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=3,
+            padding=1
+        )
         self.skip = ConvBlock2d(
             in_channels=in_channels,
             out_channels=out_channels,
