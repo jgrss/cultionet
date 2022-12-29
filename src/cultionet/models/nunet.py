@@ -1006,7 +1006,7 @@ class ResUNet3Psi(torch.nn.Module):
                 kernel_size=1,
                 padding=0
             ),
-            FinalDist()
+            torch.nn.Sigmoid()
         )
         self.final_edge = torch.nn.Conv2d(
             up_channels,
