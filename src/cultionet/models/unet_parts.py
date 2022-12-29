@@ -128,13 +128,13 @@ class ResUNetUp(torch.nn.Module):
         if prev_down is not None:
             for n, x in zip(range(self.n_prev_down), prev_down):
                 c = getattr(self, f'prev_{n}')
-                h += [c(self.up(x, size=prev_same.shape[-2:]))]
+                h += [c(self.up(x, size=prev_same[0].shape[-2:]))]
         if stream_down is not None:
             for n, x in zip(range(self.n_stream_down), stream_down):
                 c = getattr(self, f'stream_{n}')
-                h += [c(self.up(x, size=prev_same.shape[-2:]))]
-        h += [self.conv4_0_prev(self.up(x4_0, size=prev_same.shape[-2:]))]
-        h += [self.conv4_0_stream(self.up(x4_0, size=prev_same.shape[-2:]))]
+                h += [c(self.up(x, size=prev_same[0].shape[-2:]))]
+        h += [self.conv4_0_prev(self.up(x4_0, size=prev_same[0].shape[-2:]))]
+        h += [self.conv4_0_stream(self.up(x4_0, size=prev_same[0].shape[-2:]))]
         h = torch.cat(h, dim=1)
         h = self.conv(h)
 
