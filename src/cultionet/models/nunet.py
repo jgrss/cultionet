@@ -18,6 +18,12 @@ from .base_layers import (
     ResidualConv,
     SingleConv
 )
+from .unet_parts import (
+    ResUNETConnect3_1,
+    ResUNETConnect2_2,
+    ResUNETConnect1_3,
+    ResUNETConnect0_4
+)
 
 import torch
 
@@ -950,174 +956,29 @@ class ResUNet3Psi(torch.nn.Module):
         )
 
         # Connect 3
-        def stack_3_1():
-            conv0_0_3_1_con = PoolResidualConv(
-                channels[0], channels[0], pool_size=8,
-                dilations=dilations
-            )
-            conv1_0_3_1_con = PoolResidualConv(
-                channels[1], channels[0], pool_size=4,
-                dilations=dilations
-            )
-            conv2_0_3_1_con = PoolResidualConv(
-                channels[2], channels[0], pool_size=2,
-                dilations=dilations
-            )
-            conv3_0_3_1_con = ResidualConv(
-                channels[3], channels[0],
-                fractal_attention=self.attention,
-                dilations=dilations
-            )
-            conv4_0_3_1_con = ResidualConv(
-                channels[4], channels[0],
-                fractal_attention=self.attention,
-                dilations=dilations
-            )
-            
-
-            return {
-                0: conv0_0_3_1_con,
-                1: conv1_0_3_1_con,
-                2: conv2_0_3_1_con,
-                3: conv3_0_3_1_con,
-                4: conv4_0_3_1_con,
-                5: conv3_1
-            }
-
-        self.con3_1_con_dist = stack_3_1()
-        self.con3_1_con_edge = stack_3_1()
-        self.con3_1_con_mask = stack_3_1()
-        self.conv3_1_skip1 = ResidualConv(
-                up_channels*2, up_channels,
-                fractal_attention=self.attention,
-                dilations=dilations
-            )
-        self.conv3_1_skip2 = ResidualConv(
-            up_channels*2, up_channels,
-            fractal_attention=self.attention,
-            dilations=dilations
+        self.convs_3_1 = ResUNETConnect3_1(
+            channels=channels,
+            up_channels=up_channels,
+            dilations=dilations,
+            attention=attention
         )
-
-        # Connect 2
-        self.conv0_0_2_2_con = PoolResidualConv(
-            channels[0], channels[0], pool_size=4,
-            dilations=dilations
+        self.convs_2_2 = ResUNETConnect2_2(
+            channels=channels,
+            up_channels=up_channels,
+            dilations=dilations,
+            attention=attention
         )
-        self.conv1_0_2_2_con = PoolResidualConv(
-            channels[1], channels[0], pool_size=2,
-            dilations=dilations
+        self.convs_1_3 = ResUNETConnect1_3(
+            channels=channels,
+            up_channels=up_channels,
+            dilations=dilations,
+            attention=attention
         )
-        self.conv2_0_2_2_con = ResidualConv(
-            channels[2], channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv3_1_2_2_con = ResidualConv(
-            up_channels, channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv4_0_2_2_con = ResidualConv(
-            channels[4], channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv2_2 = ResidualConv(
-            up_channels, up_channels,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv2_2_skip1 = ResidualConv(
-            up_channels*2, up_channels,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv2_2_skip2 = ResidualConv(
-            up_channels*2, up_channels,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-
-        # Connect 3
-        self.conv0_0_1_3_con = PoolResidualConv(
-            channels[0], channels[0], pool_size=2,
-            dilations=dilations
-        )
-        self.conv1_0_1_3_con = ResidualConv(
-            channels[1], channels[0],
-            dilations=dilations
-        )
-        self.conv2_2_1_3_con = ResidualConv(
-            up_channels, channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv3_1_1_3_con = ResidualConv(
-            up_channels, channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv4_0_1_3_con = ResidualConv(
-            channels[4], channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv1_3 = ResidualConv(
-            up_channels, up_channels,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv1_3_skip1 = ResidualConv(
-            up_channels*2, up_channels,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv1_3_skip2 = ResidualConv(
-            up_channels*2, up_channels,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-
-        # Connect 4
-        self.conv0_0_0_4_con = ResidualConv(
-            channels[0], channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv1_3_0_4_con = ResidualConv(
-            up_channels, channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv2_2_0_4_con = ResidualConv(
-            up_channels, channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv3_1_0_4_con = ResidualConv(
-            up_channels, channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv4_0_0_4_con = ResidualConv(
-            channels[4], channels[0],
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv0_4 = ResidualConv(
-            up_channels, up_channels,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv0_4_skip1 = ResidualConv(
-            up_channels*2, up_channels,
-            fractal_attention=self.attention,
-            dilations=dilations
-        )
-        self.conv0_4_skip2 = ResidualConv(
-            up_channels*2, up_channels,
-            fractal_attention=self.attention,
-            dilations=dilations
+        self.convs_0_4 = ResUNETConnect0_4(
+            channels=channels,
+            up_channels=up_channels,
+            dilations=dilations,
+            attention=attention
         )
 
         self.final_dist = torch.nn.Conv2d(
@@ -1160,200 +1021,53 @@ class ResUNet3Psi(torch.nn.Module):
         x4_0 = self.conv4_0(x3_0)
 
         # 1/8 connection
-        x0_0_x3_1_con_dist = self.con3_1_con_dist[0](x0_0)
-        x1_0_x3_1_con_dist = self.con3_1_con_dist[1](x1_0)
-        x2_0_x3_1_con_dist = self.con3_1_con_dist[2](x2_0)
-        x3_0_x3_1_con_dist = self.con3_1_con_dist[3](x3_0)
-        x4_0_x3_1_con_dist = self.con3_1_con_dist[4](self.up(x4_0, size=x3_0.shape[-2:]))
-        h3_1_dist = torch.cat(
-            [
-                x0_0_x3_1_con_dist,
-                x1_0_x3_1_con_dist,
-                x2_0_x3_1_con_dist,
-                x3_0_x3_1_con_dist,
-                x4_0_x3_1_con_dist
-            ],
-            dim=1
+        out_3_1 = self.convs_3_1(
+            x0_0,
+            x1_0,
+            x2_0,
+            x3_0,
+            x4_0
         )
-        x3_1_dist = self.conv3_1(h3_1_dist)
-        x3_1_edge = self.conv3_1_skip1(
-            torch.cat(
-                [
-                    h3_1,
-                    x3_1_dist
-                ],
-                dim=1
-            )
-        )
-        x3_1_mask = self.conv3_1_skip2(
-            torch.cat(
-                [
-                    h3_1,
-                    x3_1_edge
-                ],
-                dim=1
-            )
-        )
-
         # 1/4 connection
-        x0_0_x2_2_con = self.conv0_0_2_2_con(x0_0)
-        x1_0_x2_2_con = self.conv1_0_2_2_con(x1_0)
-        x2_0_x2_2_con = self.conv2_0_2_2_con(x2_0)
-        x3_1_x2_2_con_dist = self.conv3_1_2_2_con(self.up(x3_1_dist, size=x2_0.shape[-2:]))
-        x3_1_x2_2_con_edge = self.conv3_1_2_2_con(self.up(x3_1_edge, size=x2_0.shape[-2:]))
-        x3_1_x2_2_con_mask = self.conv3_1_2_2_con(self.up(x3_1_mask, size=x2_0.shape[-2:]))
-        x4_0_x2_2_con = self.conv4_0_2_2_con(self.up(x4_0, size=x2_0.shape[-2:]))
-        h2_2 = torch.cat(
-            [
-                x0_0_x2_2_con,
-                x1_0_x2_2_con,
-                x2_0_x2_2_con,
-                x4_0_x2_2_con
-            ],
-            dim=1
+        out_2_2 = self.convs_2_2(
+            x0_0,
+            x1_0,
+            x2_0,
+            out_3_1['dist'],
+            out_3_1['edge'],
+            out_3_1['mask'],
+            x4_0
         )
-        x2_2_dist = self.conv2_2(
-            torch.cat(
-                [
-                    h2_2,
-                    x3_1_x2_2_con_dist
-                ],
-                dim=1
-            )
-        )
-        x2_2_edge = self.conv2_2_skip1(
-            torch.cat(
-                [
-                    h2_2,
-                    x2_2_dist,
-                    x3_1_x2_2_con_edge
-                ],
-                dim=1
-            )
-        )
-        x2_2_mask = self.conv2_2_skip2(
-            torch.cat(
-                [
-                    h2_2,
-                    x2_2_edge,
-                    x3_1_x2_2_con_mask,
-                ],
-                dim=1
-            )
-        )
-
         # 1/2 connection
-        x0_0_x1_3_con = self.conv0_0_1_3_con(x0_0)
-        x1_0_x1_3_con = self.conv1_0_1_3_con(x1_0)
-        x2_2_x1_3_con_dist = self.conv2_2_1_3_con(self.up(x2_2_dist, size=x1_0.shape[-2:]))
-        x3_1_x1_3_con_dist = self.conv3_1_1_3_con(self.up(x3_1_dist, size=x1_0.shape[-2:]))
-        x2_2_x1_3_con_edge = self.conv2_2_1_3_con(self.up(x2_2_edge, size=x1_0.shape[-2:]))
-        x3_1_x1_3_con_edge = self.conv3_1_1_3_con(self.up(x3_1_edge, size=x1_0.shape[-2:]))
-        x2_2_x1_3_con_mask = self.conv2_2_1_3_con(self.up(x2_2_mask, size=x1_0.shape[-2:]))
-        x3_1_x1_3_con_mask = self.conv3_1_1_3_con(self.up(x3_1_mask, size=x1_0.shape[-2:]))
-        x4_0_x1_3_con = self.conv4_0_1_3_con(self.up(x4_0, size=x1_0.shape[-2:]))
-        h1_3 = torch.cat(
-            [
-                x0_0_x1_3_con,
-                x1_0_x1_3_con,
-                x4_0_x1_3_con
-            ],
-            dim=1
+        out_1_3 = self.convs_1_3(
+            x0_0,
+            x1_0,
+            out_2_2['dist'],
+            out_3_1['dist'],
+            out_2_2['edge'],
+            out_3_1['edge'],
+            out_2_2['mask'],
+            out_3_1['mask'],
+            x4_0,
         )
-        x1_3_dist = self.conv1_3(
-            torch.cat(
-                [
-                    h1_3,
-                    x3_1_x1_3_con_dist,
-                    x2_2_x1_3_con_dist
-                ],
-                dim=1
-            )
-        )
-        x1_3_edge = self.conv1_3_skip1(
-            torch.cat(
-                [
-                    h1_3,
-                    x1_3_dist,
-                    x3_1_x1_3_con_edge,
-                    x2_2_x1_3_con_edge
-                ],
-                dim=1
-            )
-        )
-        x1_3_mask = self.conv1_3_skip2(
-            torch.cat(
-                [
-                    h1_3,
-                    x1_3_edge,
-                    x3_1_x1_3_con_mask,
-                    x2_2_x1_3_con_mask
-                ],
-                dim=1
-            )
-        )
-
         # 1/1 connection
-        x0_0_x0_4_con = self.conv0_0_0_4_con(x0_0)
-        # Distance
-        x1_3_x0_4_con_dist = self.conv1_3_0_4_con(self.up(x1_3_dist, size=x0_0.shape[-2:]))
-        x2_2_x0_4_con_dist = self.conv2_2_0_4_con(self.up(x2_2_dist, size=x0_0.shape[-2:]))
-        x3_1_x0_4_con_dist = self.conv3_1_0_4_con(self.up(x3_1_dist, size=x0_0.shape[-2:]))
-        # Edge
-        x1_3_x0_4_con_edge = self.conv1_3_0_4_con(self.up(x1_3_edge, size=x0_0.shape[-2:]))
-        x2_2_x0_4_con_edge = self.conv2_2_0_4_con(self.up(x2_2_edge, size=x0_0.shape[-2:]))
-        x3_1_x0_4_con_edge = self.conv3_1_0_4_con(self.up(x3_1_edge, size=x0_0.shape[-2:]))
-        # Mask
-        x1_3_x0_4_con_mask = self.conv1_3_0_4_con(self.up(x1_3_mask, size=x0_0.shape[-2:]))
-        x2_2_x0_4_con_mask = self.conv2_2_0_4_con(self.up(x2_2_mask, size=x0_0.shape[-2:]))
-        x3_1_x0_4_con_mask = self.conv3_1_0_4_con(self.up(x3_1_mask, size=x0_0.shape[-2:]))
-        x4_0_x0_4_con = self.conv4_0_0_4_con(self.up(x4_0, size=x0_0.shape[-2:]))
-        h0_4 = torch.cat(
-            [
-                x0_0_x0_4_con,
-                x4_0_x0_4_con
-            ],
-            dim=1
+        out_0_4 = self.convs_0_4(
+            x0_0,
+            out_1_3['dist'],
+            out_2_2['dist'],
+            out_3_1['dist'],
+            out_1_3['edge'],
+            out_2_2['edge'],
+            out_3_1['edge'],
+            out_1_3['mask'],
+            out_2_2['mask'],
+            out_3_1['mask'],
+            x4_0,
         )
-        x0_4_dist = self.conv0_4(
-            torch.cat(
-                [
-                    h0_4,
-                    x3_1_x0_4_con_dist,
-                    x2_2_x0_4_con_dist,
-                    x1_3_x0_4_con_dist
-                ],
-                dim=1
-            )
-        )
-        x0_4_edge = self.conv0_4_skip1(
-            torch.cat(
-                [
-                    h0_4,
-                    x0_4_dist,
-                    x3_1_x0_4_con_edge,
-                    x2_2_x0_4_con_edge,
-                    x1_3_x0_4_con_edge
-                ],
-                dim=1
-            )
-        )
-        x0_4_mask = self.conv0_4_skip2(
-            torch.cat(
-                [
-                    h0_4,
-                    x0_4_edge,
-                    x3_1_x0_4_con_mask,
-                    x2_2_x0_4_con_mask,
-                    x1_3_x0_4_con_mask
-                ],
-                dim=1
-            )
-        )
-
-        dist = self.final_dist(x0_4_dist)
-        edge = self.final_edge(x0_4_edge)
-        mask = self.final_mask(x0_4_mask)
+        
+        dist = self.final_dist(out_0_4['dist'])
+        edge = self.final_edge(out_0_4['edge'])
+        mask = self.final_mask(out_0_4['mask'])
 
         out = {
             'dist': dist,
