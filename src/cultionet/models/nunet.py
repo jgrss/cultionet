@@ -900,6 +900,7 @@ class ResUNet3Psi(torch.nn.Module):
         https://arxiv.org/ftp/arxiv/papers/2004/2004.08790.pdf
         https://arxiv.org/abs/1902.04099
         https://github.com/Bala93/Multi-task-deep-network
+        https://github.com/hamidriasat/UNet-3-Plus
     """
     def __init__(
         self,
