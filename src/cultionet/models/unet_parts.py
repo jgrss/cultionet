@@ -14,6 +14,7 @@ class ResUNetUp(torch.nn.Module):
         self,
         channels: T.List[int],
         up_channels: int,
+        n_pools: int = 0,
         n_prev_down: int = 0,
         n_stream_down: int = 0,
         dilations: T.List[int] = None,
@@ -21,18 +22,40 @@ class ResUNetUp(torch.nn.Module):
     ):
         super(ResUNetUp, self).__init__()
 
+        self.n_pools = n_pools
         self.n_prev_down = n_prev_down
         self.n_stream_down = n_stream_down
         self.cat_channels = 0
 
         self.up = model_utils.UpSample()
 
+        if n_pools > 0:
+            if n_pools == 3:
+                pool_size = 8
+            elif n_pools == 2:
+                pool_size = 4
+            else:
+                pool_size = 2
+
+            for n in range(0, n_pools):
+                setattr(
+                    self,
+                    f'pool_{n}',
+                    PoolResidualConv(
+                        channels[n],
+                        channels[0],
+                        pool_size=pool_size,
+                        dilations=dilations
+                    )
+                )
+                pool_size = int(pool_size / 2)
+                self.cat_channels += channels[0]
         self.prev = ResidualConv(
             up_channels, up_channels,
             fractal_attention=attention,
             dilations=dilations
         )
-        self.cat_channels = up_channels
+        self.cat_channels += up_channels
         if n_prev_down > 0:
             for n in range(0, n_prev_down):
                 setattr(
@@ -78,12 +101,18 @@ class ResUNetUp(torch.nn.Module):
     def forward(
         self,
         prev_same: torch.Tensor,
-        x4_0: T.List[torch.Tensor],
+        x4_0: torch.Tensor,
+        pools: T.List[torch.Tensor] = None,
         prev_down: T.List[torch.Tensor] = None,
         stream_down: T.List[torch.Tensor] = None
     ):
+        h = []
+        if pools is not None:
+            for n, x in zip(range(self.n_pools), pools):
+                c = getattr(self, f'pool_{n}')
+                h += [c(x)]
         x_prev_same = self.prev(prev_same)
-        h = [x_prev_same]
+        h += [x_prev_same]
         if prev_down is not None:
             for n, x in zip(range(self.n_prev_down), prev_down):
                 c = getattr(self, f'prev_{n}')
@@ -152,12 +181,14 @@ class ResUNETConnect3_1(torch.nn.Module):
         self.conv_edge = ResUNetUp(
             channels=channels,
             up_channels=up_channels,
+            n_pools=3,
             dilations=dilations,
             attention=attention
         )
         self.conv_mask = ResUNetUp(
             channels=channels,
             up_channels=up_channels,
+            n_pools=3,
             dilations=dilations,
             attention=attention
         )
@@ -188,10 +219,12 @@ class ResUNETConnect3_1(torch.nn.Module):
         h_dist = self.conv_dist(h_dist_logits)
         h_edge = self.conv_edge(
             prev_same=h_dist,
+            pools=[x0_0, x1_0, x2_0],
             x4_0=x4_0
         )
         h_mask = self.conv_mask(
             prev_same=h_edge,
+            pools=[x0_0, x1_0, x2_0],
             x4_0=x4_0
         )
 
@@ -253,6 +286,7 @@ class ResUNETConnect2_2(torch.nn.Module):
         self.conv_edge = ResUNetUp(
             channels=channels,
             up_channels=up_channels,
+            n_pools=2,
             n_prev_down=1,
             n_stream_down=1,
             dilations=dilations,
@@ -261,6 +295,7 @@ class ResUNETConnect2_2(torch.nn.Module):
         self.conv_mask = ResUNetUp(
             channels=channels,
             up_channels=up_channels,
+            n_pools=2,
             n_prev_down=1,
             n_stream_down=1,
             dilations=dilations,
@@ -295,12 +330,14 @@ class ResUNETConnect2_2(torch.nn.Module):
         h_dist = self.conv_dist(h_dist_logits)
         h_edge = self.conv_edge(
             prev_same=h_dist,
+            pools=[x0_0, x1_0],
             x4_0=x4_0,
             prev_down=[h3_1_dist],
             stream_down=[h3_1_edge]
         )
         h_mask = self.conv_mask(
             prev_same=h_edge,
+            pools=[x0_0, x1_0],
             x4_0=x4_0,
             prev_down=[h3_1_edge],
             stream_down=[h3_1_mask]
@@ -364,6 +401,7 @@ class ResUNETConnect1_3(torch.nn.Module):
         self.conv_edge = ResUNetUp(
             channels=channels,
             up_channels=up_channels,
+            n_pools=1,
             n_prev_down=2,
             n_stream_down=2,
             dilations=dilations,
@@ -372,6 +410,7 @@ class ResUNETConnect1_3(torch.nn.Module):
         self.conv_mask = ResUNetUp(
             channels=channels,
             up_channels=up_channels,
+            n_pools=1,
             n_prev_down=2,
             n_stream_down=2,
             dilations=dilations,
@@ -408,12 +447,14 @@ class ResUNETConnect1_3(torch.nn.Module):
         h_dist = self.conv_dist(h_dist_logits)
         h_edge = self.conv_edge(
             prev_same=h_dist,
+            pools=[x0_0],
             x4_0=x4_0,
             prev_down=[h2_2_dist, h3_1_dist],
             stream_down=[h2_2_edge, h3_1_edge]
         )
         h_mask = self.conv_mask(
             prev_same=h_edge,
+            pools=[x0_0],
             x4_0=x4_0,
             prev_down=[h2_2_edge, h3_1_edge],
             stream_down=[h2_2_mask, h3_1_mask]

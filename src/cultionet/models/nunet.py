@@ -9,12 +9,12 @@ import typing as T
 from . import model_utils
 from .base_layers import (
     AttentionGate,
-    ConvBlock2d,
     DoubleConv,
     Permute,
     PoolConv,
     PoolResidualConv,
     PoolConvSingle,
+    ResidualConvInit,
     ResidualConv,
     SingleConv
 )
@@ -929,10 +929,9 @@ class ResUNet3Psi(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
-        self.conv0_0 = ResidualConv(
+        self.conv0_0 = ResidualConvInit(
             in_channels,
-            channels[0],
-            init_conv=True
+            channels[0]
         )
         self.conv1_0 = PoolResidualConv(
             channels[0],
@@ -1022,49 +1021,49 @@ class ResUNet3Psi(torch.nn.Module):
 
         # 1/8 connection
         out_3_1 = self.convs_3_1(
-            x0_0,
-            x1_0,
-            x2_0,
-            x3_0,
-            x4_0
+            x0_0=x0_0,
+            x1_0=x1_0,
+            x2_0=x2_0,
+            x3_0=x3_0,
+            x4_0=x4_0
         )
         # 1/4 connection
         out_2_2 = self.convs_2_2(
-            x0_0,
-            x1_0,
-            x2_0,
-            out_3_1['dist'],
-            out_3_1['edge'],
-            out_3_1['mask'],
-            x4_0
+            x0_0=x0_0,
+            x1_0=x1_0,
+            x2_0=x2_0,
+            h3_1_dist=out_3_1['dist'],
+            h3_1_edge=out_3_1['edge'],
+            h3_1_mask=out_3_1['mask'],
+            x4_0=x4_0
         )
         # 1/2 connection
         out_1_3 = self.convs_1_3(
-            x0_0,
-            x1_0,
-            out_2_2['dist'],
-            out_3_1['dist'],
-            out_2_2['edge'],
-            out_3_1['edge'],
-            out_2_2['mask'],
-            out_3_1['mask'],
-            x4_0,
+            x0_0=x0_0,
+            x1_0=x1_0,
+            h2_2_dist=out_2_2['dist'],
+            h3_1_dist=out_3_1['dist'],
+            h2_2_edge=out_2_2['edge'],
+            h3_1_edge=out_3_1['edge'],
+            h2_2_mask=out_2_2['mask'],
+            h3_1_mask=out_3_1['mask'],
+            x4_0=x4_0,
         )
         # 1/1 connection
         out_0_4 = self.convs_0_4(
-            x0_0,
-            out_1_3['dist'],
-            out_2_2['dist'],
-            out_3_1['dist'],
-            out_1_3['edge'],
-            out_2_2['edge'],
-            out_3_1['edge'],
-            out_1_3['mask'],
-            out_2_2['mask'],
-            out_3_1['mask'],
-            x4_0,
+            x0_0=x0_0,
+            h1_3_dist=out_1_3['dist'],
+            h2_2_dist=out_2_2['dist'],
+            h3_1_dist=out_3_1['dist'],
+            h1_3_edge=out_1_3['edge'],
+            h2_2_edge=out_2_2['edge'],
+            h3_1_edge=out_3_1['edge'],
+            h1_3_mask=out_1_3['mask'],
+            h2_2_mask=out_2_2['mask'],
+            h3_1_mask=out_3_1['mask'],
+            x4_0=x4_0,
         )
-        
+
         dist = self.final_dist(out_0_4['dist'])
         edge = self.final_edge(out_0_4['edge'])
         mask = self.final_mask(out_0_4['mask'])

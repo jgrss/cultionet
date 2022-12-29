@@ -120,7 +120,7 @@ class TanimotoComplementLoss(torch.nn.Module):
             for d in range(0, self.depth):
                 a = 2**d
                 b = -(2.0 * a - 1.0)
-                denominator += torch.reciprocal((a * sq_sum) + (b * tpl) + self.smooth)
+                denominator = denominator + torch.reciprocal((a * sq_sum) + (b * tpl) + self.smooth)
 
             return numerator * denominator * scale
 

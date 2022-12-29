@@ -520,6 +520,43 @@ class PoolConv(torch.nn.Module):
         return self.seq(x)
 
 
+class ResidualConvInit(torch.nn.Module):
+    """A residual convolution layer
+    """
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int
+    ):
+        super(ResidualConvInit, self).__init__()
+
+        layers = [
+            ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1
+            ),
+            torch.nn.Conv2d(
+                out_channels,
+                out_channels,
+                kernel_size=3,
+                padding=1
+            )
+        ]
+
+        self.seq = torch.nn.Sequential(*layers)
+        self.skip = ConvBlock2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=1,
+            add_activation=False
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x) + self.skip(x)
+
+
 class ResidualConv(torch.nn.Module):
     """A residual convolution layer with (optional) attention
     """
