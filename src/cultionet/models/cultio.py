@@ -80,7 +80,7 @@ class CultioNet(torch.nn.Module):
                 out_edge_channels=2,
                 out_mask_channels=2,
                 init_filter=self.filters,
-                attention=False
+                attention=True
             )
         else:
             raise NameError('Model type not supported.')
@@ -103,9 +103,9 @@ class CultioNet(torch.nn.Module):
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
         # Crop/Non-crop and Crop types
-        logits_star_l2 = self.star_rnn(time_stream)
+        logits_star_l2, logits_star_last = self.star_rnn(time_stream)
         logits_star_l2 = self.cg(logits_star_l2)
-        # logits_star_last = self.cg(logits_star_last)
+        logits_star_last = self.cg(logits_star_last)
 
         # CONCAT
         # h = torch.cat(
@@ -132,10 +132,10 @@ class CultioNet(torch.nn.Module):
             'crop_star': None,
             'crop_type': None
         }
-        # if self.num_classes > 2:
-        #     # With no crop-type, return last layer (crop)
-        #     out['crop_type'] = logits_star_last
-        # else:
-        #     out['crop_star'] = logits_star_last
+        if self.num_classes > 2:
+            # With no crop-type, return last layer (crop)
+            out['crop_type'] = logits_star_last
+        else:
+            out['crop_star'] = logits_star_last
 
         return out
