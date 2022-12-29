@@ -541,12 +541,14 @@ class ResidualConv(torch.nn.Module):
 
         layers = []
         if init_conv:
-            layers = ConvBlock2d(
-                in_channels=in_channels,
-                out_channels=out_channels,
-                kernel_size=3,
-                padding=1
-            )
+            layers += [
+                ConvBlock2d(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    kernel_size=3,
+                    padding=1
+                )
+            ]
             in_channels = out_channels
 
         layers += [
