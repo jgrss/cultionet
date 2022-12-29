@@ -433,7 +433,7 @@ class CultioLitModel(pl.LightningModule):
         filters: int = 32,
         star_rnn_n_layers: int = 4,
         learning_rate: float = 1e-3,
-        weight_decay: float = 0.01,
+        weight_decay: float = 1e-4,
         eps: float = 1e-8,
         depth: int = 5,
         ckpt_name: str = 'last',
