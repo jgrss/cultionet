@@ -431,7 +431,6 @@ class CultioLitModel(pl.LightningModule):
         num_time_features: int = None,
         num_classes: int = 2,
         filters: int = 32,
-        star_rnn_hidden_dim: int = 32,
         star_rnn_n_layers: int = 4,
         learning_rate: float = 1e-3,
         weight_decay: float = 0.01,
@@ -473,7 +472,7 @@ class CultioLitModel(pl.LightningModule):
             ds_features=num_features,
             ds_time_features=num_time_features,
             filters=filters,
-            star_rnn_hidden_dim=star_rnn_hidden_dim,
+            star_rnn_hidden_dim=filters,
             star_rnn_n_layers=star_rnn_n_layers,
             num_classes=self.num_classes,
             model_type=model_type
