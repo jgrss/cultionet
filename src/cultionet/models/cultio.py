@@ -43,28 +43,26 @@ class CultioNet(torch.nn.Module):
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
-        # Star RNN layer (+star_rnn_hidden_dim +num_classes_l2 +num_classes_last)
-        # Crop classes
+        # Star RNN layer crop classes
+        num_classes_l2 = 0
         if self.num_classes > 2:
             # Crop-type classes
+            num_classes_l2 = 3
             num_classes_last = self.num_classes
+            base_in_channels = star_rnn_hidden_dim * 2
         else:
+            # Loss on background:0, crop-type:1, edge:2
             num_classes_last = 3
+            base_in_channels = star_rnn_hidden_dim
+
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
             hidden_dim=star_rnn_hidden_dim,
             n_layers=star_rnn_n_layers,
+            num_classes_l2=num_classes_l2,
             num_classes_last=num_classes_last,
             crop_type_layer=True if self.num_classes > 2 else False
         )
-        # Local 1 = hidden dimensions
-        # Local 2 = crop (0|1)
-        # Last = crop-type (2..N)
-        # base_in_channels = (
-        #     + star_rnn_hidden_dim * (star_rnn_n_layers - 1)
-        #     + star_rnn_hidden_dim
-        # )
-        base_in_channels = star_rnn_hidden_dim
         if model_type == 'UNet3Psi':
             self.mask_model = UNet3Psi(
                 in_channels=base_in_channels,
@@ -80,7 +78,7 @@ class CultioNet(torch.nn.Module):
                 out_edge_channels=2,
                 out_mask_channels=2,
                 init_filter=self.filters,
-                attention=True
+                attention=False
             )
         else:
             raise NameError('Model type not supported.')
@@ -103,22 +101,19 @@ class CultioNet(torch.nn.Module):
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
         # Crop/Non-crop and Crop types
-        logits_star_l2, logits_star_last = self.star_rnn(time_stream)
-        logits_star_l2 = self.cg(logits_star_l2)
-        logits_star_last = self.cg(logits_star_last)
+        if self.num_classes > 2:
+            logits_star_h, logits_star_l2, logits_star_last = self.star_rnn(time_stream)
+            logits_star_l2 = self.cg(logits_star_l2)
+        else:
+            logits_star_h, logits_star_last = self.star_rnn(time_stream)
 
-        # CONCAT
-        # h = torch.cat(
-        #     [
-        #         logits_star_l2,
-        #         logits_star_last
-        #     ], dim=1
-        # )
+        logits_star_h = self.cg(logits_star_h)
+        logits_star_last = self.cg(logits_star_last)
 
         # Main stream
         logits = self.mask_model(
             self.gc(
-                logits_star_l2, batch_size, height, width
+                logits_star_h, batch_size, height, width
             )
         )
         logits_distance = self.cg(logits['dist'])
@@ -134,6 +129,7 @@ class CultioNet(torch.nn.Module):
         }
         if self.num_classes > 2:
             # With no crop-type, return last layer (crop)
+            out['crop_star'] = logits_star_l2
             out['crop_type'] = logits_star_last
         else:
             out['crop_star'] = logits_star_last
