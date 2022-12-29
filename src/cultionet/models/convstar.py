@@ -129,7 +129,8 @@ class StarRNN(torch.nn.Module):
         self,
         input_dim: int = 3,
         hidden_dim: int = 64,
-        num_classes_last: int = 2,
+        num_classes_l2: int = 3,
+        num_classes_last: int = 3,
         n_stage: int = 3,
         kernel_size: int = 3,
         n_layers: int = 6,
@@ -150,21 +151,18 @@ class StarRNN(torch.nn.Module):
             kernel_sizes=kernel_size,
             n_layers=n_layers
         )
-
         padding = int(kernel_size / 2)
-        # self.final = torch.nn.Sequential(
-        #     torch.nn.Conv2d(
-        #         hidden_dim,
-        #         hidden_dim,
-        #         kernel_size,
-        #         padding=padding,
-        #         bias=False
-        #     ),
-        #     torch.nn.BatchNorm2d(hidden_dim),
-        #     torch.nn.ReLU(inplace=False)
-        # )
+
         # Crop-type layer
         if self.crop_type_layer:
+            # Level 2
+            self.final_l2 = torch.nn.Conv2d(
+                hidden_dim,
+                num_classes_l2,
+                kernel_size,
+                padding=padding
+            )
+            # Last level (crop-type)
             self.final_last = torch.nn.Conv2d(
                 hidden_dim,
                 num_classes_last,
@@ -172,6 +170,7 @@ class StarRNN(torch.nn.Module):
                 padding=padding
             )
         else:
+            # Last level (crop|non-crop)
             self.final_last = torch.nn.Conv2d(
                 hidden_dim,
                 num_classes_last,
@@ -201,13 +200,14 @@ class StarRNN(torch.nn.Module):
         for iter_ in range(0, time_size):
             hidden_s = self.rnn(x[:, :, iter_, :, :], hidden_s)
 
-        # local = torch.cat(
-        #     [
-        #         self.final(layer) for layer in hidden_s[:-1]
-        #     ],
-        #     dim=1
-        # )
-        last = self.final_last(hidden_s[-1])
+        if self.crop_type_layer:
+            last_l2 = self.final_l2(hidden_s[-2])
+            last = self.final_last(hidden_s[-1])
+            h = torch.cat([hidden_s[-2], hidden_s[-1]], dim=1)
 
-        # The output is (B x C x H x W)
-        return hidden_s[-1], last
+            return h, last_l2, last
+        else:
+            last = self.final_last(hidden_s[-1])
+
+            # The output is (B x C x H x W)
+            return hidden_s[-1], last
