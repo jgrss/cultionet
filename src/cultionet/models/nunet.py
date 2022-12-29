@@ -904,7 +904,7 @@ class FinalDist(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.sigmoid_gamma(self.gamma) + self.smooth
-        out = torch.recipricol(out)
+        out = torch.reciprocal(out)
         out = x * out
         out = self.sigmoid_final(out)
 
