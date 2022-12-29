@@ -80,7 +80,7 @@ class CultioNet(torch.nn.Module):
                 out_edge_channels=2,
                 out_mask_channels=2,
                 init_filter=self.filters,
-                attention=True
+                attention=False
             )
         else:
             raise NameError('Model type not supported.')
