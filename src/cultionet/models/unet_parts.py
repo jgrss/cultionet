@@ -57,7 +57,6 @@ class ResUNetConnector(torch.nn.Module):
         self.prev_backbone = ResidualConv(
             channels[prev_backbone_channel_index],
             up_channels,
-            fractal_attention=attention,
             dilations=dilations
         )
         self.cat_channels += up_channels
@@ -66,7 +65,6 @@ class ResUNetConnector(torch.nn.Module):
             self.prev = ResidualConv(
                 up_channels,
                 up_channels,
-                fractal_attention=attention,
                 dilations=dilations
             )
             self.cat_channels += up_channels
@@ -79,7 +77,6 @@ class ResUNetConnector(torch.nn.Module):
                     ResidualConv(
                         up_channels,
                         up_channels,
-                        fractal_attention=attention,
                         dilations=dilations
                     )
                 )
@@ -98,23 +95,17 @@ class ResUNetConnector(torch.nn.Module):
                     )
                 )
                 self.cat_channels += up_channels
-        self.conv4_0_prev = ResidualConv(
+        self.conv4_0 = ResidualConv(
             channels[4],
             channels[0],
             fractal_attention=attention,
             dilations=dilations
         )
-        self.conv4_0_stream = ResidualConv(
-            channels[4],
-            channels[0],
-            fractal_attention=attention,
-            dilations=dilations
-        )
-        self.cat_channels += channels[0] * 2
+        self.cat_channels += channels[0]
 
         self.conv = ResidualConv(
-            self.cat_channels, up_channels,
-            fractal_attention=attention,
+            self.cat_channels,
+            up_channels,
             dilations=dilations
         )
 
@@ -137,13 +128,18 @@ class ResUNetConnector(torch.nn.Module):
         if prev_down is not None:
             for n, x in zip(range(self.n_prev_down), prev_down):
                 c = getattr(self, f'prev_{n}')
-                h += [c(self.up(x, size=prev_same[0].shape[-2:]))]
+                h += [
+                    c(self.up(x, size=prev_same[0].shape[-2:]))
+                ]
         if stream_down is not None:
             for n, x in zip(range(self.n_stream_down), stream_down):
                 c = getattr(self, f'stream_{n}')
-                h += [c(self.up(x, size=prev_same[0].shape[-2:]))]
-        h += [self.conv4_0_prev(self.up(x4_0, size=prev_same[0].shape[-2:]))]
-        h += [self.conv4_0_stream(self.up(x4_0, size=prev_same[0].shape[-2:]))]
+                h += [
+                    c(self.up(x, size=prev_same[0].shape[-2:]))
+                ]
+        h += [
+            self.conv4_0(self.up(x4_0, size=prev_same[0].shape[-2:]))
+        ]
         h = torch.cat(h, dim=1)
         h = self.conv(h)
 
