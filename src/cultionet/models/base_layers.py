@@ -631,9 +631,9 @@ class ResidualConv(torch.nn.Module):
 
         if self.fractal_weights is not None:
             # Fractal attention
-            attention= self.fractal_weights(x)
+            attention = self.fractal_weights(x)
             # 1 + γA
-            attention = attention * self.gamma + 1.0
+            attention = 1.0 + self.gamma * attention
             out = out * attention
 
         return out

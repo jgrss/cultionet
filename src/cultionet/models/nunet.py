@@ -19,10 +19,10 @@ from .base_layers import (
     SingleConv
 )
 from .unet_parts import (
-    ResUNETConnect3_1,
-    ResUNETConnect2_2,
-    ResUNETConnect1_3,
-    ResUNETConnect0_4
+    ResUNet3_3_1,
+    ResUNet3_2_2,
+    ResUNet3_1_3,
+    ResUNet3_0_4
 )
 
 import torch
@@ -956,25 +956,25 @@ class ResUNet3Psi(torch.nn.Module):
         )
 
         # Connect 3
-        self.convs_3_1 = ResUNETConnect3_1(
+        self.convs_3_1 = ResUNet3_3_1(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
             attention=attention
         )
-        self.convs_2_2 = ResUNETConnect2_2(
+        self.convs_2_2 = ResUNet3_2_2(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
             attention=attention
         )
-        self.convs_1_3 = ResUNETConnect1_3(
+        self.convs_1_3 = ResUNet3_1_3(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
             attention=attention
         )
-        self.convs_0_4 = ResUNETConnect0_4(
+        self.convs_0_4 = ResUNet3_0_4(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
@@ -1051,7 +1051,7 @@ class ResUNet3Psi(torch.nn.Module):
             h3_1_edge=out_3_1['edge'],
             h2_2_mask=out_2_2['mask'],
             h3_1_mask=out_3_1['mask'],
-            x4_0=x4_0,
+            x4_0=x4_0
         )
         # 1/1 connection
         out_0_4 = self.convs_0_4(
@@ -1065,7 +1065,7 @@ class ResUNet3Psi(torch.nn.Module):
             h1_3_mask=out_1_3['mask'],
             h2_2_mask=out_2_2['mask'],
             h3_1_mask=out_3_1['mask'],
-            x4_0=x4_0,
+            x4_0=x4_0
         )
 
         dist = self.final_dist(out_0_4['dist'])

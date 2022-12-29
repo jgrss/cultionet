@@ -9,7 +9,9 @@ from . import model_utils
 import torch
 
 
-class ResUNetConnector(torch.nn.Module):
+class ResUNet3Connector(torch.nn.Module):
+    """Connects layers in a Residual UNet 3+ architecture
+    """
     def __init__(
         self,
         channels: T.List[int],
@@ -22,7 +24,7 @@ class ResUNetConnector(torch.nn.Module):
         dilations: T.List[int] = None,
         attention: bool = False
     ):
-        super(ResUNetConnector, self).__init__()
+        super(ResUNet3Connector, self).__init__()
 
         self.n_pools = n_pools
         self.n_prev_down = n_prev_down
@@ -146,7 +148,9 @@ class ResUNetConnector(torch.nn.Module):
         return h
 
 
-class ResUNETConnect3_1(torch.nn.Module):
+class ResUNet3_3_1(torch.nn.Module):
+    """Residual UNet 3+ connection from backbone to upstream 3,1
+    """
     def __init__(
         self,
         channels: T.Sequence[int],
@@ -154,11 +158,12 @@ class ResUNETConnect3_1(torch.nn.Module):
         dilations: T.List[int] = None,
         attention: bool = False
     ):
-        super(ResUNETConnect3_1, self).__init__()
+        super(ResUNet3_3_1, self).__init__()
 
         self.up = model_utils.UpSample()
 
-        self.conv_dist = ResUNetConnector(
+        # Distance stream connection
+        self.conv_dist = ResUNet3Connector(
             channels=channels,
             up_channels=up_channels,
             is_side_stream=False,
@@ -167,7 +172,8 @@ class ResUNETConnect3_1(torch.nn.Module):
             dilations=dilations,
             attention=attention
         )
-        self.conv_edge = ResUNetConnector(
+        # Edge stream connection
+        self.conv_edge = ResUNet3Connector(
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=3,
@@ -175,7 +181,8 @@ class ResUNETConnect3_1(torch.nn.Module):
             dilations=dilations,
             attention=attention
         )
-        self.conv_mask = ResUNetConnector(
+        # Mask stream connection
+        self.conv_mask = ResUNet3Connector(
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=3,
@@ -192,16 +199,19 @@ class ResUNETConnect3_1(torch.nn.Module):
         x3_0: torch.Tensor,
         x4_0: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
+        # Distance logits
         h_dist = self.conv_dist(
             prev_same=[x3_0],
             pools=[x0_0, x1_0, x2_0],
             x4_0=x4_0
         )
+        # Output distance logits pass to edge layer
         h_edge = self.conv_edge(
             prev_same=[x3_0, h_dist],
             pools=[x0_0, x1_0, x2_0],
             x4_0=x4_0
         )
+        # Output edge logits pass to mask layer
         h_mask = self.conv_mask(
             prev_same=[x3_0, h_edge],
             pools=[x0_0, x1_0, x2_0],
@@ -215,7 +225,9 @@ class ResUNETConnect3_1(torch.nn.Module):
         }
 
 
-class ResUNETConnect2_2(torch.nn.Module):
+class ResUNet3_2_2(torch.nn.Module):
+    """Residual UNet 3+ connection from backbone to upstream 2,2
+    """
     def __init__(
         self,
         channels: T.Sequence[int],
@@ -223,11 +235,11 @@ class ResUNETConnect2_2(torch.nn.Module):
         dilations: T.List[int] = None,
         attention: bool = False
     ):
-        super(ResUNETConnect2_2, self).__init__()
+        super(ResUNet3_2_2, self).__init__()
 
         self.up = model_utils.UpSample()
 
-        self.conv_dist = ResUNetConnector(
+        self.conv_dist = ResUNet3Connector(
             channels=channels,
             up_channels=up_channels,
             is_side_stream=False,
@@ -237,7 +249,7 @@ class ResUNETConnect2_2(torch.nn.Module):
             dilations=dilations,
             attention=attention
         )
-        self.conv_edge = ResUNetConnector(
+        self.conv_edge = ResUNet3Connector(
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=2,
@@ -246,7 +258,7 @@ class ResUNETConnect2_2(torch.nn.Module):
             dilations=dilations,
             attention=attention
         )
-        self.conv_mask = ResUNetConnector(
+        self.conv_mask = ResUNet3Connector(
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=2,
@@ -292,7 +304,9 @@ class ResUNETConnect2_2(torch.nn.Module):
         }
 
 
-class ResUNETConnect1_3(torch.nn.Module):
+class ResUNet3_1_3(torch.nn.Module):
+    """Residual UNet 3+ connection from backbone to upstream 1,3
+    """
     def __init__(
         self,
         channels: T.Sequence[int],
@@ -300,11 +314,11 @@ class ResUNETConnect1_3(torch.nn.Module):
         dilations: T.List[int] = None,
         attention: bool = False
     ):
-        super(ResUNETConnect1_3, self).__init__()
+        super(ResUNet3_1_3, self).__init__()
 
         self.up = model_utils.UpSample()
 
-        self.conv_dist = ResUNetConnector(
+        self.conv_dist = ResUNet3Connector(
             channels=channels,
             up_channels=up_channels,
             is_side_stream=False,
@@ -314,7 +328,7 @@ class ResUNETConnect1_3(torch.nn.Module):
             dilations=dilations,
             attention=attention
         )
-        self.conv_edge = ResUNetConnector(
+        self.conv_edge = ResUNet3Connector(
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=1,
@@ -323,7 +337,7 @@ class ResUNETConnect1_3(torch.nn.Module):
             dilations=dilations,
             attention=attention
         )
-        self.conv_mask = ResUNetConnector(
+        self.conv_mask = ResUNet3Connector(
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=1,
@@ -371,7 +385,9 @@ class ResUNETConnect1_3(torch.nn.Module):
         }
 
 
-class ResUNETConnect0_4(torch.nn.Module):
+class ResUNet3_0_4(torch.nn.Module):
+    """Residual UNet 3+ connection from backbone to upstream 0,4
+    """
     def __init__(
         self,
         channels: T.Sequence[int],
@@ -379,11 +395,11 @@ class ResUNETConnect0_4(torch.nn.Module):
         dilations: T.List[int] = None,
         attention: bool = False
     ):
-        super(ResUNETConnect0_4, self).__init__()
+        super(ResUNet3_0_4, self).__init__()
 
         self.up = model_utils.UpSample()
 
-        self.conv_dist = ResUNetConnector(
+        self.conv_dist = ResUNet3Connector(
             channels=channels,
             up_channels=up_channels,
             is_side_stream=False,
@@ -392,7 +408,7 @@ class ResUNETConnect0_4(torch.nn.Module):
             dilations=dilations,
             attention=attention
         )
-        self.conv_edge = ResUNetConnector(
+        self.conv_edge = ResUNet3Connector(
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=0,
@@ -400,7 +416,7 @@ class ResUNETConnect0_4(torch.nn.Module):
             dilations=dilations,
             attention=attention
         )
-        self.conv_mask = ResUNetConnector(
+        self.conv_mask = ResUNet3Connector(
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=0,
