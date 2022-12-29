@@ -893,24 +893,6 @@ class UNet3Psi(torch.nn.Module):
         return out
 
 
-class FinalDist(torch.nn.Module):
-    def __init__(self, smooth: float = 1e-4):
-        super(FinalDist, self).__init__()
-
-        self.smooth = smooth
-        self.sigmoid_gamma = torch.nn.Sigmoid()
-        self.sigmoid_final = torch.nn.Sigmoid()
-        self.gamma = torch.nn.Parameter(torch.ones(1))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.sigmoid_gamma(self.gamma) + self.smooth
-        out = torch.reciprocal(out)
-        out = x * out
-        out = self.sigmoid_final(out)
-
-        return out
-
-
 class ResUNet3Psi(torch.nn.Module):
     """Residual UNet+++ with Psi-Net (Multi-head streams) and Attention
 
