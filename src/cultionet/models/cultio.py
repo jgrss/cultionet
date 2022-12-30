@@ -1,11 +1,74 @@
 import typing as T
 
 from . import model_utils
+from .base_layers import ConvBlock2d
 from .nunet import UNet3Psi, ResUNet3Psi
 from .convstar import StarRNN
 
 import torch
 from torch_geometric.data import Data
+
+
+class CropTypeFinal(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        out_classes: int
+    ):
+        super(CropTypeFinal, self).__init__()
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.out_classes = out_classes
+
+        self.conv1 = ConvBlock2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=1,
+            padding=0,
+            activation_type='ReLU'
+        )
+        layers1 = [
+            ConvBlock2d(
+                in_channels=out_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1,
+                activation_type='ReLU'
+            ),
+            torch.nn.Conv2d(
+                out_channels,
+                out_channels,
+                kernel_size=3,
+                padding=1,
+                bias=False
+            ),
+            torch.nn.BatchNorm2d(out_channels)
+        ]
+        self.seq1 = torch.nn.Sequential(*layers1)
+
+        layers_final = [
+            torch.nn.ReLU(inplace=False),
+            torch.nn.Conv2d(
+                out_channels,
+                out_classes,
+                kernel_size=1,
+                padding=0
+            )
+        ]
+        self.final = torch.nn.Sequential(*layers_final)
+
+    def forward(
+        self, x: torch.Tensor, crop_type_star: torch.Tensor
+    ) -> torch.Tensor:
+        out1 = self.conv1(x)
+        out = self.seq(out1)
+        out = out + out1
+        out = self.final(out)
+        out = out + crop_type_star
+
+        return out
 
 
 class CultioNet(torch.nn.Module):
@@ -47,9 +110,17 @@ class CultioNet(torch.nn.Module):
         num_classes_l2 = 0
         if self.num_classes > 2:
             # Crop-type classes
+            # Loss on background:0, crop-type:1, edge:2
             num_classes_l2 = 3
+            # Loss on background:0, crop-type:N
             num_classes_last = self.num_classes
             base_in_channels = star_rnn_hidden_dim * 2
+
+            self.crop_type_model = CropTypeFinal(
+                in_channels=base_in_channels+1+2+2,
+                out_channels=star_rnn_hidden_dim,
+                out_classes=num_classes_last
+            )
         else:
             # Loss on background:0, crop-type:1, edge:2
             num_classes_last = 3
@@ -125,12 +196,31 @@ class CultioNet(torch.nn.Module):
             'edge': logits_edges,
             'crop': logits_crop,
             'crop_star': None,
+            'crop_type_star': None,
             'crop_type': None
         }
         if self.num_classes > 2:
-            # With no crop-type, return last layer (crop)
+            # Crop binary plus edge
             out['crop_star'] = logits_star_l2
-            out['crop_type'] = logits_star_last
+            # Crop-type
+            out['crop_type_star'] = logits_star_last
+
+            crop_type_logits = self.crop_type_model(
+                self.gc(
+                    torch.cat(
+                        [
+                            logits_star_h,
+                            logits_distance,
+                            logits_edges,
+                            logits_crop
+                        ],
+                        dim=1
+                    )
+                ),
+                crop_type_star=self.gc(logits_star_last)
+            )
+            # Crop-type (final)
+            out['crop_type'] = self.cg(crop_type_logits)
         else:
             out['crop_star'] = logits_star_last
 
