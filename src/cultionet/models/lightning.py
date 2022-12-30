@@ -533,23 +533,32 @@ class CultioLitModel(pl.LightningModule):
         return predictions
 
     def get_true_labels(
-        self, batch: Data, crop_type: torch.Tensor
-    ) -> T.Tuple[torch.Tensor, torch.Tensor]:
-        edge_true = torch.where(
+        self, batch: Data, crop_type: torch.Tensor = None
+    ) -> T.Tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, T.Union[None, torch.Tensor]
+    ]:
+        true_edge = torch.where(
             batch.y == self.edge_class, 1, 0
         ).long()
+        # Recode all crop classes to 1, otherwise 0
+        true_crop = torch.where(
+            (batch.y > 0) & (batch.y != self.edge_class), 1, 0
+        ).long()
+        # Same as above, with additional edge class included
+        true_crop_plus_edge = torch.where(
+            (batch.y > 0) & (batch.y != self.edge_class), 1,
+            torch.where(
+                batch.y == self.edge_class, 2, 0
+            )
+        ).long()
+        true_crop_type = None
         if crop_type is not None:
             # Leave all crop classes as they are
-            crop_true = torch.where(
+            true_crop_type = torch.where(
                 batch.y == self.edge_class, 0, batch.y
             ).long()
-        else:
-            # Recode all crop classes to 1
-            crop_true = torch.where(
-                (batch.y > 0) & (batch.y != self.edge_class), 1, 0
-            ).long()
 
-        return edge_true, crop_true
+        return true_edge, true_crop, true_crop_plus_edge, true_crop_type
 
     def softmax(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
         return F.softmax(x, dim=dim, dtype=x.dtype)
@@ -576,22 +585,8 @@ class CultioLitModel(pl.LightningModule):
         return x
 
     # def on_train_epoch_start(self):
-    #     """
-    #     Set the depth for the d hyperparameter in the Tanimoto loss
-
-    #     Source:
-    #         https://arxiv.org/pdf/2009.02062.pdf
-    #     """
     #     # Get the current learning rate from the optimizer
     #     lr = self.optimizers().optimizer.param_groups[0]['lr']
-    #     if lr == self.learning_rate:
-    #         self.depth = 1
-    #     elif 1e-5 < lr < 1e-3:
-    #         self.depth = 10
-    #     else:
-    #         self.depth = 20
-
-    #     self.configure_loss()
 
     def on_validation_epoch_end(self, *args, **kwargs):
         """Save the model on validation end
@@ -614,32 +609,31 @@ class CultioLitModel(pl.LightningModule):
         Returns:
             Total loss
         """
-        true_edge, true_crop = self.get_true_labels(
+        true_edge, true_crop, true_crop_plus_edge, true_crop_type = self.get_true_labels(
             batch, crop_type=predictions['crop_type']
         )
 
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
-
+        # Main loss
         loss = (
             dist_loss
             + edge_loss
             + crop_loss
         )
-
-        true_crop = torch.where(
-            true_crop == 1, 1,
-            torch.where(
-                true_edge == 1, 2, 0
-            )
-        ).long()
-        crop_star_loss = self.crop_star_loss(predictions['crop_star'], true_crop)
+        # Upstream (deep) loss on crop|non-crop + edge
+        crop_star_loss = self.crop_star_loss(
+            predictions['crop_star'], true_crop_plus_edge
+        )
         loss = loss + crop_star_loss
         if predictions['crop_type'] is not None:
-            true_crop_type = torch.where(
-                batch.y == self.edge_class, 0, batch.y
-            ).long()
+            # Upstream (deep) loss on crop-type
+            crop_type_star_loss = self.crop_type_star_loss(
+                predictions['crop_type_star'], true_crop_type
+            )
+            loss = loss + crop_type_star_loss
+            # Loss on crop-type
             crop_type_loss = self.crop_type_loss(
                 predictions['crop_type'], true_crop_type
             )
@@ -686,7 +680,7 @@ class CultioLitModel(pl.LightningModule):
             )
         )
         # Get the true edge and crop labels
-        edge_ytrue, crop_ytrue = self.get_true_labels(
+        edge_ytrue, crop_ytrue, __, crop_type_ytrue = self.get_true_labels(
             batch, crop_type=predictions['crop_type']
         )
         # F1-score
@@ -721,9 +715,6 @@ class CultioLitModel(pl.LightningModule):
                     predictions['crop_type']
                 )
             )
-            crop_type_ytrue = torch.where(
-                batch.y == self.edge_class, 0, batch.y
-            ).long()
             crop_type_score = self.crop_type_f1(crop_type_ypred, crop_type_ytrue)
             metrics['crop_type_f1'] = crop_type_score
 
@@ -800,6 +791,7 @@ class CultioLitModel(pl.LightningModule):
         self.crop_loss = TanimotoDistLoss()
         self.crop_star_loss = TanimotoDistLoss()
         if self.num_classes > 2:
+            self.crop_type_star_loss = TanimotoDistLoss()
             self.crop_type_loss = TanimotoDistLoss()
 
     def configure_optimizers(self):
