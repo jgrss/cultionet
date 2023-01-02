@@ -46,7 +46,7 @@ class CropTypeFinal(torch.nn.Module):
             ),
             torch.nn.BatchNorm2d(out_channels)
         ]
-        self.seq1 = torch.nn.Sequential(*layers1)
+        self.seq = torch.nn.Sequential(*layers1)
 
         layers_final = [
             torch.nn.ReLU(inplace=False),
