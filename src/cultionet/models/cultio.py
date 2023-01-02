@@ -217,7 +217,12 @@ class CultioNet(torch.nn.Module):
                         dim=1
                     ), batch_size, height, width
                 ),
-                crop_type_star=self.gc(logits_star_last)
+                crop_type_star=self.gc(
+                    logits_star_last,
+                    batch_size,
+                    height,
+                    width
+                )
             )
             # Crop-type (final)
             out['crop_type'] = self.cg(crop_type_logits)
