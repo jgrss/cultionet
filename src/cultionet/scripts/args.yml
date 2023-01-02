@@ -405,7 +405,7 @@ train:
     long: learning-rate
     help: The learning rate
     kwargs:
-      default: 0.001
+      default: 1e-4
       type: '&float'
   threads:
     short: t
@@ -482,7 +482,7 @@ train:
     long: gradient-clip-val
     help: The gradient clip value
     kwargs:
-      default: 1.0
+      default: 5.0
       type: '&float'
   patience:
     short: ''
@@ -496,7 +496,7 @@ train:
     long: weight-decay
     help: Sets the weight decay for Adam optimizer\'s regularization
     kwargs:
-      default: 1e-5
+      default: 0.01
       type: '&float'
   accumulate_grad_batches:
     short: agb

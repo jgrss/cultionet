@@ -19,6 +19,10 @@ from .base_layers import (
     SingleConv
 )
 from .unet_parts import (
+    UNet3_3_1,
+    UNet3_2_2,
+    UNet3_1_3,
+    UNet3_0_4,
     ResUNet3_3_1,
     ResUNet3_2_2,
     ResUNet3_1_3,
@@ -603,57 +607,53 @@ class UNet3Psi(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
-        self.conv0_0 = SingleConv(in_channels, channels[0])
-        self.conv1_0 = PoolConv(channels[0], channels[1])
-        self.conv2_0 = PoolConv(channels[1], channels[2])
-        self.conv3_0 = PoolConv(channels[2], channels[3])
-        self.conv4_0 = PoolConv(channels[3], channels[4])
+        self.conv0_0 = SingleConv(
+            in_channels,
+            channels[0]
+        )
+        self.conv1_0 = PoolConv(
+            channels[0],
+            channels[1]
+        )
+        self.conv2_0 = PoolConv(
+            channels[1],
+            channels[2]
+        )
+        self.conv3_0 = PoolConv(
+            channels[2],
+            channels[3]
+        )
+        self.conv4_0 = PoolConv(
+            channels[3],
+            channels[4]
+        )
 
         # Connect 3
-        self.conv0_0_3_1_con = PoolConv(channels[0], channels[0], pool_size=8)
-        self.conv1_0_3_1_con = PoolConv(channels[1], channels[0], pool_size=4)
-        self.conv2_0_3_1_con = PoolConv(channels[2], channels[0], pool_size=2)
-        self.conv3_0_3_1_con = DoubleConv(channels[3], channels[0])
-        self.conv4_0_3_1_con = DoubleConv(channels[4], channels[0])
-        self.conv3_1 = DoubleConv(up_channels, up_channels)
-        self.conv3_1_skip_edge = DoubleConv(up_channels*2, up_channels)
-        self.conv3_1_skip_mask = DoubleConv(up_channels*2, up_channels)
+        self.convs_3_1 = UNet3_3_1(
+            channels=channels,
+            up_channels=up_channels
+        )
+        self.convs_2_2 = UNet3_2_2(
+            channels=channels,
+            up_channels=up_channels
+        )
+        self.convs_1_3 = UNet3_1_3(
+            channels=channels,
+            up_channels=up_channels
+        )
+        self.convs_0_4 = UNet3_0_4(
+            channels=channels,
+            up_channels=up_channels
+        )
 
-        # Connect 2
-        self.conv0_0_2_2_con = PoolConv(channels[0], channels[0], pool_size=4)
-        self.conv1_0_2_2_con = PoolConv(channels[1], channels[0], pool_size=2)
-        self.conv2_0_2_2_con = DoubleConv(channels[2], channels[0])
-        self.conv3_1_2_2_con = DoubleConv(up_channels, channels[0])
-        self.conv4_0_2_2_con = DoubleConv(channels[4], channels[0])
-        self.conv2_2 = DoubleConv(up_channels, up_channels)
-        self.conv2_2_skip_edge = DoubleConv(up_channels*2, up_channels)
-        self.conv2_2_skip_mask = DoubleConv(up_channels*2, up_channels)
-
-        # Connect 3
-        self.conv0_0_1_3_con = PoolConv(channels[0], channels[0], pool_size=2)
-        self.conv1_0_1_3_con = DoubleConv(channels[1], channels[0])
-        self.conv2_2_1_3_con = DoubleConv(up_channels, channels[0])
-        self.conv3_1_1_3_con = DoubleConv(up_channels, channels[0])
-        self.conv4_0_1_3_con = DoubleConv(channels[4], channels[0])
-        self.conv1_3 = DoubleConv(up_channels, up_channels)
-        self.conv1_3_skip_edge = DoubleConv(up_channels*2, up_channels)
-        self.conv1_3_skip_mask = DoubleConv(up_channels*2, up_channels)
-
-        # Connect 4
-        self.conv0_0_0_4_con = DoubleConv(channels[0], channels[0])
-        self.conv1_3_0_4_con = DoubleConv(up_channels, channels[0])
-        self.conv2_2_0_4_con = DoubleConv(up_channels, channels[0])
-        self.conv3_1_0_4_con = DoubleConv(up_channels, channels[0])
-        self.conv4_0_0_4_con = DoubleConv(channels[4], channels[0])
-        self.conv0_4 = DoubleConv(up_channels, up_channels)
-        self.conv0_4_skip_edge = DoubleConv(up_channels*2, up_channels)
-        self.conv0_4_skip_mask = DoubleConv(up_channels*2, up_channels)
-
-        self.final_dist = torch.nn.Conv2d(
-            up_channels,
-            out_dist_channels,
-            kernel_size=1,
-            padding=0
+        self.final_dist = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                up_channels,
+                out_dist_channels,
+                kernel_size=1,
+                padding=0
+            ),
+            torch.nn.Sigmoid()
         )
         self.final_edge = torch.nn.Conv2d(
             up_channels,
@@ -689,200 +689,53 @@ class UNet3Psi(torch.nn.Module):
         x4_0 = self.conv4_0(x3_0)
 
         # 1/8 connection
-        x0_0_x3_1_con = self.conv0_0_3_1_con(x0_0)
-        x1_0_x3_1_con = self.conv1_0_3_1_con(x1_0)
-        x2_0_x3_1_con = self.conv2_0_3_1_con(x2_0)
-        x3_0_x3_1_con = self.conv3_0_3_1_con(x3_0)
-        x4_0_x3_1_con = self.conv4_0_3_1_con(self.up(x4_0, size=x3_0.shape[-2:]))
-        h3_1 = torch.cat(
-            [
-                x0_0_x3_1_con,
-                x1_0_x3_1_con,
-                x2_0_x3_1_con,
-                x3_0_x3_1_con,
-                x4_0_x3_1_con
-            ],
-            dim=1
+        out_3_1 = self.convs_3_1(
+            x0_0=x0_0,
+            x1_0=x1_0,
+            x2_0=x2_0,
+            x3_0=x3_0,
+            x4_0=x4_0
         )
-        x3_1_dist = self.conv3_1(h3_1)
-        x3_1_edge = self.conv3_1_skip_edge(
-            torch.cat(
-                [
-                    h3_1,
-                    x3_1_dist
-                ],
-                dim=1
-            )
-        )
-        x3_1_mask = self.conv3_1_skip_mask(
-            torch.cat(
-                [
-                    h3_1,
-                    x3_1_edge
-                ],
-                dim=1
-            )
-        )
-
         # 1/4 connection
-        x0_0_x2_2_con = self.conv0_0_2_2_con(x0_0)
-        x1_0_x2_2_con = self.conv1_0_2_2_con(x1_0)
-        x2_0_x2_2_con = self.conv2_0_2_2_con(x2_0)
-        x3_1_x2_2_con_dist = self.conv3_1_2_2_con(self.up(x3_1_dist, size=x2_0.shape[-2:]))
-        x3_1_x2_2_con_edge = self.conv3_1_2_2_con(self.up(x3_1_edge, size=x2_0.shape[-2:]))
-        x3_1_x2_2_con_mask = self.conv3_1_2_2_con(self.up(x3_1_mask, size=x2_0.shape[-2:]))
-        x4_0_x2_2_con = self.conv4_0_2_2_con(self.up(x4_0, size=x2_0.shape[-2:]))
-        h2_2 = torch.cat(
-            [
-                x0_0_x2_2_con,
-                x1_0_x2_2_con,
-                x2_0_x2_2_con,
-                x4_0_x2_2_con
-            ],
-            dim=1
+        out_2_2 = self.convs_2_2(
+            x0_0=x0_0,
+            x1_0=x1_0,
+            x2_0=x2_0,
+            h3_1_dist=out_3_1['dist'],
+            h3_1_edge=out_3_1['edge'],
+            h3_1_mask=out_3_1['mask'],
+            x4_0=x4_0
         )
-        x2_2_dist = self.conv2_2(
-            torch.cat(
-                [
-                    h2_2,
-                    x3_1_x2_2_con_dist
-                ],
-                dim=1
-            )
-        )
-        x2_2_edge = self.conv2_2_skip_edge(
-            torch.cat(
-                [
-                    h2_2,
-                    x3_1_x2_2_con_edge,
-                    x2_2_dist
-                ],
-                dim=1
-            )
-        )
-        x2_2_mask = self.conv2_2_skip_mask(
-            torch.cat(
-                [
-                    h2_2,
-                    x3_1_x2_2_con_mask,
-                    x2_2_edge
-                ],
-                dim=1
-            )
-        )
-
         # 1/2 connection
-        x0_0_x1_3_con = self.conv0_0_1_3_con(x0_0)
-        x1_0_x1_3_con = self.conv1_0_1_3_con(x1_0)
-        x2_2_x1_3_con_dist = self.conv2_2_1_3_con(self.up(x2_2_dist, size=x1_0.shape[-2:]))
-        x3_1_x1_3_con_dist = self.conv3_1_1_3_con(self.up(x3_1_dist, size=x1_0.shape[-2:]))
-        x2_2_x1_3_con_edge = self.conv2_2_1_3_con(self.up(x2_2_edge, size=x1_0.shape[-2:]))
-        x3_1_x1_3_con_edge = self.conv3_1_1_3_con(self.up(x3_1_edge, size=x1_0.shape[-2:]))
-        x2_2_x1_3_con_mask = self.conv2_2_1_3_con(self.up(x2_2_mask, size=x1_0.shape[-2:]))
-        x3_1_x1_3_con_mask = self.conv3_1_1_3_con(self.up(x3_1_mask, size=x1_0.shape[-2:]))
-        x4_0_x1_3_con = self.conv4_0_1_3_con(self.up(x4_0, size=x1_0.shape[-2:]))
-        h1_3 = torch.cat(
-            [
-                x0_0_x1_3_con,
-                x1_0_x1_3_con,
-                x4_0_x1_3_con
-            ],
-            dim=1
+        out_1_3 = self.convs_1_3(
+            x0_0=x0_0,
+            x1_0=x1_0,
+            h2_2_dist=out_2_2['dist'],
+            h3_1_dist=out_3_1['dist'],
+            h2_2_edge=out_2_2['edge'],
+            h3_1_edge=out_3_1['edge'],
+            h2_2_mask=out_2_2['mask'],
+            h3_1_mask=out_3_1['mask'],
+            x4_0=x4_0
         )
-        x1_3_dist = self.conv1_3(
-            torch.cat(
-                [
-                    h1_3,
-                    x2_2_x1_3_con_dist,
-                    x3_1_x1_3_con_dist
-                ],
-                dim=1
-            )
-        )
-        x1_3_edge = self.conv1_3_skip_edge(
-            torch.cat(
-                [
-                    h1_3,
-                    x2_2_x1_3_con_edge,
-                    x3_1_x1_3_con_edge,
-                    x1_3_dist
-                ],
-                dim=1
-            )
-        )
-        x1_3_mask = self.conv1_3_skip_mask(
-            torch.cat(
-                [
-                    h1_3,
-                    x2_2_x1_3_con_mask,
-                    x3_1_x1_3_con_mask,
-                    x1_3_edge
-                ],
-                dim=1
-            )
-        )
-
         # 1/1 connection
-        x0_0_x0_4_con = self.conv0_0_0_4_con(x0_0)
-        # Distance
-        x1_3_x0_4_con_dist = self.conv1_3_0_4_con(self.up(x1_3_dist, size=x0_0.shape[-2:]))
-        x2_2_x0_4_con_dist = self.conv2_2_0_4_con(self.up(x2_2_dist, size=x0_0.shape[-2:]))
-        x3_1_x0_4_con_dist = self.conv3_1_0_4_con(self.up(x3_1_dist, size=x0_0.shape[-2:]))
-        # Edge
-        x1_3_x0_4_con_edge = self.conv1_3_0_4_con(self.up(x1_3_edge, size=x0_0.shape[-2:]))
-        x2_2_x0_4_con_edge = self.conv2_2_0_4_con(self.up(x2_2_edge, size=x0_0.shape[-2:]))
-        x3_1_x0_4_con_edge = self.conv3_1_0_4_con(self.up(x3_1_edge, size=x0_0.shape[-2:]))
-        # Mask
-        x1_3_x0_4_con_mask = self.conv1_3_0_4_con(self.up(x1_3_mask, size=x0_0.shape[-2:]))
-        x2_2_x0_4_con_mask = self.conv2_2_0_4_con(self.up(x2_2_mask, size=x0_0.shape[-2:]))
-        x3_1_x0_4_con_mask = self.conv3_1_0_4_con(self.up(x3_1_mask, size=x0_0.shape[-2:]))
-        x4_0_x0_4_con = self.conv4_0_0_4_con(self.up(x4_0, size=x0_0.shape[-2:]))
-        h0_4 = torch.cat(
-            [
-                x0_0_x0_4_con,
-                x4_0_x0_4_con
-            ],
-            dim=1
-        )
-        x0_4_dist = self.conv0_4(
-            torch.cat(
-                [
-                    h0_4,
-                    x1_3_x0_4_con_dist,
-                    x2_2_x0_4_con_dist,
-                    x3_1_x0_4_con_dist
-                ],
-                dim=1
-            )
-        )
-        x0_4_edge = self.conv0_4_skip_edge(
-            torch.cat(
-                [
-                    h0_4,
-                    x1_3_x0_4_con_edge,
-                    x2_2_x0_4_con_edge,
-                    x3_1_x0_4_con_edge,
-                    x0_4_dist
-                ],
-                dim=1
-            )
-        )
-        x0_4_mask = self.conv0_4_skip_mask(
-            torch.cat(
-                [
-                    h0_4,
-                    x1_3_x0_4_con_mask,
-                    x2_2_x0_4_con_mask,
-                    x3_1_x0_4_con_mask,
-                    x0_4_edge
-                ],
-                dim=1
-            )
+        out_0_4 = self.convs_0_4(
+            x0_0=x0_0,
+            h1_3_dist=out_1_3['dist'],
+            h2_2_dist=out_2_2['dist'],
+            h3_1_dist=out_3_1['dist'],
+            h1_3_edge=out_1_3['edge'],
+            h2_2_edge=out_2_2['edge'],
+            h3_1_edge=out_3_1['edge'],
+            h1_3_mask=out_1_3['mask'],
+            h2_2_mask=out_2_2['mask'],
+            h3_1_mask=out_3_1['mask'],
+            x4_0=x4_0
         )
 
-        dist = self.final_dist(x0_4_dist)
-        edge = self.final_edge(x0_4_edge)
-        mask = self.final_mask(x0_4_mask)
+        dist = self.final_dist(out_0_4['dist'])
+        edge = self.final_edge(out_0_4['edge'])
+        mask = self.final_mask(out_0_4['mask'])
 
         out = {
             'dist': dist,
