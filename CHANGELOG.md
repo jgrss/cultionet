@@ -2,6 +2,13 @@
 
 <!--next-version-placeholder-->
 
+## v1.6.0 (2023-01-03)
+* ([#40](https://github.com/jgrss/cultionet/pull/40))
+* New architecture design based on UNet 3+ and residual convolutions
+* Modified total loss quantification with deep supervision of crop type in RNN layer
+* Added `num_workers` option in `DataLoader` for faster train/predict
+* Added .pt data compression by changing `torch.save|load` to `joblib.dump|load`
+
 ## v1.5.2 (2022-11-10)
 * Fixed in-memory predictions ([#38](https://github.com/jgrss/cultionet/pull/38))
 
