@@ -9,7 +9,7 @@ import numpy as np
 from .data.const import SCALE_FACTOR
 from .data.datasets import EdgeDataset, zscores
 from .data.modules import EdgeDataModule
-from .models.lightning import CultioLitModel, MaskRCNNLitModel
+from .models.lightning import CultioLitModel, MaskRCNNLitModel, TemperatureScaling
 from .utils.reshape import ModelOutputs
 from .utils.logging import set_color_logger
 
@@ -20,7 +20,6 @@ from rasterio.windows import Window
 import torch
 from torch_geometric.data import Data
 import pytorch_lightning as pl
-from pytorch_lightning import seed_everything
 from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
@@ -52,7 +51,6 @@ def fit_maskrcnn(
     early_stopping_patience: T.Optional[int] = 7,
     early_stopping_min_delta: T.Optional[float] = 0.01,
     gradient_clip_val: T.Optional[float] = 1.0,
-    random_seed: T.Optional[int] = 0,
     reset_model: T.Optional[bool] = False,
     auto_lr_find: T.Optional[bool] = False,
     device: T.Optional[str] = 'gpu',
@@ -84,7 +82,6 @@ def fit_maskrcnn(
         early_stopping_patience (Optional[int]): The patience (epochs) before early stopping.
         early_stopping_min_delta (Optional[float]): The minimum change threshold before early stopping.
         gradient_clip_val (Optional[float]): A gradient clip limit.
-        random_seed (Optional[int]): A random seed.
         reset_model (Optional[bool]): Whether to reset an existing model. Otherwise, pick up from last epoch of
             an existing model.
         auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
@@ -102,7 +99,6 @@ def fit_maskrcnn(
     ckpt_file = Path(ckpt_file)
 
     # Split the dataset into train/validation
-    seed_everything(random_seed, workers=True)
     train_ds, val_ds = dataset.split_train_val(val_frac=val_frac)
 
     # Setup the data module
@@ -218,10 +214,15 @@ def fit(
     ckpt_file: T.Union[str, Path],
     test_dataset: T.Optional[EdgeDataset] = None,
     val_frac: T.Optional[float] = 0.2,
+    spatial_partitions: T.Optional[T.Union[str, Path]] = None,
+    partition_name: T.Optional[str] = None,
+    partition_column: T.Optional[str] = None,
     batch_size: T.Optional[int] = 4,
+    load_batch_workers: T.Optional[int] = 2,
     accumulate_grad_batches: T.Optional[int] = 1,
     filters: T.Optional[int] = 64,
     num_classes: T.Optional[int] = 2,
+    edge_class: T.Optional[int] = None,
     class_weights: T.Sequence[float] = None,
     edge_weights: T.Sequence[float] = None,
     learning_rate: T.Optional[float] = 0.001,
@@ -230,7 +231,6 @@ def fit(
     early_stopping_patience: T.Optional[int] = 7,
     early_stopping_min_delta: T.Optional[float] = 0.01,
     gradient_clip_val: T.Optional[float] = 1.0,
-    random_seed: T.Optional[int] = 0,
     reset_model: T.Optional[bool] = False,
     auto_lr_find: T.Optional[bool] = False,
     device: T.Optional[str] = 'gpu',
@@ -250,7 +250,11 @@ def fit(
         test_dataset (Optional[EdgeDataset]): A test dataset to evaluate on. If given, early stopping
             will switch from the validation dataset to the test dataset.
         val_frac (Optional[float]): The fraction of data to use for model validation.
+        spatial_partitions (Optional[str | Path]): A spatial partitions file.
+        partition_name (Optional[str]): The spatial partition file column query name.
+        partition_column (Optional[str]): The spatial partition file column name.
         batch_size (Optional[int]): The data batch size.
+        load_batch_workers (Optional[int]): The number of parallel batches to load.
         filters (Optional[int]): The number of initial model filters.
         learning_rate (Optional[float]): The model learning rate.
         epochs (Optional[int]): The number of epochs.
@@ -258,7 +262,6 @@ def fit(
         early_stopping_patience (Optional[int]): The patience (epochs) before early stopping.
         early_stopping_min_delta (Optional[float]): The minimum change threshold before early stopping.
         gradient_clip_val (Optional[float]): A gradient clip limit.
-        random_seed (Optional[int]): A random seed.
         reset_model (Optional[bool]): Whether to reset an existing model. Otherwise, pick up from last epoch of
             an existing model.
         auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
@@ -277,8 +280,15 @@ def fit(
     ckpt_file = Path(ckpt_file)
 
     # Split the dataset into train/validation
-    seed_everything(random_seed, workers=True)
-    train_ds, val_ds = dataset.split_train_val(val_frac=val_frac)
+    if spatial_partitions is not None:
+        train_ds, val_ds = dataset.split_train_val_by_partition(
+            spatial_partitions=spatial_partitions,
+            partition_column=partition_column,
+            val_frac=val_frac,
+            partition_name=partition_name
+        )
+    else:
+        train_ds, val_ds = dataset.split_train_val(val_frac=val_frac)
 
     # Setup the data module
     data_module = EdgeDataModule(
@@ -286,7 +296,13 @@ def fit(
         val_ds=val_ds,
         test_ds=test_dataset,
         batch_size=batch_size,
-        num_workers=0,
+        num_workers=load_batch_workers,
+        shuffle=True
+    )
+    temperature_data_module = EdgeDataModule(
+        train_ds=val_ds,
+        batch_size=batch_size,
+        num_workers=load_batch_workers,
         shuffle=True
     )
 
@@ -299,7 +315,8 @@ def fit(
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         class_weights=class_weights,
-        edge_weights=edge_weights
+        edge_weights=edge_weights,
+        edge_class=edge_class
     )
 
     if reset_model:
@@ -339,10 +356,12 @@ def fit(
         early_stop_callback
     ]
     if stochastic_weight_averaging:
-        callbacks.append(StochasticWeightAveraging(
-            swa_lrs=stochastic_weight_averaging_lr,
-            swa_epoch_start=stochastic_weight_averaging_start
-        ))
+        callbacks.append(
+            StochasticWeightAveraging(
+                swa_lrs=stochastic_weight_averaging_lr,
+                swa_epoch_start=stochastic_weight_averaging_start
+            )
+        )
     if 0 < model_pruning <= 1:
         callbacks.append(
             ModelPruning('l1_unstructured', amount=model_pruning)
@@ -369,6 +388,52 @@ def fit(
         deterministic=False,
         benchmark=False
     )
+    temperature_ckpt_file = ckpt_file.parent / 'temperature' / ckpt_file.name
+    temperature_ckpt_file.parent.mkdir(parents=True, exist_ok=True)
+    # Temperature checkpoints
+    temperature_cb_train_loss = ModelCheckpoint(
+        dirpath=temperature_ckpt_file.parent,
+        filename=temperature_ckpt_file.stem,
+        save_last=True,
+        save_top_k=save_top_k,
+        mode='min',
+        monitor='loss',
+        every_n_train_steps=0,
+        every_n_epochs=1
+    )
+    # Early stopping
+    temperature_early_stop_callback = EarlyStopping(
+        monitor='loss',
+        min_delta=early_stopping_min_delta,
+        patience=5,
+        mode='min',
+        check_on_train_epoch_end=False
+    )
+    temperature_callbacks = [
+        lr_monitor,
+        temperature_cb_train_loss,
+        temperature_early_stop_callback
+    ]
+    temperature_trainer = pl.Trainer(
+        default_root_dir=str(temperature_ckpt_file.parent),
+        callbacks=temperature_callbacks,
+        enable_checkpointing=True,
+        auto_lr_find=auto_lr_find,
+        auto_scale_batch_size=False,
+        gradient_clip_val=gradient_clip_val,
+        gradient_clip_algorithm='value',
+        check_val_every_n_epoch=1,
+        min_epochs=5 if epochs >= 5 else epochs,
+        max_epochs=10,
+        precision=32,
+        devices=1 if device == 'gpu' else None,
+        num_processes=0,
+        accelerator=device,
+        log_every_n_steps=10,
+        profiler=profiler,
+        deterministic=False,
+        benchmark=False
+    )
 
     if auto_lr_find:
         trainer.tune(model=lit_model, datamodule=data_module)
@@ -377,6 +442,21 @@ def fit(
             model=lit_model,
             datamodule=data_module,
             ckpt_path=ckpt_file if ckpt_file.is_file() else None
+        )
+        # Calibrate the logits
+        temperature_model = TemperatureScaling(
+            model=CultioLitModel.load_from_checkpoint(
+                checkpoint_path=str(ckpt_file)
+            ),
+            learning_rate=0.1,
+            max_iter=20,
+            class_weights=class_weights,
+            edge_class=edge_class
+        )
+        temperature_trainer.fit(
+            model=temperature_model,
+            datamodule=temperature_data_module,
+            ckpt_path=temperature_ckpt_file if temperature_ckpt_file.is_file() else None
         )
         if test_dataset is not None:
             trainer.test(
@@ -387,7 +467,7 @@ def fit(
             logged_metrics = trainer.logged_metrics
             for k, v in logged_metrics.items():
                 logged_metrics[k] = float(v)
-            with open(Path(trainer.logger.save_dir) / 'last.test', mode='w') as f:
+            with open(Path(trainer.logger.save_dir) / 'test.metrics', mode='w') as f:
                 f.write(json.dumps(logged_metrics))
 
 
@@ -533,30 +613,36 @@ class LightningGTiffWriter(BasePredictionWriter):
                 int(batch.width[batch_index])-int(batch.col_pad_after[batch_index])
             )
         )
-        distance_batch = distance_batch.reshape(
-            int(batch.height[batch_index]), int(batch.width[batch_index])
-        )[pad_slice2d].contiguous().view(-1)[:, None]
         rheight = pad_slice2d[0].stop - pad_slice2d[0].start
         rwidth = pad_slice2d[1].stop - pad_slice2d[1].start
-        edge_batch = edge_batch.t().reshape(
-            2, int(batch.height[batch_index]), int(batch.width[batch_index])
-        )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, 2)
-        crop_batch = crop_batch.t().reshape(
-            2, int(batch.height[batch_index]), int(batch.width[batch_index])
-        )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, 2)
+        def reshaper(x: torch.Tensor, channel_dims: int) -> torch.Tensor:
+            if channel_dims == 1:
+                return x.reshape(
+                    int(batch.height[batch_index]), int(batch.width[batch_index])
+                )[pad_slice2d].contiguous().view(-1)[:, None]
+            else:
+                return x.t().reshape(
+                    channel_dims,
+                    int(batch.height[batch_index]),
+                    int(batch.width[batch_index])
+                )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, channel_dims)
+
+        distance_batch = reshaper(distance_batch, channel_dims=1)
+        edge_batch = reshaper(edge_batch, channel_dims=2)
+        crop_batch = reshaper(crop_batch, channel_dims=2)
         if crop_type_batch is not None:
             num_classes = crop_type_batch.size(1)
-            crop_type_batch = crop_type_batch.t().reshape(
-                num_classes, int(batch.height[batch_index]), int(batch.width[batch_index])
-            )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, num_classes)
+            crop_type_batch = reshaper(crop_type_batch, channel_dims=num_classes)
 
         return distance_batch, edge_batch, crop_batch, crop_type_batch
 
     def write_on_batch_end(
         self, trainer, pl_module, prediction, batch_indices, batch, batch_idx, dataloader_idx
     ):
-        distance, dist_1, dist_2, dist_3, dist_4, edge, crop = prediction
-        crop_type = None
+        distance = prediction['dist']
+        edge = prediction['edge']
+        crop = prediction['crop']
+        crop_type = prediction['crop_type']
         for batch_index in batch.batch.unique():
             mask = batch.batch == batch_index
             w = Window(
@@ -606,13 +692,15 @@ def predict_lightning(
     ckpt: Path,
     dataset: EdgeDataset,
     batch_size: int,
+    load_batch_workers: int,
     device: str,
-    filters: int,
     precision: int,
     num_classes: int,
     resampling: str,
     ref_res: float,
-    compression: str
+    compression: str,
+    edge_temperature: T.Optional[torch.Tensor] = None,
+    crop_temperature: T.Optional[torch.Tensor] = None
 ):
     reference_image = Path(reference_image)
     out_path = Path(out_path)
@@ -622,7 +710,7 @@ def predict_lightning(
     data_module = EdgeDataModule(
         predict_ds=dataset,
         batch_size=batch_size,
-        num_workers=0,
+        num_workers=load_batch_workers,
         shuffle=False
     )
     pred_writer = LightningGTiffWriter(
@@ -644,17 +732,11 @@ def predict_lightning(
         log_every_n_steps=0,
         logger=False
     )
-    lit_kwargs = dict(
-        num_features=dataset.num_features,
-        num_time_features=dataset.num_time_features,
-        filters=filters
-    )
 
     trainer = pl.Trainer(**trainer_kwargs)
-    lit_model = (
-        CultioLitModel(**lit_kwargs)
-        .load_from_checkpoint(checkpoint_path=str(ckpt_file))
-    )
+    lit_model = CultioLitModel.load_from_checkpoint(checkpoint_path=str(ckpt_file))
+    setattr(lit_model, 'edge_temperature', edge_temperature)
+    setattr(lit_model, 'crop_temperature', crop_temperature)
 
     # Make predictions
     trainer.predict(

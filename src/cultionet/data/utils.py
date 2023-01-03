@@ -43,7 +43,6 @@ def create_data_object(
     x: np.ndarray,
     edge_indices: np.ndarray,
     edge_attrs: np.ndarray,
-    xy: np.ndarray,
     ntime: int,
     nbands: int,
     height: int,
@@ -58,10 +57,11 @@ def create_data_object(
 ) -> Data:
     """Creates a training data object
     """
-    edge_indices = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
-    edge_attrs = torch.tensor(edge_attrs, dtype=torch.float)
+    # edge_indices = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
+    # edge_attrs = torch.tensor(edge_attrs, dtype=torch.float)
+    edge_indices = None
+    edge_attrs = None
     x = torch.tensor(x, dtype=torch.float)
-    xy = torch.tensor(xy, dtype=torch.float)
 
     boxes = None
     box_labels = None
@@ -76,7 +76,6 @@ def create_data_object(
             x=x,
             edge_index=edge_indices,
             edge_attrs=edge_attrs,
-            pos=xy,
             height=height,
             width=width,
             ntime=ntime,
@@ -90,7 +89,7 @@ def create_data_object(
     else:
         y = torch.tensor(y.flatten(), dtype=torch.float if 'float' in y.dtype.name else torch.long)
         bdist_ = torch.tensor(bdist.flatten(), dtype=torch.float)
-        ori_ = torch.tensor(ori.flatten(), dtype=torch.float)
+        # ori_ = torch.tensor(ori.flatten(), dtype=torch.float)
 
         if other is None:
             train_data = Data(
@@ -99,8 +98,7 @@ def create_data_object(
                 edge_attrs=edge_attrs,
                 y=y,
                 bdist=bdist_,
-                ori=ori_,
-                pos=xy,
+                # ori=ori_,
                 height=height,
                 width=width,
                 ntime=ntime,
@@ -120,8 +118,7 @@ def create_data_object(
                 edge_attrs=edge_attrs,
                 y=y,
                 bdist=bdist_,
-                ori=ori_,
-                pos=xy,
+                # ori=ori_,
                 other=other_,
                 height=height,
                 width=width,

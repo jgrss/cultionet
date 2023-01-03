@@ -16,9 +16,6 @@ class UpSample(torch.nn.Module):
     def __init__(self):
         super(UpSample, self).__init__()
 
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
     def forward(
         self, x: torch.Tensor, size: T.Sequence[int], mode: str = 'bilinear'
     ) -> torch.Tensor:
@@ -30,9 +27,6 @@ class GraphToConv(torch.nn.Module):
     """
     def __init__(self):
         super(GraphToConv, self).__init__()
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
 
     def forward(
         self,
@@ -50,9 +44,6 @@ class ConvToGraph(torch.nn.Module):
     """
     def __init__(self):
         super(ConvToGraph, self).__init__()
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         nbatch, n_channels, nrows, ncols = x.shape

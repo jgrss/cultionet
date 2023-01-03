@@ -21,6 +21,7 @@ from skimage.measure import regionprops
 from tqdm.auto import tqdm
 import torch
 from torch_geometric.data import Data
+import joblib
 from joblib import delayed, parallel_backend
 
 
@@ -182,7 +183,7 @@ def is_grid_processed(
                 train_id = f'{group_id}_{grid}_{aug}_{i:03d}'
                 train_path = process_path / f'data_{train_id}.pt'
                 if train_path.is_file():
-                    train_data = torch.load(train_path)
+                    train_data = joblib.load(train_path)
                     if train_data.train_id == train_id:
                         batch_stored = True
 
@@ -190,7 +191,7 @@ def is_grid_processed(
             train_id = f'{group_id}_{grid}_{aug}'
             train_path = process_path / f'data_{train_id}.pt'
             if train_path.is_file():
-                train_data = torch.load(train_path)
+                train_data = joblib.load(train_path)
                 if train_data.train_id == train_id:
                     batch_stored = True
 
@@ -320,12 +321,19 @@ def create_image_vars(
             band_names=list(range(1, len(image) + 1)),
             resampling=resampling
         ) as src_ts:
+            # 65535 'no data' values = nan
+            mask = xr.where(src_ts > 10_000, np.nan, 1)
             # X variables
             time_series = (
-                (src_ts.astype('float64') * gain + offset)
-                .clip(0, 1)
-                .gw.compute(num_workers=num_workers)
-            )
+                src_ts.gw.set_nodata(
+                    src_ts.gw.nodataval, 0,
+                    out_range=(0, 1),
+                    dtype='float64',
+                    scale_factor=gain,
+                    offset=offset
+                ) * mask
+            ).fillna(0).gw.compute(num_workers=num_workers)
+
             # Get the time and band count
             ntime, nbands = get_image_list_dims(image, src_ts)
             if grid_edges is not None:
@@ -448,7 +456,11 @@ def create_predict_dataset(
         name: str
     ) -> None:
         predict_path = write_path / f'data_{name}.pt'
-        torch.save(predict_data, predict_path)
+        joblib.dump(
+            predict_data,
+            predict_path,
+            compress=5
+        )
 
     def read_slice(darray: xr.DataArray, w_pad: Window):
         slicer = (
@@ -548,7 +560,8 @@ def create_predict_dataset(
             image_list,
             stack_dim='band',
             band_names=list(range(1, len(image_list) + 1)),
-            resampling=resampling
+            resampling=resampling,
+            chunks=512
         ) as src_ts:
             windows = get_window_offsets(
                 src_ts.gw.nrows,
@@ -783,7 +796,11 @@ def create_dataset(
                 )
                 def save_and_update(train_data: Data) -> None:
                     train_path = process_path / f'data_{train_data.train_id}.pt'
-                    torch.save(train_data, train_path)
+                    joblib.dump(
+                        train_data,
+                        train_path,
+                        compress=5
+                    )
 
                 for aug in transforms:
                     if aug.startswith('ts-'):

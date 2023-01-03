@@ -322,7 +322,6 @@ def augment(
         xaug,
         edge_indices,
         edge_attrs,
-        xy,
         ntime=ntime,
         nbands=nbands,
         height=height,
@@ -330,7 +329,7 @@ def augment(
         y=yaug,
         mask_y=mask_y,
         bdist=bdist_aug,
-        ori=ori_aug,
+        # ori=ori_aug,
         zero_padding=zero_padding,
         **kwargs
     )

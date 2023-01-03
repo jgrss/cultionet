@@ -17,13 +17,13 @@ epilog: |
 
 dates:
   start_date:
-    short: 'sd'
+    short: sd
     long: start-date
     help: The predict start date (mm-dd)
     kwargs:
       default: 01-01
   end_date:
-    short: 'ed'
+    short: ed
     long: end-date
     help: The predict start date (mm-dd)
     kwargs:
@@ -31,14 +31,14 @@ dates:
 
 create:
   num_workers:
-    short: n
+    short: 'n'
     long: num-workers
     help: The number of CPUs for data creation
     kwargs:
       default: 4
       type: '&int'
   transforms:
-    short: t
+    short: tr
     long: transforms
     help: Augmentation transforms to apply
     kwargs:
@@ -69,8 +69,8 @@ create:
         - s&p
       nargs: '+'
   n_ts:
-    short: ''
-    long: n-ts
+    short: n-ta
+    long: num-temporal-aug
     help: The number of temporal augmentations
     kwargs:
       default: 6
@@ -126,6 +126,12 @@ create:
     kwargs:
       default: y
       choices: ['y', 'n']
+  feature_pattern:
+    short: ''
+    long: feature-pattern
+    help: The feature path pattern
+    kwargs:
+      default: '{region}/brdf_ts/ms/{image_vi}'
   instance_seg:
     short: ''
     long: instance-seg
@@ -183,7 +189,7 @@ create_predict:
     kwargs:
       type: '&int'
   num_workers:
-    short: n
+    short: 'n'
     long: num-workers
     help: The number of CPUs for data creation
     kwargs:
@@ -274,7 +280,7 @@ train_predict:
     long: filters
     help: The number of model input filters
     kwargs:
-      default: 64
+      default: 32
       type: '&int'
   device:
     short: ''
@@ -296,6 +302,13 @@ train_predict:
     help: The batch size
     kwargs:
       default: 4
+      type: '&int'
+  load_batch_workers:
+    short: ''
+    long: load-batch-workers
+    help: The number of parallel batches to load
+    kwargs:
+      default: 2
       type: '&int'
   precision:
     short: ''
@@ -342,11 +355,21 @@ maskrcnn:
       default: 3
       type: '&int'
 
-skfoldcv:
+shared_partitions:
   spatial_partitions:
     short: ''
     long: spatial-partitions
-    help: The spatial partitions for spatil k-fold cross-validation
+    help: The spatial partitions for spatial k-fold cross-validation or regional training
+  partition_column:
+    short: ''
+    long: partition-column
+    help: The partition column name
+  partition_name:
+    short: ''
+    long: partition-name
+    help: A partition name query used as "{partition_column} == 'partition_name'"
+
+skfoldcv:
   splits:
     short: ''
     long: splits
@@ -378,14 +401,14 @@ train:
       default: 30
       type: '&int'
   learning_rate:
-    short: ''
+    short: lr
     long: learning-rate
     help: The learning rate
     kwargs:
-      default: 0.001
+      default: 1e-4
       type: '&float'
   threads:
-    short: ''
+    short: t
     long: threads
     help: The number of threads per process worker
     kwargs:
@@ -455,11 +478,11 @@ train:
     kwargs:
       action: store_true
   gradient_clip_val:
-    short: ''
+    short: gcv
     long: gradient-clip-val
     help: The gradient clip value
     kwargs:
-      default: 1.0
+      default: 5.0
       type: '&float'
   patience:
     short: ''
@@ -473,7 +496,7 @@ train:
     long: weight-decay
     help: Sets the weight decay for Adam optimizer\'s regularization
     kwargs:
-      default: 1e-5
+      default: 0.01
       type: '&float'
   accumulate_grad_batches:
     short: agb
@@ -483,8 +506,8 @@ train:
       default: 1
       type: '&int'
   stochastic_weight_averaging:
-    short: ''
-    long: swa
+    short: swa
+    long: stochastic-weight-averaging
     help: Whether to use stochastic weight averaging
     kwargs:
       action: store_true
@@ -519,6 +542,20 @@ train:
         - !!null
         - simple
         - advanced
+  num_classes:
+    short: ''
+    long: num-classes
+    help: The number of classes (overrides file info)
+    kwargs:
+      default: !!null
+      type: '&int'
+  edge_class:
+    short: ''
+    long: edge-class
+    help: The edge class value (overrides file info)
+    kwargs:
+      default: !!null
+      type: '&int'
 
 predict:
   predict_year:
@@ -528,11 +565,11 @@ predict:
     kwargs:
       type: '&int'
   out_path:
-    short: o
+    short: 'o'
     long: out-path
     help: The output raster path and filename to be created
   data_path:
-    short: d
+    short: 'd'
     long: data-path
     help: |
       A data path with PyTorch .pt files to predict on
@@ -550,7 +587,7 @@ predict:
     long: grid-id
     help: The grid id to process (the grid id should be a sub-directory of --project-path)
   window_size:
-    short: w
+    short: 'w'
     long: window-size
     help: The processing windows size at which to apply inference
     kwargs:
@@ -628,3 +665,23 @@ predict:
     kwargs:
       default: 0
       type: '&int'
+  num_classes:
+    short: ''
+    long: num-classes
+    help: The number of classes (overrides file info)
+    kwargs:
+      default: !!null
+      type: '&int'
+  edge_class:
+    short: ''
+    long: edge-class
+    help: The edge class value (overrides file info)
+    kwargs:
+      default: !!null
+      type: '&int'
+  delete_dataset:
+    short: ''
+    long: delete-dataset
+    help: Whether to delete the prediction dataset
+    kwargs:
+      action: store_true
