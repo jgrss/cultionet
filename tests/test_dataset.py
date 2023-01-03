@@ -11,7 +11,7 @@ project_path = Path(os.path.abspath(os.path.dirname(__file__)))
 ppaths = setup_paths(project_path)
 ds = EdgeDataset(ppaths.train_path)
 data = next(iter(ds))
-loaded_data = torch.load(batch_file)
+loaded_data = ds.load_file(batch_file)
 
 
 def test_load():
