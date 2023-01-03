@@ -54,7 +54,8 @@ jobs:
       - name: Pytest
         run: |
           pip install pytest
-          pytest
+          cd tests/
+          python -m pytest
 
 #   Version:
 #     needs: Tests
