@@ -43,11 +43,10 @@ jobs:
       - name: Install PyTorch
         run: |
           TORCH_CPU="https://download.pytorch.org/whl/cpu"
-          pip install --upgrade --no-cache-dir setuptools>=0.59.0
+          pip install --upgrade --no-cache-dir setuptools>=0.59.5
           pip install torch torchvision torchaudio --extra-index-url $TORCH_CPU
           PYG_TORCH_CPU="https://data.pyg.org/whl/torch-1.12.0+cpu.html"
           pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f $PYG_TORCH_CPU
-          pip install torchmetrics>=0.7.0
         if: steps.cnetenv.outputs.cache-hit != 'true'
       - name: Install cultionet
         run: |
