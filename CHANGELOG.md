@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.6.1 (2023-01-04)
+* Reorganized CLI arguments ([#41](https://github.com/jgrss/cultionet/pull/41))
+
 ## v1.6.0 (2023-01-03)
 * ([#40](https://github.com/jgrss/cultionet/pull/40))
 * New architecture design based on UNet 3+ and residual convolutions
