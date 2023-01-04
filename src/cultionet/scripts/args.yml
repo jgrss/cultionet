@@ -29,7 +29,50 @@ dates:
     kwargs:
       default: 01-01
 
-create:
+
+shared_image:
+  gain:
+    short: ''
+    long: gain
+    help: The image gain, or scale, factor
+    kwargs:
+      default: 1e-4
+      type: '&float'
+  offset:
+    short: ''
+    long: offset
+    help: The image offset to add to the scaling
+    kwargs:
+      default: 0.0
+      type: '&float'
+  resampling:
+    short: rm
+    long: resampling
+    help: The resampling method
+    kwargs:
+      default: nearest
+  append_ts:
+    short: ''
+    long: append-ts
+    help: Whether to append time_series_vars to the image path
+    kwargs:
+      default: y
+      choices: ['y', 'n']
+  date_format:
+    short: ''
+    long: image-date-format
+    help: The image file date format
+    kwargs:
+      default: '%Y%j'
+  skip_index:
+    short: ''
+    long: skip-index
+    help: A skip index to slice time series lists by
+    kwargs:
+      default: 0
+      type: '&int'
+
+shared_create:
   num_workers:
     short: 'n'
     long: num-workers
@@ -37,6 +80,34 @@ create:
     kwargs:
       default: 4
       type: '&int'
+  ref_res:
+    short: r
+    long: res
+    help: The cell resolution
+    kwargs:
+      default: 10.0
+      type: '&float'
+  feature_pattern:
+    short: ''
+    long: feature-pattern
+    help: The feature path pattern
+    kwargs:
+      default: '{region}/brdf_ts/ms/{image_vi}'
+  zero_padding:
+    short: ''
+    long: zero-padding
+    help: Zero padding to apply
+    kwargs:
+      default: 0
+      type: '&int'
+  instance_seg:
+    short: ''
+    long: instance-seg
+    help: Whether to create a dataset for instance segmentation
+    kwargs:
+      action: store_true
+
+create:
   transforms:
     short: tr
     long: transforms
@@ -75,33 +146,6 @@ create:
     kwargs:
       default: 6
       type: '&int'
-  gain:
-    short: ''
-    long: gain
-    help: The image gain, or scale, factor
-    kwargs:
-      default: 1e-4
-      type: '&float'
-  offset:
-    short: ''
-    long: offset
-    help: The image offset to add to the scaling
-    kwargs:
-      default: 0.0
-      type: '&float'
-  ref_res:
-    short: r
-    long: res
-    help: The cell resolution
-    kwargs:
-      default: 10.0
-      type: '&float'
-  resampling:
-    short: rm
-    long: resampling
-    help: The resampling method
-    kwargs:
-      default: nearest
   grid_size:
     short: gs
     long: grid-size
@@ -119,32 +163,6 @@ create:
     kwargs:
       default: train
       choices: ['train', 'test']
-  append_ts:
-    short: ''
-    long: append-ts
-    help: Whether to append time_series_vars to the image path
-    kwargs:
-      default: y
-      choices: ['y', 'n']
-  feature_pattern:
-    short: ''
-    long: feature-pattern
-    help: The feature path pattern
-    kwargs:
-      default: '{region}/brdf_ts/ms/{image_vi}'
-  instance_seg:
-    short: ''
-    long: instance-seg
-    help: Whether to create a dataset for instance segmentation
-    kwargs:
-      action: store_true
-  zero_padding:
-    short: ''
-    long: zero-padding
-    help: Zero padding to apply
-    kwargs:
-      default: 0
-      type: '&int'
   crop_column:
     short: ''
     long: crop-column
@@ -167,19 +185,6 @@ create:
     short: ''
     long: replace-dict
     help: A dictionary of crop class remappings
-  date_format:
-    short: ''
-    long: image-date-format
-    help: The image file date format
-    kwargs:
-      default: '%Y%j'
-  skip_index:
-    short: ''
-    long: skip-index
-    help: A skip index to slice time series lists by
-    kwargs:
-      default: 0
-      type: '&int'
 
 create_predict:
   predict_year:
@@ -188,26 +193,6 @@ create_predict:
     help: The predict end year (yyyy)
     kwargs:
       type: '&int'
-  num_workers:
-    short: 'n'
-    long: num-workers
-    help: The number of CPUs for data creation
-    kwargs:
-      default: 4
-      type: '&int'
-  ref_res:
-    short: r
-    long: res
-    help: The cell resolution
-    kwargs:
-      default: 10.0
-      type: '&float'
-  resampling:
-    short: rm
-    long: resampling
-    help: The resampling method
-    kwargs:
-      default: bilinear
   window_size:
     short: w
     long: window-size
@@ -222,57 +207,10 @@ create_predict:
     kwargs:
       default: 101
       type: '&int'
-  append_ts:
-    short: ''
-    long: append-ts
-    help: Whether to append time_series_vars to the image path
-    kwargs:
-      default: y
-      choices: ['y', 'n']
   time_series_path:
     short: ''
     long: ts-path
     help: A path with time series data (overrides the config regions)
-  gain:
-    short: ''
-    long: gain
-    help: The image gain, or scale, factor
-    kwargs:
-      default: 1e-4
-      type: '&float'
-  offset:
-    short: ''
-    long: offset
-    help: The image offset to add to the scaling
-    kwargs:
-      default: 0.0
-      type: '&float'
-  instance_seg:
-    short: ''
-    long: instance-seg
-    help: Whether to create a dataset for instance segmentation
-    kwargs:
-      action: store_true
-  zero_padding:
-    short: ''
-    long: zero-padding
-    help: Zero padding to apply
-    kwargs:
-      default: 0
-      type: '&int'
-  date_format:
-    short: ''
-    long: image-date-format
-    help: The image file date format
-    kwargs:
-      default: '%Y%j'
-  skip_index:
-    short: ''
-    long: skip-index
-    help: A skip index to slice time series lists by
-    kwargs:
-      default: 0
-      type: '&int'
 
 train_predict:
   filters:
@@ -316,6 +254,20 @@ train_predict:
     help: The model data precision
     kwargs:
       default: 16
+      type: '&int'
+  num_classes:
+    short: ''
+    long: num-classes
+    help: The number of classes (overrides file info)
+    kwargs:
+      default: !!null
+      type: '&int'
+  edge_class:
+    short: ''
+    long: edge-class
+    help: The edge class value (overrides file info)
+    kwargs:
+      default: !!null
       type: '&int'
 
 maskrcnn:
@@ -542,20 +494,6 @@ train:
         - !!null
         - simple
         - advanced
-  num_classes:
-    short: ''
-    long: num-classes
-    help: The number of classes (overrides file info)
-    kwargs:
-      default: !!null
-      type: '&int'
-  edge_class:
-    short: ''
-    long: edge-class
-    help: The edge class value (overrides file info)
-    kwargs:
-      default: !!null
-      type: '&int'
 
 predict:
   predict_year:
@@ -600,20 +538,6 @@ predict:
     kwargs:
       default: 101
       type: '&int'
-  gain:
-    short: ''
-    long: gain
-    help: The image gain, or scale, factor
-    kwargs:
-      default: 1e-4
-      type: '&float'
-  offset:
-    short: ''
-    long: offset
-    help: The image offset to add to the scaling
-    kwargs:
-      default: 0.0
-      type: '&float'
   mode:
     short: ''
     long: mode
@@ -627,13 +551,6 @@ predict:
     help: Whether to preload the full image data into memory
     kwargs:
       action: store_true
-  append_ts:
-    short: ''
-    long: append-ts
-    help: Whether to append time_series_vars to the image path
-    kwargs:
-      default: y
-      choices: ['y', 'n']
   compression:
     short: ''
     long: compression
@@ -646,39 +563,6 @@ predict:
     help: Whether to include Mask R-CNN
     kwargs:
       action: store_true
-  resampling:
-    short: rm
-    long: resampling
-    help: The resampling method
-    kwargs:
-      default: nearest
-  date_format:
-    short: ''
-    long: image-date-format
-    help: The image file date format
-    kwargs:
-      default: '%Y%j'
-  skip_index:
-    short: ''
-    long: skip-index
-    help: A skip index to slice time series lists by
-    kwargs:
-      default: 0
-      type: '&int'
-  num_classes:
-    short: ''
-    long: num-classes
-    help: The number of classes (overrides file info)
-    kwargs:
-      default: !!null
-      type: '&int'
-  edge_class:
-    short: ''
-    long: edge-class
-    help: The edge class value (overrides file info)
-    kwargs:
-      default: !!null
-      type: '&int'
   delete_dataset:
     short: ''
     long: delete-dataset
