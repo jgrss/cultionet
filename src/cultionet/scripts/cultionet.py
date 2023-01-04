@@ -1218,15 +1218,16 @@ def main():
             help='The project path (the directory that contains the grid ids)'
         )
 
-        if process == 'create-predict':
-            process_dict = args_config['create_predict']
-        else:
-            process_dict = args_config[process]
+        process_dict = args_config[process.replace('-', '_')]
         if process in ('skfoldcv', 'maskrcnn'):
             process_dict.update(args_config['train'])
         if process in ('train', 'maskrcnn', 'predict', 'skfoldcv'):
             process_dict.update(args_config['train_predict'])
             process_dict.update(args_config['shared_partitions'])
+        if process in ('create', 'create-predict'):
+            process_dict.update(args_config['shared_create'])
+        if process in ('create', 'create-predict', 'predict'):
+            process_dict.update(args_config['shared_image'])
         process_dict.update(args_config['dates'])
         for process_key, process_values in process_dict.items():
             if 'kwargs' in process_values:

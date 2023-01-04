@@ -555,6 +555,7 @@ class LightningGTiffWriter(BasePredictionWriter):
         super().__init__(write_interval)
         self.reference_image = reference_image
         self.out_path = out_path
+        self.out_path.parent.mkdir(parents=True, exist_ok=True)
 
         with gw.config.update(ref_res=ref_res):
             with gw.open(reference_image, resampling=resampling) as src:
