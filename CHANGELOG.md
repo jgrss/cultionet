@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.6.2 (2023-01-11)
+* Addressed security issue by bumping `setuptools` ([#42](https://github.com/jgrss/cultionet/pull/42))
+
 ## v1.6.1 (2023-01-04)
 * Reorganized CLI arguments ([#41](https://github.com/jgrss/cultionet/pull/41))
 
