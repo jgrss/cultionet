@@ -185,6 +185,10 @@ create:
     short: ''
     long: replace-dict
     help: A dictionary of crop class remappings
+  chunksize:
+    short: ''
+    long: chunksize
+    help: The window chunksize for processing batches
 
 create_predict:
   predict_year:
