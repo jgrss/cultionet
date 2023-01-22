@@ -19,7 +19,6 @@ import xarray as xr
 import geopandas as gpd
 from skimage.measure import regionprops
 from tqdm.auto import tqdm
-import torch
 from torch_geometric.data import Data
 import joblib
 from joblib import delayed, parallel_backend
@@ -437,6 +436,123 @@ def create_image_vars(
     return time_series, labels_array, bdist, ori, ntime, nbands
 
 
+def save_and_update(
+    write_path: Path,
+    predict_data: Data,
+    name: str,
+    compress: int = 5
+) -> None:
+    predict_path = write_path / f'data_{name}.pt'
+    joblib.dump(
+        predict_data,
+        predict_path,
+        compress=compress
+    )
+
+
+def read_slice(darray: xr.DataArray, w_pad: Window):
+    slicer = (
+        slice(0, None),
+        slice(w_pad.row_off, w_pad.row_off+w_pad.height),
+        slice(w_pad.col_off, w_pad.col_off+w_pad.width)
+    )
+
+    return darray[slicer].gw.compute()
+
+
+def get_window_chunk(
+    windows: T.List[T.Tuple[Window, Window]],
+    chunksize: int
+) -> T.List[T.Tuple[Window, Window]]:
+    for i in range(0, len(windows), chunksize):
+        yield windows[i:i+chunksize]
+
+
+def create_and_save_window(
+    write_path: Path,
+    ntime: int,
+    nbands: int,
+    image_height: int,
+    image_width: int,
+    res: float,
+    resampling: str,
+    region: str,
+    year: int,
+    window_size: int,
+    padding: int,
+    x: np.ndarray,
+    w: Window,
+    w_pad: Window,
+) -> None:
+    size = window_size + padding*2
+    x_height = x.shape[1]
+    x_width = x.shape[2]
+
+    row_pad_before = 0
+    col_pad_before = 0
+    col_pad_after = 0
+    row_pad_after = 0
+    if (x_height != size) or (x_width != size):
+        # Pre-padding
+        if w.row_off < padding:
+            row_pad_before = padding - w.row_off
+        if w.col_off < padding:
+            col_pad_before = padding - w.col_off
+        # Post-padding
+        if w.row_off + window_size + padding > image_height:
+            row_pad_after = size - x_height
+        if w.col_off + window_size + padding > image_width:
+            col_pad_after = size - x_width
+
+        x = np.pad(
+            x,
+            pad_width=(
+                (0, 0),
+                (row_pad_before, row_pad_after),
+                (col_pad_before, col_pad_after)
+            ),
+            mode='constant',
+        )
+    if x.shape[1:] != (size, size):
+        logger.exception('The array does not match the expected size.')
+
+    ldata = LabeledData(
+        x=x,
+        y=None,
+        bdist=None,
+        ori=None,
+        segments=None,
+        props=None
+    )
+    predict_data = augment(
+        ldata,
+        aug='none',
+        ntime=ntime,
+        nbands=nbands,
+        max_crop_class=0,
+        k=3,
+        instance_seg=False,
+        zero_padding=0,
+        window_row_off=w.row_off,
+        window_col_off=w.col_off,
+        window_height=w.height,
+        window_width=w.width,
+        window_pad_row_off=w_pad.row_off,
+        window_pad_col_off=w_pad.col_off,
+        window_pad_height=w_pad.height,
+        window_pad_width=w_pad.width,
+        row_pad_before=row_pad_before,
+        row_pad_after=row_pad_after,
+        col_pad_before=col_pad_before,
+        col_pad_after=col_pad_after,
+        res=res,
+        resampling=resampling
+    )
+    save_and_update(
+        write_path, predict_data, f'{region}_{year}_{w.row_off}_{w.col_off}'
+    )
+
+
 def create_predict_dataset(
     image_list: T.List[T.List[T.Union[str, Path]]],
     region: str,
@@ -448,113 +564,9 @@ def create_predict_dataset(
     resampling: str = 'nearest',
     window_size: int = 100,
     padding: int = 101,
-    num_workers: int = 1
+    num_workers: int = 1,
+    chunksize: int = 100
 ):
-    def save_and_update(
-        write_path: Path,
-        predict_data: Data,
-        name: str
-    ) -> None:
-        predict_path = write_path / f'data_{name}.pt'
-        joblib.dump(
-            predict_data,
-            predict_path,
-            compress=5
-        )
-
-    def read_slice(darray: xr.DataArray, w_pad: Window):
-        slicer = (
-            slice(0, None),
-            slice(w_pad.row_off, w_pad.row_off+w_pad.height),
-            slice(w_pad.col_off, w_pad.col_off+w_pad.width)
-        )
-
-        return darray[slicer].gw.compute()
-
-    def create_and_save_window(
-        write_path: Path,
-        ntime: int,
-        nbands: int,
-        image_height: int,
-        image_width: int,
-        res: float,
-        resampling: str,
-        region: str,
-        year: int,
-        window_size: int,
-        padding: int,
-        x: np.ndarray,
-        w: Window,
-        w_pad: Window,
-    ) -> None:
-        size = window_size + padding*2
-        x_height = x.shape[1]
-        x_width = x.shape[2]
-
-        row_pad_before = 0
-        col_pad_before = 0
-        col_pad_after = 0
-        row_pad_after = 0
-        if (x_height != size) or (x_width != size):
-            # Pre-padding
-            if w.row_off < padding:
-                row_pad_before = padding - w.row_off
-            if w.col_off < padding:
-                col_pad_before = padding - w.col_off
-            # Post-padding
-            if w.row_off + window_size + padding > image_height:
-                row_pad_after = size - x_height
-            if w.col_off + window_size + padding > image_width:
-                col_pad_after = size - x_width
-
-            x = np.pad(
-                x,
-                pad_width=(
-                    (0, 0),
-                    (row_pad_before, row_pad_after),
-                    (col_pad_before, col_pad_after)
-                ),
-                mode='constant',
-            )
-        if x.shape[1:] != (size, size):
-            logger.exception('The array does not match the expected size.')
-
-        ldata = LabeledData(
-            x=x,
-            y=None,
-            bdist=None,
-            ori=None,
-            segments=None,
-            props=None
-        )
-        predict_data = augment(
-            ldata,
-            aug='none',
-            ntime=ntime,
-            nbands=nbands,
-            max_crop_class=0,
-            k=3,
-            instance_seg=False,
-            zero_padding=0,
-            window_row_off=w.row_off,
-            window_col_off=w.col_off,
-            window_height=w.height,
-            window_width=w.width,
-            window_pad_row_off=w_pad.row_off,
-            window_pad_col_off=w_pad.col_off,
-            window_pad_height=w_pad.height,
-            window_pad_width=w_pad.width,
-            row_pad_before=row_pad_before,
-            row_pad_after=row_pad_after,
-            col_pad_before=col_pad_before,
-            col_pad_after=col_pad_after,
-            res=res,
-            resampling=resampling
-        )
-        save_and_update(
-            write_path, predict_data, f'{region}_{year}_{w.row_off}_{w.col_off}'
-        )
-
     with gw.config.update(ref_res=ref_res):
         with gw.open(
             image_list,
@@ -593,22 +605,31 @@ def create_predict_dataset(
                 padding
             )
 
-            with parallel_backend(
-                backend='loky',
-                n_jobs=num_workers
-            ):
-                with TqdmParallel(
-                    tqdm_kwargs={
-                        'total': len(windows),
-                        'desc': 'Creating prediction windows'
-                    },
-                    temp_folder='/tmp'
-                ) as pool:
-                    __ = pool(
-                        delayed(partial_create)(
-                            read_slice(time_series, window_pad), window, window_pad
-                        ) for window, window_pad in windows
-                    )
+            with tqdm(
+                total=len(windows),
+                desc='Creating prediction windows',
+                position=0
+            ) as pbar_total:
+                with parallel_backend(
+                    backend='loky',
+                    n_jobs=num_workers
+                ):
+                    for window_chunk in get_window_chunk(windows, chunksize):
+                        with TqdmParallel(
+                            tqdm_kwargs={
+                                'total': len(window_chunk),
+                                'desc': 'Window chunks',
+                                'position': 1,
+                                'leave': False
+                            },
+                            temp_folder='/tmp'
+                        ) as pool:
+                            __ = pool(
+                                delayed(partial_create)(
+                                    read_slice(time_series, window_pad), window, window_pad
+                                ) for window, window_pad in window_chunk
+                            )
+                        pbar_total.update(len(window_chunk))
 
 
 def create_dataset(
