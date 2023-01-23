@@ -215,7 +215,10 @@ create_predict:
     short: ''
     long: chunksize
     help: The window chunksize for processing batches
-  
+    kwargs:
+      default: 100
+      type: '&int'
+
 train_predict:
   filters:
     short: ''
