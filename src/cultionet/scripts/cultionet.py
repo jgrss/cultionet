@@ -837,7 +837,8 @@ def create_datasets(args):
                     resampling=args.resampling,
                     window_size=args.window_size,
                     padding=args.padding,
-                    num_workers=args.num_workers
+                    num_workers=args.num_workers,
+                    chunksize=args.chunksize
                 )
             else:
                 create_dataset(

@@ -1,0 +1,26 @@
+image_vis:
+  - evi2
+  - gcvi
+  - kndvi
+
+# The regions to process (start, end)
+regions:
+  - 64
+  - 64
+
+# The region file path
+region_id_file: !!null
+
+# End years (i.e., 2020 = 2019 planting/harvest year)
+years:
+  - 2021
+
+# End year for prediction
+predict_year: 2021
+# Start and end date for prediction
+# Set as !!null to use dates from filenames. However, it is recommended
+# to set these dates to avoid unexpected date inclusions.
+start_date: 01-01
+end_date: 01-01
+
+lc_path: !!null
