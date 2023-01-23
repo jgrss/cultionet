@@ -185,10 +185,6 @@ create:
     short: ''
     long: replace-dict
     help: A dictionary of crop class remappings
-  chunksize:
-    short: ''
-    long: chunksize
-    help: The window chunksize for processing batches
 
 create_predict:
   predict_year:
@@ -215,7 +211,11 @@ create_predict:
     short: ''
     long: ts-path
     help: A path with time series data (overrides the config regions)
-
+  chunksize:
+    short: ''
+    long: chunksize
+    help: The window chunksize for processing batches
+  
 train_predict:
   filters:
     short: ''
