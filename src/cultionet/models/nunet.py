@@ -763,11 +763,10 @@ class ResUNet3Psi(torch.nn.Module):
         out_mask_channels: int = 2,
         init_filter: int = 64,
         dilations: T.List[int] = None,
-        attention: bool = False
+        attention: bool = False,
+        rcsb: bool = False
     ):
         super(ResUNet3Psi, self).__init__()
-
-        self.attention = attention
 
         init_filter = int(init_filter)
         channels = [
@@ -813,25 +812,29 @@ class ResUNet3Psi(torch.nn.Module):
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            rcsb=rcsb
         )
         self.convs_2_2 = ResUNet3_2_2(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            rcsb=rcsb
         )
         self.convs_1_3 = ResUNet3_1_3(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            rcsb=rcsb
         )
         self.convs_0_4 = ResUNet3_0_4(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            rcsb=rcsb
         )
 
         self.final_dist = torch.nn.Sequential(
@@ -843,11 +846,14 @@ class ResUNet3Psi(torch.nn.Module):
             ),
             torch.nn.Sigmoid()
         )
-        self.final_edge = torch.nn.Conv2d(
-            up_channels,
-            out_edge_channels,
-            kernel_size=1,
-            padding=0
+        self.final_edge = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                up_channels,
+                out_edge_channels,
+                kernel_size=1,
+                padding=0
+            ),
+            torch.nn.Sigmoid()
         )
         self.final_mask = torch.nn.Conv2d(
             up_channels,

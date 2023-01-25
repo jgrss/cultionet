@@ -3,9 +3,8 @@ from pathlib import Path
 import json
 
 from ..losses import (
-    CrossEntropyLoss,
-    MSELoss,
-    TanimotoDistLoss
+    TanimotoDistLoss,
+    TopologicalLoss
 )
 from .cultio import CultioNet
 from .maskcrnn import BFasterRCNN
@@ -394,8 +393,8 @@ class TemperatureScaling(pl.LightningModule):
                 f.write(json.dumps(temperature_scales))
 
     def configure_loss(self):
-        self.edge_loss = TanimotoDistLoss()
-        self.crop_loss = TanimotoDistLoss()
+        self.edge_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
 
     def configure_optimizers(self):
         optimizer = torch.optim.LBFGS(
@@ -582,7 +581,7 @@ class CultioLitModel(pl.LightningModule):
                 # Transform logits to probabilities
                 x = self.softmax(x)
 
-        return x
+        return x.clip(0, 1)
 
     # def on_train_epoch_start(self):
     #     # Get the current learning rate from the optimizer
@@ -615,18 +614,22 @@ class CultioLitModel(pl.LightningModule):
 
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
-        crop_loss = self.crop_loss(predictions['crop'], true_crop)
-        # Main loss
-        loss = (
-            dist_loss
-            + edge_loss
-            + crop_loss
+        edge_topo_loss = self.edge_topo_loss(
+            self.logits_to_probas(predictions['edge']), true_edge, batch
         )
+        crop_loss = self.crop_loss(predictions['crop'], true_crop)
         # Upstream (deep) loss on crop|non-crop + edge
         crop_star_loss = self.crop_star_loss(
             predictions['crop_star'], true_crop_plus_edge
         )
-        loss = loss + crop_star_loss
+        # Main loss
+        loss = (
+            dist_loss
+            + edge_loss
+            + 0.5 * edge_topo_loss
+            + crop_loss
+            + 0.5 * crop_star_loss
+        )
         if predictions['crop_type'] is not None:
             # Upstream (deep) loss on crop-type
             crop_type_star_loss = self.crop_type_star_loss(
@@ -787,12 +790,13 @@ class CultioLitModel(pl.LightningModule):
 
     def configure_loss(self):
         self.dist_loss = TanimotoDistLoss()
-        self.edge_loss = TanimotoDistLoss()
-        self.crop_loss = TanimotoDistLoss()
-        self.crop_star_loss = TanimotoDistLoss()
+        self.edge_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.edge_topo_loss = TopologicalLoss()
+        self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=True)
         if self.num_classes > 2:
-            self.crop_type_star_loss = TanimotoDistLoss()
-            self.crop_type_loss = TanimotoDistLoss()
+            self.crop_type_star_loss = TanimotoDistLoss(scale_pos_weight=True)
+            self.crop_type_loss = TanimotoDistLoss(scale_pos_weight=True)
 
     def configure_optimizers(self):
         params_list = list(self.cultionet_model.parameters())

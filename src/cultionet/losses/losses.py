@@ -1,7 +1,9 @@
 import typing as T
 
+from . import topological
 from ..models import model_utils
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch_geometric.data import Data
@@ -35,6 +37,101 @@ class LossPreprocessing(torch.nn.Module):
             targets = targets.unsqueeze(1)
 
         return inputs, targets
+
+
+class TopologicalLoss(torch.nn.Module):
+    """
+    Reference:
+        https://arxiv.org/abs/1906.05404
+        https://arxiv.org/pdf/1906.05404.pdf
+        https://github.com/HuXiaoling/TopoLoss/blob/5cb98177de50a3694f5886137ff7c6f55fd51493/topoloss_pytorch.py
+    """
+    def __init__(self):
+        super(TopologicalLoss, self).__init__()
+
+        self.gc = model_utils.GraphToConv()
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        data: Data
+    ) -> torch.Tensor:
+        height = int(data.height) if data.batch is None else int(data.height[0])
+        width = int(data.width) if data.batch is None else int(data.width[0])
+        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
+
+        input_dims = inputs.shape[1]
+        # Probabilities are ether Sigmoid or Softmax
+        input_index = 0 if input_dims == 1 else 1
+
+        inputs = self.gc(
+            inputs, batch_size, height, width
+        )
+        targets = self.gc(
+            targets.unsqueeze(1), batch_size, height, width
+        )
+        # Clone tensors before detaching from GPU
+        inputs_clone = inputs.clone()
+        targets_clone = targets.clone()
+
+        topo_cp_weight_map = np.zeros(inputs_clone[:, input_index].shape, dtype='float32')
+        topo_cp_ref_map = np.zeros(inputs_clone[:, input_index].shape, dtype='float32')
+        topo_mask = np.zeros(inputs_clone[:, input_index].shape, dtype='uint8')
+
+        # Detach from GPU for gudhi libary
+        inputs_clone = inputs_clone[:, input_index].float().cpu().detach().numpy()
+        targets_clone = targets_clone[:, 0].float().cpu().detach().numpy()
+
+        pd_lh, bcp_lh, dcp_lh, pairs_lh_pa = topological.critical_points(inputs_clone)
+        pd_gt, __, __, pairs_lh_gt = topological.critical_points(targets_clone)
+
+        if pairs_lh_pa and pairs_lh_gt:
+            for batch in range(0, batch_size):
+                if (pd_lh[batch].size > 0) and (pd_gt[batch].size > 0):
+                    __, idx_holes_to_fix, idx_holes_to_remove = topological.compute_dgm_force(
+                        pd_lh[batch], pd_gt[batch], pers_thresh=0.03
+                    )
+                    topo_cp_weight_map[batch], topo_cp_ref_map[batch], topo_mask[batch] = topological.set_topology_weights(
+                        likelihood=inputs_clone[batch],
+                        topo_cp_weight_map=topo_cp_weight_map[batch],
+                        topo_cp_ref_map=topo_cp_ref_map[batch],
+                        topo_mask=topo_mask[batch],
+                        bcp_lh=bcp_lh[batch],
+                        dcp_lh=dcp_lh[batch],
+                        idx_holes_to_fix=idx_holes_to_fix,
+                        idx_holes_to_remove=idx_holes_to_remove,
+                        height=inputs.shape[-2],
+                        width=inputs.shape[-1]
+                    )
+
+        topo_cp_weight_map = torch.tensor(
+            topo_cp_weight_map, dtype=inputs.dtype, device=inputs.device
+        )
+        topo_cp_ref_map = torch.tensor(
+            topo_cp_ref_map, dtype=inputs.dtype, device=inputs.device
+        )
+        topo_mask = torch.tensor(
+            topo_mask, dtype=bool, device=inputs.device
+        )
+        if not topo_mask.any():
+            topo_loss = (
+                (
+                    (
+                        inputs[:, input_index] * topo_cp_weight_map
+                    ) - topo_cp_ref_map
+                ) ** 2
+            )
+        else:
+            topo_loss = (
+                (
+                    (
+                        inputs[:, input_index][topo_mask] * topo_cp_weight_map[topo_mask]
+                    ) - topo_cp_ref_map[topo_mask]
+                ) ** 2
+            )
+
+        return topo_loss.mean()
 
 
 class TanimotoComplementLoss(torch.nn.Module):
@@ -134,21 +231,45 @@ class TanimotoComplementLoss(torch.nn.Module):
 class TanimotoDistLoss(torch.nn.Module):
     """Tanimoto distance loss
 
-    Reference:
+    References:
+        https://github.com/feevos/resuneta/blob/145be5519ee4bec9a8cce9e887808b8df011f520/nn/loss/loss.py
+
+            CSIRO BSTD/MIT LICENSE
+
+            Redistribution and use in source and binary forms, with or without modification, are permitted provided that
+            the following conditions are met:
+
+            1. Redistributions of source code must retain the above copyright notice, this list of conditions and the
+                following disclaimer.
+            2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and
+                the following disclaimer in the documentation and/or other materials provided with the distribution.
+            3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or
+                promote products derived from this software without specific prior written permission.
+
+            THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+            INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+            DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+            SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+            SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+            WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+            USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
         https://github.com/sentinel-hub/eo-flow/blob/master/eoflow/models/losses.py
 
-    MIT License
+            MIT License
 
-    Copyright (c) 2017-2020 Matej Aleksandrov, Matej Batič, Matic Lubej, Grega Milčinski (Sinergise)
-    Copyright (c) 2017-2020 Devis Peressutti, Jernej Puc, Anže Zupanc, Lojze Žust, Jovan Višnjić (Sinergise)
+            Copyright (c) 2017-2020 Matej Aleksandrov, Matej Batič, Matic Lubej, Grega Milčinski (Sinergise)
+            Copyright (c) 2017-2020 Devis Peressutti, Jernej Puc, Anže Zupanc, Lojze Žust, Jovan Višnjić (Sinergise)
     """
     def __init__(
-        self, smooth: float = 1e-5
+        self,
+        smooth: float = 1e-5,
+        scale_pos_weight: T.Optional[bool] = False
     ):
         super(TanimotoDistLoss, self).__init__()
 
         self.smooth = smooth
-
+        self.scale_pos_weight = scale_pos_weight
         self.preprocessor = LossPreprocessing(
             inputs_are_logits=True,
             apply_transform=True
@@ -157,13 +278,15 @@ class TanimotoDistLoss(torch.nn.Module):
     def forward(
         self,
         inputs: torch.Tensor,
-        targets: torch.Tensor
+        targets: torch.Tensor,
+        sample_weights: T.Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Performs a single forward pass
 
         Args:
             inputs: Predictions from model (probabilities, logits or labels).
             targets: Ground truth values.
+            sample_weights: Weights for each sample/pixel.
 
         Returns:
             Tanimoto distance loss (float)
@@ -176,11 +299,33 @@ class TanimotoDistLoss(torch.nn.Module):
         if len(targets.shape) == 1:
             targets = targets.unsqueeze(1)
 
+        if sample_weights is None:
+            sample_weights = 1.0
+
         def tanimoto_loss(yhat: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            tpl = (yhat * y).sum(dim=0)
-            sq_sum = (yhat**2 + y**2).sum(dim=0)
-            numerator = tpl + self.smooth
-            denominator = (sq_sum - tpl) + self.smooth
+            y = y.to(dtype=yhat.dtype)
+            if self.scale_pos_weight:
+                volume = y.mean(dim=0)
+                weights = torch.reciprocal(volume**2)
+                new_weights = torch.where(
+                    torch.isinf(weights),
+                    torch.zeros_like(weights),
+                    weights
+                )
+                weights = torch.where(
+                    torch.isinf(weights),
+                    torch.ones_like(weights) * new_weights.max(),
+                    weights
+                )
+            else:
+                weights = torch.ones(
+                    inputs.shape[1], dtype=inputs.dtype, device=inputs.device
+                )
+            # Reduce
+            tpl = ((yhat * y) * sample_weights).sum(dim=0)
+            sq_sum = ((yhat**2 + y**2) * sample_weights).sum(dim=0)
+            numerator = tpl * weights + self.smooth
+            denominator = (sq_sum - tpl) * weights + self.smooth
             tanimoto = numerator / denominator
             loss = 1.0 - tanimoto
 
@@ -188,7 +333,8 @@ class TanimotoDistLoss(torch.nn.Module):
 
         loss = tanimoto_loss(inputs, targets)
         if inputs.shape[1] == 1:
-            loss = (loss + tanimoto_loss(1.0 - inputs, 1.0 - targets)) * 0.5
+            compl_loss = tanimoto_loss(1.0 - inputs, 1.0 - targets)
+            loss = (loss + compl_loss) * 0.5
 
         return loss.mean()
 

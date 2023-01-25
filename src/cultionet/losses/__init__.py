@@ -5,5 +5,6 @@ from .losses import (
     MultiScaleSSIMLoss,
     MSELoss,
     TanimotoDistLoss,
-    TanimotoComplementLoss
+    TanimotoComplementLoss,
+    TopologicalLoss
 )
