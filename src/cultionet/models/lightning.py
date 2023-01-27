@@ -580,8 +580,9 @@ class CultioLitModel(pl.LightningModule):
             if x.shape[1] > 1:
                 # Transform logits to probabilities
                 x = self.softmax(x)
+            x = x.clip(0, 1)
 
-        return x.clip(0, 1)
+        return x
 
     # def on_train_epoch_start(self):
     #     # Get the current learning rate from the optimizer
