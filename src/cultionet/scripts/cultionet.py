@@ -476,7 +476,6 @@ def predict_image(args):
         class_info = json.load(f)
 
     num_classes = args.num_classes if args.num_classes is not None else class_info['max_crop_class'] + 1
-    edge_class = args.edge_class if args.edge_class is not None else class_info['edge_class']
 
     if args.data_path is not None:
         ds = EdgeDataset(

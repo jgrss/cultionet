@@ -269,13 +269,6 @@ train_predict:
     kwargs:
       default: !!null
       type: '&int'
-  edge_class:
-    short: ''
-    long: edge-class
-    help: The edge class value (overrides file info)
-    kwargs:
-      default: !!null
-      type: '&int'
 
 maskrcnn:
   resize_height:
@@ -501,6 +494,13 @@ train:
         - !!null
         - simple
         - advanced
+  edge_class:
+    short: ''
+    long: edge-class
+    help: The edge class value (overrides file info)
+    kwargs:
+      default: !!null
+      type: '&int'
 
 predict:
   predict_year:
