@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.6.4 (2023-02-01)
+* Pinned required packages to full semantic versions ([#44](https://github.com/jgrss/cultionet/pull/44))
+
 ## v1.6.3 (2023-01-23)
 * Added `chunksize` argument for `create-predict` ([#43](https://github.com/jgrss/cultionet/pull/43))
 
