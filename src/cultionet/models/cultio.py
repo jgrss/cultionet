@@ -9,6 +9,81 @@ import torch
 from torch_geometric.data import Data
 
 
+class FinalRefinement(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        out_classes: int
+    ):
+        super(FinalRefinement, self).__init__()
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.out_classes = out_classes
+
+        self.gc = model_utils.GraphToConv()
+        self.cg = model_utils.ConvToGraph()
+
+        self.conv1 = ConvBlock2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=1,
+            padding=0,
+            activation_type='LeakyReLU'
+        )
+        layers1 = [
+            ConvBlock2d(
+                in_channels=out_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1,
+                activation_type='LeakyReLU'
+            ),
+            ConvBlock2d(
+                in_channels=out_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1,
+                add_activation=False
+            )
+        ]
+        self.seq = torch.nn.Sequential(*layers1)
+
+        layers_final = [
+            torch.nn.LeakyReLU(inplace=False),
+            torch.nn.Conv2d(
+                out_channels,
+                out_classes,
+                kernel_size=1,
+                padding=0
+            )
+        ]
+        self.final = torch.nn.Sequential(*layers_final)
+
+    def forward(
+        self, x: torch.Tensor, data: Data
+    ) -> torch.Tensor:
+        height = int(data.height) if data.batch is None else int(data.height[0])
+        width = int(data.width) if data.batch is None else int(data.width[0])
+        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
+
+        x = self.gc(
+            x, batch_size, height, width
+        )
+        crop = self.gc(
+            x[-2:], batch_size, height, width
+        )
+
+        out1 = self.conv1(x)
+        out = self.seq(out1)
+        out = out + out1
+        out = self.final(out)
+        out = out + crop
+
+        return out
+
+
 class CropTypeFinal(torch.nn.Module):
     def __init__(
         self,

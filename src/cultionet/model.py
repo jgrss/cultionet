@@ -701,7 +701,8 @@ def predict_lightning(
     ref_res: float,
     compression: str,
     edge_temperature: T.Optional[torch.Tensor] = None,
-    crop_temperature: T.Optional[torch.Tensor] = None
+    crop_temperature: T.Optional[torch.Tensor] = None,
+    temperature_ckpt: Path = None
 ):
     reference_image = Path(reference_image)
     out_path = Path(out_path)
@@ -736,8 +737,12 @@ def predict_lightning(
 
     trainer = pl.Trainer(**trainer_kwargs)
     lit_model = CultioLitModel.load_from_checkpoint(checkpoint_path=str(ckpt_file))
+    temperature_lit_model = TemperatureScaling.load_from_checkpoint(
+        checkpoint_path=str(temperature_ckpt)
+    )
     setattr(lit_model, 'edge_temperature', edge_temperature)
     setattr(lit_model, 'crop_temperature', crop_temperature)
+    setattr(lit_model, 'temperature_lit_model', temperature_lit_model)
 
     # Make predictions
     trainer.predict(

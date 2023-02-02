@@ -513,7 +513,8 @@ def predict_image(args):
             resampling=ds[0].resampling,
             compression=args.compression,
             crop_temperature=crop_temperature,
-            edge_temperature=edge_temperature
+            edge_temperature=edge_temperature,
+            temperature_ckpt=ckpt_file.parent / 'temperature' / 'last.ckpt'
         )
 
         if args.delete_dataset:
