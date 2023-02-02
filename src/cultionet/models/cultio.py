@@ -88,7 +88,7 @@ class FinalRefinement(torch.nn.Module):
         out = self.final(out)
         out = out + crop
 
-        return out
+        return self.cg(out)
 
 
 class CropTypeFinal(torch.nn.Module):
