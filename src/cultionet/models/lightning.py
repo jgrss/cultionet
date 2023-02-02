@@ -502,11 +502,6 @@ class TemperatureScaling(pl.LightningModule):
             max_iter=self.max_iter,
             line_search_fn=None
         )
-        lr_scheduler_adamw = ReduceLROnPlateau(
-            optimizer_adamw,
-            factor=0.1,
-            patience=5
-        )
         lr_scheduler_lbfgs = ReduceLROnPlateau(
             optimizer_lbfgs,
             factor=0.1,
@@ -515,13 +510,7 @@ class TemperatureScaling(pl.LightningModule):
 
         return (
             {
-                'optimizer': optimizer_adamw,
-                'lr_scheduler': {
-                    'scheduler': lr_scheduler_adamw,
-                    'monitor': 'val_loss',
-                    'interval': 'epoch',
-                    'frequency': 1
-                },
+                'optimizer': optimizer_adamw
             },
             {
                 'optimizer': optimizer_lbfgs,
