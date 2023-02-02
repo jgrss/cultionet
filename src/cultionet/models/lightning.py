@@ -316,8 +316,12 @@ def scale_logits(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
 class TemperatureScaling(pl.LightningModule):
     def __init__(
         self,
-        model: CultioNet = None,
-        learning_rate: float = 0.01,
+        num_features: int,
+        cultionet_model: CultioNet = None,
+        learning_rate: float = 1e-4,
+        learning_rate_lbfgs: float = 0.1,
+        weight_decay: float = 1e-4,
+        eps: float = 1e-8,
         max_iter: float = 20,
         class_weights: T.Sequence[float] = None,
         edge_class: T.Optional[int] = None
@@ -327,20 +331,23 @@ class TemperatureScaling(pl.LightningModule):
         self.edge_temperature = torch.nn.Parameter(torch.ones(1))
         self.crop_temperature = torch.nn.Parameter(torch.ones(1))
 
-        self.model = model
+        self.cultionet_model = cultionet_model
         self.learning_rate = learning_rate
+        self.learning_rate_lbfgs = learning_rate_lbfgs
+        self.weight_decay = weight_decay
+        self.eps = eps
         self.max_iter = max_iter
         self.class_weights = class_weights
         self.edge_class = edge_class
 
         self.final_model = FinalRefinement(
-            in_channels=4,
+            in_channels=num_features+4,
             out_channels=64,
             out_classes=2
         )
 
-        self.model.eval()
-        self.model.freeze()
+        self.cultionet_model.eval()
+        self.cultionet_model.freeze()
         self.configure_loss()
 
     def __call__(self, *args, **kwargs):
@@ -394,7 +401,7 @@ class TemperatureScaling(pl.LightningModule):
         """Executes one training step
         """
         with torch.no_grad():
-            predictions = self.model(batch)
+            predictions = self.cultionet_model(batch)
 
         crop_refine = self.final_model(
             torch.cat(
@@ -452,7 +459,7 @@ class TemperatureScaling(pl.LightningModule):
                 self.edge_temperature,
                 self.crop_temperature
             ],
-            lr=self.learning_rate,
+            lr=self.learning_rate_lbfgs,
             max_iter=self.max_iter,
             line_search_fn=None
         )
