@@ -71,9 +71,7 @@ class FinalRefinement(torch.nn.Module):
         x = self.gc(
             x, batch_size, height, width
         )
-        crop = self.gc(
-            x[-2:], batch_size, height, width
-        )
+        crop = x[:, -2:]
         # Combine all inputs and predictions
         x = torch.cat([x, data.x], dim=1)
 
