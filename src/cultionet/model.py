@@ -446,7 +446,7 @@ def fit(
         # Calibrate the logits
         temperature_model = TemperatureScaling(
             num_features=train_ds.num_features,
-            model=CultioLitModel.load_from_checkpoint(
+            cultionet_model=CultioLitModel.load_from_checkpoint(
                 checkpoint_path=str(ckpt_file)
             ),
             class_weights=class_weights,
