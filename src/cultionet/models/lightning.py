@@ -357,9 +357,11 @@ class TemperatureScaling(pl.LightningModule):
         self,
         x: T.Dict[str, torch.Tensor],
         batch: Data,
+        edge_temperature: torch.Tensor,
+        crop_temperature: torch.Tensor,
         batch_idx: int = None
     ) -> torch.Tensor:
-        x = self.final_model(
+        x['crop'] = self.final_model(
             torch.cat(
                 [
                     x['dist'],
@@ -370,56 +372,93 @@ class TemperatureScaling(pl.LightningModule):
             ),
             data=batch
         )
+        x['edge'] = scale_logits(x['edge'], edge_temperature)
+        x['crop'] = scale_logits(x['crop'], crop_temperature)
 
-        return x['crop']
+        return x
 
-    def calc_loss(
+    def calc_refined_loss(
         self,
         batch: T.Union[Data, T.List],
         predictions: torch.Tensor
     ):
-        edge_scaled = scale_logits(predictions['edge'], self.edge_temperature)
-        crop_scaled = scale_logits(predictions['crop'], self.crop_temperature)
+        # in case of multi-class, `true_crop` = 1, 2, etc.
+        true_crop = torch.where(
+            (batch.y > 0) & (batch.y != self.edge_class), 1, 0
+        ).long()
 
+        loss = self.crop_loss_refine(
+            predictions['crop'], true_crop
+        )
+
+        return loss
+
+    def calc_loss(
+        self,
+        batch: T.Union[Data, T.List],
+        predictions: T.Dict[str, torch.Tensor]
+    ):
         true_edge = batch.y.eq(self.edge_class).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.
         true_crop = torch.where(
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
 
-        edge_loss = self.edge_loss(edge_scaled, true_edge)
-        crop_loss = self.crop_loss(crop_scaled, true_crop)
-        crop_loss_refine = self.crop_loss_refine(
-            predictions['crop'], true_crop
-        )
+        edge_loss = self.edge_loss(predictions['edge'], true_edge)
+        crop_loss = self.crop_loss(predictions['crop'], true_crop)
 
-        loss = edge_loss + crop_loss + crop_loss_refine
+        loss = edge_loss + crop_loss
 
         return loss
 
-    def training_step(self, batch: Data, batch_idx: int = None):
+    def training_step(
+        self,
+        batch: Data,
+        batch_idx: int = None,
+        optimizer_idx: int = None
+    ):
         """Executes one training step
         """
         with torch.no_grad():
             predictions = self.cultionet_model(batch)
 
-        crop_refine = self.final_model(
-            torch.cat(
-                [
-                    predictions['dist'],
-                    predictions['edge'],
-                    predictions['crop']
-                ],
-                dim=1
-            ),
-            data=batch
-        )
-        predictions['crop'] = crop_refine
+        if optimizer_idx == 0:
+            predictions['crop'] = self.final_model(
+                torch.cat(
+                    [
+                        predictions['dist'],
+                        predictions['edge'],
+                        predictions['crop']
+                    ],
+                    dim=1
+                ),
+                data=batch
+            )
+            loss = self.calc_refined_loss(
+                batch,
+                predictions
+            )
+        else:
+            with torch.no_grad():
+                predictions['crop'] = self.final_model(
+                    torch.cat(
+                        [
+                            predictions['dist'],
+                            predictions['edge'],
+                            predictions['crop']
+                        ],
+                        dim=1
+                    ),
+                    data=batch
+                )
+            predictions['edge'] = scale_logits(predictions['edge'], self.edge_temperature)
+            predictions['crop'] = scale_logits(predictions['crop'], self.crop_temperature)
 
-        loss = self.calc_loss(
-            batch,
-            predictions
-        )
+            loss = self.calc_loss(
+                batch,
+                predictions
+            )
+
         metrics = {
             'loss': loss,
             'edge_temp': self.edge_temperature,
@@ -585,18 +624,12 @@ class CultioLitModel(pl.LightningModule):
         """
         predictions = self.forward(batch, batch_idx)
         if self.temperature_lit_model is not None:
-            predictions['crop'] = self.temperature_lit_model(
-                predictions, batch, batch_idx
-            )
-        if self.edge_temperature is not None:
-            predictions['edge'] = scale_logits(
-                predictions['edge'],
-                self.edge_temperature
-            )
-        if self.crop_temperature is not None:
-            predictions['crop'] = scale_logits(
-                predictions['crop'],
-                self.crop_temperature
+            predictions = self.temperature_lit_model(
+                predictions,
+                batch,
+                self.edge_temperature,
+                self.crop_temperature,
+                batch_idx
             )
         predictions['edge'] = self.logits_to_probas(
             predictions['edge']
