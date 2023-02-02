@@ -442,7 +442,7 @@ class TemperatureScaling(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer_adamw = torch.optim.AdamW(
-            list(self.refine_model.parameters()),
+            list(self.final_model.parameters()),
             lr=self.learning_rate,
             weight_decay=self.weight_decay,
             eps=self.eps
