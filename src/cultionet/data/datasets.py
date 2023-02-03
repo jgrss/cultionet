@@ -369,6 +369,9 @@ class EdgeDataset(Dataset):
         """Returns the dataset length"""
         return len(self.processed_file_names)
 
+    def holder(self):
+        df = self.to_frame()
+
     def split_train_val_by_partition(
         self,
         spatial_partitions: str,
