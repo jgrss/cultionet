@@ -30,7 +30,7 @@ class FinalRefinement(torch.nn.Module):
         self.cg = model_utils.ConvToGraph()
 
         self.inception = InceptionNet(
-            in_channels=num_time,
+            in_channels=int(in_channels / num_time),
             out_channels=out_channels,
             num_classes_last=predict_channels
         )
