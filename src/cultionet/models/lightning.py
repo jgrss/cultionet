@@ -317,14 +317,13 @@ class TemperatureScaling(pl.LightningModule):
     def __init__(
         self,
         num_features: int,
+        num_time: int,
         cultionet_model: CultioNet = None,
         learning_rate: float = 1e-4,
         learning_rate_lbfgs: float = 0.1,
         weight_decay: float = 1e-4,
         eps: float = 1e-8,
-        max_iter: float = 20,
-        class_weights: T.Sequence[float] = None,
-        edge_class: T.Optional[int] = None
+        max_iter: float = 20
     ):
         super(TemperatureScaling, self).__init__()
 
@@ -337,11 +336,11 @@ class TemperatureScaling(pl.LightningModule):
         self.weight_decay = weight_decay
         self.eps = eps
         self.max_iter = max_iter
-        self.class_weights = class_weights
-        self.edge_class = edge_class
 
         self.final_model = FinalRefinement(
-            in_channels=num_features+4,
+            in_channels=num_features,
+            num_time=num_time,
+            predict_channels=4,
             out_channels=64,
             out_classes=2
         )
@@ -423,6 +422,7 @@ class TemperatureScaling(pl.LightningModule):
             predictions = self.cultionet_model(batch)
 
         if optimizer_idx == 0:
+            self.final_model.train()
             predictions['crop'] = self.final_model(
                 torch.cat(
                     [
@@ -439,6 +439,7 @@ class TemperatureScaling(pl.LightningModule):
                 predictions
             )
         else:
+            self.final_model.eval()
             with torch.no_grad():
                 predictions['crop'] = self.final_model(
                     torch.cat(
@@ -451,8 +452,12 @@ class TemperatureScaling(pl.LightningModule):
                     ),
                     data=batch
                 )
-            predictions['edge'] = scale_logits(predictions['edge'], self.edge_temperature)
-            predictions['crop'] = scale_logits(predictions['crop'], self.crop_temperature)
+            predictions['edge'] = scale_logits(
+                predictions['edge'], self.edge_temperature
+            )
+            predictions['crop'] = scale_logits(
+                predictions['crop'], self.crop_temperature
+            )
 
             loss = self.calc_loss(
                 batch,
@@ -532,10 +537,10 @@ class CultioLitModel(pl.LightningModule):
         num_classes: int = 2,
         filters: int = 32,
         star_rnn_n_layers: int = 4,
+        optimizer: str = 'AdamW',
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-4,
         eps: float = 1e-8,
-        depth: int = 5,
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
         model_type: str = 'ResUNet3Psi',
@@ -552,6 +557,7 @@ class CultioLitModel(pl.LightningModule):
 
         self.save_hyperparameters()
 
+        self.optimizer = optimizer
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.eps = eps
@@ -568,7 +574,6 @@ class CultioLitModel(pl.LightningModule):
             self.edge_class = edge_class
         else:
             self.edge_class = num_classes
-        self.depth = depth
 
         self.cultionet_model = CultioNet(
             ds_features=num_features,
@@ -902,12 +907,23 @@ class CultioLitModel(pl.LightningModule):
 
     def configure_optimizers(self):
         params_list = list(self.cultionet_model.parameters())
-        optimizer = torch.optim.AdamW(
-            params_list,
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay,
-            eps=self.eps
-        )
+        if self.optimizer == 'AdamW':
+            optimizer = torch.optim.AdamW(
+                params_list,
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+                eps=self.eps
+            )
+        elif self.optimizer == 'SGD':
+            optimizer = torch.optim.SGD(
+                params_list,
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+                momentum=0.9
+            )
+        else:
+            raise NameError("Choose either 'AdamW' or 'SGD'.")
+
         lr_scheduler = ReduceLROnPlateau(
             optimizer,
             factor=0.1,
