@@ -99,9 +99,9 @@ class ConvBlock3d(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        in_time: int,
         out_channels: int,
         kernel_size: int,
+        in_time: int = 0,
         padding: int = 0,
         dilation: int = 1,
         add_activation: bool = True,
