@@ -73,13 +73,14 @@ class ResBlock2d(torch.nn.Module):
         out_channels: int,
         kernel_size: int,
         padding: int = 0,
-        dilation: int = 1
+        dilation: int = 1,
+        activation_type: str = 'LeakyReLU'
     ):
         super(ResBlock2d, self).__init__()
 
         layers = [
             torch.nn.BatchNorm2d(in_channels),
-            torch.nn.LeakyReLU(inplace=False),
+            getattr(torch.nn, activation_type)(inplace=False),
             torch.nn.Conv2d(
                 in_channels,
                 out_channels,
