@@ -369,9 +369,6 @@ class EdgeDataset(Dataset):
         """Returns the dataset length"""
         return len(self.processed_file_names)
 
-    def holder(self):
-        df = self.to_frame()
-
     def split_train_val_by_partition(
         self,
         spatial_partitions: str,
@@ -412,7 +409,8 @@ class EdgeDataset(Dataset):
         return train_ds, val_ds
 
     def split_train_val(
-        self, val_frac: float
+        self, val_frac: float,
+        spatial_overlap_allowed: bool = True
     ) -> T.Tuple['EdgeDataset', 'EdgeDataset']:
         """Splits the dataset into train and validation
 
@@ -422,10 +420,32 @@ class EdgeDataset(Dataset):
         Returns:
             train dataset, validation dataset
         """
-        n_train = int(len(self) * (1.0 - val_frac))
         self.shuffle_items()
-        train_ds = self[:n_train]
-        val_ds = self[n_train:]
+        if spatial_overlap_allowed:
+            n_train = int(len(self) * (1.0 - val_frac))
+            train_ds = self[:n_train]
+            val_ds = self[n_train:]
+        else:
+            self.create_spatial_index()
+            # Keep only one centroid for each site
+            df_isolated = self.dataset_df.drop_duplicates('geometry')
+            # Randomly sample a percentage for validation
+            df_val = df_isolated.sample(
+                frac=val_frac, random_state=self.random_seed
+            )
+            val_geometries = df_val.geometry.tolist()
+            train_idx = []
+            val_idx = []
+            # Iterate over all sample sites
+            for i, row in enumerate(self.dataset_df.itertuples()):
+                # Find matching geometry
+                if row.geometry in val_geometries:
+                    val_idx.append(i)
+                else:
+                    train_idx.append(i)
+
+            train_ds = self[train_idx]
+            val_ds = self[val_idx]
 
         return train_ds, val_ds
 

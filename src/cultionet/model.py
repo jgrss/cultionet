@@ -281,11 +281,15 @@ def fit(
 
     # Split the dataset into train/validation
     if spatial_partitions is not None:
-        train_ds, val_ds = dataset.split_train_val_by_partition(
-            spatial_partitions=spatial_partitions,
-            partition_column=partition_column,
+        # train_ds, val_ds = dataset.split_train_val_by_partition(
+        #     spatial_partitions=spatial_partitions,
+        #     partition_column=partition_column,
+        #     val_frac=val_frac,
+        #     partition_name=partition_name
+        # )
+        train_ds, val_ds = dataset.split_train_val(
             val_frac=val_frac,
-            partition_name=partition_name
+            spatial_overlap_allowed=False
         )
     else:
         train_ds, val_ds = dataset.split_train_val(val_frac=val_frac)
@@ -449,7 +453,8 @@ def fit(
             num_time=train_ds.num_time_features,
             cultionet_model=CultioLitModel.load_from_checkpoint(
                 checkpoint_path=str(ckpt_file)
-            )
+            ),
+            edge_class=edge_class
         )
         temperature_trainer.fit(
             model=temperature_model,

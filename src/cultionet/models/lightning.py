@@ -323,7 +323,8 @@ class TemperatureScaling(pl.LightningModule):
         learning_rate_lbfgs: float = 0.01,
         weight_decay: float = 1e-4,
         eps: float = 1e-8,
-        max_iter: float = 50
+        max_iter: float = 50,
+        edge_class: int = 2
     ):
         super(TemperatureScaling, self).__init__()
 
@@ -336,6 +337,7 @@ class TemperatureScaling(pl.LightningModule):
         self.weight_decay = weight_decay
         self.eps = eps
         self.max_iter = max_iter
+        self.edge_class = edge_class
 
         self.final_model = FinalRefinement(
             in_channels=num_features,

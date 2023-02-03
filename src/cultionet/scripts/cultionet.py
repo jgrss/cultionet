@@ -1087,11 +1087,15 @@ def train_model(args):
             ppaths.norm_file.unlink()
     if not ppaths.norm_file.is_file():
         if args.spatial_partitions is not None:
-            train_ds = ds.split_train_val_by_partition(
-                spatial_partitions=args.spatial_partitions,
-                partition_column=args.partition_column,
+            # train_ds = ds.split_train_val_by_partition(
+            #     spatial_partitions=args.spatial_partitions,
+            #     partition_column=args.partition_column,
+            #     val_frac=args.val_frac,
+            #     partition_name=args.partition_name
+            # )[0]
+            train_ds = ds.split_train_val(
                 val_frac=args.val_frac,
-                partition_name=args.partition_name
+                spatial_overlap_allowed=False
             )[0]
         else:
             train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
