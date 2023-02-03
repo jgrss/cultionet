@@ -320,10 +320,10 @@ class TemperatureScaling(pl.LightningModule):
         num_time: int,
         cultionet_model: CultioNet = None,
         learning_rate: float = 1e-4,
-        learning_rate_lbfgs: float = 0.1,
+        learning_rate_lbfgs: float = 0.01,
         weight_decay: float = 1e-4,
         eps: float = 1e-8,
-        max_iter: float = 20
+        max_iter: float = 50
     ):
         super(TemperatureScaling, self).__init__()
 

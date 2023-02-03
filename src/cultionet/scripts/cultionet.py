@@ -1095,6 +1095,7 @@ def train_model(args):
             )[0]
         else:
             train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
+        # Get means and standard deviations from the training dataset
         data_values = get_norm_values(
             dataset=train_ds,
             class_info=class_info,

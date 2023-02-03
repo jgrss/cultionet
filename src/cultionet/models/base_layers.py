@@ -105,7 +105,8 @@ class ConvBlock3d(torch.nn.Module):
         padding: int = 0,
         dilation: int = 1,
         add_activation: bool = True,
-        squeeze: bool = True
+        squeeze: bool = True,
+        activation_type: str = 'LeakyReLU'
     ):
         super(ConvBlock3d, self).__init__()
 
@@ -127,7 +128,7 @@ class ConvBlock3d(torch.nn.Module):
         else:
             self.seq += [torch.nn.BatchNorm3d(out_channels)]
         if add_activation:
-            self.seq += [torch.nn.LeakyReLU(inplace=False)]
+            self.seq += [getattr(torch.nn, activation_type)(inplace=False)]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
