@@ -354,27 +354,29 @@ class TemperatureScaling(pl.LightningModule):
 
     def forward(
         self,
-        x: T.Dict[str, torch.Tensor],
         batch: Data,
         edge_temperature: torch.Tensor,
         crop_temperature: torch.Tensor,
         batch_idx: int = None
-    ) -> torch.Tensor:
-        x['crop'] = self.final_model(
-            torch.cat(
-                [
-                    x['dist'],
-                    x['edge'],
-                    x['crop']
-                ],
-                dim=1
-            ),
-            data=batch
+    ) -> T.Dict[str, torch.Tensor]:
+        self.final_model.eval()
+        with torch.no_grad():
+            # Cultionet predictions
+            predictions = self.cultionet_model(batch)
+            predictions['crop'] = self.final_model(
+                predictions['dist'],
+                predictions['edge'],
+                predictions['crop'],
+                data=batch
+            )
+        predictions['edge'] = scale_logits(
+            predictions['edge'], edge_temperature
         )
-        x['edge'] = scale_logits(x['edge'], edge_temperature)
-        x['crop'] = scale_logits(x['crop'], crop_temperature)
+        predictions['crop'] = scale_logits(
+            predictions['crop'], crop_temperature
+        )
 
-        return x
+        return predictions
 
     def calc_refined_loss(
         self,
@@ -424,14 +426,9 @@ class TemperatureScaling(pl.LightningModule):
         if optimizer_idx == 0:
             self.final_model.train()
             predictions['crop'] = self.final_model(
-                torch.cat(
-                    [
-                        predictions['dist'],
-                        predictions['edge'],
-                        predictions['crop']
-                    ],
-                    dim=1
-                ),
+                predictions['dist'],
+                predictions['edge'],
+                predictions['crop'],
                 data=batch
             )
             loss = self.calc_refined_loss(
@@ -442,14 +439,9 @@ class TemperatureScaling(pl.LightningModule):
             self.final_model.eval()
             with torch.no_grad():
                 predictions['crop'] = self.final_model(
-                    torch.cat(
-                        [
-                            predictions['dist'],
-                            predictions['edge'],
-                            predictions['crop']
-                        ],
-                        dim=1
-                    ),
+                    predictions['dist'],
+                    predictions['edge'],
+                    predictions['crop'],
                     data=batch
                 )
             predictions['edge'] = scale_logits(
@@ -616,15 +608,15 @@ class CultioLitModel(pl.LightningModule):
     ) -> T.Dict[str, torch.Tensor]:
         """A prediction step for Lightning
         """
-        predictions = self.forward(batch, batch_idx)
         if self.temperature_lit_model is not None:
             predictions = self.temperature_lit_model(
-                predictions,
                 batch,
                 self.edge_temperature,
                 self.crop_temperature,
                 batch_idx
             )
+        else:
+            predictions = self.forward(batch, batch_idx)
         predictions['edge'] = self.logits_to_probas(
             predictions['edge']
         )

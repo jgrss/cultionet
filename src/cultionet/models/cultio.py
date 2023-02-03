@@ -66,11 +66,24 @@ class FinalRefinement(torch.nn.Module):
         )
 
     def forward(
-        self, x: torch.Tensor, data: Data
+        self,
+        distance: torch.Tensor,
+        edge: torch.Tensor,
+        crop: torch.Tensor,
+        data: Data
     ) -> torch.Tensor:
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
+
+        x = torch.cat(
+            [
+                distance,
+                edge,
+                crop
+            ],
+            dim=1
+        )
 
         # Reshape
         x = self.gc(
