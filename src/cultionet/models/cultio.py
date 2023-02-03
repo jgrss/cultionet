@@ -96,7 +96,7 @@ class FinalRefinement(torch.nn.Module):
         # nbatch, ntime, height, width
         nbatch, __, height, width = h.shape
         h = h.reshape(
-            nbatch, self.in_channels, self.num_time, height, width
+            nbatch, int(self.in_channels / self.num_time), self.num_time, height, width
         )
         h = self.inception(h)
         h = h + x
