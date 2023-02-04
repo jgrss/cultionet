@@ -316,14 +316,12 @@ def scale_logits(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
 class TemperatureScaling(pl.LightningModule):
     def __init__(
         self,
-        num_features: int,
-        num_time: int,
         cultionet_model: CultioNet = None,
         learning_rate: float = 1e-4,
         learning_rate_lbfgs: float = 0.01,
         weight_decay: float = 1e-4,
         eps: float = 1e-8,
-        max_iter: float = 50,
+        max_iter: float = 25,
         edge_class: int = 2
     ):
         super(TemperatureScaling, self).__init__()
