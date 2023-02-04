@@ -433,17 +433,18 @@ class EdgeDataset(Dataset):
             df_val = df_isolated.sample(
                 frac=val_frac, random_state=self.random_seed
             )
-            val_geometries = df_val.geometry.tolist()
-            train_idx = []
-            val_idx = []
-            # Iterate over all sample sites
-            for i, row in enumerate(self.dataset_df.itertuples()):
-                # Find matching geometry
-                if row.geometry in val_geometries:
-                    val_idx.append(i)
-                else:
-                    train_idx.append(i)
-
+            # Spatial joinb all points -> validation points
+            df_val = self.dataset_df.sjoin(df_val)
+            # Drop duplicated indexes
+            df_val = df_val.loc[~df_val.index.duplicated()]
+            # Get a mask of samples that are in the validation set
+            val_mask = self.dataset_df.index.isin(df_val.index)
+            # Take the samples that are not in the validation set
+            df_train = self.dataset_df.loc[~val_mask]
+            # Get train/val indices
+            train_idx = df_train.index.tolist()
+            val_idx = df_val.index.tolist()
+            # Slice the dataset
             train_ds = self[train_idx]
             val_ds = self[val_idx]
 
