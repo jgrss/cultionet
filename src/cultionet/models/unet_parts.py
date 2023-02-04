@@ -4,7 +4,9 @@ from .base_layers import (
     DoubleConv,
     PoolConv,
     PoolResidualConv,
-    ResidualConv
+    ResidualConv,
+    AttentionGate,
+    FractalAttention
 )
 from . import model_utils
 from .rcsb import RCSB
