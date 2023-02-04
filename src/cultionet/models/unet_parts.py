@@ -183,8 +183,7 @@ class UNet3_3_1(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         attention: bool = False,
-        attention_weights: str = 'gate',
-        depthwise_conv: bool = False
+        attention_weights: str = 'gate'
     ):
         super(UNet3_3_1, self).__init__()
 
@@ -196,8 +195,7 @@ class UNet3_3_1(torch.nn.Module):
             up_channels=up_channels,
             is_side_stream=False,
             prev_backbone_channel_index=3,
-            n_pools=3,
-            depthwise_conv=depthwise_conv
+            n_pools=3
         )
         # Edge stream connection
         self.conv_edge = UNet3Connector(
@@ -206,8 +204,7 @@ class UNet3_3_1(torch.nn.Module):
             prev_backbone_channel_index=3,
             n_pools=3,
             attention=attention,
-            attention_weights=attention_weights,
-            depthwise_conv=depthwise_conv
+            attention_weights=attention_weights
         )
         # Mask stream connection
         self.conv_mask = UNet3Connector(
@@ -216,8 +213,7 @@ class UNet3_3_1(torch.nn.Module):
             prev_backbone_channel_index=3,
             n_pools=3,
             attention=attention,
-            attention_weights=attention_weights,
-            depthwise_conv=depthwise_conv
+            attention_weights=attention_weights
         )
 
     def forward(
@@ -262,8 +258,7 @@ class UNet3_2_2(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         attention: bool = False,
-        attention_weights: str = 'gate',
-        depthwise_conv: bool = False
+        attention_weights: str = 'gate'
     ):
         super(UNet3_2_2, self).__init__()
 
@@ -275,8 +270,7 @@ class UNet3_2_2(torch.nn.Module):
             is_side_stream=False,
             prev_backbone_channel_index=2,
             n_pools=2,
-            n_stream_down=1,
-            depthwise_conv=depthwise_conv
+            n_stream_down=1
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
@@ -285,8 +279,7 @@ class UNet3_2_2(torch.nn.Module):
             n_pools=2,
             n_stream_down=1,
             attention=attention,
-            attention_weights=attention_weights,
-            depthwise_conv=depthwise_conv
+            attention_weights=attention_weights
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -295,8 +288,7 @@ class UNet3_2_2(torch.nn.Module):
             n_pools=2,
             n_stream_down=1,
             attention=attention,
-            attention_weights=attention_weights,
-            depthwise_conv=depthwise_conv
+            attention_weights=attention_weights
         )
 
     def forward(
@@ -345,8 +337,7 @@ class UNet3_1_3(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         attention: bool = False,
-        attention_weights: str = 'gate',
-        depthwise_conv: bool = False
+        attention_weights: str = 'gate'
     ):
         super(UNet3_1_3, self).__init__()
 
@@ -358,8 +349,7 @@ class UNet3_1_3(torch.nn.Module):
             is_side_stream=False,
             prev_backbone_channel_index=1,
             n_pools=1,
-            n_stream_down=2,
-            depthwise_conv=depthwise_conv
+            n_stream_down=2
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
@@ -368,8 +358,7 @@ class UNet3_1_3(torch.nn.Module):
             n_pools=1,
             n_stream_down=2,
             attention=attention,
-            attention_weights=attention_weights,
-            depthwise_conv=depthwise_conv
+            attention_weights=attention_weights
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -378,8 +367,7 @@ class UNet3_1_3(torch.nn.Module):
             n_pools=1,
             n_stream_down=2,
             attention=attention,
-            attention_weights=attention_weights,
-            depthwise_conv=depthwise_conv
+            attention_weights=attention_weights
         )
 
     def forward(
@@ -430,8 +418,7 @@ class UNet3_0_4(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         attention: bool = False,
-        attention_weights: str = 'gate',
-        depthwise_conv: bool = False
+        attention_weights: str = 'gate'
     ):
         super(UNet3_0_4, self).__init__()
 
@@ -442,8 +429,7 @@ class UNet3_0_4(torch.nn.Module):
             up_channels=up_channels,
             is_side_stream=False,
             prev_backbone_channel_index=0,
-            n_stream_down=3,
-            depthwise_conv=depthwise_conv
+            n_stream_down=3
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
@@ -451,8 +437,7 @@ class UNet3_0_4(torch.nn.Module):
             prev_backbone_channel_index=0,
             n_stream_down=3,
             attention=attention,
-            attention_weights=attention_weights,
-            depthwise_conv=depthwise_conv
+            attention_weights=attention_weights
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -460,8 +445,7 @@ class UNet3_0_4(torch.nn.Module):
             prev_backbone_channel_index=0,
             n_stream_down=3,
             attention=attention,
-            attention_weights=attention_weights,
-            depthwise_conv=depthwise_conv
+            attention_weights=attention_weights
         )
 
     def forward(
