@@ -340,11 +340,9 @@ class TemperatureScaling(pl.LightningModule):
         self.edge_class = edge_class
 
         self.final_model = FinalRefinement(
-            in_channels=num_features,
-            num_time=num_time,
-            predict_channels=4,
-            out_channels=64,
-            out_classes=2
+            in_channels=4,
+            n_features=32,
+            out_channels=2
         )
 
         self.cultionet_model.eval()

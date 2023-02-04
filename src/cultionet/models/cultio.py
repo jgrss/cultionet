@@ -3,7 +3,7 @@ import typing as T
 from . import model_utils
 from .base_layers import ConvBlock2d, ResBlock2d
 from .inception import InceptionNet
-from .nunet import UNet3Psi, ResUNet3Psi
+from .nunet import UNet3, UNet3Psi, ResUNet3Psi
 from .convstar import StarRNN
 
 import torch
@@ -14,55 +14,18 @@ class FinalRefinement(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        num_time: int,
-        predict_channels: int,
-        out_channels: int,
-        out_classes: int
+        n_features: int,
+        out_channels: int
     ):
         super(FinalRefinement, self).__init__()
-
-        self.in_channels = in_channels
-        self.num_time = num_time
-        self.out_channels = out_channels
-        self.out_classes = out_classes
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
-        self.inception = InceptionNet(
-            in_channels=int(in_channels / num_time),
+        self.model = UNet3(
+            in_channels=in_channels,
             out_channels=out_channels,
-            num_classes_last=predict_channels
-        )
-        self.conv_predict = ResBlock2d(
-            in_channels=predict_channels,
-            out_channels=out_channels,
-            kernel_size=3,
-            padding=1,
-            activation_type='LeakyReLU'
-        )
-        layers = [
-            ResBlock2d(
-                in_channels=out_channels,
-                out_channels=out_channels,
-                kernel_size=3,
-                padding=1,
-                activation_type='LeakyReLU'
-            ),
-            ResBlock2d(
-                in_channels=out_channels,
-                out_channels=out_channels,
-                kernel_size=3,
-                padding=1,
-                activation_type='LeakyReLU'
-            )
-        ]
-        self.seq = torch.nn.Sequential(*layers)
-        self.final = torch.nn.Conv2d(
-            out_channels,
-            out_classes,
-            kernel_size=1,
-            padding=0
+            init_filter=n_features
         )
 
     def forward(
@@ -89,21 +52,7 @@ class FinalRefinement(torch.nn.Module):
         x = self.gc(
             x, batch_size, height, width
         )
-        h = self.gc(
-            data.x, batch_size, height, width
-        )
-        # Reshape from (B x C x H x W) -> (B x C x T x H x W)
-        # nbatch, ntime, height, width
-        nbatch, __, height, width = h.shape
-        h = h.reshape(
-            nbatch, int(self.in_channels / self.num_time), self.num_time, height, width
-        )
-        h = self.inception(h)
-        h = h + x
-        h1 = self.conv_predict(h)
-        h = self.seq(h1)
-        h = h + h1
-        h = self.final(h)
+        h = self.model(x)
 
         return self.cg(h)
 

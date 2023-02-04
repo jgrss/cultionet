@@ -13,12 +13,15 @@ from .base_layers import (
     Permute,
     PoolConv,
     PoolResidualConv,
-    PoolConvSingle,
     ResidualConvInit,
     ResidualConv,
     SingleConv
 )
 from .unet_parts import (
+    UNet3P_3_1,
+    UNet3P_2_2,
+    UNet3P_1_3,
+    UNet3P_0_4,
     UNet3_3_1,
     UNet3_2_2,
     UNet3_1_3,
@@ -268,43 +271,6 @@ class UNet2(torch.nn.Module):
         }
 
 
-class TemporalUNet2(torch.nn.Module):
-    def __init__(
-        self,
-        num_features: int,
-        in_channels: int,
-        out_channels: int,
-        out_side_channels: int,
-        init_filter: int,
-        boundary_layer: bool = True,
-        linear_fc: bool = False
-    ):
-        super(TemporalUNet2, self).__init__()
-
-        self.num_features = num_features
-        self.in_channels = in_channels
-
-        self.nunet = UNet2(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            out_side_channels=out_side_channels,
-            init_filter=init_filter,
-            boundary_layer=boundary_layer,
-            linear_fc=linear_fc
-        )
-
-    def forward(
-        self, x: torch.Tensor
-    ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
-        nunet_stream = []
-        for band in range(0, self.num_features, self.in_channels):
-            t = self.nunet(x[:, band:band+self.in_channels])['mask']
-            nunet_stream.append(t)
-        nunet_stream = torch.cat(nunet_stream, dim=1)
-
-        return nunet_stream
-
-
 class UNet3(torch.nn.Module):
     """UNet+++
 
@@ -315,14 +281,9 @@ class UNet3(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        init_filter: int = 64,
-        deep_supervision: bool = False,
-        linear_fc: bool = False,
-        side_stream: bool = False
+        init_filter: int = 64
     ):
         super(UNet3, self).__init__()
-
-        self.deep_supervision = deep_supervision
 
         init_filter = int(init_filter)
         channels = [
@@ -334,126 +295,60 @@ class UNet3(torch.nn.Module):
         ]
         up_channels = int(channels[0] * 5)
 
-        self.side_stream = side_stream
         self.up = model_utils.UpSample()
 
-        self.conv0_0 = SingleConv(in_channels, channels[0])
-        self.conv1_0 = PoolConv(channels[0], channels[1], dropout=0.25)
-        self.conv2_0 = PoolConv(channels[1], channels[2], dropout=0.5)
-        self.conv3_0 = PoolConv(channels[2], channels[3], dropout=0.5)
-        self.conv4_0 = PoolConv(channels[3], channels[4], dropout=0.5)
+        self.conv0_0 = SingleConv(
+            in_channels,
+            channels[0]
+        )
+        self.conv1_0 = PoolConv(
+            channels[0],
+            channels[1]
+        )
+        self.conv2_0 = PoolConv(
+            channels[1],
+            channels[2]
+        )
+        self.conv3_0 = PoolConv(
+            channels[2],
+            channels[3]
+        )
+        self.conv4_0 = PoolConv(
+            channels[3],
+            channels[4]
+        )
 
         # Connect 3
-        self.conv0_0_3_1_con = PoolConvSingle(channels[0], channels[0], pool_size=8)
-        self.conv1_0_3_1_con = PoolConvSingle(channels[1], channels[0], pool_size=4)
-        self.conv2_0_3_1_con = PoolConvSingle(channels[2], channels[0], pool_size=2)
-        self.conv3_0_3_1_con = SingleConv(channels[3], channels[0])
-        self.conv4_0_3_1_con = SingleConv(channels[4], channels[0])
-        self.conv3_1 = SingleConv(up_channels, up_channels)
+        self.convs_3_1 = UNet3P_3_1(
+            channels=channels,
+            up_channels=up_channels
+        )
+        self.convs_2_2 = UNet3P_2_2(
+            channels=channels,
+            up_channels=up_channels
+        )
+        self.convs_1_3 = UNet3P_1_3(
+            channels=channels,
+            up_channels=up_channels
+        )
+        self.convs_0_4 = UNet3P_0_4(
+            channels=channels,
+            up_channels=up_channels
+        )
 
-        # Connect 2
-        self.conv0_0_2_2_con = PoolConvSingle(channels[0], channels[0], pool_size=4)
-        self.conv1_0_2_2_con = PoolConvSingle(channels[1], channels[0], pool_size=2)
-        self.conv2_0_2_2_con = SingleConv(channels[2], channels[0])
-        self.conv3_1_2_2_con = SingleConv(up_channels, channels[0])
-        self.conv4_0_2_2_con = SingleConv(channels[4], channels[0])
-        self.conv2_2 = SingleConv(up_channels, up_channels)
-
-        # Connect 3
-        self.conv0_0_1_3_con = PoolConvSingle(channels[0], channels[0], pool_size=2)
-        self.conv1_0_1_3_con = SingleConv(channels[1], channels[0])
-        self.conv2_2_1_3_con = SingleConv(up_channels, channels[0])
-        self.conv3_1_1_3_con = SingleConv(up_channels, channels[0])
-        self.conv4_0_1_3_con = SingleConv(channels[4], channels[0])
-        self.conv1_3 = SingleConv(up_channels, up_channels)
-
-        # Connect 4
-        self.conv0_0_0_4_con = SingleConv(channels[0], channels[0])
-        self.conv1_3_0_4_con = SingleConv(up_channels, channels[0])
-        self.conv2_2_0_4_con = SingleConv(up_channels, channels[0])
-        self.conv3_1_0_4_con = SingleConv(up_channels, channels[0])
-        self.conv4_0_0_4_con = SingleConv(channels[4], channels[0])
-        self.conv0_4 = SingleConv(up_channels, up_channels)
-
-        if self.side_stream:
-            self.convs4_0 = SingleConv(channels[4]+up_channels, channels[0])
-            self.convs3_1 = SingleConv(up_channels+channels[0], channels[0])
-            self.convs2_2 = SingleConv(up_channels+channels[0], channels[0])
-            self.convs1_3 = SingleConv(up_channels+channels[0], channels[0])
-            self.side_final = torch.nn.Conv2d(
-                channels[0], out_channels, kernel_size=3, padding=1
-            )
-
-        if linear_fc:
-            self.final = torch.nn.Sequential(
-                torch.nn.LeakyReLU(inplace=False),
-                Permute((0, 2, 3, 1)),
-                torch.nn.Linear(
-                    up_channels, out_channels
-                ),
-                Permute((0, 3, 1, 2))
-            )
-        else:
-            self.final = torch.nn.Conv2d(
-                up_channels, out_channels, kernel_size=3, padding=1
-            )
-
-        if self.deep_supervision:
-            if linear_fc:
-                self.final_1 = torch.nn.Sequential(
-                    torch.nn.LeakyReLU(inplace=False),
-                    Permute((0, 2, 3, 1)),
-                    torch.nn.Linear(
-                        up_channels, out_channels
-                    ),
-                    Permute((0, 3, 1, 2))
-                )
-                self.final_2 = torch.nn.Sequential(
-                    torch.nn.LeakyReLU(inplace=False),
-                    Permute((0, 2, 3, 1)),
-                    torch.nn.Linear(
-                        up_channels, out_channels
-                    ),
-                    Permute((0, 3, 1, 2))
-                )
-                self.final_3 = torch.nn.Sequential(
-                    torch.nn.LeakyReLU(inplace=False),
-                    Permute((0, 2, 3, 1)),
-                    torch.nn.Linear(
-                        up_channels, out_channels
-                    ),
-                    Permute((0, 3, 1, 2))
-                )
-                self.final_4 = torch.nn.Sequential(
-                    torch.nn.LeakyReLU(inplace=False),
-                    Permute((0, 2, 3, 1)),
-                    torch.nn.Linear(
-                        channels[4], out_channels
-                    ),
-                    Permute((0, 3, 1, 2))
-                )
-            else:
-                self.final_1 = torch.nn.Conv2d(
-                    up_channels, out_channels, kernel_size=3, padding=1
-                )
-                self.final_2 = torch.nn.Conv2d(
-                    up_channels, out_channels, kernel_size=3, padding=1
-                )
-                self.final_3 = torch.nn.Conv2d(
-                    up_channels, out_channels, kernel_size=3, padding=1
-                )
-                self.final_4 = torch.nn.Conv2d(
-                    channels[4], out_channels, kernel_size=3, padding=1
-                )
+        self.final = torch.nn.Conv2d(
+            up_channels,
+            out_channels,
+            kernel_size=1,
+            padding=0
+        )
 
         # Initialise weights
         for m in self.modules():
             if isinstance(m, (torch.nn.Conv2d, torch.nn.BatchNorm2d)):
                 m.apply(weights_init_kaiming)
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Backbone
         # 1/1
         x0_0 = self.conv0_0(x)
@@ -467,112 +362,39 @@ class UNet3(torch.nn.Module):
         x4_0 = self.conv4_0(x3_0)
 
         # 1/8 connection
-        x0_0_x3_1_con = self.conv0_0_3_1_con(x0_0)
-        x1_0_x3_1_con = self.conv1_0_3_1_con(x1_0)
-        x2_0_x3_1_con = self.conv2_0_3_1_con(x2_0)
-        x3_0_x3_1_con = self.conv3_0_3_1_con(x3_0)
-        x4_0_x3_1_con = self.conv4_0_3_1_con(self.up(x4_0, size=x3_0.shape[-2:]))
-        x3_1 = self.conv3_1(
-            torch.cat(
-                [
-                    x0_0_x3_1_con,
-                    x1_0_x3_1_con,
-                    x2_0_x3_1_con,
-                    x3_0_x3_1_con,
-                    x4_0_x3_1_con
-                ],
-                dim=1
-            )
+        out_3_1 = self.convs_3_1(
+            x0_0=x0_0,
+            x1_0=x1_0,
+            x2_0=x2_0,
+            x3_0=x3_0,
+            x4_0=x4_0
         )
-
         # 1/4 connection
-        x0_0_x2_2_con = self.conv0_0_2_2_con(x0_0)
-        x1_0_x2_2_con = self.conv1_0_2_2_con(x1_0)
-        x2_0_x2_2_con = self.conv2_0_2_2_con(x2_0)
-        x3_1_x2_2_con = self.conv3_1_2_2_con(self.up(x3_1, size=x2_0.shape[-2:]))
-        x4_0_x2_2_con = self.conv4_0_2_2_con(self.up(x4_0, size=x2_0.shape[-2:]))
-        x2_2 = self.conv2_2(
-            torch.cat(
-                [
-                    x0_0_x2_2_con,
-                    x1_0_x2_2_con,
-                    x2_0_x2_2_con,
-                    x3_1_x2_2_con,
-                    x4_0_x2_2_con
-                ],
-                dim=1
-            )
+        out_2_2 = self.convs_2_2(
+            x0_0=x0_0,
+            x1_0=x1_0,
+            x2_0=x2_0,
+            h3_1=out_3_1,
+            x4_0=x4_0
         )
-
         # 1/2 connection
-        x0_0_x1_3_con = self.conv0_0_1_3_con(x0_0)
-        x1_0_x1_3_con = self.conv1_0_1_3_con(x1_0)
-        x2_2_x1_3_con = self.conv2_2_1_3_con(self.up(x2_2, size=x1_0.shape[-2:]))
-        x3_1_x1_3_con = self.conv3_1_1_3_con(self.up(x3_1, size=x1_0.shape[-2:]))
-        x4_0_x1_3_con = self.conv4_0_1_3_con(self.up(x4_0, size=x1_0.shape[-2:]))
-        x1_3 = self.conv1_3(
-            torch.cat(
-                [
-                    x0_0_x1_3_con,
-                    x1_0_x1_3_con,
-                    x2_2_x1_3_con,
-                    x3_1_x1_3_con,
-                    x4_0_x1_3_con
-                ],
-                dim=1
-            )
+        out_1_3 = self.convs_1_3(
+            x0_0=x0_0,
+            x1_0=x1_0,
+            h2_2=out_2_2,
+            h3_1=out_3_1,
+            x4_0=x4_0
         )
-
         # 1/1 connection
-        x0_0_x0_4_con = self.conv0_0_0_4_con(x0_0)
-        x1_3_x0_4_con = self.conv1_3_0_4_con(self.up(x1_3, size=x0_0.shape[-2:]))
-        x2_2_x0_4_con = self.conv2_2_0_4_con(self.up(x2_2, size=x0_0.shape[-2:]))
-        x3_1_x0_4_con = self.conv3_1_0_4_con(self.up(x3_1, size=x0_0.shape[-2:]))
-        x4_0_x0_4_con = self.conv4_0_0_4_con(self.up(x4_0, size=x0_0.shape[-2:]))
-        x0_4 = self.conv0_4(
-            torch.cat(
-                [
-                    x0_0_x0_4_con,
-                    x1_3_x0_4_con,
-                    x2_2_x0_4_con,
-                    x3_1_x0_4_con,
-                    x4_0_x0_4_con
-                ],
-                dim=1
-            )
+        out_0_4 = self.convs_0_4(
+            x0_0=x0_0,
+            h1_3=out_1_3,
+            h2_2=out_2_2,
+            h3_1=out_3_1,
+            x4_0=x4_0
         )
 
-        mask = self.final(x0_4)
-        if self.deep_supervision:
-            mask_1 = self.final_1(self.up(x1_3, size=x0_0.shape[-2:]))
-            mask_2 = self.final_2(self.up(x2_2, size=x0_0.shape[-2:]))
-            mask_3 = self.final_3(self.up(x3_1, size=x0_0.shape[-2:]))
-            mask_4 = self.final_4(self.up(x4_0, size=x0_0.shape[-2:]))
-
-            out = {
-                'mask_0': mask,
-                'mask_1': mask_1,
-                'mask_2': mask_2,
-                'mask_3': mask_3,
-                'mask_4': mask_4
-            }
-        else:
-            out = {'mask': mask}
-
-        if self.side_stream:
-            s4_0 = self.convs4_0(
-                torch.cat([x3_1, self.up(x4_0, size=x3_1.shape[-2:])], dim=1)
-            )
-            s3_1 = self.convs3_1(
-                torch.cat([x2_2, self.up(s4_0, size=x2_2.shape[-2:])], dim=1)
-            )
-            s2_2 = self.convs2_2(
-                torch.cat([x1_3, self.up(s3_1, size=x1_3.shape[-2:])], dim=1)
-            )
-            s1_3 = self.convs1_3(
-                torch.cat([x0_4, self.up(s2_2, size=x0_4.shape[-2:])], dim=1)
-            )
-            out['side'] = self.side_final(s1_3)
+        out = self.final(out_0_4)
 
         return out
 

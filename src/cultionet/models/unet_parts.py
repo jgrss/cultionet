@@ -175,6 +175,154 @@ class UNet3Connector(torch.nn.Module):
         return h
 
 
+class UNet3P_3_1(torch.nn.Module):
+    """UNet 3+ connection from backbone to upstream 3,1
+    """
+    def __init__(
+        self,
+        channels: T.Sequence[int],
+        up_channels: int
+    ):
+        super(UNet3P_3_1, self).__init__()
+
+        # Distance stream connection
+        self.conv = UNet3Connector(
+            channels=channels,
+            up_channels=up_channels,
+            is_side_stream=False,
+            prev_backbone_channel_index=3,
+            n_pools=3
+        )
+
+    def forward(
+        self,
+        x0_0: torch.Tensor,
+        x1_0: torch.Tensor,
+        x2_0: torch.Tensor,
+        x3_0: torch.Tensor,
+        x4_0: torch.Tensor,
+    ) -> torch.Tensor:
+        # Distance logits
+        h = self.conv(
+            prev_same=[('prev_backbone', x3_0)],
+            pools=[x0_0, x1_0, x2_0],
+            x4_0=x4_0
+        )
+
+        return h
+
+
+class UNet3P_2_2(torch.nn.Module):
+    """UNet 3+ connection from backbone to upstream 2,2
+    """
+    def __init__(
+        self,
+        channels: T.Sequence[int],
+        up_channels: int
+    ):
+        super(UNet3P_2_2, self).__init__()
+
+        self.conv = UNet3Connector(
+            channels=channels,
+            up_channels=up_channels,
+            is_side_stream=False,
+            prev_backbone_channel_index=2,
+            n_pools=2,
+            n_stream_down=1
+        )
+
+    def forward(
+        self,
+        x0_0: torch.Tensor,
+        x1_0: torch.Tensor,
+        x2_0: torch.Tensor,
+        h3_1: torch.Tensor,
+        x4_0: torch.Tensor,
+    ) -> torch.Tensor:
+        h = self.conv(
+            prev_same=[('prev_backbone', x2_0)],
+            pools=[x0_0, x1_0],
+            x4_0=x4_0,
+            stream_down=[h3_1]
+        )
+
+        return h
+
+
+class UNet3P_1_3(torch.nn.Module):
+    """UNet 3+ connection from backbone to upstream 1,3
+    """
+    def __init__(
+        self,
+        channels: T.Sequence[int],
+        up_channels: int
+    ):
+        super(UNet3P_1_3, self).__init__()
+
+        self.conv = UNet3Connector(
+            channels=channels,
+            up_channels=up_channels,
+            is_side_stream=False,
+            prev_backbone_channel_index=1,
+            n_pools=1,
+            n_stream_down=2
+        )
+
+    def forward(
+        self,
+        x0_0: torch.Tensor,
+        x1_0: torch.Tensor,
+        h2_2: torch.Tensor,
+        h3_1: torch.Tensor,
+        x4_0: torch.Tensor,
+    ) -> torch.Tensor:
+        h = self.conv(
+            prev_same=[('prev_backbone', x1_0)],
+            pools=[x0_0],
+            x4_0=x4_0,
+            stream_down=[h2_2, h3_1]
+        )
+
+        return h
+
+
+class UNet3P_0_4(torch.nn.Module):
+    """UNet 3+ connection from backbone to upstream 0,4
+    """
+    def __init__(
+        self,
+        channels: T.Sequence[int],
+        up_channels: int
+    ):
+        super(UNet3P_0_4, self).__init__()
+
+        self.up = model_utils.UpSample()
+
+        self.conv = UNet3Connector(
+            channels=channels,
+            up_channels=up_channels,
+            is_side_stream=False,
+            prev_backbone_channel_index=0,
+            n_stream_down=3
+        )
+
+    def forward(
+        self,
+        x0_0: torch.Tensor,
+        h1_3: torch.Tensor,
+        h2_2: torch.Tensor,
+        h3_1: torch.Tensor,
+        x4_0: torch.Tensor,
+    ) -> T.Dict[str, torch.Tensor]:
+        h = self.conv(
+            prev_same=[('prev_backbone', x0_0)],
+            x4_0=x4_0,
+            stream_down=[h1_3, h2_2, h3_1]
+        )
+
+        return h
+
+
 class UNet3_3_1(torch.nn.Module):
     """UNet 3+ connection from backbone to upstream 3,1
     """
