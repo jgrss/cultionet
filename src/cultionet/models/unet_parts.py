@@ -26,8 +26,7 @@ class UNet3Connector(torch.nn.Module):
         n_stream_down: int = 0,
         attention: bool = False,
         attention_weights: str = 'gate',
-        atrous_spatial_pyramid: bool = False,
-        depthwise_conv: bool = False
+        atrous_spatial_pyramid: bool = False
     ):
         super(UNet3Connector, self).__init__()
 
@@ -73,15 +72,13 @@ class UNet3Connector(torch.nn.Module):
             else:
                 self.prev = DoubleConv(
                     up_channels,
-                    up_channels,
-                    depthwise_conv=depthwise_conv
+                    up_channels
                 )
         else:
             # Backbone, same level
             self.prev_backbone = DoubleConv(
                 channels[prev_backbone_channel_index],
-                up_channels,
-                depthwise_conv=depthwise_conv
+                up_channels
             )
         if not self.attention or (self.n_stream_down == 0):
             self.cat_channels += up_channels
@@ -93,8 +90,7 @@ class UNet3Connector(torch.nn.Module):
                     f'prev_{n}',
                     DoubleConv(
                         up_channels,
-                        up_channels,
-                        depthwise_conv=depthwise_conv
+                        up_channels
                     )
                 )
                 self.cat_channels += up_channels
@@ -118,8 +114,7 @@ class UNet3Connector(torch.nn.Module):
                     f'stream_{n}',
                     DoubleConv(
                         in_stream_channels,
-                        up_channels,
-                        depthwise_conv=depthwise_conv
+                        up_channels
                     )
                 )
                 self.cat_channels += up_channels

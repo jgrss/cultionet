@@ -427,23 +427,20 @@ class EdgeDataset(Dataset):
             val_ds = self[n_train:]
         else:
             self.create_spatial_index()
-            # Keep only one centroid for each site
-            df_isolated = self.dataset_df.drop_duplicates('geometry')
-            # Randomly sample a percentage for validation
-            df_val = df_isolated.sample(
-                frac=val_frac, random_state=self.random_seed
+            self.dataset_df['common_id'] = (
+                self.dataset_df.grid_id
+                .str.split('_', expand=True).loc[:, 0]
             )
-            # Spatial joinb all points -> validation points
-            df_val = self.dataset_df.sjoin(df_val)
-            # Drop duplicated indexes
-            df_val = df_val.loc[~df_val.index.duplicated()]
-            # Get a mask of samples that are in the validation set
-            val_mask = self.dataset_df.index.isin(df_val.index)
-            # Take the samples that are not in the validation set
-            df_train = self.dataset_df.loc[~val_mask]
+            unique_ids = self.dataset_df.common_id.unique()
+            # Randomly sample a percentage for validation
+            df_val_ids = pd.Series(unique_ids).sample(
+                frac=val_frac, random_state=self.random_seed
+            ).to_frame(name='common_id')
+            # Get all ids for validation samples
+            val_mask = self.dataset_df.common_id.isin(df_val_ids.common_id)
             # Get train/val indices
-            train_idx = df_train.index.tolist()
-            val_idx = df_val.index.tolist()
+            val_idx = self.dataset_df.loc[val_mask].index.tolist()
+            train_idx = self.dataset_df.loc[~val_mask].index.tolist()
             # Slice the dataset
             train_ds = self[train_idx]
             val_ds = self[val_idx]
