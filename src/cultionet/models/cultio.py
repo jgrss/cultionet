@@ -1,8 +1,7 @@
 import typing as T
 
 from . import model_utils
-from .base_layers import ConvBlock2d, ResBlock2d
-from .inception import InceptionNet
+from .base_layers import ConvBlock2d
 from .nunet import UNet3, UNet3Psi, ResUNet3Psi
 from .convstar import StarRNN
 
