@@ -13,6 +13,7 @@ from torch_geometric.data import Data, Dataset
 import psutil
 import joblib
 from joblib import delayed, parallel_backend
+import pandas as pd
 import geopandas as gpd
 from shapely.geometry import box
 from pytorch_lightning import seed_everything
