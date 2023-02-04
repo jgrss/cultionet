@@ -537,7 +537,7 @@ class CultioLitModel(pl.LightningModule):
         eps: float = 1e-8,
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
-        model_type: str = 'ResUNet3Psi',
+        model_type: str = 'UNet3Psi',
         class_weights: T.Sequence[float] = None,
         edge_weights: T.Sequence[float] = None,
         edge_class: T.Optional[int] = None,
