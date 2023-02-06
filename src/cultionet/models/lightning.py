@@ -560,6 +560,7 @@ class CultioLitModel(pl.LightningModule):
         self.edge_temperature = edge_temperature
         self.crop_temperature = crop_temperature
         self.temperature_lit_model = temperature_lit_model
+        self.sigmoid = torch.nn.Sigmoid()
         if edge_class is not None:
             self.edge_class = edge_class
         else:
@@ -676,6 +677,8 @@ class CultioLitModel(pl.LightningModule):
             if x.shape[1] > 1:
                 # Transform logits to probabilities
                 x = self.softmax(x)
+            else:
+                x = self.sigmoid(x)
             x = x.clip(0, 1)
 
         return x
@@ -711,9 +714,6 @@ class CultioLitModel(pl.LightningModule):
 
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
-        edge_topo_loss = self.edge_topo_loss(
-            self.logits_to_probas(predictions['edge']), true_edge, batch
-        )
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
         # Upstream (deep) loss on crop|non-crop + edge
         crop_star_loss = self.crop_star_loss(
@@ -723,9 +723,8 @@ class CultioLitModel(pl.LightningModule):
         loss = (
             dist_loss
             + edge_loss
-            + 0.5 * edge_topo_loss
             + crop_loss
-            + 0.5 * crop_star_loss
+            + 0.1 * crop_star_loss
         )
         if predictions['crop_type'] is not None:
             # Upstream (deep) loss on crop-type
@@ -887,13 +886,12 @@ class CultioLitModel(pl.LightningModule):
 
     def configure_loss(self):
         self.dist_loss = TanimotoDistLoss()
-        self.edge_loss = TanimotoDistLoss(scale_pos_weight=True)
-        self.edge_topo_loss = TopologicalLoss()
-        self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
-        self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.edge_loss = TanimotoDistLoss()
+        self.crop_loss = TanimotoDistLoss()
+        self.crop_star_loss = TanimotoDistLoss()
         if self.num_classes > 2:
-            self.crop_type_star_loss = TanimotoDistLoss(scale_pos_weight=True)
-            self.crop_type_loss = TanimotoDistLoss(scale_pos_weight=True)
+            self.crop_type_star_loss = TanimotoDistLoss()
+            self.crop_type_loss = TanimotoDistLoss()
 
     def configure_optimizers(self):
         params_list = list(self.cultionet_model.parameters())
