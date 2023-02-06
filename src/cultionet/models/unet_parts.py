@@ -449,6 +449,7 @@ class UNet3_2_2(torch.nn.Module):
         h3_1_mask: torch.Tensor,
         x4_0: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
+        import ipdb; ipdb.set_trace()
         h_dist = self.conv_dist(
             prev_same=[('prev_backbone', x2_0)],
             pools=[x0_0, x1_0],
