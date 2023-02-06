@@ -713,7 +713,9 @@ class CultioLitModel(pl.LightningModule):
         )
 
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
-        edge_loss = self.edge_loss(predictions['edge'], true_edge)
+        edge_loss = self.edge_loss(
+            self.logits_to_probas(predictions['edge']), true_edge
+        )
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
         # Upstream (deep) loss on crop|non-crop + edge
         crop_star_loss = self.crop_star_loss(
@@ -886,12 +888,12 @@ class CultioLitModel(pl.LightningModule):
 
     def configure_loss(self):
         self.dist_loss = TanimotoDistLoss()
-        self.edge_loss = TanimotoDistLoss()
-        self.crop_loss = TanimotoDistLoss()
-        self.crop_star_loss = TanimotoDistLoss()
+        self.edge_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=True)
         if self.num_classes > 2:
-            self.crop_type_star_loss = TanimotoDistLoss()
-            self.crop_type_loss = TanimotoDistLoss()
+            self.crop_type_star_loss = TanimotoDistLoss(scale_pos_weight=True)
+            self.crop_type_loss = TanimotoDistLoss(scale_pos_weight=True)
 
     def configure_optimizers(self):
         params_list = list(self.cultionet_model.parameters())
