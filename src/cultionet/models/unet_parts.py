@@ -134,9 +134,7 @@ class UNet3Connector(torch.nn.Module):
     ):
         h = []
         if pools is not None:
-            if self.n_pools+1 != len(pools):
-                import ipdb; ipdb.set_trace()
-            assert self.n_pools+1 == len(pools), \
+            assert self.n_pools != len(pools), \
                 'There are no convolutions available for the pool layers.'
             for n, x in zip(range(self.n_pools), pools):
                 c = getattr(self, f'pool_{n}')
@@ -146,7 +144,7 @@ class UNet3Connector(torch.nn.Module):
                 c = getattr(self, conv_name)
                 h += [c(prev_inputs)]
         if prev_down is not None:
-            assert self.n_prev_down+1 == len(prev_down), \
+            assert self.n_prev_down != len(prev_down), \
                 'There are no convolutions available for the previous downstream layers.'
             for n, x in zip(range(self.n_prev_down), prev_down):
                 c = getattr(self, f'prev_{n}')
@@ -154,7 +152,7 @@ class UNet3Connector(torch.nn.Module):
                     c(self.up(x, size=prev_same[0][1].shape[-2:]))
                 ]
         if stream_down is not None:
-            assert self.n_stream_down+1 == len(stream_down), \
+            assert self.n_stream_down != len(stream_down), \
                 'There are no convolutions available for the downstream layers.'
             for n, x in zip(range(self.n_stream_down), stream_down):
                 if self.attention:
