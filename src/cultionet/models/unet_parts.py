@@ -76,7 +76,6 @@ class UNet3Connector(torch.nn.Module):
             )
         if not self.attention or (self.n_stream_down == 0):
             self.cat_channels += up_channels
-        import ipdb; ipdb.set_trace()
         # Previous output, downstream
         if self.n_prev_down > 0:
             for n in range(0, self.n_prev_down):
@@ -135,6 +134,8 @@ class UNet3Connector(torch.nn.Module):
     ):
         h = []
         if pools is not None:
+            assert self.n_pools+1 == len(pools), \
+                'There are no convolutions available for the pool layers.'
             for n, x in zip(range(self.n_pools), pools):
                 c = getattr(self, f'pool_{n}')
                 h += [c(x)]
@@ -143,12 +144,16 @@ class UNet3Connector(torch.nn.Module):
                 c = getattr(self, conv_name)
                 h += [c(prev_inputs)]
         if prev_down is not None:
+            assert self.n_prev_down+1 == len(prev_down), \
+                'There are no convolutions available for the previous downstream layers.'
             for n, x in zip(range(self.n_prev_down), prev_down):
                 c = getattr(self, f'prev_{n}')
                 h += [
                     c(self.up(x, size=prev_same[0][1].shape[-2:]))
                 ]
         if stream_down is not None:
+            assert self.n_stream_down+1 == len(stream_down), \
+                'There are no convolutions available for the downstream layers.'
             for n, x in zip(range(self.n_stream_down), stream_down):
                 if self.attention:
                     # Gate
@@ -426,6 +431,7 @@ class UNet3_2_2(torch.nn.Module):
             up_channels=up_channels,
             prev_backbone_channel_index=2,
             n_pools=2,
+            n_prev_down=1,
             n_stream_down=1,
             attention=attention,
             attention_weights=attention_weights
@@ -435,6 +441,7 @@ class UNet3_2_2(torch.nn.Module):
             up_channels=up_channels,
             prev_backbone_channel_index=2,
             n_pools=2,
+            n_prev_down=1,
             n_stream_down=1,
             attention=attention,
             attention_weights=attention_weights
@@ -505,6 +512,7 @@ class UNet3_1_3(torch.nn.Module):
             up_channels=up_channels,
             prev_backbone_channel_index=1,
             n_pools=1,
+            n_prev_down=2,
             n_stream_down=2,
             attention=attention,
             attention_weights=attention_weights
@@ -514,6 +522,7 @@ class UNet3_1_3(torch.nn.Module):
             up_channels=up_channels,
             prev_backbone_channel_index=1,
             n_pools=1,
+            n_prev_down=2,
             n_stream_down=2,
             attention=attention,
             attention_weights=attention_weights
@@ -584,6 +593,7 @@ class UNet3_0_4(torch.nn.Module):
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=0,
+            n_prev_down=3,
             n_stream_down=3,
             attention=attention,
             attention_weights=attention_weights
@@ -592,6 +602,7 @@ class UNet3_0_4(torch.nn.Module):
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=0,
+            n_prev_down=3,
             n_stream_down=3,
             attention=attention,
             attention_weights=attention_weights
