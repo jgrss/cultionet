@@ -630,7 +630,7 @@ class LightningGTiffWriter(BasePredictionWriter):
                 )[pad_slice3d].permute(1, 2, 0).reshape(rheight * rwidth, channel_dims)
 
         distance_batch = reshaper(distance_batch, channel_dims=1)
-        edge_batch = reshaper(edge_batch, channel_dims=2)
+        edge_batch = reshaper(edge_batch, channel_dims=1)
         crop_batch = reshaper(crop_batch, channel_dims=2)
         if crop_type_batch is not None:
             num_classes = crop_type_batch.size(1)
