@@ -410,8 +410,10 @@ class EdgeDataset(Dataset):
         return train_ds, val_ds
 
     def split_train_val(
-        self, val_frac: float,
-        spatial_overlap_allowed: bool = True
+        self,
+        val_frac: float,
+        spatial_overlap_allowed: bool = True,
+        spatial_balance: bool = True
     ) -> T.Tuple['EdgeDataset', 'EdgeDataset']:
         """Splits the dataset into train and validation
 
@@ -421,6 +423,7 @@ class EdgeDataset(Dataset):
         Returns:
             train dataset, validation dataset
         """
+        id_column = 'common_id'
         self.shuffle_items()
         if spatial_overlap_allowed:
             n_train = int(len(self) * (1.0 - val_frac))
@@ -428,17 +431,32 @@ class EdgeDataset(Dataset):
             val_ds = self[n_train:]
         else:
             self.create_spatial_index()
-            self.dataset_df['common_id'] = (
+            self.dataset_df[id_column] = (
                 self.dataset_df.grid_id
                 .str.split('_', expand=True).loc[:, 0]
             )
             unique_ids = self.dataset_df.common_id.unique()
-            # Randomly sample a percentage for validation
-            df_val_ids = pd.Series(unique_ids).sample(
-                frac=val_frac, random_state=self.random_seed
-            ).to_frame(name='common_id')
-            # Get all ids for validation samples
-            val_mask = self.dataset_df.common_id.isin(df_val_ids.common_id)
+            if spatial_balance:
+                df_unique_locations = gpd.GeoDataFrame(
+                    pd.Series(unique_ids)
+                    .to_frame(name=id_column)
+                    .merge(self.dataset_df, on=id_column)
+                    .drop_duplicates(id_column)
+                    .drop(columns=['grid_id'])
+                ).to_crs('EPSG:8858')
+
+                qt = QuadTree(df_unique_locations, force_square=False)
+                qt.split_recursive(max_samples=1)
+                n_val = int(val_frac * len(df_unique_locations.index))
+                df_val_sample = qt.sample(n=n_val)
+                val_mask = self.dataset_df.common_id.isin(df_val_sample.common_id)
+            else:
+                # Randomly sample a percentage for validation
+                df_val_ids = pd.Series(unique_ids).sample(
+                    frac=val_frac, random_state=self.random_seed
+                ).to_frame(name=id_column)
+                # Get all ids for validation samples
+                val_mask = self.dataset_df.common_id.isin(df_val_ids.common_id)
             # Get train/val indices
             val_idx = self.dataset_df.loc[val_mask].index.tolist()
             train_idx = self.dataset_df.loc[~val_mask].index.tolist()
