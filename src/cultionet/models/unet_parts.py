@@ -431,7 +431,6 @@ class UNet3_2_2(torch.nn.Module):
             up_channels=up_channels,
             prev_backbone_channel_index=2,
             n_pools=2,
-            n_prev_down=1,
             n_stream_down=1,
             attention=attention,
             attention_weights=attention_weights
@@ -441,7 +440,6 @@ class UNet3_2_2(torch.nn.Module):
             up_channels=up_channels,
             prev_backbone_channel_index=2,
             n_pools=2,
-            n_prev_down=1,
             n_stream_down=1,
             attention=attention,
             attention_weights=attention_weights
@@ -467,14 +465,12 @@ class UNet3_2_2(torch.nn.Module):
             prev_same=[('prev', h_dist)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
-            prev_down=[h3_1_dist],
             stream_down=[h3_1_edge]
         )
         h_mask = self.conv_mask(
             prev_same=[('prev', h_edge)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
-            prev_down=[h3_1_edge],
             stream_down=[h3_1_mask]
         )
 
@@ -512,7 +508,6 @@ class UNet3_1_3(torch.nn.Module):
             up_channels=up_channels,
             prev_backbone_channel_index=1,
             n_pools=1,
-            n_prev_down=2,
             n_stream_down=2,
             attention=attention,
             attention_weights=attention_weights
@@ -522,7 +517,6 @@ class UNet3_1_3(torch.nn.Module):
             up_channels=up_channels,
             prev_backbone_channel_index=1,
             n_pools=1,
-            n_prev_down=2,
             n_stream_down=2,
             attention=attention,
             attention_weights=attention_weights
@@ -550,14 +544,12 @@ class UNet3_1_3(torch.nn.Module):
             prev_same=[('prev', h_dist)],
             pools=[x0_0],
             x4_0=x4_0,
-            prev_down=[h2_2_dist, h3_1_dist],
             stream_down=[h2_2_edge, h3_1_edge]
         )
         h_mask = self.conv_mask(
             prev_same=[('prev', h_edge)],
             pools=[x0_0],
             x4_0=x4_0,
-            prev_down=[h2_2_edge, h3_1_edge],
             stream_down=[h2_2_mask, h3_1_mask]
         )
 
@@ -593,7 +585,6 @@ class UNet3_0_4(torch.nn.Module):
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=0,
-            n_prev_down=3,
             n_stream_down=3,
             attention=attention,
             attention_weights=attention_weights
@@ -602,7 +593,6 @@ class UNet3_0_4(torch.nn.Module):
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=0,
-            n_prev_down=3,
             n_stream_down=3,
             attention=attention,
             attention_weights=attention_weights
@@ -630,13 +620,11 @@ class UNet3_0_4(torch.nn.Module):
         h_edge = self.conv_edge(
             prev_same=[('prev', h_dist)],
             x4_0=x4_0,
-            prev_down=[h1_3_dist, h2_2_dist, h3_1_dist],
             stream_down=[h1_3_edge, h2_2_edge, h3_1_edge]
         )
         h_mask = self.conv_mask(
             prev_same=[('prev', h_edge)],
             x4_0=x4_0,
-            prev_down=[h1_3_edge, h2_2_edge, h3_1_edge],
             stream_down=[h1_3_mask, h2_2_mask, h3_1_mask]
         )
 
