@@ -134,6 +134,8 @@ class UNet3Connector(torch.nn.Module):
     ):
         h = []
         if pools is not None:
+            if self.n_pools+1 != len(pools):
+                import ipdb; ipdb.set_trace()
             assert self.n_pools+1 == len(pools), \
                 'There are no convolutions available for the pool layers.'
             for n, x in zip(range(self.n_pools), pools):
