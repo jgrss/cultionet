@@ -305,8 +305,8 @@ class TanimotoDistLoss(torch.nn.Module):
         def tanimoto_loss(yhat: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             y = y.to(dtype=yhat.dtype)
             if self.scale_pos_weight:
-                volume = y.mean(dim=0)
-                weights = torch.reciprocal(volume**2)
+                counts = y.sum(dim=0)
+                weights = counts.sum() / (counts.shape[0] * counts)
                 new_weights = torch.where(
                     torch.isinf(weights),
                     torch.zeros_like(weights),
