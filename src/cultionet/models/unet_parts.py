@@ -76,6 +76,7 @@ class UNet3Connector(torch.nn.Module):
             )
         if not self.attention or (self.n_stream_down == 0):
             self.cat_channels += up_channels
+        import ipdb; ipdb.set_trace()
         # Previous output, downstream
         if self.n_prev_down > 0:
             for n in range(0, self.n_prev_down):
@@ -449,7 +450,6 @@ class UNet3_2_2(torch.nn.Module):
         h3_1_mask: torch.Tensor,
         x4_0: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
-        import ipdb; ipdb.set_trace()
         h_dist = self.conv_dist(
             prev_same=[('prev_backbone', x2_0)],
             pools=[x0_0, x1_0],

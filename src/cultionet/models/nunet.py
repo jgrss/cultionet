@@ -451,10 +451,10 @@ class UNet3Psi(torch.nn.Module):
         )
 
         # Connect 3
-        self.convs_3_1 = UNet3_3_1(
-            channels=channels,
-            up_channels=up_channels
-        )
+        # self.convs_3_1 = UNet3_3_1(
+        #     channels=channels,
+        #     up_channels=up_channels
+        # )
         self.convs_2_2 = UNet3_2_2(
             channels=channels,
             up_channels=up_channels
