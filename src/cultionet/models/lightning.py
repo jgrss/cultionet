@@ -723,10 +723,10 @@ class CultioLitModel(pl.LightningModule):
         )
         # Main loss
         loss = (
-            dist_loss
+            0.1 * crop_star_loss
+            + dist_loss
             + edge_loss
             + crop_loss
-            + 0.1 * crop_star_loss
         )
         if predictions['crop_type'] is not None:
             # Upstream (deep) loss on crop-type
