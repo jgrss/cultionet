@@ -677,11 +677,10 @@ class ResUNet3Connector(torch.nn.Module):
                 setattr(
                     self,
                     f'pool_{n}',
-                    PoolResidualConv(
+                    PoolConv(
                         channels[n],
                         channels[0],
-                        pool_size=pool_size,
-                        dilations=dilations
+                        pool_size=pool_size
                     )
                 )
                 pool_size = int(pool_size / 2)
@@ -759,6 +758,8 @@ class ResUNet3Connector(torch.nn.Module):
     ):
         h = []
         if pools is not None:
+            assert self.n_pools == len(pools), \
+                'There are no convolutions available for the pool layers.'
             for n, x in zip(range(self.n_pools), pools):
                 c = getattr(self, f'pool_{n}')
                 h += [c(x)]
@@ -767,12 +768,16 @@ class ResUNet3Connector(torch.nn.Module):
                 c = getattr(self, conv_name)
                 h += [c(prev_inputs)]
         if prev_down is not None:
+            assert self.n_prev_down == len(prev_down), \
+                'There are no convolutions available for the previous downstream layers.'
             for n, x in zip(range(self.n_prev_down), prev_down):
                 c = getattr(self, f'prev_{n}')
                 h += [
                     c(self.up(x, size=prev_same[0][1].shape[-2:]))
                 ]
         if stream_down is not None:
+            assert self.n_stream_down == len(stream_down), \
+                'There are no convolutions available for the downstream layers.'
             for n, x in zip(range(self.n_stream_down), stream_down):
                 c = getattr(self, f'stream_{n}')
                 h += [
