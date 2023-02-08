@@ -310,12 +310,12 @@ class TanimotoDistLoss(torch.nn.Module):
             Tanimoto distance loss (float)
         """
         if self.transform_logits:
-            if inputs.shape[1] == 1:
+            if len(inputs.shape) == 1:
                 inputs, __ = self.preprocessor(inputs)
             else:
                 inputs, targets = self.preprocessor(inputs, targets)
         else:
-            if targets.shape[1] > 1:
+            if len(targets.shape) > 1:
                 targets = one_hot(targets, dims=inputs.shape[1])
 
         if len(inputs.shape) == 1:
