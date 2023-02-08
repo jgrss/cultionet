@@ -356,9 +356,7 @@ class UNet3_3_1(torch.nn.Module):
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=3,
-            n_pools=3,
-            attention=attention,
-            attention_weights=attention_weights
+            n_pools=3
         )
         # Mask stream connection
         self.conv_mask = UNet3Connector(
@@ -431,9 +429,7 @@ class UNet3_2_2(torch.nn.Module):
             up_channels=up_channels,
             prev_backbone_channel_index=2,
             n_pools=2,
-            n_stream_down=1,
-            attention=attention,
-            attention_weights=attention_weights
+            n_stream_down=1
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -508,9 +504,7 @@ class UNet3_1_3(torch.nn.Module):
             up_channels=up_channels,
             prev_backbone_channel_index=1,
             n_pools=1,
-            n_stream_down=2,
-            attention=attention,
-            attention_weights=attention_weights
+            n_stream_down=2
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -585,9 +579,7 @@ class UNet3_0_4(torch.nn.Module):
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=0,
-            n_stream_down=3,
-            attention=attention,
-            attention_weights=attention_weights
+            n_stream_down=3
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
