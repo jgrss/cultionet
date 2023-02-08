@@ -8,11 +8,13 @@ from torch_geometric import nn
 
 
 class Softmax(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, dim: int = 1):
         super(Softmax, self).__init__()
 
-    def forward(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
-        return F.softmax(x, dim=dim, dtype=x.dtype)
+        self.dim = dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.softmax(x, dim=self.dim, dtype=x.dtype)
 
 
 class Permute(torch.nn.Module):
