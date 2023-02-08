@@ -386,9 +386,7 @@ class TemperatureScaling(pl.LightningModule):
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
 
-        loss = self.crop_loss_refine(
-            predictions['crop'], true_crop
-        )
+        loss = self.crop_loss_refine(predictions['crop'], true_crop)
 
         return loss
 
@@ -477,7 +475,7 @@ class TemperatureScaling(pl.LightningModule):
                 f.write(json.dumps(temperature_scales))
 
     def configure_loss(self):
-        self.edge_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.edge_loss = TanimotoDistLoss()
         self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
         self.crop_loss_refine = TanimotoDistLoss(scale_pos_weight=True)
 
@@ -713,9 +711,7 @@ class CultioLitModel(pl.LightningModule):
         )
 
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
-        edge_loss = self.edge_loss(
-            self.logits_to_probas(predictions['edge']), true_edge
-        )
+        edge_loss = self.edge_loss(predictions['edge'], true_edge)
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
         # Upstream (deep) loss on crop|non-crop + edge
         crop_star_loss = self.crop_star_loss(
@@ -723,7 +719,7 @@ class CultioLitModel(pl.LightningModule):
         )
         # Main loss
         loss = (
-            0.1 * crop_star_loss
+            0.5 * crop_star_loss
             + dist_loss
             + edge_loss
             + crop_loss
@@ -887,8 +883,8 @@ class CultioLitModel(pl.LightningModule):
             )
 
     def configure_loss(self):
-        self.dist_loss = TanimotoDistLoss()
-        self.edge_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.dist_loss = TanimotoDistLoss(transform_logits=False)
+        self.edge_loss = TanimotoDistLoss()
         self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
         self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=True)
         if self.num_classes > 2:
