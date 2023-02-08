@@ -495,14 +495,11 @@ class UNet3Psi(torch.nn.Module):
             ),
             torch.nn.Sigmoid()
         )
-        self.final_mask = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                out_mask_channels,
-                kernel_size=1,
-                padding=0
-            ),
-            Softmax()
+        self.final_mask = torch.nn.Conv2d(
+            up_channels,
+            out_mask_channels,
+            kernel_size=1,
+            padding=0
         )
 
         # Initialise weights
@@ -692,14 +689,11 @@ class ResUNet3Psi(torch.nn.Module):
             ),
             torch.nn.Sigmoid()
         )
-        self.final_mask = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                out_mask_channels,
-                kernel_size=1,
-                padding=0
-            ),
-            Softmax()
+        self.final_mask = torch.nn.Conv2d(
+            up_channels,
+            out_mask_channels,
+            kernel_size=1,
+            padding=0
         )
 
         # Initialise weights
