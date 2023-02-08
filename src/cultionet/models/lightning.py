@@ -326,7 +326,8 @@ class TemperatureScaling(pl.LightningModule):
     ):
         super(TemperatureScaling, self).__init__()
 
-        self.edge_temperature = torch.nn.Parameter(torch.ones(1))
+        # FIXME
+        self.edge_temperature = torch.ones(1)
         self.crop_temperature = torch.nn.Parameter(torch.ones(1))
 
         self.cultionet_model = cultionet_model
@@ -367,9 +368,6 @@ class TemperatureScaling(pl.LightningModule):
                 predictions['crop'],
                 data=batch
             )
-        predictions['edge'] = scale_logits(
-            predictions['edge'], edge_temperature
-        )
         predictions['crop'] = scale_logits(
             predictions['crop'], crop_temperature
         )
@@ -440,9 +438,6 @@ class TemperatureScaling(pl.LightningModule):
                     predictions['crop'],
                     data=batch
                 )
-            predictions['edge'] = scale_logits(
-                predictions['edge'], self.edge_temperature
-            )
             predictions['crop'] = scale_logits(
                 predictions['crop'], self.crop_temperature
             )
@@ -475,7 +470,7 @@ class TemperatureScaling(pl.LightningModule):
                 f.write(json.dumps(temperature_scales))
 
     def configure_loss(self):
-        self.edge_loss = TanimotoDistLoss()
+        self.edge_loss = TanimotoDistLoss(transform_logits=False)
         self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
         self.crop_loss_refine = TanimotoDistLoss(scale_pos_weight=True)
 
@@ -488,7 +483,6 @@ class TemperatureScaling(pl.LightningModule):
         )
         optimizer_lbfgs = torch.optim.LBFGS(
             [
-                self.edge_temperature,
                 self.crop_temperature
             ],
             lr=self.learning_rate_lbfgs,
@@ -614,9 +608,6 @@ class CultioLitModel(pl.LightningModule):
             )
         else:
             predictions = self.forward(batch, batch_idx)
-        predictions['edge'] = self.logits_to_probas(
-            predictions['edge']
-        )
         predictions['crop'] = self.logits_to_probas(
             predictions['crop']
         )
@@ -766,11 +757,7 @@ class CultioLitModel(pl.LightningModule):
             batch.bdist.contiguous().view(-1)
         )
         # Get the class labels
-        edge_ypred = self.probas_to_labels(
-            self.logits_to_probas(
-                predictions['edge']
-            )
-        )
+        edge_ypred = self.probas_to_labels(predictions['edge'])
         crop_ypred = self.probas_to_labels(
             self.logits_to_probas(
                 predictions['crop']
@@ -884,7 +871,7 @@ class CultioLitModel(pl.LightningModule):
 
     def configure_loss(self):
         self.dist_loss = TanimotoDistLoss(transform_logits=False)
-        self.edge_loss = TanimotoDistLoss()
+        self.edge_loss = TanimotoDistLoss(transform_logits=False)
         self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
         self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=True)
         if self.num_classes > 2:
