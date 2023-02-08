@@ -2,6 +2,8 @@
 """
 import typing as T
 
+from .base_layers import Softmax
+
 import torch
 from torch.autograd import Variable
 
@@ -163,19 +165,25 @@ class StarRNN(torch.nn.Module):
                 padding=padding
             )
             # Last level (crop-type)
-            self.final_last = torch.nn.Conv2d(
-                hidden_dim,
-                num_classes_last,
-                kernel_size,
-                padding=padding
+            self.final_last = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    hidden_dim,
+                    num_classes_last,
+                    kernel_size,
+                    padding=padding
+                ),
+                Softmax()
             )
         else:
             # Last level (crop|non-crop)
-            self.final_last = torch.nn.Conv2d(
-                hidden_dim,
-                num_classes_last,
-                kernel_size,
-                padding=padding
+            self.final_last = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    hidden_dim,
+                    num_classes_last,
+                    kernel_size,
+                    padding=padding
+                ),
+                Softmax()
             )
 
     def forward(
@@ -207,7 +215,8 @@ class StarRNN(torch.nn.Module):
 
             return h, last_l2, last
         else:
-            last = self.final_last(hidden_s[-1])
+            h = hidden_s[-1]
+            last = self.final_last(h)
 
             # The output is (B x C x H x W)
-            return hidden_s[-1], last
+            return h, last

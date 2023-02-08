@@ -10,6 +10,10 @@ from torch_geometric.data import Data
 import torchmetrics
 
 
+def one_hot(targets: torch.Tensor, dims: int) -> torch.Tensor:
+    return F.one_hot(targets.contiguous().view(-1), dims).float()
+
+
 class LossPreprocessing(torch.nn.Module):
     def __init__(self, inputs_are_logits: bool, apply_transform: bool):
         super(LossPreprocessing, self).__init__()
@@ -42,9 +46,8 @@ class LossPreprocessing(torch.nn.Module):
 
             inputs = inputs.clip(0, 1)
             if targets is not None:
-                targets = F.one_hot(
-                    targets.contiguous().view(-1), inputs.shape[1]
-                ).float()
+                targets = one_hot(targets, dims=inputs.shape[1])
+
         else:
             inputs = inputs.unsqueeze(1)
             targets = targets.unsqueeze(1)
@@ -278,7 +281,7 @@ class TanimotoDistLoss(torch.nn.Module):
         self,
         smooth: float = 1e-5,
         scale_pos_weight: T.Optional[bool] = False,
-        transform_logits: T.Optional[bool] = True
+        transform_logits: T.Optional[bool] = False
     ):
         super(TanimotoDistLoss, self).__init__()
 
@@ -311,6 +314,9 @@ class TanimotoDistLoss(torch.nn.Module):
                 inputs, __ = self.preprocessor(inputs)
             else:
                 inputs, targets = self.preprocessor(inputs, targets)
+        else:
+            if targets.shape[1] > 1:
+                targets = one_hot(targets, dims=inputs.shape[1])
 
         if len(inputs.shape) == 1:
             inputs = inputs.unsqueeze(1)

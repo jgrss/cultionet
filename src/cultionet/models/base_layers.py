@@ -3,7 +3,16 @@ import typing as T
 from . import model_utils
 
 import torch
+import torch.nn.functional as F
 from torch_geometric import nn
+
+
+class Softmax(torch.nn.Module):
+    def __init__(self):
+        super(Softmax, self).__init__()
+
+    def forward(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
+        return F.softmax(x, dim=dim, dtype=x.dtype)
 
 
 class Permute(torch.nn.Module):

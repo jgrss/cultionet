@@ -15,7 +15,8 @@ from .base_layers import (
     PoolResidualConv,
     ResidualConvInit,
     ResidualConv,
-    SingleConv
+    SingleConv,
+    Softmax
 )
 from .unet_parts import (
     UNet3P_3_1,
@@ -336,11 +337,14 @@ class UNet3(torch.nn.Module):
             up_channels=up_channels
         )
 
-        self.final = torch.nn.Conv2d(
-            up_channels,
-            out_channels,
-            kernel_size=1,
-            padding=0
+        self.final = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                up_channels,
+                out_channels,
+                kernel_size=1,
+                padding=0
+            ),
+            Softmax()
         )
 
         # Initialise weights
@@ -491,11 +495,14 @@ class UNet3Psi(torch.nn.Module):
             ),
             torch.nn.Sigmoid()
         )
-        self.final_mask = torch.nn.Conv2d(
-            up_channels,
-            out_mask_channels,
-            kernel_size=1,
-            padding=0
+        self.final_mask = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                up_channels,
+                out_mask_channels,
+                kernel_size=1,
+                padding=0
+            ),
+            Softmax()
         )
 
         # Initialise weights
@@ -685,11 +692,14 @@ class ResUNet3Psi(torch.nn.Module):
             ),
             torch.nn.Sigmoid()
         )
-        self.final_mask = torch.nn.Conv2d(
-            up_channels,
-            out_mask_channels,
-            kernel_size=1,
-            padding=0
+        self.final_mask = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                up_channels,
+                out_mask_channels,
+                kernel_size=1,
+                padding=0
+            ),
+            Softmax()
         )
 
         # Initialise weights
