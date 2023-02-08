@@ -16,22 +16,35 @@ class LossPreprocessing(torch.nn.Module):
 
         self.inputs_are_logits = inputs_are_logits
         self.apply_transform = apply_transform
+        self.sigmoid = torch.nn.Sigmoid()
 
     def forward(
         self,
         inputs: torch.Tensor,
-        targets: torch.Tensor
-    ) -> T.Tuple[torch.Tensor, torch.Tensor]:
+        targets: torch.Tensor = None
+    ) -> T.Tuple[torch.Tensor, T.Union[torch.Tensor, None]]:
+        """Forward pass to transform logits
+
+        If logits are single-dimension then they are transformed by Sigmoid.
+        If logits are multi-dimension then they are transformed by Softmax.
+        """
         if self.inputs_are_logits:
-            if (len(targets.unique()) > inputs.size(1)) or (targets.unique().max()+1 > inputs.size(1)):
-                raise ValueError(
-                    'The targets should be ordered values of equal length to the inputs 2nd dimension.'
-                )
+            if targets is not None:
+                if (len(targets.unique()) > inputs.size(1)) or (targets.unique().max()+1 > inputs.size(1)):
+                    raise ValueError(
+                        'The targets should be ordered values of equal length to the inputs 2nd dimension.'
+                    )
             if self.apply_transform:
-                inputs = F.softmax(inputs, dim=1, dtype=inputs.dtype).clip(0, 1)
-            targets = F.one_hot(
-                targets.contiguous().view(-1), inputs.shape[1]
-            ).float()
+                if inputs.shape[1] == 1:
+                    inputs = self.sigmoid(inputs)
+                else:
+                    inputs = F.softmax(inputs, dim=1, dtype=inputs.dtype)
+
+            inputs = inputs.clip(0, 1)
+            if targets is not None:
+                targets = F.one_hot(
+                    targets.contiguous().view(-1), inputs.shape[1]
+                ).float()
         else:
             inputs = inputs.unsqueeze(1)
             targets = targets.unsqueeze(1)
@@ -264,12 +277,14 @@ class TanimotoDistLoss(torch.nn.Module):
     def __init__(
         self,
         smooth: float = 1e-5,
-        scale_pos_weight: T.Optional[bool] = False
+        scale_pos_weight: T.Optional[bool] = False,
+        transform_logits: T.Optional[bool] = True
     ):
         super(TanimotoDistLoss, self).__init__()
 
         self.smooth = smooth
         self.scale_pos_weight = scale_pos_weight
+        self.transform_logits = transform_logits
         self.preprocessor = LossPreprocessing(
             inputs_are_logits=True,
             apply_transform=True
@@ -291,8 +306,11 @@ class TanimotoDistLoss(torch.nn.Module):
         Returns:
             Tanimoto distance loss (float)
         """
-        if inputs.shape[1] > 1:
-            inputs, targets = self.preprocessor(inputs, targets)
+        if self.transform_logits:
+            if inputs.shape[1] == 1:
+                inputs = self.preprocessor(inputs)
+            else:
+                inputs, targets = self.preprocessor(inputs, targets)
 
         if len(inputs.shape) == 1:
             inputs = inputs.unsqueeze(1)
