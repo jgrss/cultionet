@@ -308,7 +308,7 @@ class TanimotoDistLoss(torch.nn.Module):
         """
         if self.transform_logits:
             if inputs.shape[1] == 1:
-                inputs = self.preprocessor(inputs)
+                inputs, __ = self.preprocessor(inputs)
             else:
                 inputs, targets = self.preprocessor(inputs, targets)
 
