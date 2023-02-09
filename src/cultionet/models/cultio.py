@@ -170,7 +170,7 @@ class CultioNet(torch.nn.Module):
             )
         else:
             # Loss on background:0, crop-type:1, edge:2
-            num_classes_last = 3
+            num_classes_last = 1
             base_in_channels = star_rnn_hidden_dim
 
         self.star_rnn = StarRNN(
