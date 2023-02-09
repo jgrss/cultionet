@@ -186,7 +186,7 @@ class CultioNet(torch.nn.Module):
                 in_channels=base_in_channels,
                 out_dist_channels=1,
                 out_edge_channels=1,
-                out_mask_channels=1,
+                out_mask_channels=2,
                 init_filter=self.filters,
                 attention=False
             )
@@ -195,7 +195,7 @@ class CultioNet(torch.nn.Module):
                 in_channels=base_in_channels,
                 out_dist_channels=1,
                 out_edge_channels=1,
-                out_mask_channels=1,
+                out_mask_channels=2,
                 init_filter=self.filters,
                 attention=False
             )

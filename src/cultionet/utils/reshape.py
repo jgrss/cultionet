@@ -105,9 +105,10 @@ class ModelOutputs(object):
                 inputs, dim=1, dtype=inputs.dtype
             )[:, 1]
         else:
-            if inputs.shape[1] > 1:
-                # Two-class output
-                inputs = inputs[:, 1]
+            if len(inputs.shape) > 1:
+                if inputs.shape[1] > 1:
+                    # Two-class output
+                    inputs = inputs[:, 1]
 
         inputs = self._clip_and_reshape(inputs, w_pad)
 
