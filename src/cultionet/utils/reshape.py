@@ -106,7 +106,7 @@ class ModelOutputs(object):
         # Get the edge probabilities
         if self.apply_softmax:
             self.edge_probas = F.softmax(
-                self.edge, dim=1, dtype=self.crop_type.dtype
+                self.edge, dim=1, dtype=self.edge.dtype
             )[:, 1]
         else:
             if self.edge.shape[1] > 1:
@@ -119,10 +119,13 @@ class ModelOutputs(object):
         # Get the crop probabilities
         if self.apply_softmax:
             self.crop_probas = F.softmax(
-                self.crop, dim=1, dtype=self.crop_type.dtype
+                self.crop, dim=1, dtype=self.crop.dtype
             )[:, 1]
         else:
-            self.crop_probas = self.crop[:, 1]
+            if self.crop.shape[1] > 1:
+                self.crop_probas = self.crop[:, 1]
+            else:
+                self.crop_probas = self.crop
         self.crop_probas = self._clip_and_reshape(self.crop_probas, w_pad)
 
         # Get the crop-type probabilities
