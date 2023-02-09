@@ -124,7 +124,7 @@ class ModelOutputs(object):
         # Get the crop-type probabilities
         self.crop_type_probas = None
         if self.crop_type is not None:
-            self.crop_type_probas = self.inputs_to_probas(self.crop_type_probas, w_pad)
+            self.crop_type_probas = self.inputs_to_probas(self.crop_type, w_pad)
 
         # Reshape the window chunk and slice off padding
         i = abs(w.row_off - w_pad.row_off)
