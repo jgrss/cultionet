@@ -315,7 +315,7 @@ class TanimotoDistLoss(torch.nn.Module):
             else:
                 inputs, targets = self.preprocessor(inputs, targets)
         else:
-            if len(targets.shape) > 1:
+            if len(inputs.shape) > 1:
                 targets = one_hot(targets, dims=inputs.shape[1])
 
         if len(inputs.shape) == 1:

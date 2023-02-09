@@ -863,7 +863,7 @@ class CultioLitModel(pl.LightningModule):
         self.dist_loss = TanimotoDistLoss()
         self.edge_loss = TanimotoDistLoss()
         self.crop_loss = TanimotoDistLoss()
-        self.crop_star_loss = TanimotoDistLoss()
+        self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=True)
         if self.num_classes > 2:
             self.crop_type_star_loss = TanimotoDistLoss(scale_pos_weight=True)
             self.crop_type_loss = TanimotoDistLoss(scale_pos_weight=True)
