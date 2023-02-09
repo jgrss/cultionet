@@ -154,6 +154,7 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
         padding = int(kernel_size / 2)
+        final_activation = torch.nn.Sigmoid() if num_classes_last == 1 else Softmax(dim=1)
 
         # Crop-type layer
         if self.crop_type_layer:
@@ -172,7 +173,7 @@ class StarRNN(torch.nn.Module):
                     kernel_size,
                     padding=padding
                 ),
-                Softmax()
+                final_activation
             )
         else:
             # Last level (crop|non-crop)
@@ -183,7 +184,7 @@ class StarRNN(torch.nn.Module):
                     kernel_size,
                     padding=padding
                 ),
-                Softmax()
+                final_activation
             )
 
     def forward(
