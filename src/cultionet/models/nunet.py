@@ -477,6 +477,9 @@ class UNet3Psi(torch.nn.Module):
             attention=attention
         )
 
+        edge_activation = torch.nn.Sigmoid() if out_edge_channels == 1 else Softmax(dim=1)
+        mask_activation = torch.nn.Sigmoid() if out_mask_channels == 1 else Softmax(dim=1)
+
         self.final_dist = torch.nn.Sequential(
             torch.nn.Conv2d(
                 up_channels,
@@ -493,7 +496,7 @@ class UNet3Psi(torch.nn.Module):
                 kernel_size=1,
                 padding=0
             ),
-            torch.nn.Sigmoid()
+            edge_activation
         )
         self.final_mask = torch.nn.Sequential(
             torch.nn.Conv2d(
@@ -502,7 +505,7 @@ class UNet3Psi(torch.nn.Module):
                 kernel_size=1,
                 padding=0
             ),
-            torch.nn.Sigmoid()
+            mask_activation
         )
 
         # Initialise weights
@@ -674,6 +677,9 @@ class ResUNet3Psi(torch.nn.Module):
             rcsb=rcsb
         )
 
+        edge_activation = torch.nn.Sigmoid() if out_edge_channels == 1 else Softmax(dim=1)
+        mask_activation = torch.nn.Sigmoid() if out_mask_channels == 1 else Softmax(dim=1)
+
         self.final_dist = torch.nn.Sequential(
             torch.nn.Conv2d(
                 up_channels,
@@ -690,7 +696,7 @@ class ResUNet3Psi(torch.nn.Module):
                 kernel_size=1,
                 padding=0
             ),
-            torch.nn.Sigmoid()
+            edge_activation
         )
         self.final_mask = torch.nn.Sequential(
             torch.nn.Conv2d(
@@ -699,7 +705,7 @@ class ResUNet3Psi(torch.nn.Module):
                 kernel_size=1,
                 padding=0
             ),
-            torch.nn.Sigmoid()
+            mask_activation
         )
 
         # Initialise weights
