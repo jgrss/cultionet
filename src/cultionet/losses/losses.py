@@ -313,10 +313,14 @@ class TanimotoDistLoss(torch.nn.Module):
             if len(inputs.shape) == 1:
                 inputs, __ = self.preprocessor(inputs)
             else:
-                inputs, targets = self.preprocessor(inputs, targets)
+                if inputs.shape[1] == 1:
+                    inputs, __ = self.preprocessor(inputs)
+                else:
+                    inputs, targets = self.preprocessor(inputs, targets)
         else:
             if len(inputs.shape) > 1:
-                targets = one_hot(targets, dims=inputs.shape[1])
+                if inputs.shape[1] > 1:
+                    targets = one_hot(targets, dims=inputs.shape[1])
 
         if len(inputs.shape) == 1:
             inputs = inputs.unsqueeze(1)
