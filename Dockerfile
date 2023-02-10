@@ -9,7 +9,8 @@ RUN apt update -y && \
     apt install \
     build-essential \
     python3.8 \
-    python3-pip \
+    python3-pip \        
+    python-is-python3 \
     libgeos++-dev \
     libgeos-3.8.0 \
     libgeos-c1v5 \
@@ -40,7 +41,7 @@ RUN pip install \
     torchvision \
     torchaudio --extra-index-url https://download.pytorch.org/whl/cu113
 
-RUN TORCH_VERSION=`(python -c "import torch;print(torch.__version__)")` &&
+RUN TORCH_VERSION=`(python -c "import torch;print(torch.__version__)")` && \
     pip install \
     torch-scatter \
     torch-sparse \
