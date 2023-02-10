@@ -74,8 +74,7 @@ class UNet3Connector(torch.nn.Module):
                 channels[prev_backbone_channel_index],
                 up_channels
             )
-        if not self.attention:
-            self.cat_channels += up_channels
+        self.cat_channels += up_channels
         # Previous output, downstream
         if self.n_prev_down > 0:
             for n in range(0, self.n_prev_down):
