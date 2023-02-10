@@ -1,15 +1,14 @@
 import typing as T
 
 from .base_layers import (
-    DoubleConv,
-    PoolConv,
+    DoubleConv3d,
+    PoolConv3d,
     PoolResidualConv,
     ResidualConv,
-    AttentionGate,
+    AttentionGate3d,
     FractalAttention
 )
 from . import model_utils
-from .rcsb import RCSB
 
 import torch
 
@@ -57,7 +56,7 @@ class UNet3Connector(torch.nn.Module):
                 setattr(
                     self,
                     f'pool_{n}',
-                    PoolConv(
+                    PoolConv3d(
                         channels[n],
                         channels[0],
                         pool_size=pool_size
@@ -66,7 +65,7 @@ class UNet3Connector(torch.nn.Module):
                 pool_size = int(pool_size / 2)
                 self.cat_channels += channels[0]
         if is_side_stream:
-            self.prev = DoubleConv(
+            self.prev = DoubleConv3d(
                 up_channels,
                 up_channels,
                 init_point_conv=init_point_conv,
@@ -74,7 +73,7 @@ class UNet3Connector(torch.nn.Module):
             )
         else:
             # Backbone, same level
-            self.prev_backbone = DoubleConv(
+            self.prev_backbone = DoubleConv3d(
                 channels[prev_backbone_channel_index],
                 up_channels,
                 init_point_conv=init_point_conv,
@@ -87,7 +86,7 @@ class UNet3Connector(torch.nn.Module):
                 setattr(
                     self,
                     f'prev_{n}',
-                    DoubleConv(
+                    DoubleConv3d(
                         up_channels,
                         up_channels,
                         init_point_conv=init_point_conv,
@@ -101,9 +100,11 @@ class UNet3Connector(torch.nn.Module):
                 in_stream_channels = up_channels
                 if self.attention:
                     if attention_weights == 'gate':
-                        attention_module = AttentionGate(up_channels, up_channels)
+                        attention_module = AttentionGate3d(up_channels, up_channels)
                     else:
-                        attention_module = FractalAttention(up_channels, up_channels)
+                        # FIXME:
+                        raise NameError
+                    
                     setattr(
                         self,
                         f'attn_stream_{n}',
@@ -113,7 +114,7 @@ class UNet3Connector(torch.nn.Module):
                 setattr(
                     self,
                     f'stream_{n}',
-                    DoubleConv(
+                    DoubleConv3d(
                         in_stream_channels,
                         up_channels,
                         init_point_conv=init_point_conv,
@@ -122,14 +123,14 @@ class UNet3Connector(torch.nn.Module):
                 )
                 self.cat_channels += up_channels
 
-        self.conv4_0 = DoubleConv(
+        self.conv4_0 = DoubleConv3d(
             channels[4],
             channels[0],
             init_point_conv=init_point_conv
         )
         self.cat_channels += channels[0]
 
-        self.final = DoubleConv(
+        self.final = DoubleConv3d(
             self.cat_channels,
             up_channels,
             init_point_conv=init_point_conv,

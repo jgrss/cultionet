@@ -34,6 +34,16 @@ class Add(torch.nn.Module):
         return x + y
 
 
+class Mean(torch.nn.Module):
+    def __init__(self, dim: int):
+        super(Mean, self).__init__()
+
+        self.dim = dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.mean(dim=self.dim)
+
+
 class Squeeze(torch.nn.Module):
     def __init__(self):
         super(Squeeze, self).__init__()
@@ -159,6 +169,65 @@ class AttentionAdd(torch.nn.Module):
             x = self.up(x, size=g.shape[-2:], mode='bilinear')
 
         return x + g
+
+
+class AttentionGate3d(torch.nn.Module):
+    def __init__(
+        self,
+        high_channels: int,
+        low_channels: int
+    ):
+        super(AttentionGate3d, self).__init__()
+
+        conv_x = torch.nn.Conv3d(
+            high_channels,
+            high_channels,
+            kernel_size=1,
+            padding=0
+        )
+        conv_g = torch.nn.Conv3d(
+            low_channels,
+            high_channels,
+            kernel_size=1,
+            padding=0,
+        )
+        conv1d = torch.nn.Conv3d(
+            high_channels,
+            1,
+            kernel_size=1,
+            padding=0
+        )
+        self.up = model_utils.UpSample()
+
+        self.seq = nn.Sequential(
+            'x, g',
+            [
+                (conv_x, 'x -> x'),
+                (conv_g, 'g -> g'),
+                (AttentionAdd(), 'x, g -> x'),
+                (torch.nn.LeakyReLU(inplace=False), 'x -> x'),
+                (conv1d, 'x -> x'),
+                (torch.nn.Sigmoid(), 'x -> x')
+            ]
+        )
+        self.final = ConvBlock3d(
+            in_channels=high_channels,
+            out_channels=high_channels,
+            kernel_size=1,
+            add_activation=False
+        )
+
+    def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Higher dimension
+            g: Lower dimension
+        """
+        h = self.seq(x, g)
+        if h.shape[-2:] != x.shape[-2:]:
+            h = self.up(h, size=x.shape[-2:], mode='bilinear')
+
+        return self.final(x * h)
 
 
 class AttentionGate(torch.nn.Module):
@@ -459,6 +528,54 @@ class ChannelAttention(torch.nn.Module):
         return x * self.module(x)
 
 
+class DoubleConv3d(torch.nn.Module):
+    """A double convolution layer
+    """
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        init_point_conv: bool = False,
+        double_dilation: int = 1
+    ):
+        super(DoubleConv3d, self).__init__()
+
+        layers = []
+
+        init_channels = in_channels
+        if init_point_conv:
+            layers += [
+                ConvBlock3d(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    kernel_size=1,
+                    padding=0
+                )
+            ]
+            init_channels = out_channels
+
+        layers += [
+            ConvBlock3d(
+                in_channels=init_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1
+            ),
+            ConvBlock3d(
+                in_channels=out_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=double_dilation,
+                dilation=double_dilation
+            )
+        ]
+
+        self.seq = torch.nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
+
+
 class DoubleConv(torch.nn.Module):
     """A double convolution layer
     """
@@ -527,6 +644,28 @@ class PoolConvSingle(torch.nn.Module):
                 padding=1
             )
         )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
+
+
+class PoolConv3d(torch.nn.Module):
+    """Max pooling with (optional) dropout
+    """
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        pool_size: int = 2,
+        dropout: T.Optional[float] = None
+    ):
+        super(PoolConv3d, self).__init__()
+
+        layers = [torch.nn.MaxPool3d((1, pool_size, pool_size))]
+        if dropout is not None:
+            layers += [torch.nn.Dropout(dropout)]
+        layers += [DoubleConv3d(in_channels, out_channels)]
+        self.seq = torch.nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
@@ -766,6 +905,27 @@ class PoolResidualConv(torch.nn.Module):
             ]
 
         self.seq = torch.nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
+
+
+class SingleConv3d(torch.nn.Module):
+    """A single convolution layer
+    """
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int
+    ):
+        super(SingleConv3d, self).__init__()
+
+        self.seq = ConvBlock3d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=3,
+            padding=1
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)

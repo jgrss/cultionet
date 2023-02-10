@@ -10,14 +10,17 @@ from . import model_utils
 from .base_layers import (
     AttentionGate,
     DoubleConv,
+    Mean,
     Permute,
     PoolConv,
+    PoolConv3d,
     PoolResidualConv,
     ResidualConvInit,
     ResidualConv,
     SingleConv,
+    SingleConv3d,
     Softmax,
-    TemporalConv
+    Squeeze
 )
 from .unet_parts import (
     UNet3P_3_1,
@@ -411,11 +414,7 @@ class UNet3Psi(torch.nn.Module):
     """
     def __init__(
         self,
-        in_features: int,
         in_channels: int,
-        out_dist_channels: int = 1,
-        out_edge_channels: int = 2,
-        out_mask_channels: int = 2,
         init_filter: int = 64,
         init_point_conv: bool = False,
         double_dilation: int = 1,
@@ -435,29 +434,23 @@ class UNet3Psi(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
-        self.temporal_conv = TemporalConv(
-            in_channels=in_features,
-            hidden_channels=channels[0],
-            out_channels=1
-        )
-
-        self.conv0_0 = SingleConv(
+        self.conv0_0 = SingleConv3d(
             in_channels,
             channels[0]
         )
-        self.conv1_0 = PoolConv(
+        self.conv1_0 = PoolConv3d(
             channels[0],
             channels[1]
         )
-        self.conv2_0 = PoolConv(
+        self.conv2_0 = PoolConv3d(
             channels[1],
             channels[2]
         )
-        self.conv3_0 = PoolConv(
+        self.conv3_0 = PoolConv3d(
             channels[2],
             channels[3]
         )
-        self.conv4_0 = PoolConv(
+        self.conv4_0 = PoolConv3d(
             channels[3],
             channels[4]
         )
@@ -492,31 +485,45 @@ class UNet3Psi(torch.nn.Module):
             double_dilation=double_dilation
         )
 
-        edge_activation = torch.nn.Sigmoid() if out_edge_channels == 1 else Softmax(dim=1)
-
         self.final_dist = torch.nn.Sequential(
-            torch.nn.Conv2d(
+            # Reduce channels to 1, leaving time
+            torch.nn.Conv3d(
                 up_channels,
-                out_dist_channels,
+                1,
                 kernel_size=1,
                 padding=0
             ),
-            torch.nn.Sigmoid()
+            Squeeze(),
+            # Sigmoid applied to each timepoint
+            torch.nn.Sigmoid(),
+            # Take the mean over time
+            Mean(dim=1)
         )
         self.final_edge = torch.nn.Sequential(
-            torch.nn.Conv2d(
+            torch.nn.Conv3d(
                 up_channels,
-                out_edge_channels,
+                1,
                 kernel_size=1,
                 padding=0
             ),
-            edge_activation
+            Squeeze(),
+            # Sigmoid applied to each timepoint
+            torch.nn.Sigmoid(),
+            # Take the mean probability over time
+            Mean(dim=1)
         )
-        self.final_mask = torch.nn.Conv2d(
-            up_channels,
-            out_mask_channels,
-            kernel_size=1,
-            padding=0
+        self.final_mask = torch.nn.Sequential(
+            torch.nn.Conv3d(
+                up_channels,
+                1,
+                kernel_size=1,
+                padding=0
+            ),
+            Squeeze(),
+            # Sigmoid applied to each timepoint
+            torch.nn.Sigmoid(),
+            # Take the mean probability over time
+            Mean(dim=1)
         )
 
         # Initialise weights
@@ -527,7 +534,7 @@ class UNet3Psi(torch.nn.Module):
                     torch.nn.Conv2d,
                     torch.nn.BatchNorm2d,
                     torch.nn.Conv3d,
-                    torch.nn.BatchNorm3d
+                    torch.nn.BatchNorm2d
                 )
             ):
                 m.apply(weights_init_kaiming)
