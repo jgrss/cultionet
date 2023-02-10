@@ -152,10 +152,6 @@ class UNet3Connector(torch.nn.Module):
             for n, x in zip(range(self.n_pools), pools):
                 c = getattr(self, f'pool_{n}')
                 h += [c(x)]
-        # Lowest level
-        h += [
-            self.conv4_0(self.up(x4_0, size=prev_same[0][1].shape[-2:]))
-        ]
         # Up down layers from the previous head
         if prev_down is not None:
             assert self.n_prev_down == len(prev_down), \
@@ -191,6 +187,10 @@ class UNet3Connector(torch.nn.Module):
                         c(self.up(x, size=prev_same[0][1].shape[-2:]))
                     ]
 
+        # Lowest level
+        h += [
+            self.conv4_0(self.up(x4_0, size=prev_same[0][1].shape[-2:]))
+        ]
         h = torch.cat(h, dim=1)
         h = self.final(h)
 
