@@ -5,8 +5,7 @@ from .base_layers import (
     PoolConv3d,
     PoolResidualConv,
     ResidualConv,
-    AttentionGate3d,
-    FractalAttention
+    AttentionGate3d
 )
 from . import model_utils
 
@@ -104,7 +103,7 @@ class UNet3Connector(torch.nn.Module):
                     else:
                         # FIXME:
                         raise NameError
-                    
+
                     setattr(
                         self,
                         f'attn_stream_{n}',
@@ -160,7 +159,7 @@ class UNet3Connector(torch.nn.Module):
             for n, x in zip(range(self.n_prev_down), prev_down):
                 c = getattr(self, f'prev_{n}')
                 h += [
-                    c(self.up(x, size=prev_same[0][1].shape[-2:]))
+                    c(self.up(x, size=prev_same[0][1].shape[-3:]))
                 ]
         # Previous same layers from the previous head
         for conv_name, prev_inputs in prev_same:
@@ -175,7 +174,7 @@ class UNet3Connector(torch.nn.Module):
             for n, x in zip(range(self.n_stream_down), stream_down):
                 if self.attention:
                     # Gate
-                    g = self.up(x, size=prev_same[0][1].shape[-2:])
+                    g = self.up(x, size=prev_same[0][1].shape[-3:])
                     c_attn = getattr(self, f'attn_stream_{n}')
                     # Attention gate
                     attn_out = c_attn(g, prev_same_hidden)
@@ -185,12 +184,12 @@ class UNet3Connector(torch.nn.Module):
                 else:
                     c = getattr(self, f'stream_{n}')
                     h += [
-                        c(self.up(x, size=prev_same[0][1].shape[-2:]))
+                        c(self.up(x, size=prev_same[0][1].shape[-3:]))
                     ]
 
         # Lowest level
         h += [
-            self.conv4_0(self.up(x4_0, size=prev_same[0][1].shape[-2:]))
+            self.conv4_0(self.up(x4_0, size=prev_same[0][1].shape[-3:]))
         ]
         h = torch.cat(h, dim=1)
         h = self.final(h)

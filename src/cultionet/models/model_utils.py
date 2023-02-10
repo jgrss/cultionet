@@ -19,7 +19,9 @@ class UpSample(torch.nn.Module):
     def forward(
         self, x: torch.Tensor, size: T.Sequence[int], mode: str = 'bilinear'
     ) -> torch.Tensor:
-        return F.interpolate(x, size=size, mode=mode, align_corners=True)
+        upsampler = torch.nn.Upsample(size=size, mode=mode, align_corners=True)
+
+        return upsampler(x)
 
 
 class GraphToConv(torch.nn.Module):
