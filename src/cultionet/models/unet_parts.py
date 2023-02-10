@@ -154,17 +154,15 @@ class UNet3Connector(torch.nn.Module):
                     c(self.up(x, size=prev_same[0][1].shape[-2:]))
                 ]
         # Previous same layers from the previous head
-        if not self.attention:
-            # With attention, this happens with each gate
-            for conv_name, prev_inputs in prev_same:
-                c = getattr(self, conv_name)
-                h += [c(prev_inputs)]
+        for conv_name, prev_inputs in prev_same:
+            c = getattr(self, conv_name)
+            h += [c(prev_inputs)]
+        if self.attention:
+            prev_same_hidden = h[-1].clone()
         # Previous down layers from the same head
         if stream_down is not None:
             assert self.n_stream_down == len(stream_down), \
                 'There are no convolutions available for the downstream layers.'
-            if self.attention:
-                prev_same_hidden = h[-1].clone()
             for n, x in zip(range(self.n_stream_down), stream_down):
                 if self.attention:
                     # Gate
