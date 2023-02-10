@@ -393,16 +393,13 @@ class TemperatureScaling(pl.LightningModule):
         batch: T.Union[Data, T.List],
         predictions: T.Dict[str, torch.Tensor]
     ):
-        true_edge = batch.y.eq(self.edge_class).long()
+        # true_edge = batch.y.eq(self.edge_class).long()
         # in case of multi-class, `true_crop` = 1, 2, etc.
         true_crop = torch.where(
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
 
-        edge_loss = self.edge_loss(predictions['edge'], true_edge)
-        crop_loss = self.crop_loss(predictions['crop'], true_crop)
-
-        loss = edge_loss + crop_loss
+        loss = self.crop_loss(predictions['crop'], true_crop)
 
         return loss
 
@@ -470,9 +467,15 @@ class TemperatureScaling(pl.LightningModule):
                 f.write(json.dumps(temperature_scales))
 
     def configure_loss(self):
-        self.edge_loss = TanimotoDistLoss(transform_logits=False)
-        self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
-        self.crop_loss_refine = TanimotoDistLoss(scale_pos_weight=True)
+        self.edge_loss = TanimotoDistLoss()
+        self.crop_loss = TanimotoDistLoss(
+            transform_logits=False,
+            scale_pos_weight=True
+        )
+        self.crop_loss_refine = TanimotoDistLoss(
+            transform_logits=False,
+            scale_pos_weight=True
+        )
 
     def configure_optimizers(self):
         optimizer_adamw = torch.optim.AdamW(
@@ -609,6 +612,10 @@ class CultioLitModel(pl.LightningModule):
         else:
             predictions = self.forward(batch, batch_idx)
 
+        predictions['crop'] = self.logits_to_probas(
+            predictions['crop']
+        )
+
         return predictions
 
     def get_true_labels(
@@ -704,7 +711,7 @@ class CultioLitModel(pl.LightningModule):
         )
         # Main loss
         loss = (
-            0.5 * crop_star_loss
+            crop_star_loss
             + dist_loss
             + edge_loss
             + crop_loss
@@ -752,7 +759,9 @@ class CultioLitModel(pl.LightningModule):
         )
         # Get the class labels
         edge_ypred = self.probas_to_labels(predictions['edge'])
-        crop_ypred = self.probas_to_labels(predictions['crop'])
+        crop_ypred = self.probas_to_labels(
+            self.logits_to_probas(predictions['crop'])
+        )
         # Get the true edge and crop labels
         edge_ytrue, crop_ytrue, __, crop_type_ytrue = self.get_true_labels(
             batch, crop_type=predictions['crop_type']
@@ -862,8 +871,14 @@ class CultioLitModel(pl.LightningModule):
     def configure_loss(self):
         self.dist_loss = TanimotoDistLoss()
         self.edge_loss = TanimotoDistLoss()
-        self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
-        self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.crop_loss = TanimotoDistLoss(
+            transform_logits=True,
+            scale_pos_weight=True
+        )
+        self.crop_star_loss = TanimotoDistLoss(
+            transform_logits=True,
+            scale_pos_weight=True
+        )
         if self.num_classes > 2:
             self.crop_type_star_loss = TanimotoDistLoss(scale_pos_weight=True)
             self.crop_type_loss = TanimotoDistLoss(scale_pos_weight=True)

@@ -337,14 +337,11 @@ class UNet3(torch.nn.Module):
             up_channels=up_channels
         )
 
-        self.final = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                out_channels,
-                kernel_size=1,
-                padding=0
-            ),
-            Softmax()
+        self.final = torch.nn.Conv2d(
+            up_channels,
+            out_channels,
+            kernel_size=1,
+            padding=0
         )
 
         # Initialise weights
@@ -478,7 +475,6 @@ class UNet3Psi(torch.nn.Module):
         )
 
         edge_activation = torch.nn.Sigmoid() if out_edge_channels == 1 else Softmax(dim=1)
-        mask_activation = torch.nn.Sigmoid() if out_mask_channels == 1 else Softmax(dim=1)
 
         self.final_dist = torch.nn.Sequential(
             torch.nn.Conv2d(
@@ -498,14 +494,11 @@ class UNet3Psi(torch.nn.Module):
             ),
             edge_activation
         )
-        self.final_mask = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                out_mask_channels,
-                kernel_size=1,
-                padding=0
-            ),
-            mask_activation
+        self.final_mask = torch.nn.Conv2d(
+            up_channels,
+            out_mask_channels,
+            kernel_size=1,
+            padding=0
         )
 
         # Initialise weights
@@ -678,7 +671,6 @@ class ResUNet3Psi(torch.nn.Module):
         )
 
         edge_activation = torch.nn.Sigmoid() if out_edge_channels == 1 else Softmax(dim=1)
-        mask_activation = torch.nn.Sigmoid() if out_mask_channels == 1 else Softmax(dim=1)
 
         self.final_dist = torch.nn.Sequential(
             torch.nn.Conv2d(
@@ -698,14 +690,11 @@ class ResUNet3Psi(torch.nn.Module):
             ),
             edge_activation
         )
-        self.final_mask = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                out_mask_channels,
-                kernel_size=1,
-                padding=0
-            ),
-            mask_activation
+        self.final_mask = torch.nn.Conv2d(
+            up_channels,
+            out_mask_channels,
+            kernel_size=1,
+            padding=0
         )
 
         # Initialise weights
