@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.6.5 (2023-02-10)
+* Updated Python version in the `Dockerfile` ([#45](https://github.com/jgrss/cultionet/pull/45))
+
 ## v1.6.4 (2023-02-01)
 * Pinned required packages to full semantic versions ([#44](https://github.com/jgrss/cultionet/pull/44))
 
