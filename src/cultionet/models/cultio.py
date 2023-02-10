@@ -203,8 +203,8 @@ class CultioNet(torch.nn.Module):
         # Output shape is (B x C X T|D x H x W)
         logits_time = self.temporal_conv(time_stream)
         # Reshape from (B x C X T|D x H x W) -> (B x C x H x W)
-        logits_time = logits_time.reshape(
-            nbatch, self.time_aggregate_channels, height, width
+        logits_time = logits_time.view(
+            nbatch, -1, height, width
         )
         crop_time = self.cg(self.final_time(logits_time))
         # Main stream

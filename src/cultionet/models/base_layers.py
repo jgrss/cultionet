@@ -145,6 +145,7 @@ class ConvBlock3d(torch.nn.Module):
         self.seq = torch.nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        import ipdb; ipdb.set_trace()
         return self.seq(x)
 
 
