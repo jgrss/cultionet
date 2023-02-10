@@ -415,6 +415,8 @@ class UNet3Psi(torch.nn.Module):
         out_edge_channels: int = 2,
         out_mask_channels: int = 2,
         init_filter: int = 64,
+        init_point_conv: bool = False,
+        double_dilation: int = 1,
         attention: bool = False
     ):
         super(UNet3Psi, self).__init__()
@@ -456,22 +458,30 @@ class UNet3Psi(torch.nn.Module):
         self.convs_3_1 = UNet3_3_1(
             channels=channels,
             up_channels=up_channels,
-            attention=attention
+            attention=attention,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.convs_2_2 = UNet3_2_2(
             channels=channels,
             up_channels=up_channels,
-            attention=attention
+            attention=attention,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.convs_1_3 = UNet3_1_3(
             channels=channels,
             up_channels=up_channels,
-            attention=attention
+            attention=attention,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.convs_0_4 = UNet3_0_4(
             channels=channels,
             up_channels=up_channels,
-            attention=attention
+            attention=attention,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
 
         edge_activation = torch.nn.Sigmoid() if out_edge_channels == 1 else Softmax(dim=1)

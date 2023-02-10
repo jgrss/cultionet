@@ -465,13 +465,29 @@ class DoubleConv(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        out_channels: int
+        out_channels: int,
+        init_point_conv: bool = False,
+        double_dilation: int = 1
     ):
         super(DoubleConv, self).__init__()
 
-        self.seq = torch.nn.Sequential(
+        layers = []
+
+        init_channels = in_channels
+        if init_point_conv:
+            layers += [
+                ConvBlock2d(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    kernel_size=1,
+                    padding=0
+                )
+            ]
+            init_channels = out_channels
+
+        layers += [
             ConvBlock2d(
-                in_channels=in_channels,
+                in_channels=init_channels,
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1
@@ -480,9 +496,12 @@ class DoubleConv(torch.nn.Module):
                 in_channels=out_channels,
                 out_channels=out_channels,
                 kernel_size=3,
-                padding=1
+                padding=double_dilation,
+                dilation=double_dilation
             )
-        )
+        ]
+
+        self.seq = torch.nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)

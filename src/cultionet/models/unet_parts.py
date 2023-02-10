@@ -27,7 +27,9 @@ class UNet3Connector(torch.nn.Module):
         n_prev_down: int = 0,
         n_stream_down: int = 0,
         attention: bool = False,
-        attention_weights: str = 'gate'
+        attention_weights: str = 'gate',
+        init_point_conv: bool = False,
+        double_dilation: int = 1
     ):
         super(UNet3Connector, self).__init__()
 
@@ -66,13 +68,17 @@ class UNet3Connector(torch.nn.Module):
         if is_side_stream:
             self.prev = DoubleConv(
                 up_channels,
-                up_channels
+                up_channels,
+                init_point_conv=init_point_conv,
+                double_dilation=double_dilation
             )
         else:
             # Backbone, same level
             self.prev_backbone = DoubleConv(
                 channels[prev_backbone_channel_index],
-                up_channels
+                up_channels,
+                init_point_conv=init_point_conv,
+                double_dilation=double_dilation
             )
         self.cat_channels += up_channels
         # Previous output, downstream
@@ -83,7 +89,9 @@ class UNet3Connector(torch.nn.Module):
                     f'prev_{n}',
                     DoubleConv(
                         up_channels,
-                        up_channels
+                        up_channels,
+                        init_point_conv=init_point_conv,
+                        double_dilation=double_dilation
                     )
                 )
                 self.cat_channels += up_channels
@@ -107,20 +115,25 @@ class UNet3Connector(torch.nn.Module):
                     f'stream_{n}',
                     DoubleConv(
                         in_stream_channels,
-                        up_channels
+                        up_channels,
+                        init_point_conv=init_point_conv,
+                        double_dilation=double_dilation
                     )
                 )
                 self.cat_channels += up_channels
 
         self.conv4_0 = DoubleConv(
             channels[4],
-            channels[0]
+            channels[0],
+            init_point_conv=init_point_conv
         )
         self.cat_channels += channels[0]
 
         self.final = DoubleConv(
             self.cat_channels,
-            up_channels
+            up_channels,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
 
     def forward(
@@ -340,7 +353,9 @@ class UNet3_3_1(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         attention: bool = False,
-        attention_weights: str = 'gate'
+        attention_weights: str = 'gate',
+        init_point_conv: bool = False,
+        double_dilation: int = 1
     ):
         super(UNet3_3_1, self).__init__()
 
@@ -352,14 +367,18 @@ class UNet3_3_1(torch.nn.Module):
             up_channels=up_channels,
             is_side_stream=False,
             prev_backbone_channel_index=3,
-            n_pools=3
+            n_pools=3,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         # Edge stream connection
         self.conv_edge = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=3,
-            n_pools=3
+            n_pools=3,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         # Mask stream connection
         self.conv_mask = UNet3Connector(
@@ -368,7 +387,9 @@ class UNet3_3_1(torch.nn.Module):
             prev_backbone_channel_index=3,
             n_pools=3,
             attention=attention,
-            attention_weights=attention_weights
+            attention_weights=attention_weights,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
 
     def forward(
@@ -413,7 +434,9 @@ class UNet3_2_2(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         attention: bool = False,
-        attention_weights: str = 'gate'
+        attention_weights: str = 'gate',
+        init_point_conv: bool = False,
+        double_dilation: int = 1
     ):
         super(UNet3_2_2, self).__init__()
 
@@ -425,14 +448,18 @@ class UNet3_2_2(torch.nn.Module):
             is_side_stream=False,
             prev_backbone_channel_index=2,
             n_pools=2,
-            n_stream_down=1
+            n_stream_down=1,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=2,
             n_pools=2,
-            n_stream_down=1
+            n_stream_down=1,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -441,7 +468,9 @@ class UNet3_2_2(torch.nn.Module):
             n_pools=2,
             n_stream_down=1,
             attention=attention,
-            attention_weights=attention_weights
+            attention_weights=attention_weights,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
 
     def forward(
@@ -488,7 +517,9 @@ class UNet3_1_3(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         attention: bool = False,
-        attention_weights: str = 'gate'
+        attention_weights: str = 'gate',
+        init_point_conv: bool = False,
+        double_dilation: int = 1
     ):
         super(UNet3_1_3, self).__init__()
 
@@ -500,14 +531,18 @@ class UNet3_1_3(torch.nn.Module):
             is_side_stream=False,
             prev_backbone_channel_index=1,
             n_pools=1,
-            n_stream_down=2
+            n_stream_down=2,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=1,
             n_pools=1,
-            n_stream_down=2
+            n_stream_down=2,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -516,7 +551,9 @@ class UNet3_1_3(torch.nn.Module):
             n_pools=1,
             n_stream_down=2,
             attention=attention,
-            attention_weights=attention_weights
+            attention_weights=attention_weights,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
 
     def forward(
@@ -565,7 +602,9 @@ class UNet3_0_4(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         attention: bool = False,
-        attention_weights: str = 'gate'
+        attention_weights: str = 'gate',
+        init_point_conv: bool = False,
+        double_dilation: int = 1
     ):
         super(UNet3_0_4, self).__init__()
 
@@ -576,13 +615,17 @@ class UNet3_0_4(torch.nn.Module):
             up_channels=up_channels,
             is_side_stream=False,
             prev_backbone_channel_index=0,
-            n_stream_down=3
+            n_stream_down=3,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
             prev_backbone_channel_index=0,
-            n_stream_down=3
+            n_stream_down=3,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -590,7 +633,9 @@ class UNet3_0_4(torch.nn.Module):
             prev_backbone_channel_index=0,
             n_stream_down=3,
             attention=attention,
-            attention_weights=attention_weights
+            attention_weights=attention_weights,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
 
     def forward(
