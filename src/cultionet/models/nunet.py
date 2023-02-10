@@ -16,7 +16,8 @@ from .base_layers import (
     ResidualConvInit,
     ResidualConv,
     SingleConv,
-    Softmax
+    Softmax,
+    TemporalConv
 )
 from .unet_parts import (
     UNet3P_3_1,
@@ -410,6 +411,7 @@ class UNet3Psi(torch.nn.Module):
     """
     def __init__(
         self,
+        in_features: int,
         in_channels: int,
         out_dist_channels: int = 1,
         out_edge_channels: int = 2,
@@ -432,6 +434,12 @@ class UNet3Psi(torch.nn.Module):
         up_channels = int(channels[0] * 5)
 
         self.up = model_utils.UpSample()
+
+        self.temporal_conv = TemporalConv(
+            in_channels=in_features,
+            hidden_channels=channels[0],
+            out_channels=1
+        )
 
         self.conv0_0 = SingleConv(
             in_channels,
@@ -519,9 +527,13 @@ class UNet3Psi(torch.nn.Module):
     def forward(
         self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
+        # Output shape is (B x C X T|D x H x W)
+        x_t = self.temporal_conv(x)
+        # Reshape from (B x C X T|D x H x W) -> (B x C x H x W)
+
         # Backbone
         # 1/1
-        x0_0 = self.conv0_0(x)
+        x0_0 = self.conv0_0(x_t.squeeze())
         # 1/2
         x1_0 = self.conv1_0(x0_0)
         # 1/4
