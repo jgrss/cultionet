@@ -798,7 +798,6 @@ class TemporalConv(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        in_time: int,
         out_channels: int
     ):
         super(TemporalConv, self).__init__()
@@ -809,17 +808,15 @@ class TemporalConv(torch.nn.Module):
                 in_time=0,
                 out_channels=out_channels,
                 kernel_size=3,
-                padding=1,
-                squeeze=False
+                padding=1
             ),
             ConvBlock3d(
                 in_channels=out_channels,
-                in_time=in_time,
+                in_time=0,
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=2,
-                dilation=2,
-                squeeze=True
+                dilation=2
             )
         ]
         self.seq = torch.nn.Sequential(*layers)

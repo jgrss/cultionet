@@ -146,17 +146,17 @@ class CultioNet(torch.nn.Module):
         self.ds_num_bands = int(self.ds_num_features / self.ds_num_time)
         self.filters = filters
         self.num_classes = num_classes
+        self.time_aggregate_channels = int(self.filters * self.ds_num_time)
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
         self.temporal_conv = TemporalConv(
             in_channels=self.ds_num_bands,
-            in_time=self.ds_num_time,
             out_channels=self.filters
         )
         self.final_time = torch.nn.Conv2d(
-            self.filters,
+            self.time_aggregate_channels,
             self.num_classes,
             kernel_size=1,
             padding=0
@@ -164,7 +164,7 @@ class CultioNet(torch.nn.Module):
 
         if model_type == 'UNet3Psi':
             self.mask_model = UNet3Psi(
-                in_channels=self.filters,
+                in_channels=self.time_aggregate_channels,
                 out_dist_channels=1,
                 out_edge_channels=1,
                 out_mask_channels=self.num_classes,
@@ -174,7 +174,7 @@ class CultioNet(torch.nn.Module):
             )
         elif model_type == 'ResUNet3Psi':
             self.mask_model = ResUNet3Psi(
-                in_channels=self.filters,
+                in_channels=self.time_aggregate_channels,
                 out_dist_channels=1,
                 out_edge_channels=1,
                 out_mask_channels=self.num_classes,
@@ -200,9 +200,13 @@ class CultioNet(torch.nn.Module):
         time_stream = time_stream.reshape(
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
-        # Output shape is (B x C x H x W)
+        # Output shape is (B x C X T|D x H x W)
         logits_time = self.temporal_conv(time_stream)
-        crop_time = self.cg(self.crop_time(logits_time))
+        # Reshape from (B x C X T|D x H x W) -> (B x C x H x W)
+        logits_time = logits_time.reshape(
+            nbatch, self.time_aggregate_channels, height, width
+        )
+        crop_time = self.cg(self.final_time(logits_time))
         # Main stream
         logits = self.mask_model(logits_time)
         logits_distance = self.cg(logits['dist'])
