@@ -20,7 +20,8 @@ from .base_layers import (
     SingleConv,
     SingleConv3d,
     Softmax,
-    Squeeze
+    Squeeze,
+    Unsqueeze
 )
 from .unet_parts import (
     UNet3P_3_1,
@@ -497,7 +498,8 @@ class UNet3Psi(torch.nn.Module):
             # Sigmoid applied to each timepoint
             torch.nn.Sigmoid(),
             # Take the mean over time
-            Mean(dim=1)
+            Mean(dim=1),
+            Unsqueeze(dim=1)
         )
         self.final_edge = torch.nn.Sequential(
             torch.nn.Conv3d(
@@ -510,7 +512,8 @@ class UNet3Psi(torch.nn.Module):
             # Sigmoid applied to each timepoint
             torch.nn.Sigmoid(),
             # Take the mean probability over time
-            Mean(dim=1)
+            Mean(dim=1),
+            Unsqueeze(dim=1)
         )
         self.final_mask = torch.nn.Sequential(
             torch.nn.Conv3d(
@@ -523,7 +526,8 @@ class UNet3Psi(torch.nn.Module):
             # Sigmoid applied to each timepoint
             torch.nn.Sigmoid(),
             # Take the mean probability over time
-            Mean(dim=1)
+            Mean(dim=1),
+            Unsqueeze(dim=1)
         )
 
         # Initialise weights

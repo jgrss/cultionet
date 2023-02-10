@@ -52,6 +52,16 @@ class Squeeze(torch.nn.Module):
         return x.squeeze()
 
 
+class Unsqueeze(torch.nn.Module):
+    def __init__(self, dim: int):
+        super(Unsqueeze, self).__init__()
+
+        self.dim = dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.unsqueeze(self.dim)
+
+
 class ConvBlock2d(torch.nn.Module):
     def __init__(
         self,
