@@ -542,13 +542,10 @@ class UNet3Psi(torch.nn.Module):
     def forward(
         self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
-        # Output shape is (B x C X T|D x H x W)
-        x_t = self.temporal_conv(x)
-        # Reshape from (B x C X T|D x H x W) -> (B x C x H x W)
-
+        # Inputs shape is (B x C X T|D x H x W)
         # Backbone
         # 1/1
-        x0_0 = self.conv0_0(x_t.squeeze())
+        x0_0 = self.conv0_0(x)
         # 1/2
         x1_0 = self.conv1_0(x0_0)
         # 1/4
