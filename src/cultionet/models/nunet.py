@@ -521,7 +521,15 @@ class UNet3Psi(torch.nn.Module):
 
         # Initialise weights
         for m in self.modules():
-            if isinstance(m, (torch.nn.Conv2d, torch.nn.BatchNorm2d)):
+            if isinstance(
+                m,
+                (
+                    torch.nn.Conv2d,
+                    torch.nn.BatchNorm2d,
+                    torch.nn.Conv3d,
+                    torch.nn.BatchNorm3d
+                )
+            ):
                 m.apply(weights_init_kaiming)
 
     def forward(
