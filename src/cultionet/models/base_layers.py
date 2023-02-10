@@ -806,7 +806,7 @@ class TemporalConv(torch.nn.Module):
         layers = [
             ConvBlock3d(
                 in_channels=in_channels,
-                in_time=in_time,
+                in_time=0,
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1,
