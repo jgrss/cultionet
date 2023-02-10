@@ -146,17 +146,17 @@ class CultioNet(torch.nn.Module):
         self.ds_num_bands = int(self.ds_num_features / self.ds_num_time)
         self.filters = filters
         self.num_classes = num_classes
-        self.time_aggregate_channels = int(self.filters * self.ds_num_time)
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
         self.temporal_conv = TemporalConv(
             in_channels=self.ds_num_bands,
-            out_channels=self.filters
+            hidden_channels=self.filters,
+            out_channels=1
         )
         self.final_time = torch.nn.Conv2d(
-            self.time_aggregate_channels,
+            self.ds_num_time,
             self.num_classes,
             kernel_size=1,
             padding=0
@@ -164,7 +164,7 @@ class CultioNet(torch.nn.Module):
 
         if model_type == 'UNet3Psi':
             self.mask_model = UNet3Psi(
-                in_channels=self.time_aggregate_channels,
+                in_channels=self.ds_num_time,
                 out_dist_channels=1,
                 out_edge_channels=1,
                 out_mask_channels=self.num_classes,
@@ -174,7 +174,7 @@ class CultioNet(torch.nn.Module):
             )
         elif model_type == 'ResUNet3Psi':
             self.mask_model = ResUNet3Psi(
-                in_channels=self.time_aggregate_channels,
+                in_channels=self.ds_num_time,
                 out_dist_channels=1,
                 out_edge_channels=1,
                 out_mask_channels=self.num_classes,
@@ -203,9 +203,7 @@ class CultioNet(torch.nn.Module):
         # Output shape is (B x C X T|D x H x W)
         logits_time = self.temporal_conv(time_stream)
         # Reshape from (B x C X T|D x H x W) -> (B x C x H x W)
-        logits_time = logits_time.view(
-            nbatch, -1, height, width
-        )
+        logits_time = logits_time.squeeze()
         crop_time = self.cg(self.final_time(logits_time))
         # Main stream
         logits = self.mask_model(logits_time)
