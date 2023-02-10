@@ -582,8 +582,8 @@ class CultioLitModel(pl.LightningModule):
         """Performs a single model forward pass
 
         Returns:
-            distance: Normalized distance from boundaries [0,1].
-            edge: Logits of edge|non-edge.
+            distance: Normalized distance transform (from boundaries), [0,1].
+            edge: Probabilities of edge|non-edge, [0,1].
             crop: Logits of crop|non-crop.
         """
         return self.cultionet_model(batch)

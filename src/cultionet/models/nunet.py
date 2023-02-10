@@ -596,8 +596,7 @@ class ResUNet3Psi(torch.nn.Module):
         out_mask_channels: int = 2,
         init_filter: int = 64,
         dilations: T.List[int] = None,
-        attention: bool = False,
-        rcsb: bool = False
+        attention: bool = False
     ):
         super(ResUNet3Psi, self).__init__()
 
@@ -645,29 +644,25 @@ class ResUNet3Psi(torch.nn.Module):
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
-            attention=attention,
-            rcsb=rcsb
+            attention=attention
         )
         self.convs_2_2 = ResUNet3_2_2(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
-            attention=attention,
-            rcsb=rcsb
+            attention=attention
         )
         self.convs_1_3 = ResUNet3_1_3(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
-            attention=attention,
-            rcsb=rcsb
+            attention=attention
         )
         self.convs_0_4 = ResUNet3_0_4(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
-            attention=attention,
-            rcsb=rcsb
+            attention=attention
         )
 
         edge_activation = torch.nn.Sigmoid() if out_edge_channels == 1 else Softmax(dim=1)
