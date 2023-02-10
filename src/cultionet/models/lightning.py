@@ -521,7 +521,6 @@ class CultioLitModel(pl.LightningModule):
         num_time_features: int = None,
         num_classes: int = 2,
         filters: int = 32,
-        star_rnn_n_layers: int = 4,
         optimizer: str = 'AdamW',
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-4,
@@ -565,8 +564,6 @@ class CultioLitModel(pl.LightningModule):
             ds_features=num_features,
             ds_time_features=num_time_features,
             filters=filters,
-            star_rnn_hidden_dim=filters,
-            star_rnn_n_layers=star_rnn_n_layers,
             num_classes=self.num_classes,
             model_type=model_type
         )
@@ -706,12 +703,12 @@ class CultioLitModel(pl.LightningModule):
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
         # Upstream (deep) loss on crop|non-crop
-        crop_star_loss = self.crop_star_loss(
-            predictions['crop_star'], true_crop
+        crop_time_loss = self.crop_time_loss(
+            predictions['crop_time'], true_crop
         )
         # Main loss
         loss = (
-            crop_star_loss
+            crop_time_loss
             + dist_loss
             + edge_loss
             + crop_loss
@@ -875,7 +872,7 @@ class CultioLitModel(pl.LightningModule):
             transform_logits=True,
             scale_pos_weight=True
         )
-        self.crop_star_loss = TanimotoDistLoss(
+        self.crop_time_loss = TanimotoDistLoss(
             transform_logits=True,
             scale_pos_weight=True
         )
