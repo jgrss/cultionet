@@ -161,7 +161,7 @@ class UNet3Connector(torch.nn.Module):
                 h += [
                     c(
                         self.up(
-                            x, size=prev_same[0][1].shape[-3:], mode='trilinear'
+                            x, size=prev_same[0][1].shape[-2:], mode='bilinear'
                         )
                     )
                 ]
@@ -178,7 +178,7 @@ class UNet3Connector(torch.nn.Module):
             for n, x in zip(range(self.n_stream_down), stream_down):
                 if self.attention:
                     # Gate
-                    g = self.up(x, size=prev_same[0][1].shape[-3:], mode='trilinear')
+                    g = self.up(x, size=prev_same[0][1].shape[-2:], mode='bilinear')
                     c_attn = getattr(self, f'attn_stream_{n}')
                     # Attention gate
                     attn_out = c_attn(g, prev_same_hidden)
@@ -190,7 +190,7 @@ class UNet3Connector(torch.nn.Module):
                     h += [
                         c(
                             self.up(
-                                x, size=prev_same[0][1].shape[-3:], mode='trilinear'
+                                x, size=prev_same[0][1].shape[-2:], mode='bilinear'
                             )
                         )
                     ]
@@ -199,7 +199,7 @@ class UNet3Connector(torch.nn.Module):
         h += [
             self.conv4_0(
                 self.up(
-                    x4_0, size=prev_same[0][1].shape[-3:], mode='trilinear'
+                    x4_0, size=prev_same[0][1].shape[-2:], mode='bilinear'
                 )
             )
         ]
