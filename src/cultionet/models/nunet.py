@@ -439,14 +439,12 @@ class UNet3Psi(torch.nn.Module):
         self.time_conv0 = DoubleConv3d(
             in_channels=in_channels,
             out_channels=channels[0],
-            init_point_conv=True,
             double_dilation=2
         )
         self.time_conv1 = torch.nn.Sequential(
             DoubleConv3d(
                 in_channels=channels[0],
                 out_channels=channels[0],
-                init_point_conv=True,
                 double_dilation=2
             ),
             # Reduce channels to 1, leaving time
