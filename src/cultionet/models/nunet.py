@@ -454,7 +454,9 @@ class UNet3Psi(torch.nn.Module):
                 kernel_size=1,
                 padding=0
             ),
-            Squeeze()
+            Squeeze(),
+            torch.nn.BatchNorm2d(in_time),
+            torch.nn.LeakyReLU(inplace=False)
         )
         self.final_time_dist = torch.nn.Sequential(
             # Reduce channels to 1, leaving time
