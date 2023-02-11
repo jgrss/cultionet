@@ -568,8 +568,8 @@ class DoubleConv3d(torch.nn.Module):
             ConvBlock3d(
                 in_channels=init_channels,
                 out_channels=out_channels,
-                kernel_size=3,
-                padding=1
+                kernel_size=1,
+                padding=0
             ),
             ConvBlock3d(
                 in_channels=out_channels,
