@@ -546,12 +546,11 @@ class UNet3Psi(torch.nn.Module):
         self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
         __, __, __, h, w = x.shape
-        # x = F.interpolate(
-        #     x[:, 1:4],
-        #     size=(6, h, w),
-        #     mode='trilinear'
-        # )
-        x = x[:, 1:4]
+        x = F.interpolate(
+            x[:, 1:4],
+            size=(6, h, w),
+            mode='trilinear'
+        )
         # Inputs shape is (B x C X T|D x H x W)
         # Backbone
         # 1/1
