@@ -10,19 +10,16 @@ from . import model_utils
 from .base_layers import (
     AttentionGate,
     DoubleConv,
-    DoubleConv3d,
+    SpatioTemporalConv3d,
     Mean,
     Permute,
     PoolConv,
-    PoolConv3d,
     PoolResidualConv,
     ResidualConvInit,
     ResidualConv,
     SingleConv,
-    SingleConv3d,
     Softmax,
-    Squeeze,
-    Unsqueeze
+    Squeeze
 )
 from .unet_parts import (
     UNet3P_3_1,
@@ -436,13 +433,13 @@ class UNet3Psi(torch.nn.Module):
         ]
         up_channels = int(channels[0] * 5)
 
-        self.time_conv0 = DoubleConv3d(
+        self.time_conv0 = SpatioTemporalConv3d(
             in_channels=in_channels,
             out_channels=channels[0],
             double_dilation=2
         )
         self.time_conv1 = torch.nn.Sequential(
-            DoubleConv3d(
+            SpatioTemporalConv3d(
                 in_channels=channels[0],
                 out_channels=channels[0],
                 double_dilation=2
@@ -452,8 +449,10 @@ class UNet3Psi(torch.nn.Module):
                 channels[0],
                 1,
                 kernel_size=1,
-                padding=0
+                padding=0,
+                bias=False
             ),
+            # Squeeze to 2d (time)
             Squeeze(),
             torch.nn.BatchNorm2d(in_time),
             torch.nn.LeakyReLU(inplace=False)

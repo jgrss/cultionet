@@ -539,7 +539,7 @@ class ChannelAttention(torch.nn.Module):
         return x * self.module(x)
 
 
-class DoubleConv3d(torch.nn.Module):
+class SpatioTemporalConv3d(torch.nn.Module):
     """A double convolution layer
     """
     def __init__(
@@ -548,7 +548,7 @@ class DoubleConv3d(torch.nn.Module):
         out_channels: int,
         double_dilation: int = 1
     ):
-        super(DoubleConv3d, self).__init__()
+        super(SpatioTemporalConv3d, self).__init__()
 
         layers = [
             ConvBlock3d(
