@@ -35,13 +35,14 @@ class Add(torch.nn.Module):
 
 
 class Mean(torch.nn.Module):
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, keepdim: bool = True):
         super(Mean, self).__init__()
 
         self.dim = dim
+        self.keepdim = keepdim
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x.mean(dim=self.dim)
+        return x.mean(dim=self.dim, keepdim=self.keepdim)
 
 
 class Squeeze(torch.nn.Module):
@@ -545,31 +546,22 @@ class DoubleConv3d(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        init_point_conv: bool = False,
         double_dilation: int = 1
     ):
         super(DoubleConv3d, self).__init__()
 
-        layers = []
-
-        init_channels = in_channels
-        if init_point_conv:
-            layers += [
-                ConvBlock3d(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=(3, 1, 1),
-                    padding=(1, 0, 0)
-                )
-            ]
-            init_channels = out_channels
-
-        layers += [
+        layers = [
             ConvBlock3d(
-                in_channels=init_channels,
+                in_channels=in_channels,
                 out_channels=out_channels,
-                kernel_size=3,
-                padding=1
+                kernel_size=(3, 1, 1),
+                padding=(1, 0, 0)
+            ),
+            ConvBlock3d(
+                in_channels=out_channels,
+                out_channels=out_channels,
+                kernel_size=(1, 3, 3),
+                padding=(0, 1, 1)
             ),
             ConvBlock3d(
                 in_channels=out_channels,

@@ -458,7 +458,7 @@ class UNet3Psi(torch.nn.Module):
             ),
             Squeeze()
         )
-        self.final_time = torch.nn.Sequential(
+        self.final_time_dist = torch.nn.Sequential(
             # Reduce channels to 1, leaving time
             torch.nn.Conv3d(
                 channels[0],
@@ -468,8 +468,31 @@ class UNet3Psi(torch.nn.Module):
             ),
             Squeeze(),
             # Take the mean over time
-            Mean(dim=1),
-            Unsqueeze(dim=1)
+            Mean(dim=1, keepdim=True)
+        )
+        self.final_time_edge = torch.nn.Sequential(
+            # Reduce channels to 1, leaving time
+            torch.nn.Conv3d(
+                channels[0],
+                1,
+                kernel_size=1,
+                padding=0
+            ),
+            Squeeze(),
+            # Take the mean over time
+            Mean(dim=1, keepdim=True)
+        )
+        self.final_time_mask = torch.nn.Sequential(
+            # Reduce channels to 1, leaving time
+            torch.nn.Conv3d(
+                channels[0],
+                1,
+                kernel_size=1,
+                padding=0
+            ),
+            Squeeze(),
+            # Take the mean over time
+            Mean(dim=1, keepdim=True)
         )
 
         self.conv0_0 = SingleConv(
@@ -634,11 +657,12 @@ class UNet3Psi(torch.nn.Module):
             x4_0=x4_0
         )
 
-        time = self.final_time(x)
-
-        dist = self.final_dist(out_0_4['dist'] + time)
-        edge = self.final_edge(out_0_4['edge'] + time)
-        mask = self.final_mask(out_0_4['mask'] + time)
+        dist = out_0_4['dist'] + self.final_time_dist(x)
+        dist = self.final_dist(dist)
+        edge = out_0_4['edge'] + self.final_time_edge(x)
+        edge = self.final_edge(edge)
+        mask = out_0_4['mask'] + self.final_time_mask(x)
+        mask = self.final_mask(mask)
 
         out = {
             'dist': dist,
