@@ -1,7 +1,6 @@
 import typing as T
 
 import torch
-import torch.nn.functional as F
 from torch_geometric import nn
 from torch_geometric.data import Data
 

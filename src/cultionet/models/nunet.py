@@ -39,6 +39,7 @@ from .unet_parts import (
 )
 
 import torch
+import torch.nn.functional as F
 
 
 def weights_init_kaiming(m):
@@ -433,8 +434,6 @@ class UNet3Psi(torch.nn.Module):
         ]
         up_channels = int(channels[0] * 5)
 
-        self.up = model_utils.UpSample()
-
         self.conv0_0 = SingleConv3d(
             in_channels,
             channels[0]
@@ -546,6 +545,12 @@ class UNet3Psi(torch.nn.Module):
     def forward(
         self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
+        __, __, d, h, w = x.shape
+        x = F.interpolate(
+            x,
+            size=(int(d / 2.0), h, w),
+            mode='trilinear'
+        )
         # Inputs shape is (B x C X T|D x H x W)
         # Backbone
         # 1/1
