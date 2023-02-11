@@ -537,7 +537,7 @@ class UNet3Psi(torch.nn.Module):
                     torch.nn.Conv2d,
                     torch.nn.BatchNorm2d,
                     torch.nn.Conv3d,
-                    torch.nn.BatchNorm2d
+                    torch.nn.BatchNorm3d
                 )
             ):
                 m.apply(weights_init_kaiming)
@@ -545,10 +545,10 @@ class UNet3Psi(torch.nn.Module):
     def forward(
         self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
-        __, __, d, h, w = x.shape
+        __, __, __, h, w = x.shape
         x = F.interpolate(
-            x,
-            size=(int(d / 2.0), h, w),
+            x[:, 1:4],
+            size=(6, h, w),
             mode='trilinear'
         )
         # Inputs shape is (B x C X T|D x H x W)
