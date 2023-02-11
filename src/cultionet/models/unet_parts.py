@@ -1,11 +1,11 @@
 import typing as T
 
 from .base_layers import (
-    DoubleConv3d,
-    PoolConv3d,
+    DoubleConv,
+    PoolConv,
     PoolResidualConv,
     ResidualConv,
-    AttentionGate3d
+    AttentionGate
 )
 from . import model_utils
 
@@ -55,7 +55,7 @@ class UNet3Connector(torch.nn.Module):
                 setattr(
                     self,
                     f'pool_{n}',
-                    PoolConv3d(
+                    PoolConv(
                         channels[n],
                         channels[0],
                         pool_size=pool_size
@@ -64,7 +64,7 @@ class UNet3Connector(torch.nn.Module):
                 pool_size = int(pool_size / 2)
                 self.cat_channels += channels[0]
         if is_side_stream:
-            self.prev = DoubleConv3d(
+            self.prev = DoubleConv(
                 up_channels,
                 up_channels,
                 init_point_conv=init_point_conv,
@@ -72,7 +72,7 @@ class UNet3Connector(torch.nn.Module):
             )
         else:
             # Backbone, same level
-            self.prev_backbone = DoubleConv3d(
+            self.prev_backbone = DoubleConv(
                 channels[prev_backbone_channel_index],
                 up_channels,
                 init_point_conv=init_point_conv,
@@ -85,7 +85,7 @@ class UNet3Connector(torch.nn.Module):
                 setattr(
                     self,
                     f'prev_{n}',
-                    DoubleConv3d(
+                    DoubleConv(
                         up_channels,
                         up_channels,
                         init_point_conv=init_point_conv,
@@ -99,7 +99,7 @@ class UNet3Connector(torch.nn.Module):
                 in_stream_channels = up_channels
                 if self.attention:
                     if attention_weights == 'gate':
-                        attention_module = AttentionGate3d(up_channels, up_channels)
+                        attention_module = AttentionGate(up_channels, up_channels)
                     else:
                         # FIXME:
                         raise NameError
@@ -113,7 +113,7 @@ class UNet3Connector(torch.nn.Module):
                 setattr(
                     self,
                     f'stream_{n}',
-                    DoubleConv3d(
+                    DoubleConv(
                         in_stream_channels,
                         up_channels,
                         init_point_conv=init_point_conv,
@@ -122,14 +122,14 @@ class UNet3Connector(torch.nn.Module):
                 )
                 self.cat_channels += up_channels
 
-        self.conv4_0 = DoubleConv3d(
+        self.conv4_0 = DoubleConv(
             channels[4],
             channels[0],
             init_point_conv=init_point_conv
         )
         self.cat_channels += channels[0]
 
-        self.final = DoubleConv3d(
+        self.final = DoubleConv(
             self.cat_channels,
             up_channels,
             init_point_conv=init_point_conv,
