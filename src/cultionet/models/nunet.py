@@ -545,22 +545,20 @@ class UNet3Psi(torch.nn.Module):
     def forward(
         self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
-        __, __, __, h, w = x.shape
-        x = F.interpolate(
-            x[:, 1:4],
-            size=(6, h, w),
-            mode='trilinear'
-        )
         # Inputs shape is (B x C X T|D x H x W)
         # Backbone
         # 1/1
         x0_0 = self.conv0_0(x)
+        x0_0 = model_utils.resample_time(x0_0, dims=-2)
         # 1/2
         x1_0 = self.conv1_0(x0_0)
+        x1_0 = model_utils.resample_time(x1_0, dims=-2)
         # 1/4
         x2_0 = self.conv2_0(x1_0)
+        x2_0 = model_utils.resample_time(x2_0, dims=-2)
         # 1/8
         x3_0 = self.conv3_0(x2_0)
+        x3_0 = model_utils.resample_time(x3_0, dims=-2)
         # 1/16
         x4_0 = self.conv4_0(x3_0)
 
