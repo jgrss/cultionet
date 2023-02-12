@@ -495,6 +495,7 @@ class UNet3Psi(torch.nn.Module):
         )
 
         self.final_dist = torch.nn.Sequential(
+            # 4 -> 13
             ResampleTime(dims=9),
             # Reduce channels to 1, leaving time
             torch.nn.Conv3d(

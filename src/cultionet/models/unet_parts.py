@@ -5,7 +5,8 @@ from .base_layers import (
     PoolConv3d,
     PoolResidualConv,
     ResidualConv,
-    AttentionGate3d
+    AttentionGate3d,
+    ResampleTime
 )
 from . import model_utils
 
@@ -46,12 +47,21 @@ class UNet3Connector(torch.nn.Module):
         if n_pools > 0:
             if n_pools == 3:
                 pool_size = 8
+                resample_time_dim = None
             elif n_pools == 2:
                 pool_size = 4
+                resample_time_dim = -2
             else:
                 pool_size = 2
+                resample_time_dim = -7
 
             for n in range(0, n_pools):
+                if resample_time_dim is not None:
+                    setattr(
+                        self,
+                        f'pool_resample_{n}',
+                        ResampleTime(dims=resample_time_dim)
+                    )
                 setattr(
                     self,
                     f'pool_{n}',
@@ -151,7 +161,11 @@ class UNet3Connector(torch.nn.Module):
                 'There are no convolutions available for the pool layers.'
             for n, x in zip(range(self.n_pools), pools):
                 c = getattr(self, f'pool_{n}')
-                h += [c(x)]
+                if hasattr(self, f'pool_resample_{n}'):
+                    pr = getattr(self, f'pool_resample_{n}')
+                    h += [c(pr(x))]
+                else:
+                    h += [c(x)]
         # Up down layers from the previous head
         if prev_down is not None:
             assert self.n_prev_down == len(prev_down), \
