@@ -463,9 +463,11 @@ class UNet3Psi(torch.nn.Module):
                 channels[0],
                 1,
                 kernel_size=1,
-                padding=0
+                padding=0,
+                bias=False
             ),
             Squeeze(),
+            torch.nn.BatchNorm2d(in_time),
             # Take the mean over time
             Max(dim=1, keepdim=True)
         )
