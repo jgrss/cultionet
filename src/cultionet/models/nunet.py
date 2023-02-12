@@ -10,16 +10,18 @@ from . import model_utils
 from .base_layers import (
     AttentionGate,
     DoubleConv,
-    SpatioTemporalConv3d,
     Mean,
     Permute,
     PoolConv,
+    PoolConv3d,
     PoolResidualConv,
     ResidualConvInit,
     ResidualConv,
     SingleConv,
+    SingleConv3d,
     Softmax,
-    Squeeze
+    Squeeze,
+    Unsqueeze
 )
 from .unet_parts import (
     UNet3P_3_1,
@@ -415,7 +417,6 @@ class UNet3Psi(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        in_time: int,
         init_filter: int = 64,
         init_point_conv: bool = False,
         double_dilation: int = 1,
@@ -433,84 +434,23 @@ class UNet3Psi(torch.nn.Module):
         ]
         up_channels = int(channels[0] * 5)
 
-        self.time_conv0 = SpatioTemporalConv3d(
-            in_channels=in_channels,
-            out_channels=channels[0],
-            double_dilation=2
-        )
-        self.time_conv1 = torch.nn.Sequential(
-            SpatioTemporalConv3d(
-                in_channels=channels[0],
-                out_channels=channels[0],
-                double_dilation=2
-            ),
-            # Reduce channels to 1, leaving time
-            torch.nn.Conv3d(
-                channels[0],
-                1,
-                kernel_size=1,
-                padding=0,
-                bias=False
-            ),
-            # Squeeze to 2d (time)
-            Squeeze(),
-            torch.nn.BatchNorm2d(in_time),
-            torch.nn.LeakyReLU(inplace=False)
-        )
-        self.final_time_dist = torch.nn.Sequential(
-            # Reduce channels to 1, leaving time
-            torch.nn.Conv3d(
-                channels[0],
-                1,
-                kernel_size=1,
-                padding=0
-            ),
-            Squeeze(),
-            # Take the mean over time
-            Mean(dim=1, keepdim=True)
-        )
-        self.final_time_edge = torch.nn.Sequential(
-            # Reduce channels to 1, leaving time
-            torch.nn.Conv3d(
-                channels[0],
-                1,
-                kernel_size=1,
-                padding=0
-            ),
-            Squeeze(),
-            # Take the mean over time
-            Mean(dim=1, keepdim=True)
-        )
-        self.final_time_mask = torch.nn.Sequential(
-            # Reduce channels to 1, leaving time
-            torch.nn.Conv3d(
-                channels[0],
-                1,
-                kernel_size=1,
-                padding=0
-            ),
-            Squeeze(),
-            # Take the mean over time
-            Mean(dim=1, keepdim=True)
-        )
-
-        self.conv0_0 = SingleConv(
-            in_time,
+        self.conv0_0 = SingleConv3d(
+            in_channels,
             channels[0]
         )
-        self.conv1_0 = PoolConv(
+        self.conv1_0 = PoolConv3d(
             channels[0],
             channels[1]
         )
-        self.conv2_0 = PoolConv(
+        self.conv2_0 = PoolConv3d(
             channels[1],
             channels[2]
         )
-        self.conv3_0 = PoolConv(
+        self.conv3_0 = PoolConv3d(
             channels[2],
             channels[3]
         )
-        self.conv4_0 = PoolConv(
+        self.conv4_0 = PoolConv3d(
             channels[3],
             channels[4]
         )
@@ -546,31 +486,47 @@ class UNet3Psi(torch.nn.Module):
         )
 
         self.final_dist = torch.nn.Sequential(
-            torch.nn.Conv2d(
+            # Reduce channels to 1, leaving time
+            torch.nn.Conv3d(
                 up_channels,
                 1,
                 kernel_size=1,
                 padding=0
             ),
-            torch.nn.Sigmoid()
+            Squeeze(),
+            # Sigmoid applied to each timepoint
+            torch.nn.Sigmoid(),
+            # Take the mean over time
+            Mean(dim=1),
+            Unsqueeze(dim=1)
         )
         self.final_edge = torch.nn.Sequential(
-            torch.nn.Conv2d(
+            torch.nn.Conv3d(
                 up_channels,
                 1,
                 kernel_size=1,
                 padding=0
             ),
-            torch.nn.Sigmoid()
+            Squeeze(),
+            # Sigmoid applied to each timepoint
+            torch.nn.Sigmoid(),
+            # Take the mean probability over time
+            Mean(dim=1),
+            Unsqueeze(dim=1)
         )
         self.final_mask = torch.nn.Sequential(
-            torch.nn.Conv2d(
+            torch.nn.Conv3d(
                 up_channels,
                 1,
                 kernel_size=1,
                 padding=0
             ),
-            torch.nn.Sigmoid()
+            Squeeze(),
+            # Sigmoid applied to each timepoint
+            torch.nn.Sigmoid(),
+            # Take the mean probability over time
+            Mean(dim=1),
+            Unsqueeze(dim=1)
         )
 
         # Initialise weights
@@ -589,19 +545,16 @@ class UNet3Psi(torch.nn.Module):
     def forward(
         self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
-        # __, __, __, h, w = x.shape
-        # x = F.interpolate(
-        #     x[:, 1:4],
-        #     size=(6, h, w),
-        #     mode='trilinear'
-        # )
+        __, __, __, h, w = x.shape
+        x = F.interpolate(
+            x[:, 1:4],
+            size=(6, h, w),
+            mode='trilinear'
+        )
         # Inputs shape is (B x C X T|D x H x W)
-        x = self.time_conv0(x)
-        h = self.time_conv1(x)
-        # h shape is (B x C x H x W)
         # Backbone
         # 1/1
-        x0_0 = self.conv0_0(h)
+        x0_0 = self.conv0_0(x)
         # 1/2
         x1_0 = self.conv1_0(x0_0)
         # 1/4
@@ -656,12 +609,9 @@ class UNet3Psi(torch.nn.Module):
             x4_0=x4_0
         )
 
-        dist = out_0_4['dist'] + self.final_time_dist(x)
-        dist = self.final_dist(dist)
-        edge = out_0_4['edge'] + self.final_time_edge(x)
-        edge = self.final_edge(edge)
-        mask = out_0_4['mask'] + self.final_time_mask(x)
-        mask = self.final_mask(mask)
+        dist = self.final_dist(out_0_4['dist'])
+        edge = self.final_edge(out_0_4['edge'])
+        mask = self.final_mask(out_0_4['mask'])
 
         out = {
             'dist': dist,
