@@ -9,6 +9,17 @@ def get_batch_count(batch: torch.Tensor) -> int:
     return batch.unique().size(0)
 
 
+def resample_time(x: torch.Tensor, dims: int) -> torch.Tensor:
+    __, __, d, h, w = x.shape
+    x = F.interpolate(
+        x,
+        size=(d + dims, h, w),
+        mode='trilinear'
+    )
+
+    return x
+
+
 class UpSample(torch.nn.Module):
     """Up-samples a tensor
     """
