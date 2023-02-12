@@ -57,13 +57,11 @@ class Mean(torch.nn.Module):
 
 
 class Squeeze(torch.nn.Module):
-    def __init__(self, dim: T.Optional[int] = None):
+    def __init__(self):
         super(Squeeze, self).__init__()
 
-        self.dim = dim
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x.squeeze(dim=self.dim)
+        return x.squeeze()
 
 
 class Unsqueeze(torch.nn.Module):
