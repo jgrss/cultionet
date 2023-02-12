@@ -415,6 +415,7 @@ class UNet3Psi(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
+        in_time: int,
         init_filter: int = 64,
         init_point_conv: bool = False,
         double_dilation: int = 1,
@@ -442,14 +443,26 @@ class UNet3Psi(torch.nn.Module):
                 in_channels=channels[0],
                 out_channels=channels[0],
                 double_dilation=2
+            )
+        )
+        self.reduce_to_time = torch.nn.Sequential(
+            SpatioTemporalConv3d(
+                in_channels=channels[0],
+                out_channels=1,
+                double_dilation=1
             ),
-            # Temporal max logit
+            Squeeze()
+        )
+        # (B x C x T|D x H x W)
+        # Temporal max logit
+        # Squeeze to 2d (B x C x H x W)
+        self.reduce_to_channels = torch.nn.Sequential(
             Max(dim=2),
-            # Squeeze to 2d (B x C x H x W)
+            Squeeze()
         )
 
         self.conv0_0 = SingleConv(
-            channels[0],
+            in_time + channels[0],
             channels[0]
         )
         self.conv1_0 = PoolConv(
@@ -545,6 +558,13 @@ class UNet3Psi(torch.nn.Module):
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
         # Inputs shape is (B x C X T|D x H x W)
         h = self.time_conv0(x)
+        h = torch.cat(
+            [
+                self.reduce_to_time(h),
+                self.reduce_to_channels(h)
+            ],
+            dim=1
+        )
         # h shape is (B x C x H x W)
         # Backbone
         # 1/1
