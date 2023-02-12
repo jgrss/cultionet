@@ -42,7 +42,7 @@ class Max(torch.nn.Module):
         self.keepdim = keepdim
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.max(x, dim=self.dim, keepdim=self.keepdim)
+        return x.max(dim=self.dim, keepdim=self.keepdim)[0]
 
 
 class Mean(torch.nn.Module):
@@ -53,7 +53,7 @@ class Mean(torch.nn.Module):
         self.keepdim = keepdim
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.mean(x, dim=self.dim, keepdim=self.keepdim)
+        return x.mean(dim=self.dim, keepdim=self.keepdim)
 
 
 class Squeeze(torch.nn.Module):
@@ -63,7 +63,7 @@ class Squeeze(torch.nn.Module):
         self.dim = dim
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.squeeze(x, dim=self.dim)
+        return x.squeeze(dim=self.dim)
 
 
 class Unsqueeze(torch.nn.Module):

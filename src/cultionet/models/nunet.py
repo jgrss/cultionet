@@ -446,7 +446,6 @@ class UNet3Psi(torch.nn.Module):
             # Temporal max logit
             Max(dim=2),
             # Squeeze to 2d (B x C x H x W)
-            Squeeze()
         )
 
         self.conv0_0 = SingleConv(
