@@ -35,7 +35,7 @@ class Add(torch.nn.Module):
 
 
 class Max(torch.nn.Module):
-    def __init__(self, dim: int, keepdim: bool = True):
+    def __init__(self, dim: int, keepdim: bool = False):
         super(Max, self).__init__()
 
         self.dim = dim
@@ -46,7 +46,7 @@ class Max(torch.nn.Module):
 
 
 class Mean(torch.nn.Module):
-    def __init__(self, dim: int, keepdim: bool = True):
+    def __init__(self, dim: int, keepdim: bool = False):
         super(Mean, self).__init__()
 
         self.dim = dim
@@ -551,7 +551,7 @@ class ChannelAttention(torch.nn.Module):
 
 
 class SpatioTemporalConv3d(torch.nn.Module):
-    """A double convolution layer
+    """A spatio-temporal convolution layer
     """
     def __init__(
         self,

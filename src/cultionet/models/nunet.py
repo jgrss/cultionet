@@ -415,7 +415,6 @@ class UNet3Psi(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        in_time: int,
         init_filter: int = 64,
         init_point_conv: bool = False,
         double_dilation: int = 1,
@@ -433,47 +432,25 @@ class UNet3Psi(torch.nn.Module):
         ]
         up_channels = int(channels[0] * 5)
 
-        self.time_conv0 = SpatioTemporalConv3d(
-            in_channels=in_channels,
-            out_channels=channels[0],
-            double_dilation=2
-        )
-        self.time_conv1 = torch.nn.Sequential(
+        self.time_conv0 = torch.nn.Sequential(
+            SpatioTemporalConv3d(
+                in_channels=in_channels,
+                out_channels=channels[0],
+                double_dilation=1
+            ),
             SpatioTemporalConv3d(
                 in_channels=channels[0],
                 out_channels=channels[0],
                 double_dilation=2
             ),
-            # Reduce channels to 1, leaving time
-            torch.nn.Conv3d(
-                channels[0],
-                1,
-                kernel_size=1,
-                padding=0,
-                bias=False
-            ),
-            # Squeeze to 2d (time)
-            Squeeze(),
-            torch.nn.BatchNorm2d(in_time),
-            torch.nn.LeakyReLU(inplace=False)
-        )
-        self.time_conv2 = torch.nn.Sequential(
-            # Reduce channels to 1, leaving time
-            torch.nn.Conv3d(
-                channels[0],
-                1,
-                kernel_size=1,
-                padding=0,
-                bias=False
-            ),
-            Squeeze(),
-            torch.nn.BatchNorm2d(in_time),
-            # Take the mean over time
-            # Max(dim=1, keepdim=True)
+            # Temporal max logit
+            Max(dim=2),
+            # Squeeze to 2d (B x C x H x W)
+            Squeeze()
         )
 
         self.conv0_0 = SingleConv(
-            in_time,
+            channels[0],
             channels[0]
         )
         self.conv1_0 = PoolConv(
@@ -567,16 +544,8 @@ class UNet3Psi(torch.nn.Module):
     def forward(
         self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
-        # __, __, __, h, w = x.shape
-        # x = F.interpolate(
-        #     x[:, 1:4],
-        #     size=(6, h, w),
-        #     mode='trilinear'
-        # )
         # Inputs shape is (B x C X T|D x H x W)
-        x = self.time_conv0(x)
-        h = self.time_conv1(x)
-        h = h + self.time_conv2(x)
+        h = self.time_conv0(x)
         # h shape is (B x C x H x W)
         # Backbone
         # 1/1
