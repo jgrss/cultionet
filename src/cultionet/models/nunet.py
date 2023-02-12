@@ -21,7 +21,8 @@ from .base_layers import (
     SingleConv3d,
     Softmax,
     Squeeze,
-    Unsqueeze
+    Unsqueeze,
+    ResampleTime
 )
 from .unet_parts import (
     UNet3P_3_1,
@@ -438,13 +439,21 @@ class UNet3Psi(torch.nn.Module):
             in_channels,
             channels[0]
         )
-        self.conv1_0 = PoolConv3d(
-            channels[0],
-            channels[1]
+        self.conv1_0 = torch.nn.Sequential(
+            # 12 -> 6
+            ResampleTime(dims=-6),
+            PoolConv3d(
+                channels[0],
+                channels[1]
+            )
         )
-        self.conv2_0 = PoolConv3d(
-            channels[1],
-            channels[2]
+        self.conv2_0 = torch.nn.Sequential(
+            # 6 -> 4
+            ResampleTime(dims=-2),
+            PoolConv3d(
+                channels[1],
+                channels[2]
+            )
         )
         self.conv3_0 = PoolConv3d(
             channels[2],
@@ -549,16 +558,12 @@ class UNet3Psi(torch.nn.Module):
         # Backbone
         # 1/1
         x0_0 = self.conv0_0(x)
-        x0_0 = model_utils.resample_time(x0_0, dims=-2)
         # 1/2
         x1_0 = self.conv1_0(x0_0)
-        x1_0 = model_utils.resample_time(x1_0, dims=-2)
         # 1/4
         x2_0 = self.conv2_0(x1_0)
-        x2_0 = model_utils.resample_time(x2_0, dims=-2)
         # 1/8
         x3_0 = self.conv3_0(x2_0)
-        x3_0 = model_utils.resample_time(x3_0, dims=-2)
         # 1/16
         x4_0 = self.conv4_0(x3_0)
 

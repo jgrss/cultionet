@@ -7,6 +7,23 @@ import torch.nn.functional as F
 from torch_geometric import nn
 
 
+class ResampleTime(torch.nn.Module):
+    def __init__(self, dims: int):
+        super(ResampleTime, self).__init__()
+
+        self.dims = dims
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        __, __, d, h, w = x.shape
+        x = F.interpolate(
+            x,
+            size=(d + self.dims, h, w),
+            mode='trilinear'
+        )
+
+        return x
+
+
 class Softmax(torch.nn.Module):
     def __init__(self, dim: int = 1):
         super(Softmax, self).__init__()
