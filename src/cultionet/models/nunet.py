@@ -440,8 +440,8 @@ class UNet3Psi(torch.nn.Module):
             channels[0]
         )
         self.conv1_0 = torch.nn.Sequential(
-            # 12 -> 6
-            ResampleTime(dims=-6),
+            # 13 -> 6
+            ResampleTime(dims=-7),
             PoolConv3d(
                 channels[0],
                 channels[1]
@@ -495,6 +495,7 @@ class UNet3Psi(torch.nn.Module):
         )
 
         self.final_dist = torch.nn.Sequential(
+            ResampleTime(dims=9),
             # Reduce channels to 1, leaving time
             torch.nn.Conv3d(
                 up_channels,
@@ -510,6 +511,7 @@ class UNet3Psi(torch.nn.Module):
             Unsqueeze(dim=1)
         )
         self.final_edge = torch.nn.Sequential(
+            ResampleTime(dims=9),
             torch.nn.Conv3d(
                 up_channels,
                 1,
@@ -524,6 +526,7 @@ class UNet3Psi(torch.nn.Module):
             Unsqueeze(dim=1)
         )
         self.final_mask = torch.nn.Sequential(
+            ResampleTime(dims=9),
             torch.nn.Conv3d(
                 up_channels,
                 1,
