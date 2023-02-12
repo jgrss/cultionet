@@ -11,7 +11,7 @@ from .base_layers import (
     AttentionGate,
     DoubleConv,
     SpatioTemporalConv3d,
-    Mean,
+    Max,
     Permute,
     PoolConv,
     PoolResidualConv,
@@ -457,7 +457,7 @@ class UNet3Psi(torch.nn.Module):
             torch.nn.BatchNorm2d(in_time),
             torch.nn.LeakyReLU(inplace=False)
         )
-        self.final_time_dist = torch.nn.Sequential(
+        self.time_conv2 = torch.nn.Sequential(
             # Reduce channels to 1, leaving time
             torch.nn.Conv3d(
                 channels[0],
@@ -467,31 +467,7 @@ class UNet3Psi(torch.nn.Module):
             ),
             Squeeze(),
             # Take the mean over time
-            Mean(dim=1, keepdim=True)
-        )
-        self.final_time_edge = torch.nn.Sequential(
-            # Reduce channels to 1, leaving time
-            torch.nn.Conv3d(
-                channels[0],
-                1,
-                kernel_size=1,
-                padding=0
-            ),
-            Squeeze(),
-            # Take the mean over time
-            Mean(dim=1, keepdim=True)
-        )
-        self.final_time_mask = torch.nn.Sequential(
-            # Reduce channels to 1, leaving time
-            torch.nn.Conv3d(
-                channels[0],
-                1,
-                kernel_size=1,
-                padding=0
-            ),
-            Squeeze(),
-            # Take the mean over time
-            Mean(dim=1, keepdim=True)
+            Max(dim=1, keepdim=True)
         )
 
         self.conv0_0 = SingleConv(
@@ -598,6 +574,7 @@ class UNet3Psi(torch.nn.Module):
         # Inputs shape is (B x C X T|D x H x W)
         x = self.time_conv0(x)
         h = self.time_conv1(x)
+        h = h + self.time_conv2(x)
         # h shape is (B x C x H x W)
         # Backbone
         # 1/1
@@ -656,12 +633,9 @@ class UNet3Psi(torch.nn.Module):
             x4_0=x4_0
         )
 
-        dist = out_0_4['dist'] + self.final_time_dist(x)
-        dist = self.final_dist(dist)
-        edge = out_0_4['edge'] + self.final_time_edge(x)
-        edge = self.final_edge(edge)
-        mask = out_0_4['mask'] + self.final_time_mask(x)
-        mask = self.final_mask(mask)
+        dist = self.final_dist(out_0_4['dist'])
+        edge = self.final_edge(out_0_4['edge'])
+        mask = self.final_mask(out_0_4['mask'])
 
         out = {
             'dist': dist,

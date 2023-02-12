@@ -34,6 +34,17 @@ class Add(torch.nn.Module):
         return x + y
 
 
+class Max(torch.nn.Module):
+    def __init__(self, dim: int, keepdim: bool = True):
+        super(Max, self).__init__()
+
+        self.dim = dim
+        self.keepdim = keepdim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.max(dim=self.dim, keepdim=self.keepdim)
+
+
 class Mean(torch.nn.Module):
     def __init__(self, dim: int, keepdim: bool = True):
         super(Mean, self).__init__()
