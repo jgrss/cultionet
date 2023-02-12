@@ -469,7 +469,7 @@ class UNet3Psi(torch.nn.Module):
             Squeeze(),
             torch.nn.BatchNorm2d(in_time),
             # Take the mean over time
-            Max(dim=1, keepdim=True)
+            # Max(dim=1, keepdim=True)
         )
 
         self.conv0_0 = SingleConv(
