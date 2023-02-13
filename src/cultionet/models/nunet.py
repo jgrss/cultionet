@@ -435,6 +435,12 @@ class UNet3Psi(torch.nn.Module):
             init_filter*16
         ]
         up_channels = int(channels[0] * 5)
+        time_channels = {
+            'low': 3,
+            'medium': 4,
+            'high': 6,
+            'input': in_time
+        }
 
         self.conv0_0 = SingleConv3d(
             in_channels,
@@ -442,7 +448,7 @@ class UNet3Psi(torch.nn.Module):
         )
         self.conv1_0 = torch.nn.Sequential(
             # 13 -> 6
-            ResampleTime(dims=6),
+            ResampleTime(dims=time_channels['high']),
             PoolConv3d(
                 in_channels=channels[0],
                 in_time=in_time,
@@ -451,7 +457,7 @@ class UNet3Psi(torch.nn.Module):
         )
         self.conv2_0 = torch.nn.Sequential(
             # 6 -> 4
-            ResampleTime(dims=4),
+            ResampleTime(dims=time_channels['medium']),
             PoolConv3d(
                 in_channels=channels[1],
                 in_time=in_time,
@@ -460,7 +466,7 @@ class UNet3Psi(torch.nn.Module):
         )
         self.conv3_0 = torch.nn.Sequential(
             # 4 -> 3
-            ResampleTime(dims=3),
+            ResampleTime(dims=time_channels['low']),
             PoolConv3d(
                 in_channels=channels[2],
                 in_time=in_time,
@@ -476,28 +482,50 @@ class UNet3Psi(torch.nn.Module):
         # Connect 3
         self.convs_3_1 = UNet3_3_1(
             channels=channels,
-            in_time=in_time,
+            in_times={
+                'input': time_channels['low'],
+                'low': time_channels['low']
+            },
             up_channels=up_channels,
             attention=attention,
             double_dilation=double_dilation
         )
         self.convs_2_2 = UNet3_2_2(
             channels=channels,
-            in_time=in_time,
+            in_times={
+                'input': time_channels['medium'],
+                'low': time_channels['low'],
+                'down': [time_channels['low']]
+            },
             up_channels=up_channels,
             attention=attention,
             double_dilation=double_dilation
         )
         self.convs_1_3 = UNet3_1_3(
             channels=channels,
-            in_time=in_time,
+            in_times={
+                'input': time_channels['high'],
+                'low': time_channels['low'],
+                'down': [
+                    time_channels['low'],
+                    time_channels['medium']
+                ]
+            },
             up_channels=up_channels,
             attention=attention,
             double_dilation=double_dilation
         )
         self.convs_0_4 = UNet3_0_4(
             channels=channels,
-            in_time=in_time,
+            in_times={
+                'input': time_channels['input'],
+                'low': time_channels['low'],
+                'down': [
+                    time_channels['low'],
+                    time_channels['medium'],
+                    time_channels['high']
+                ]
+            },
             up_channels=up_channels,
             attention=attention,
             double_dilation=double_dilation
