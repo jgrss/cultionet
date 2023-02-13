@@ -605,7 +605,7 @@ class DoubleConv3d(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, __, __, h, w = x.shape
-        rs = Reshape(b, -1, h, w)
+        rs = Reshape(dims=(b, -1, h, w))
         h = self.seq(x)
         h = h + self.seq_dilated(rs(x))
 
