@@ -159,11 +159,8 @@ class UNet3Connector(torch.nn.Module):
                 'There are no convolutions available for the pool layers.'
             for n, x in zip(range(self.n_pools), pools):
                 c = getattr(self, f'pool_{n}')
-                if hasattr(self, f'pool_resample_{n}'):
-                    pr = getattr(self, f'pool_resample_{n}')
-                    h += [c(pr(x))]
-                else:
-                    h += [c(x)]
+                pr = getattr(self, f'pool_resample_{n}')
+                h += [c(pr(x))]
         # Up down layers from the previous head
         if prev_down is not None:
             assert self.n_prev_down == len(prev_down), \

@@ -14,12 +14,13 @@ class ResampleTime(torch.nn.Module):
         self.dims = dims
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        __, __, __, h, w = x.shape
-        x = F.interpolate(
-            x,
-            size=(self.dims, h, w),
-            mode='trilinear'
-        )
+        __, __, input_dims, height, width = x.shape
+        if self.dims != input_dims:
+            x = F.interpolate(
+                x,
+                size=(self.dims, height, width),
+                mode='trilinear'
+            )
 
         return x
 
