@@ -666,9 +666,7 @@ class CultioLitModel(pl.LightningModule):
 
         return x
 
-    def on_train_epoch_start(self):
-        print(self.optimizers().optimizer.param_groups[0]['eps'])
-        import ipdb; ipdb.set_trace()
+    # def on_train_epoch_start(self):
     #     # Get the current learning rate from the optimizer
     #     lr = self.optimizers().optimizer.param_groups[0]['lr']
 
@@ -874,7 +872,6 @@ class CultioLitModel(pl.LightningModule):
                 weight_decay=self.weight_decay,
                 eps=self.eps
             )
-            print(optimizer)
         elif self.optimizer == 'SGD':
             optimizer = torch.optim.SGD(
                 params_list,
