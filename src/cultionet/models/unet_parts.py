@@ -64,12 +64,11 @@ class UNet3Connector(torch.nn.Module):
                         pool_size=pool_size
                     )
                 )
-                if n > 0:
-                    setattr(
-                        self,
-                        f'pool_resample_{n}',
-                        ResampleTime(dims=in_time)
-                    )
+                setattr(
+                    self,
+                    f'pool_resample_{n}',
+                    ResampleTime(dims=in_time)
+                )
                 pool_size = int(pool_size / 2)
                 self.cat_channels += channels[0]
         if is_side_stream:
@@ -160,14 +159,11 @@ class UNet3Connector(torch.nn.Module):
                 'There are no convolutions available for the pool layers.'
             for n, x in zip(range(self.n_pools), pools):
                 c = getattr(self, f'pool_{n}')
-                try:
-                    if hasattr(self, f'pool_resample_{n}'):
-                        pr = getattr(self, f'pool_resample_{n}')
-                        h += [c(pr(x))]
-                    else:
-                        h += [c(x)]
-                except:
-                    import ipdb; ipdb.set_trace()
+                if hasattr(self, f'pool_resample_{n}'):
+                    pr = getattr(self, f'pool_resample_{n}')
+                    h += [c(pr(x))]
+                else:
+                    h += [c(x)]
         # Up down layers from the previous head
         if prev_down is not None:
             assert self.n_prev_down == len(prev_down), \
