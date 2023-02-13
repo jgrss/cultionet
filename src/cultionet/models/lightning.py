@@ -872,6 +872,8 @@ class CultioLitModel(pl.LightningModule):
                 weight_decay=self.weight_decay,
                 eps=self.eps
             )
+            import ipdb; ipdb.set_trace()
+            # eps = self.optimizers().optimizer.param_groups[0]['eps']
         elif self.optimizer == 'SGD':
             optimizer = torch.optim.SGD(
                 params_list,
