@@ -263,8 +263,8 @@ class AttentionGate3d(torch.nn.Module):
             g: Lower dimension
         """
         h = self.seq(x, g)
-        if h.shape[-2:] != x.shape[-2:]:
-            h = self.up(h, size=x.shape[-2:], mode='bilinear')
+        if h.shape[-3:] != x.shape[-3:]:
+            h = self.up(h, size=x.shape[-3:], mode='trilinear')
 
         return self.final(x * h)
 

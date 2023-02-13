@@ -32,8 +32,8 @@ class UNet3Connector(torch.nn.Module):
     ):
         super(UNet3Connector, self).__init__()
 
-        assert attention_weights in ['gate', 'fractal'], \
-            "Choose from 'gate' or 'fractal' attention weights."
+        assert attention_weights == 'gate', \
+            "Only 'gate' attention weights are supported."
 
         self.n_pools = n_pools
         self.n_prev_down = n_prev_down
@@ -106,12 +106,8 @@ class UNet3Connector(torch.nn.Module):
             for n in range(0, self.n_stream_down):
                 in_stream_channels = up_channels
                 if self.attention:
-                    if attention_weights == 'gate':
-                        attention_module = AttentionGate3d(up_channels, up_channels)
-                    else:
-                        # FIXME:
-                        raise NameError
-
+                    attention_module = AttentionGate3d(up_channels, up_channels)
+                    
                     setattr(
                         self,
                         f'attn_stream_{n}',

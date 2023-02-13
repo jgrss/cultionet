@@ -547,8 +547,7 @@ class UNet3Psi(torch.nn.Module):
                 kernel_size=1,
                 padding=0
             ),
-            Squeeze(),
-            # Sigmoid applied to each timepoint
+            # Softmax applied to each timepoint
             Softmax(dim=1),
             # Take the mean probability over time
             Mean(dim=2, keepdim=False)
