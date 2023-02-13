@@ -582,7 +582,6 @@ class UNet3Psi(torch.nn.Module):
         x3_0 = self.conv3_0(x2_0)
         # 1/16
         x4_0 = self.conv4_0(x3_0)
-        import ipdb; ipdb.set_trace()
 
         # 1/8 connection
         out_3_1 = self.convs_3_1(
