@@ -66,8 +66,9 @@ class UNet3Connector(torch.nn.Module):
                     self,
                     f'pool_{n}',
                     PoolConv3d(
-                        channels[n],
-                        channels[0],
+                        in_channels=channels[n],
+                        in_time=in_time,
+                        out_channels=channels[0],
                         pool_size=pool_size
                     )
                 )
