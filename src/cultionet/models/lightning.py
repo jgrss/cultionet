@@ -524,7 +524,7 @@ class CultioLitModel(pl.LightningModule):
         optimizer: str = 'AdamW',
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-4,
-        eps: float = 1e-8,
+        eps: float = 1e-4,
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
         model_type: str = 'UNet3Psi',
