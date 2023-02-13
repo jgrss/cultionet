@@ -584,19 +584,19 @@ class UNet3_1_3(torch.nn.Module):
             prev_same=[('prev_backbone', x1_0)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h2_2_dist, h3_1_dist]
+            stream_down=[h3_1_dist, h2_2_dist]
         )
         h_edge = self.conv_edge(
             prev_same=[('prev', h_dist)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h2_2_edge, h3_1_edge]
+            stream_down=[h3_1_edge, h2_2_edge]
         )
         h_mask = self.conv_mask(
             prev_same=[('prev', h_edge)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h2_2_mask, h3_1_mask]
+            stream_down=[h3_1_mask, h2_2_mask]
         )
 
         return {
@@ -667,17 +667,17 @@ class UNet3_0_4(torch.nn.Module):
         h_dist = self.conv_dist(
             prev_same=[('prev_backbone', x0_0)],
             x4_0=x4_0,
-            stream_down=[h1_3_dist, h2_2_dist, h3_1_dist]
+            stream_down=[h3_1_dist, h2_2_dist, h1_3_dist]
         )
         h_edge = self.conv_edge(
             prev_same=[('prev', h_dist)],
             x4_0=x4_0,
-            stream_down=[h1_3_edge, h2_2_edge, h3_1_edge]
+            stream_down=[h3_1_edge, h2_2_edge, h1_3_edge]
         )
         h_mask = self.conv_mask(
             prev_same=[('prev', h_edge)],
             x4_0=x4_0,
-            stream_down=[h1_3_mask, h2_2_mask, h3_1_mask]
+            stream_down=[h3_1_mask, h2_2_mask, h1_3_mask]
         )
 
         return {
