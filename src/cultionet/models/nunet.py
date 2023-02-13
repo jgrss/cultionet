@@ -418,6 +418,7 @@ class UNet3Psi(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
+        in_time: int,
         init_filter: int = 64,
         init_point_conv: bool = False,
         double_dilation: int = 1,
@@ -425,6 +426,7 @@ class UNet3Psi(torch.nn.Module):
     ):
         super(UNet3Psi, self).__init__()
 
+        self.in_time = in_time
         init_filter = int(init_filter)
         channels = [
             init_filter,
@@ -441,7 +443,7 @@ class UNet3Psi(torch.nn.Module):
         )
         self.conv1_0 = torch.nn.Sequential(
             # 13 -> 6
-            ResampleTime(dims=-7),
+            ResampleTime(dims=6),
             PoolConv3d(
                 channels[0],
                 channels[1]
@@ -449,7 +451,7 @@ class UNet3Psi(torch.nn.Module):
         )
         self.conv2_0 = torch.nn.Sequential(
             # 6 -> 4
-            ResampleTime(dims=-2),
+            ResampleTime(dims=4),
             PoolConv3d(
                 channels[1],
                 channels[2]
@@ -496,7 +498,7 @@ class UNet3Psi(torch.nn.Module):
 
         self.final_dist = torch.nn.Sequential(
             # 4 -> 13
-            ResampleTime(dims=9),
+            ResampleTime(dims=self.in_time),
             # Reduce channels to 1, leaving time
             torch.nn.Conv3d(
                 up_channels,
@@ -512,7 +514,7 @@ class UNet3Psi(torch.nn.Module):
             Unsqueeze(dim=1)
         )
         self.final_edge = torch.nn.Sequential(
-            ResampleTime(dims=9),
+            ResampleTime(dims=self.in_time),
             torch.nn.Conv3d(
                 up_channels,
                 1,
@@ -527,7 +529,7 @@ class UNet3Psi(torch.nn.Module):
             Unsqueeze(dim=1)
         )
         self.final_mask = torch.nn.Sequential(
-            ResampleTime(dims=9),
+            ResampleTime(dims=self.in_time),
             torch.nn.Conv3d(
                 up_channels,
                 1,
