@@ -668,7 +668,10 @@ class CultioLitModel(pl.LightningModule):
 
     # def on_train_epoch_start(self):
     #     # Get the current learning rate from the optimizer
-    #     lr = self.optimizers().optimizer.param_groups[0]['lr']
+    #     eps = self.optimizers().optimizer.param_groups[0]['eps']
+    #     weight_decay = self.optimizers().optimizer.param_groups[0]['weight_decay']
+    #     if (weight_decay != self.weight_decay) or (eps != self.eps):
+    #         self.configure_optimizers()
 
     def on_validation_epoch_end(self, *args, **kwargs):
         """Save the model on validation end
