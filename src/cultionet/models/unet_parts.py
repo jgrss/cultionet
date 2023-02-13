@@ -42,6 +42,7 @@ class UNet3Connector(torch.nn.Module):
         self.cat_channels = 0
 
         self.up = model_utils.UpSample()
+        self.rs = ResampleTime(dims=in_times['input'])
 
         # Pool layers
         if n_pools > 0:
@@ -58,7 +59,7 @@ class UNet3Connector(torch.nn.Module):
                     setattr(
                         self,
                         f'pool_resample_{n}',
-                        ResampleTime(dims=resample_time_dim)
+                        ResampleTime(dims=in_times['input'])
                     )
                 setattr(
                     self,
@@ -102,7 +103,7 @@ class UNet3Connector(torch.nn.Module):
                     f'prev_{n}',
                     DoubleConv3d(
                         in_channels=up_channels,
-                        in_time=in_times['down'][n],
+                        in_time=in_times['input'],
                         out_channels=up_channels,
                         double_dilation=double_dilation
                     )
@@ -130,7 +131,7 @@ class UNet3Connector(torch.nn.Module):
                     f'stream_{n}',
                     DoubleConv3d(
                         in_channels=in_stream_channels,
-                        in_time=in_times['down'][n],
+                        in_time=in_times['input'],
                         out_channels=up_channels,
                         double_dilation=double_dilation
                     )
@@ -139,7 +140,7 @@ class UNet3Connector(torch.nn.Module):
 
         self.conv4_0 = DoubleConv3d(
             in_channels=channels[4],
-            in_time=in_times['low'],
+            in_time=in_times['input'],
             out_channels=channels[0]
         )
         self.cat_channels += channels[0]
