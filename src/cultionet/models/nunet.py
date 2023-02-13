@@ -631,6 +631,13 @@ class UNet3Psi(torch.nn.Module):
         edge = self.final_edge(out_0_4['edge'])
         mask = self.final_mask(out_0_4['mask'])
 
+        if len(dist.shape) == 3:
+            dist = dist.unsqueeze(1)
+        if len(edge.shape) == 3:
+            edge = edge.unsqueeze(1)
+        if len(mask.shape) == 3:
+            mask = mask.unsqueeze(1)
+
         out = {
             'dist': dist,
             'edge': edge,
