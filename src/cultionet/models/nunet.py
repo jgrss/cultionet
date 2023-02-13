@@ -482,50 +482,28 @@ class UNet3Psi(torch.nn.Module):
         # Connect 3
         self.convs_3_1 = UNet3_3_1(
             channels=channels,
-            in_times={
-                'input': time_channels['low'],
-                'low': time_channels['low']
-            },
+            in_time=time_channels['low'],
             up_channels=up_channels,
             attention=attention,
             double_dilation=double_dilation
         )
         self.convs_2_2 = UNet3_2_2(
             channels=channels,
-            in_times={
-                'input': time_channels['medium'],
-                'low': time_channels['low'],
-                'down': [time_channels['low']]
-            },
+            in_time=time_channels['medium'],
             up_channels=up_channels,
             attention=attention,
             double_dilation=double_dilation
         )
         self.convs_1_3 = UNet3_1_3(
             channels=channels,
-            in_times={
-                'input': time_channels['high'],
-                'low': time_channels['low'],
-                'down': [
-                    time_channels['low'],
-                    time_channels['medium']
-                ]
-            },
+            in_time=time_channels['high'],
             up_channels=up_channels,
             attention=attention,
             double_dilation=double_dilation
         )
         self.convs_0_4 = UNet3_0_4(
             channels=channels,
-            in_times={
-                'input': time_channels['input'],
-                'low': time_channels['low'],
-                'down': [
-                    time_channels['low'],
-                    time_channels['medium'],
-                    time_channels['high']
-                ]
-            },
+            in_time=time_channels['input'],
             up_channels=up_channels,
             attention=attention,
             double_dilation=double_dilation

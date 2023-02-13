@@ -19,7 +19,7 @@ class UNet3Connector(torch.nn.Module):
     def __init__(
         self,
         channels: T.List[int],
-        in_times: T.Dict[str, int],
+        in_time: int,
         up_channels: int,
         prev_backbone_channel_index: int,
         is_side_stream: bool = True,
@@ -42,7 +42,7 @@ class UNet3Connector(torch.nn.Module):
         self.cat_channels = 0
 
         self.up = model_utils.UpSample()
-        self.rs = ResampleTime(dims=in_times['input'])
+        self.rs = ResampleTime(dims=in_time)
 
         # Pool layers
         if n_pools > 0:
@@ -60,7 +60,7 @@ class UNet3Connector(torch.nn.Module):
                     f'pool_{n}',
                     PoolConv3d(
                         in_channels=channels[n],
-                        in_time=resample_time_dim,
+                        in_time=in_time,
                         out_channels=channels[0],
                         pool_size=pool_size
                     )
@@ -69,7 +69,7 @@ class UNet3Connector(torch.nn.Module):
                     setattr(
                         self,
                         f'pool_resample_{n}',
-                        ResampleTime(dims=in_times['input'])
+                        ResampleTime(dims=resample_time_dim)
                     )
                 pool_size = int(pool_size / 2)
                 self.cat_channels += channels[0]
@@ -82,7 +82,7 @@ class UNet3Connector(torch.nn.Module):
         if is_side_stream:
             self.prev = DoubleConv3d(
                 in_channels=up_channels,
-                in_time=in_times['input'],
+                in_time=in_time,
                 out_channels=up_channels,
                 double_dilation=double_dilation
             )
@@ -90,7 +90,7 @@ class UNet3Connector(torch.nn.Module):
             # Backbone, same level
             self.prev_backbone = DoubleConv3d(
                 in_channels=channels[prev_backbone_channel_index],
-                in_time=in_times['input'],
+                in_time=in_time,
                 out_channels=up_channels,
                 double_dilation=double_dilation
             )
@@ -103,7 +103,7 @@ class UNet3Connector(torch.nn.Module):
                     f'prev_{n}',
                     DoubleConv3d(
                         in_channels=up_channels,
-                        in_time=in_times['input'],
+                        in_time=in_time,
                         out_channels=up_channels,
                         double_dilation=double_dilation
                     )
@@ -131,7 +131,7 @@ class UNet3Connector(torch.nn.Module):
                     f'stream_{n}',
                     DoubleConv3d(
                         in_channels=in_stream_channels,
-                        in_time=in_times['input'],
+                        in_time=in_time,
                         out_channels=up_channels,
                         double_dilation=double_dilation
                     )
@@ -140,14 +140,14 @@ class UNet3Connector(torch.nn.Module):
 
         self.conv4_0 = DoubleConv3d(
             in_channels=channels[4],
-            in_time=in_times['input'],
+            in_time=in_time,
             out_channels=channels[0]
         )
         self.cat_channels += channels[0]
 
         self.final = DoubleConv3d(
             in_channels=self.cat_channels,
-            in_time=in_times['input'],
+            in_time=in_time,
             out_channels=up_channels,
             double_dilation=double_dilation
         )
@@ -383,7 +383,7 @@ class UNet3_3_1(torch.nn.Module):
     def __init__(
         self,
         channels: T.Sequence[int],
-        in_times: T.Dict[str, int],
+        in_time: int,
         up_channels: int,
         attention: bool = False,
         attention_weights: str = 'gate',
@@ -396,7 +396,7 @@ class UNet3_3_1(torch.nn.Module):
         # Distance stream connection
         self.conv_dist = UNet3Connector(
             channels=channels,
-            in_times=in_times,
+            in_time=in_time,
             up_channels=up_channels,
             is_side_stream=False,
             prev_backbone_channel_index=3,
@@ -406,7 +406,7 @@ class UNet3_3_1(torch.nn.Module):
         # Edge stream connection
         self.conv_edge = UNet3Connector(
             channels=channels,
-            in_times=in_times,
+            in_time=in_time,
             up_channels=up_channels,
             prev_backbone_channel_index=3,
             n_pools=3,
@@ -415,7 +415,7 @@ class UNet3_3_1(torch.nn.Module):
         # Mask stream connection
         self.conv_mask = UNet3Connector(
             channels=channels,
-            in_times=in_times,
+            in_time=in_time,
             up_channels=up_channels,
             prev_backbone_channel_index=3,
             n_pools=3,
@@ -464,7 +464,7 @@ class UNet3_2_2(torch.nn.Module):
     def __init__(
         self,
         channels: T.Sequence[int],
-        in_times: T.Dict[str, int],
+        in_time: int,
         up_channels: int,
         attention: bool = False,
         attention_weights: str = 'gate',
@@ -476,7 +476,7 @@ class UNet3_2_2(torch.nn.Module):
 
         self.conv_dist = UNet3Connector(
             channels=channels,
-            in_times=in_times,
+            in_time=in_time,
             up_channels=up_channels,
             is_side_stream=False,
             prev_backbone_channel_index=2,
@@ -486,7 +486,7 @@ class UNet3_2_2(torch.nn.Module):
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
-            in_times=in_times,
+            in_time=in_time,
             up_channels=up_channels,
             prev_backbone_channel_index=2,
             n_pools=2,
@@ -495,7 +495,7 @@ class UNet3_2_2(torch.nn.Module):
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
-            in_times=in_times,
+            in_time=in_time,
             up_channels=up_channels,
             prev_backbone_channel_index=2,
             n_pools=2,
@@ -547,7 +547,7 @@ class UNet3_1_3(torch.nn.Module):
     def __init__(
         self,
         channels: T.Sequence[int],
-        in_times: T.Dict[str, int],
+        in_time: int,
         up_channels: int,
         attention: bool = False,
         attention_weights: str = 'gate',
@@ -559,7 +559,7 @@ class UNet3_1_3(torch.nn.Module):
 
         self.conv_dist = UNet3Connector(
             channels=channels,
-            in_times=in_times,
+            in_time=in_time,
             up_channels=up_channels,
             is_side_stream=False,
             prev_backbone_channel_index=1,
@@ -569,7 +569,7 @@ class UNet3_1_3(torch.nn.Module):
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
-            in_times=in_times,
+            in_time=in_time,
             up_channels=up_channels,
             prev_backbone_channel_index=1,
             n_pools=1,
@@ -578,7 +578,7 @@ class UNet3_1_3(torch.nn.Module):
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
-            in_times=in_times,
+            in_time=in_time,
             up_channels=up_channels,
             prev_backbone_channel_index=1,
             n_pools=1,
@@ -632,7 +632,7 @@ class UNet3_0_4(torch.nn.Module):
     def __init__(
         self,
         channels: T.Sequence[int],
-        in_times: T.Dict[str, int],
+        in_time: int,
         up_channels: int,
         attention: bool = False,
         attention_weights: str = 'gate',
@@ -644,7 +644,7 @@ class UNet3_0_4(torch.nn.Module):
 
         self.conv_dist = UNet3Connector(
             channels=channels,
-            in_times=in_times,
+            in_time=in_time,
             up_channels=up_channels,
             is_side_stream=False,
             prev_backbone_channel_index=0,
@@ -653,7 +653,7 @@ class UNet3_0_4(torch.nn.Module):
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
-            in_times=in_times,
+            in_time=in_time,
             up_channels=up_channels,
             prev_backbone_channel_index=0,
             n_stream_down=3,
@@ -661,7 +661,7 @@ class UNet3_0_4(torch.nn.Module):
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
-            in_times=in_times,
+            in_time=in_time,
             up_channels=up_channels,
             prev_backbone_channel_index=0,
             n_stream_down=3,
