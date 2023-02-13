@@ -451,7 +451,7 @@ class UNet3Psi(torch.nn.Module):
             ResampleTime(dims=time_channels['high']),
             PoolConv3d(
                 in_channels=channels[0],
-                in_time=in_time,
+                in_time=time_channels['high'],
                 out_channels=channels[1]
             )
         )
@@ -460,7 +460,7 @@ class UNet3Psi(torch.nn.Module):
             ResampleTime(dims=time_channels['medium']),
             PoolConv3d(
                 in_channels=channels[1],
-                in_time=in_time,
+                in_time=time_channels['medium'],
                 out_channels=channels[2]
             )
         )
@@ -469,13 +469,13 @@ class UNet3Psi(torch.nn.Module):
             ResampleTime(dims=time_channels['low']),
             PoolConv3d(
                 in_channels=channels[2],
-                in_time=in_time,
+                in_time=time_channels['low'],
                 out_channels=channels[3]
             )
         )
         self.conv4_0 = PoolConv3d(
             in_channels=channels[3],
-            in_time=in_time,
+            in_time=time_channels['low'],
             out_channels=channels[4]
         )
 
