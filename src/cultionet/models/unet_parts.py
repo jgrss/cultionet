@@ -45,15 +45,13 @@ class UNet3Connector(torch.nn.Module):
 
         # Pool layers
         if n_pools > 0:
+            resample_time_dim = 13
             if n_pools == 3:
                 pool_size = 8
-                resample_time_dim = 3
             elif n_pools == 2:
                 pool_size = 4
-                resample_time_dim = 4
             else:
                 pool_size = 2
-                resample_time_dim = 6
 
             for n in range(0, n_pools):
                 if resample_time_dim is not None:
@@ -74,6 +72,12 @@ class UNet3Connector(torch.nn.Module):
                 )
                 pool_size = int(pool_size / 2)
                 self.cat_channels += channels[0]
+                if resample_time_dim == 13:
+                    resample_time_dim = 6
+                elif resample_time_dim == 6:
+                    resample_time_dim = 4
+                elif resample_time_dim == 4:
+                    resample_time_dim = 3
         if is_side_stream:
             self.prev = DoubleConv3d(
                 in_channels=up_channels,
