@@ -19,7 +19,8 @@ class ResampleTime(torch.nn.Module):
             x = F.interpolate(
                 x,
                 size=(self.dims, height, width),
-                mode='trilinear'
+                mode='trilinear',
+                align_corners=True
             )
 
         return x
