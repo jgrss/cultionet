@@ -543,15 +543,15 @@ class UNet3Psi(torch.nn.Module):
             ResampleTime(dims=self.in_time),
             torch.nn.Conv3d(
                 up_channels,
-                1,
+                2,
                 kernel_size=1,
                 padding=0
             ),
             Squeeze(),
             # Sigmoid applied to each timepoint
-            torch.nn.Sigmoid(),
+            Softmax(dim=1),
             # Take the mean probability over time
-            Mean(dim=1, keepdim=True)
+            Mean(dim=2, keepdim=False)
         )
 
         # Initialise weights
