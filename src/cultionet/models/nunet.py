@@ -497,8 +497,7 @@ class UNet3Psi(torch.nn.Module):
             # Sigmoid applied to each timepoint
             torch.nn.Sigmoid(),
             # Take the mean over time
-            Mean(dim=1),
-            Unsqueeze(dim=1)
+            Mean(dim=1, keepdim=True)
         )
         self.final_edge = torch.nn.Sequential(
             torch.nn.Conv3d(
@@ -511,8 +510,7 @@ class UNet3Psi(torch.nn.Module):
             # Sigmoid applied to each timepoint
             torch.nn.Sigmoid(),
             # Take the mean probability over time
-            Mean(dim=1),
-            Unsqueeze(dim=1)
+            Mean(dim=1, keepdim=True)
         )
         self.final_mask = torch.nn.Sequential(
             torch.nn.Conv3d(
@@ -525,8 +523,7 @@ class UNet3Psi(torch.nn.Module):
             # Sigmoid applied to each timepoint
             torch.nn.Sigmoid(),
             # Take the mean probability over time
-            Mean(dim=1),
-            Unsqueeze(dim=1)
+            Mean(dim=1, keepdim=True)
         )
 
         # Initialise weights

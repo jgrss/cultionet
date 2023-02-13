@@ -35,13 +35,14 @@ class Add(torch.nn.Module):
 
 
 class Mean(torch.nn.Module):
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, keepdim: bool = False):
         super(Mean, self).__init__()
 
         self.dim = dim
+        self.keepdim = keepdim
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x.mean(dim=self.dim)
+        return x.mean(dim=self.dim, keepdim=self.keepdim)
 
 
 class Squeeze(torch.nn.Module):
