@@ -55,12 +55,6 @@ class UNet3Connector(torch.nn.Module):
                 pool_size = 2
 
             for n in range(0, n_pools):
-                if resample_time_dim is not None:
-                    setattr(
-                        self,
-                        f'pool_resample_{n}',
-                        ResampleTime(dims=in_times['input'])
-                    )
                 setattr(
                     self,
                     f'pool_{n}',
@@ -71,6 +65,12 @@ class UNet3Connector(torch.nn.Module):
                         pool_size=pool_size
                     )
                 )
+                if n > 0:
+                    setattr(
+                        self,
+                        f'pool_resample_{n}',
+                        ResampleTime(dims=in_times['input'])
+                    )
                 pool_size = int(pool_size / 2)
                 self.cat_channels += channels[0]
                 if resample_time_dim == 13:
