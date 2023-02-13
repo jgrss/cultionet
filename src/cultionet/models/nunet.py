@@ -420,7 +420,6 @@ class UNet3Psi(torch.nn.Module):
         in_channels: int,
         in_time: int,
         init_filter: int = 64,
-        init_point_conv: bool = False,
         double_dilation: int = 1,
         attention: bool = False
     ):
@@ -445,54 +444,58 @@ class UNet3Psi(torch.nn.Module):
             # 13 -> 6
             ResampleTime(dims=6),
             PoolConv3d(
-                channels[0],
-                channels[1]
+                in_channels=channels[0],
+                in_time=in_time,
+                out_channels=channels[1]
             )
         )
         self.conv2_0 = torch.nn.Sequential(
             # 6 -> 4
             ResampleTime(dims=4),
             PoolConv3d(
-                channels[1],
-                channels[2]
+                in_channels=channels[1],
+                in_time=in_time,
+                out_channels=channels[2]
             )
         )
         self.conv3_0 = PoolConv3d(
-            channels[2],
-            channels[3]
+            in_channels=channels[2],
+            in_time=in_time,
+            out_channels=channels[3]
         )
         self.conv4_0 = PoolConv3d(
-            channels[3],
-            channels[4]
+            in_channels=channels[3],
+            in_time=in_time,
+            out_channels=channels[4]
         )
 
         # Connect 3
         self.convs_3_1 = UNet3_3_1(
             channels=channels,
+            in_time=in_time,
             up_channels=up_channels,
             attention=attention,
-            init_point_conv=init_point_conv,
             double_dilation=double_dilation
         )
         self.convs_2_2 = UNet3_2_2(
             channels=channels,
+            in_time=in_time,
             up_channels=up_channels,
             attention=attention,
-            init_point_conv=init_point_conv,
             double_dilation=double_dilation
         )
         self.convs_1_3 = UNet3_1_3(
             channels=channels,
+            in_time=in_time,
             up_channels=up_channels,
             attention=attention,
-            init_point_conv=init_point_conv,
             double_dilation=double_dilation
         )
         self.convs_0_4 = UNet3_0_4(
             channels=channels,
+            in_time=in_time,
             up_channels=up_channels,
             attention=attention,
-            init_point_conv=init_point_conv,
             double_dilation=double_dilation
         )
 
@@ -510,8 +513,7 @@ class UNet3Psi(torch.nn.Module):
             # Sigmoid applied to each timepoint
             torch.nn.Sigmoid(),
             # Take the mean over time
-            Mean(dim=1),
-            Unsqueeze(dim=1)
+            Mean(dim=1, keepdim=True)
         )
         self.final_edge = torch.nn.Sequential(
             ResampleTime(dims=self.in_time),
@@ -525,8 +527,7 @@ class UNet3Psi(torch.nn.Module):
             # Sigmoid applied to each timepoint
             torch.nn.Sigmoid(),
             # Take the mean probability over time
-            Mean(dim=1),
-            Unsqueeze(dim=1)
+            Mean(dim=1, keepdim=True)
         )
         self.final_mask = torch.nn.Sequential(
             ResampleTime(dims=self.in_time),
@@ -540,8 +541,7 @@ class UNet3Psi(torch.nn.Module):
             # Sigmoid applied to each timepoint
             torch.nn.Sigmoid(),
             # Take the mean probability over time
-            Mean(dim=1),
-            Unsqueeze(dim=1)
+            Mean(dim=1, keepdim=True)
         )
 
         # Initialise weights

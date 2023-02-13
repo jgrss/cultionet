@@ -43,6 +43,15 @@ class Permute(torch.nn.Module):
         return x.permute(*self.axis_order)
 
 
+class Reshape(torch.nn.Module):
+    def __init__(self, dims: T.Sequence[int]):
+        super(Reshape, self).__init__()
+        self.dims = dims
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.reshape(*self.dims)
+
+
 class Add(torch.nn.Module):
     def __init__(self):
         super(Add, self).__init__()
@@ -52,13 +61,14 @@ class Add(torch.nn.Module):
 
 
 class Mean(torch.nn.Module):
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, keepdim: bool = False):
         super(Mean, self).__init__()
 
         self.dim = dim
+        self.keepdim = keepdim
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x.mean(dim=self.dim)
+        return x.mean(dim=self.dim, keepdim=self.keepdim)
 
 
 class Squeeze(torch.nn.Module):
@@ -561,46 +571,45 @@ class DoubleConv3d(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
+        in_time: int,
         out_channels: int,
-        init_point_conv: bool = False,
         double_dilation: int = 1
     ):
         super(DoubleConv3d, self).__init__()
 
-        layers = []
-
-        init_channels = in_channels
-        if init_point_conv:
-            layers += [
-                ConvBlock3d(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=1,
-                    padding=0
-                )
-            ]
-            init_channels = out_channels
-
-        layers += [
+        layers = [
             ConvBlock3d(
-                in_channels=init_channels,
+                in_channels=in_channels,
                 out_channels=out_channels,
-                kernel_size=(1, 3, 3),
-                padding=(0, 1, 1)
+                kernel_size=(3, 1, 1),
+                padding=(1, 0, 0)
             ),
             ConvBlock3d(
                 in_channels=out_channels,
                 out_channels=out_channels,
-                kernel_size=3,
-                padding=double_dilation,
-                dilation=double_dilation
+                kernel_size=(1, 3, 3),
+                padding=(0, 1, 1)
             )
         ]
 
         self.seq = torch.nn.Sequential(*layers)
 
+        self.seq_dilated = ConvBlock2d(
+            in_channels=int(in_time * in_channels),
+            out_channels=out_channels,
+            kernel_size=3,
+            padding=double_dilation,
+            dilation=double_dilation,
+            add_activation=False
+        )
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.seq(x)
+        b, __, __, h, w = x.shape
+        rs = Reshape(b, -1, h, w)
+        h = self.seq(x)
+        h = h + self.seq_dilated(rs(x))
+
+        return h
 
 
 class DoubleConv(torch.nn.Module):
@@ -682,6 +691,7 @@ class PoolConv3d(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
+        in_time: int,
         out_channels: int,
         pool_size: int = 2,
         dropout: T.Optional[float] = None
@@ -691,7 +701,13 @@ class PoolConv3d(torch.nn.Module):
         layers = [torch.nn.MaxPool3d((1, pool_size, pool_size))]
         if dropout is not None:
             layers += [torch.nn.Dropout(dropout)]
-        layers += [DoubleConv3d(in_channels, out_channels)]
+        layers += [
+            DoubleConv3d(
+                in_channels=in_channels,
+                in_time=in_time,
+                out_channels=out_channels
+            )
+        ]
         self.seq = torch.nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
