@@ -607,7 +607,7 @@ class DoubleConv3d(torch.nn.Module):
         b, __, __, h, w = x.shape
         rs = Reshape(dims=(b, -1, h, w))
         h = self.seq(x)
-        h = h + self.seq_dilated(rs(x))
+        h = h + self.seq_dilated(rs(x)).unsqueeze(2)
 
         return h
 

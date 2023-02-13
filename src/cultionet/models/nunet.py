@@ -458,10 +458,14 @@ class UNet3Psi(torch.nn.Module):
                 out_channels=channels[2]
             )
         )
-        self.conv3_0 = PoolConv3d(
-            in_channels=channels[2],
-            in_time=in_time,
-            out_channels=channels[3]
+        self.conv3_0 = torch.nn.Sequential(
+            # 4 -> 3
+            ResampleTime(dims=3),
+            PoolConv3d(
+                in_channels=channels[2],
+                in_time=in_time,
+                out_channels=channels[3]
+            )
         )
         self.conv4_0 = PoolConv3d(
             in_channels=channels[3],

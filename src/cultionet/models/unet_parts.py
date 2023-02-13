@@ -47,7 +47,7 @@ class UNet3Connector(torch.nn.Module):
         if n_pools > 0:
             if n_pools == 3:
                 pool_size = 8
-                resample_time_dim = 4
+                resample_time_dim = 3
             elif n_pools == 2:
                 pool_size = 4
                 resample_time_dim = 4
