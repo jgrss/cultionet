@@ -231,6 +231,7 @@ def fit(
     early_stopping_patience: T.Optional[int] = 7,
     early_stopping_min_delta: T.Optional[float] = 0.01,
     gradient_clip_val: T.Optional[float] = 1.0,
+    gradient_clip_algorithm: T.Optional[float] = 'norm',
     reset_model: T.Optional[bool] = False,
     auto_lr_find: T.Optional[bool] = False,
     device: T.Optional[str] = 'gpu',
@@ -261,7 +262,8 @@ def fit(
         save_top_k (Optional[int]): The number of top-k model checkpoints to save.
         early_stopping_patience (Optional[int]): The patience (epochs) before early stopping.
         early_stopping_min_delta (Optional[float]): The minimum change threshold before early stopping.
-        gradient_clip_val (Optional[float]): A gradient clip limit.
+        gradient_clip_val (Optional[float]): The gradient clip limit.
+        gradient_clip_algorithm (Optional[str]): The gradient clip algorithm.
         reset_model (Optional[bool]): Whether to reset an existing model. Otherwise, pick up from last epoch of
             an existing model.
         auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
@@ -379,7 +381,7 @@ def fit(
         auto_scale_batch_size=False,
         accumulate_grad_batches=accumulate_grad_batches,
         gradient_clip_val=gradient_clip_val,
-        gradient_clip_algorithm='value',
+        gradient_clip_algorithm=gradient_clip_algorithm,
         check_val_every_n_epoch=1,
         min_epochs=5 if epochs >= 5 else epochs,
         max_epochs=epochs,
