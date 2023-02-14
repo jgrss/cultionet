@@ -436,6 +436,12 @@ train:
     kwargs:
       default: 1.0
       type: '&float'
+  gradient_clip_algorithm:
+    short: gca
+    long: gradient-clip-algorithm
+    help: The gradient clip algorithm
+    kwargs:
+      default: 'norm'
   patience:
     short: ''
     long: patience
