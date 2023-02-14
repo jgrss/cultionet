@@ -586,6 +586,8 @@ class DoubleConv3d(torch.nn.Module):
         in_channels: int,
         in_time: int,
         out_channels: int,
+        time_kernel_size: int = 1,
+        time_padding: int = 0,
         double_dilation: int = 1
     ):
         super(DoubleConv3d, self).__init__()
@@ -593,8 +595,8 @@ class DoubleConv3d(torch.nn.Module):
         self.conv = ConvBlock3d(
             in_channels=in_channels,
             out_channels=out_channels,
-            kernel_size=(1, 3, 3),
-            padding=(0, 1, 1)
+            kernel_size=(time_kernel_size, 3, 3),
+            padding=(time_padding, 1, 1)
         )
 
         self.conv_dilated = ConvBlock2d(
@@ -708,6 +710,8 @@ class PoolConv3d(torch.nn.Module):
         in_time: int,
         out_channels: int,
         pool_size: int = 2,
+        time_kernel_size: int = 3,
+        time_padding: int = 1,
         dropout: T.Optional[float] = None
     ):
         super(PoolConv3d, self).__init__()
@@ -719,7 +723,9 @@ class PoolConv3d(torch.nn.Module):
             DoubleConv3d(
                 in_channels=in_channels,
                 in_time=in_time,
-                out_channels=out_channels
+                out_channels=out_channels,
+                time_kernel_size=time_kernel_size,
+                time_padding=time_padding
             )
         ]
         self.seq = torch.nn.Sequential(*layers)
