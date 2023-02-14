@@ -437,12 +437,16 @@ class UNet3Psi(torch.nn.Module):
             'low': 3,
             'medium': 4,
             'high': 6,
+            'init': 9,
             'input': in_time
         }
 
-        self.conv0_0 = SingleConv3d(
-            in_channels,
-            channels[0]
+        self.conv0_0 = torch.nn.Sequential(
+            SingleConv3d(
+                in_channels,
+                channels[0]
+            ),
+            ResampleTime(dims=time_channels['init'])
         )
         self.conv1_0 = torch.nn.Sequential(
             # 13 -> 6
@@ -501,7 +505,7 @@ class UNet3Psi(torch.nn.Module):
         )
         self.convs_0_4 = UNet3_0_4(
             channels=channels,
-            in_time=time_channels['input'],
+            in_time=time_channels['init'],
             up_channels=up_channels,
             attention=attention,
             double_dilation=double_dilation
