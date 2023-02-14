@@ -10,7 +10,7 @@ from . import model_utils
 from .base_layers import (
     AttentionGate,
     DoubleConv,
-    Mean,
+    Max,
     Permute,
     PoolConv,
     PoolConv3d,
@@ -21,7 +21,6 @@ from .base_layers import (
     SingleConv3d,
     Softmax,
     Squeeze,
-    Unsqueeze,
     ResampleTime
 )
 from .unet_parts import (
@@ -40,7 +39,6 @@ from .unet_parts import (
 )
 
 import torch
-import torch.nn.functional as F
 
 
 def weights_init_kaiming(m):
@@ -523,7 +521,7 @@ class UNet3Psi(torch.nn.Module):
             # Sigmoid applied to each timepoint
             torch.nn.Sigmoid(),
             # Take the mean over time
-            Mean(dim=1, keepdim=True)
+            Max(dim=1, keepdim=True)
         )
         self.final_edge = torch.nn.Sequential(
             ResampleTime(dims=self.in_time),
@@ -537,7 +535,7 @@ class UNet3Psi(torch.nn.Module):
             # Sigmoid applied to each timepoint
             torch.nn.Sigmoid(),
             # Take the mean probability over time
-            Mean(dim=1, keepdim=True)
+            Max(dim=1, keepdim=True)
         )
         self.final_mask = torch.nn.Sequential(
             ResampleTime(dims=self.in_time),
@@ -550,7 +548,7 @@ class UNet3Psi(torch.nn.Module):
             # Softmax applied to each timepoint
             Softmax(dim=1),
             # Take the mean probability over time
-            Mean(dim=2, keepdim=False)
+            Max(dim=2, keepdim=False)
         )
 
         # Initialise weights
@@ -630,13 +628,6 @@ class UNet3Psi(torch.nn.Module):
         dist = self.final_dist(out_0_4['dist'])
         edge = self.final_edge(out_0_4['edge'])
         mask = self.final_mask(out_0_4['mask'])
-
-        if len(dist.shape) == 3:
-            dist = dist.unsqueeze(1)
-        if len(edge.shape) == 3:
-            edge = edge.unsqueeze(1)
-        if len(mask.shape) == 3:
-            mask = mask.unsqueeze(1)
 
         out = {
             'dist': dist,

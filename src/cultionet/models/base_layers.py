@@ -62,6 +62,17 @@ class Add(torch.nn.Module):
         return x + y
 
 
+class Max(torch.nn.Module):
+    def __init__(self, dim: int, keepdim: bool = False):
+        super(Max, self).__init__()
+
+        self.dim = dim
+        self.keepdim = keepdim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.max(dim=self.dim, keepdim=self.keepdim)[0]
+
+
 class Mean(torch.nn.Module):
     def __init__(self, dim: int, keepdim: bool = False):
         super(Mean, self).__init__()
@@ -579,24 +590,14 @@ class DoubleConv3d(torch.nn.Module):
     ):
         super(DoubleConv3d, self).__init__()
 
-        layers = [
-            ConvBlock3d(
-                in_channels=in_channels,
-                out_channels=out_channels,
-                kernel_size=(3, 1, 1),
-                padding=(1, 0, 0)
-            ),
-            ConvBlock3d(
-                in_channels=out_channels,
-                out_channels=out_channels,
-                kernel_size=(1, 3, 3),
-                padding=(0, 1, 1)
-            )
-        ]
+        self.conv = ConvBlock3d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=(1, 3, 3),
+            padding=(0, 1, 1)
+        )
 
-        self.seq = torch.nn.Sequential(*layers)
-
-        self.seq_dilated = ConvBlock2d(
+        self.conv_dilated = ConvBlock2d(
             in_channels=int(in_time * in_channels),
             out_channels=out_channels,
             kernel_size=3,
@@ -606,10 +607,21 @@ class DoubleConv3d(torch.nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        b, __, __, h, w = x.shape
-        rs = Reshape(dims=(b, -1, h, w))
-        h = self.seq(x)
-        h = h + self.seq_dilated(rs(x)).unsqueeze(2)
+        bsize, __, __, height, width = x.shape
+        # h shape should be (B x C x T x H x W)
+        h = self.conv(x)
+        if len(h.shape) == 4:
+            # (C x T x H x W) -> (B x C x T x H x W)
+            h = h.unsqueeze(0)
+        rs = Reshape(dims=(bsize, -1, height, width))
+        # s shape should be (B x C x H x W)
+        s = self.conv_dilated(rs(x))
+        if len(s.shape) == 3:
+            # (C x H x W) -> (B x C x H x W)
+            s = s.unsqueeze(0)
+        # (B x C x H x W) -> (B x C x T x H x W)
+        s = s.unsqueeze(2)
+        h = h + s
 
         return h
 
@@ -713,6 +725,11 @@ class PoolConv3d(torch.nn.Module):
         self.seq = torch.nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x shape should be (B x C x T x H x W)
+        if len(x.shape) == 4:
+            # (C x T x H x W) -> (B x C x T x H x W)
+            x = x.unsqueeze(0)
+
         return self.seq(x)
 
 
