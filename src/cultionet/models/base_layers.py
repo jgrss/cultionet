@@ -710,8 +710,8 @@ class PoolConv3d(torch.nn.Module):
         in_time: int,
         out_channels: int,
         pool_size: int = 2,
-        time_kernel_size: int = 1,
-        time_padding: int = 0,
+        time_kernel_size: int = 3,
+        time_padding: int = 1,
         dropout: T.Optional[float] = None
     ):
         super(PoolConv3d, self).__init__()
