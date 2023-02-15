@@ -815,6 +815,7 @@ class ResUNet3_3_1(torch.nn.Module):
         x4_0: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
         # Distance logits
+        import ipdb; ipdb.set_trace()
         h_dist = self.conv_dist(
             prev_same=[('prev_backbone', x3_0)],
             pools=[x0_0, x1_0, x2_0],
