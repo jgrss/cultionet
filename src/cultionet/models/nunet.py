@@ -419,6 +419,7 @@ class UNet3Psi(torch.nn.Module):
         in_channels: int,
         in_time: int,
         init_filter: int = 64,
+        num_classes: int = 2,
         init_point_conv: bool = False,
         double_dilation: int = 1,
         attention: bool = False
@@ -532,14 +533,15 @@ class UNet3Psi(torch.nn.Module):
             ),
             torch.nn.Sigmoid()
         )
+        activation = torch.nn.Sigmoid() if num_classes == 1 else Softmax(dim=1)
         self.final_mask = torch.nn.Sequential(
             torch.nn.Conv2d(
                 up_channels,
-                2,
+                num_classes,
                 kernel_size=1,
                 padding=0
             ),
-            Softmax(dim=1)
+            activation
         )
 
         # Initialise weights
@@ -652,7 +654,8 @@ class ResUNet3Psi(torch.nn.Module):
         in_channels: int,
         in_time: int,
         init_filter: int = 64,
-        dilations: T.List[int] = None,
+        num_classes: int = 2,
+        double_dilation: int = 1,
         attention: bool = False
     ):
         super(ResUNet3Psi, self).__init__()
@@ -666,8 +669,7 @@ class ResUNet3Psi(torch.nn.Module):
             init_filter*16
         ]
         up_channels = int(channels[0] * 5)
-        if dilations is None:
-            dilations = [2]
+        dilations = [double_dilation]
 
         self.time_conv0 = ResSpatioTemporalConv3d(
             in_channels=in_channels,
@@ -763,14 +765,15 @@ class ResUNet3Psi(torch.nn.Module):
             ),
             torch.nn.Sigmoid()
         )
+        mask_activation = torch.nn.Sigmoid() if num_classes == 1 else Softmax(dim=1)
         self.final_mask = torch.nn.Sequential(
             torch.nn.Conv2d(
                 up_channels,
-                2,
+                num_classes,
                 kernel_size=1,
                 padding=0
             ),
-            Softmax(dim=1)
+            mask_activation
         )
 
         # Initialise weights

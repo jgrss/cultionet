@@ -1,4 +1,5 @@
 import typing as T
+import enum
 
 from .base_layers import (
     DoubleConv,
@@ -12,6 +13,11 @@ from . import model_utils
 import torch
 
 
+class ModelTypes(enum.Enum):
+    unet = 'unet'
+    resunet = 'resunet'
+
+
 class UNet3Connector(torch.nn.Module):
     """Connects layers in a UNet 3+ architecture
     """
@@ -20,6 +26,7 @@ class UNet3Connector(torch.nn.Module):
         channels: T.List[int],
         up_channels: int,
         prev_backbone_channel_index: int,
+        use_backbone: bool = True,
         is_side_stream: bool = True,
         n_pools: int = 0,
         n_prev_down: int = 0,
@@ -27,17 +34,22 @@ class UNet3Connector(torch.nn.Module):
         attention: bool = False,
         attention_weights: str = 'gate',
         init_point_conv: bool = False,
-        double_dilation: int = 1
+        double_dilation: int = 1,
+        model_type: enum = ModelTypes.unet
     ):
         super(UNet3Connector, self).__init__()
 
         assert attention_weights in ['gate', 'fractal'], \
             "Choose from 'gate' or 'fractal' attention weights."
 
+        assert model_type in (ModelTypes.unet, ModelTypes.resunet)
+
         self.n_pools = n_pools
         self.n_prev_down = n_prev_down
         self.n_stream_down = n_stream_down
         self.attention = attention
+        self.use_backbone = use_backbone
+        self.is_side_stream = is_side_stream
         self.cat_channels = 0
 
         self.up = model_utils.UpSample()
@@ -52,89 +64,142 @@ class UNet3Connector(torch.nn.Module):
                 pool_size = 2
 
             for n in range(0, n_pools):
-                setattr(
-                    self,
-                    f'pool_{n}',
-                    PoolConv(
-                        channels[n],
-                        channels[0],
-                        pool_size=pool_size
+                if model_type == ModelTypes.unet:
+                    setattr(
+                        self,
+                        f'pool_{n}',
+                        PoolConv(
+                            channels[n],
+                            channels[0],
+                            pool_size=pool_size
+                        )
                     )
-                )
+                else:
+                    setattr(
+                        self,
+                        f'pool_{n}',
+                        PoolResidualConv(
+                            channels[n],
+                            channels[0],
+                            pool_size=pool_size,
+                            dilations=[double_dilation]
+                        )
+                    )
                 pool_size = int(pool_size / 2)
                 self.cat_channels += channels[0]
         if is_side_stream:
-            self.prev = DoubleConv(
-                up_channels,
-                up_channels,
-                init_point_conv=init_point_conv,
-                double_dilation=double_dilation
-            )
+            if model_type == ModelTypes.unet:
+                self.prev = DoubleConv(
+                    up_channels,
+                    up_channels,
+                    init_point_conv=init_point_conv,
+                    double_dilation=double_dilation
+                )
+            else:
+                self.prev_backbone = ResidualConv(
+                    channels[prev_backbone_channel_index],
+                    up_channels,
+                    dilations=[double_dilation]
+                )
         else:
-            # Backbone, same level
-            self.prev_backbone = DoubleConv(
-                channels[prev_backbone_channel_index],
-                up_channels,
-                init_point_conv=init_point_conv,
-                double_dilation=double_dilation
-            )
+            if model_type == ModelTypes.unet:
+                # Backbone, same level
+                self.prev_backbone = DoubleConv(
+                    channels[prev_backbone_channel_index],
+                    up_channels,
+                    init_point_conv=init_point_conv,
+                    double_dilation=double_dilation
+                )
+            else:
+                self.prev = ResidualConv(
+                    up_channels,
+                    up_channels,
+                    dilations=[double_dilation]
+                )
         self.cat_channels += up_channels
         # Previous output, downstream
         if self.n_prev_down > 0:
             for n in range(0, self.n_prev_down):
-                setattr(
-                    self,
-                    f'prev_{n}',
-                    DoubleConv(
-                        up_channels,
-                        up_channels,
-                        init_point_conv=init_point_conv,
-                        double_dilation=double_dilation
+                if model_type == ModelTypes.unet:
+                    setattr(
+                        self,
+                        f'prev_{n}',
+                        DoubleConv(
+                            up_channels,
+                            up_channels,
+                            init_point_conv=init_point_conv,
+                            double_dilation=double_dilation
+                        )
                     )
-                )
+                else:
+                    setattr(
+                        self,
+                        f'prev_{n}',
+                        ResidualConv(
+                            up_channels,
+                            up_channels,
+                            dilations=[double_dilation]
+                        )
+                    )
                 self.cat_channels += up_channels
         # Previous output, (same) downstream
         if self.n_stream_down > 0:
             for n in range(0, self.n_stream_down):
                 in_stream_channels = up_channels
                 if self.attention:
-                    if attention_weights == 'gate':
-                        attention_module = AttentionGate(up_channels, up_channels)
-                    else:
-                        # FIXME:
-                        raise NameError
-
+                    attention_module = AttentionGate(up_channels, up_channels)
                     setattr(
                         self,
                         f'attn_stream_{n}',
                         attention_module
                     )
                     in_stream_channels = up_channels * 2
-                setattr(
-                    self,
-                    f'stream_{n}',
-                    DoubleConv(
-                        in_stream_channels,
-                        up_channels,
-                        init_point_conv=init_point_conv,
-                        double_dilation=double_dilation
+                if model_type == ModelTypes.unet:
+                    setattr(
+                        self,
+                        f'stream_{n}',
+                        DoubleConv(
+                            in_stream_channels,
+                            up_channels,
+                            init_point_conv=init_point_conv,
+                            double_dilation=double_dilation
+                        )
                     )
-                )
+                else:
+                    setattr(
+                        self,
+                        f'stream_{n}',
+                        ResidualConv(
+                            in_stream_channels,
+                            up_channels,
+                            dilations=[double_dilation]
+                        )
+                    )
                 self.cat_channels += up_channels
 
-        self.conv4_0 = DoubleConv(
-            channels[4],
-            channels[0],
-            init_point_conv=init_point_conv
-        )
         self.cat_channels += channels[0]
-
-        self.final = DoubleConv(
-            self.cat_channels,
-            up_channels,
-            init_point_conv=init_point_conv,
-            double_dilation=double_dilation
-        )
+        if model_type == ModelTypes.unet:
+            self.conv4_0 = DoubleConv(
+                channels[4],
+                channels[0],
+                init_point_conv=init_point_conv
+            )
+            self.final = DoubleConv(
+                self.cat_channels,
+                up_channels,
+                init_point_conv=init_point_conv,
+                double_dilation=double_dilation
+            )
+        else:
+            self.conv4_0 = ResidualConv(
+                channels[4],
+                channels[0]
+            )
+            self.final = ResidualConv(
+                self.cat_channels,
+                up_channels,
+                dilations=[double_dilation]
+            )
 
     def forward(
         self,
@@ -165,6 +230,8 @@ class UNet3Connector(torch.nn.Module):
                         )
                     )
                 ]
+        assert len(prev_same) == sum([self.use_backbone, self.is_side_stream]), \
+            'The previous same layers do not match the setup.'
         # Previous same layers from the previous head
         for conv_name, prev_inputs in prev_same:
             c = getattr(self, conv_name)
@@ -687,193 +754,6 @@ class UNet3_0_4(torch.nn.Module):
         }
 
 
-class ResUNet3Connector(torch.nn.Module):
-    """Connects layers in a Residual UNet 3+ architecture
-    """
-    def __init__(
-        self,
-        channels: T.List[int],
-        up_channels: int,
-        prev_backbone_channel_index: int,
-        is_side_stream: bool = True,
-        n_pools: int = 0,
-        n_prev_down: int = 0,
-        n_stream_down: int = 0,
-        dilations: T.List[int] = None,
-        attention: bool = False
-    ):
-        super(ResUNet3Connector, self).__init__()
-
-        self.n_pools = n_pools
-        self.n_prev_down = n_prev_down
-        self.n_stream_down = n_stream_down
-        self.attention = attention
-        self.cat_channels = 0
-
-        self.up = model_utils.UpSample()
-
-        # Pool layers
-        if n_pools > 0:
-            if n_pools == 3:
-                pool_size = 8
-            elif n_pools == 2:
-                pool_size = 4
-            else:
-                pool_size = 2
-
-            for n in range(0, n_pools):
-                setattr(
-                    self,
-                    f'pool_{n}',
-                    PoolResidualConv(
-                        channels[n],
-                        channels[0],
-                        pool_size=pool_size,
-                        dilations=dilations
-                    )
-                )
-                pool_size = int(pool_size / 2)
-                self.cat_channels += channels[0]
-        # Previous output, same level
-        if is_side_stream:
-            self.prev = ResidualConv(
-                up_channels,
-                up_channels,
-                dilations=dilations
-            )
-        else:
-            # Backbone, same level
-            self.prev_backbone = ResidualConv(
-                channels[prev_backbone_channel_index],
-                up_channels,
-                dilations=dilations
-            )
-        self.cat_channels += up_channels
-        # Previous output, downstream
-        if self.n_prev_down > 0:
-            for n in range(0, self.n_prev_down):
-                setattr(
-                    self,
-                    f'prev_{n}',
-                    ResidualConv(
-                        up_channels,
-                        up_channels,
-                        dilations=dilations
-                    )
-                )
-                self.cat_channels += up_channels
-        # Previous output, (same) downstream
-        if self.n_stream_down > 0:
-            for n in range(0, self.n_stream_down):
-                in_stream_channels = up_channels
-                if self.attention:
-                    attention_module = AttentionGate(
-                        up_channels, up_channels
-                    )
-                    setattr(
-                        self,
-                        f'attn_stream_{n}',
-                        attention_module
-                    )
-                    in_stream_channels = up_channels * 2
-                setattr(
-                    self,
-                    f'stream_{n}',
-                    ResidualConv(
-                        in_stream_channels,
-                        up_channels,
-                        fractal_attention=attention,
-                        dilations=dilations
-                    )
-                )
-                self.cat_channels += up_channels
-        self.conv4_0 = ResidualConv(
-            channels[4],
-            channels[0],
-            fractal_attention=attention,
-            dilations=dilations
-        )
-        self.cat_channels += channels[0]
-
-        self.final = ResidualConv(
-            self.cat_channels,
-            up_channels,
-            dilations=dilations
-        )
-
-    def forward(
-        self,
-        prev_same: T.List[T.Tuple[str, torch.Tensor]],
-        x4_0: torch.Tensor,
-        pools: T.List[torch.Tensor] = None,
-        prev_down: T.List[torch.Tensor] = None,
-        stream_down: T.List[torch.Tensor] = None
-    ):
-        h = []
-        # Pooling layer of the backbone
-        if pools is not None:
-            assert self.n_pools == len(pools), \
-                'There are no convolutions available for the pool layers.'
-            for n, x in zip(range(self.n_pools), pools):
-                c = getattr(self, f'pool_{n}')
-                h += [c(x)]
-        # Up down layers from the previous head
-        if prev_down is not None:
-            assert self.n_prev_down == len(prev_down), \
-                'There are no convolutions available for the previous downstream layers.'
-            for n, x in zip(range(self.n_prev_down), prev_down):
-                c = getattr(self, f'prev_{n}')
-                h += [
-                    c(
-                        self.up(
-                            x, size=prev_same[0][1].shape[-2:], mode='bilinear'
-                        )
-                    )
-                ]
-        # Previous same layers from the previous head
-        for conv_name, prev_inputs in prev_same:
-            c = getattr(self, conv_name)
-            h += [c(prev_inputs)]
-        if self.attention:
-            prev_same_hidden = h[-1].clone()
-        # Previous down layers from the same head
-        if stream_down is not None:
-            assert self.n_stream_down == len(stream_down), \
-                'There are no convolutions available for the downstream layers.'
-            for n, x in zip(range(self.n_stream_down), stream_down):
-                if self.attention:
-                    # Gate
-                    g = self.up(x, size=prev_same[0][1].shape[-2:], mode='bilinear')
-                    c_attn = getattr(self, f'attn_stream_{n}')
-                    # Attention gate
-                    attn_out = c_attn(g, prev_same_hidden)
-                    c = getattr(self, f'stream_{n}')
-                    # Concatenate attention weights
-                    h += [c(torch.cat([attn_out, g], dim=1))]
-                else:
-                    c = getattr(self, f'stream_{n}')
-                    h += [
-                        c(
-                            self.up(
-                                x, size=prev_same[0][1].shape[-2:], mode='bilinear'
-                            )
-                        )
-                    ]
-
-        # Lowest level
-        h += [
-            self.conv4_0(
-                self.up(
-                    x4_0, size=prev_same[0][1].shape[-2:], mode='bilinear'
-                )
-            )
-        ]
-        h = torch.cat(h, dim=1)
-        h = self.final(h)
-
-        return h
-
-
 class ResUNet3_3_1(torch.nn.Module):
     """Residual UNet 3+ connection from backbone to upstream 3,1
     """
@@ -889,32 +769,40 @@ class ResUNet3_3_1(torch.nn.Module):
         self.up = model_utils.UpSample()
 
         # Distance stream connection
-        self.conv_dist = ResUNet3Connector(
+        self.conv_dist = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
             is_side_stream=False,
             prev_backbone_channel_index=3,
             n_pools=3,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            model_type=ModelTypes.resunet
         )
         # Edge stream connection
-        self.conv_edge = ResUNet3Connector(
+        self.conv_edge = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
+            is_side_stream=True,
             prev_backbone_channel_index=3,
             n_pools=3,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            model_type=ModelTypes.resunet
         )
         # Mask stream connection
-        self.conv_mask = ResUNet3Connector(
+        self.conv_mask = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
+            is_side_stream=True,
             prev_backbone_channel_index=3,
             n_pools=3,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            model_type=ModelTypes.resunet
         )
 
     def forward(
@@ -933,13 +821,13 @@ class ResUNet3_3_1(torch.nn.Module):
         )
         # Output distance logits pass to edge layer
         h_edge = self.conv_edge(
-            prev_same=[('prev', h_dist)],
+            prev_same=[('prev_backbone', x3_0), ('prev', h_dist)],
             pools=[x0_0, x1_0, x2_0],
             x4_0=x4_0
         )
         # Output edge logits pass to mask layer
         h_mask = self.conv_mask(
-            prev_same=[('prev', h_edge)],
+            prev_same=[('prev_backbone', x3_0), ('prev', h_edge)],
             pools=[x0_0, x1_0, x2_0],
             x4_0=x4_0
         )
@@ -965,33 +853,41 @@ class ResUNet3_2_2(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
-        self.conv_dist = ResUNet3Connector(
+        self.conv_dist = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
             is_side_stream=False,
             prev_backbone_channel_index=2,
             n_pools=2,
             n_stream_down=1,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            model_type=ModelTypes.resunet
         )
-        self.conv_edge = ResUNet3Connector(
+        self.conv_edge = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
+            is_side_stream=True,
             prev_backbone_channel_index=2,
             n_pools=2,
             n_stream_down=1,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            model_type=ModelTypes.resunet
         )
-        self.conv_mask = ResUNet3Connector(
+        self.conv_mask = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
+            is_side_stream=True,
             prev_backbone_channel_index=2,
             n_pools=2,
             n_stream_down=1,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            model_type=ModelTypes.resunet
         )
 
     def forward(
@@ -1011,13 +907,13 @@ class ResUNet3_2_2(torch.nn.Module):
             stream_down=[h3_1_dist]
         )
         h_edge = self.conv_edge(
-            prev_same=[('prev', h_dist)],
+            prev_same=[('prev_backbone', x2_0), ('prev', h_dist)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
             stream_down=[h3_1_edge]
         )
         h_mask = self.conv_mask(
-            prev_same=[('prev', h_edge)],
+            prev_same=[('prev_backbone', x2_0), ('prev', h_edge)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
             stream_down=[h3_1_mask]
@@ -1044,33 +940,41 @@ class ResUNet3_1_3(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
-        self.conv_dist = ResUNet3Connector(
+        self.conv_dist = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
             is_side_stream=False,
             prev_backbone_channel_index=1,
             n_pools=1,
             n_stream_down=2,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            model_type=ModelTypes.resunet
         )
-        self.conv_edge = ResUNet3Connector(
+        self.conv_edge = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
+            is_side_stream=True,
             prev_backbone_channel_index=1,
             n_pools=1,
             n_stream_down=2,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            model_type=ModelTypes.resunet
         )
-        self.conv_mask = ResUNet3Connector(
+        self.conv_mask = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
+            is_side_stream=True,
             prev_backbone_channel_index=1,
             n_pools=1,
             n_stream_down=2,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            model_type=ModelTypes.resunet
         )
 
     def forward(
@@ -1092,13 +996,13 @@ class ResUNet3_1_3(torch.nn.Module):
             stream_down=[h3_1_dist, h2_2_dist]
         )
         h_edge = self.conv_edge(
-            prev_same=[('prev', h_dist)],
+            prev_same=[('prev_backbone', x1_0), ('prev', h_dist)],
             pools=[x0_0],
             x4_0=x4_0,
             stream_down=[h3_1_edge, h2_2_edge]
         )
         h_mask = self.conv_mask(
-            prev_same=[('prev', h_edge)],
+            prev_same=[('prev_backbone', x1_0), ('prev', h_edge)],
             pools=[x0_0],
             x4_0=x4_0,
             stream_down=[h3_1_mask, h2_2_mask]
@@ -1125,30 +1029,38 @@ class ResUNet3_0_4(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
-        self.conv_dist = ResUNet3Connector(
+        self.conv_dist = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
             is_side_stream=False,
             prev_backbone_channel_index=0,
             n_stream_down=3,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            model_type=ModelTypes.resunet
         )
-        self.conv_edge = ResUNet3Connector(
+        self.conv_edge = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
+            is_side_stream=True,
             prev_backbone_channel_index=0,
             n_stream_down=3,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            model_type=ModelTypes.resunet
         )
-        self.conv_mask = ResUNet3Connector(
+        self.conv_mask = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
+            is_side_stream=True,
             prev_backbone_channel_index=0,
             n_stream_down=3,
             dilations=dilations,
-            attention=attention
+            attention=attention,
+            model_type=ModelTypes.resunet
         )
 
     def forward(
@@ -1171,12 +1083,12 @@ class ResUNet3_0_4(torch.nn.Module):
             stream_down=[h3_1_dist, h2_2_dist, h1_3_dist]
         )
         h_edge = self.conv_edge(
-            prev_same=[('prev', h_dist)],
+            prev_same=[('prev_backbone', x0_0), ('prev', h_dist)],
             x4_0=x4_0,
             stream_down=[h3_1_edge, h2_2_edge, h1_3_edge]
         )
         h_mask = self.conv_mask(
-            prev_same=[('prev', h_edge)],
+            prev_same=[('prev_backbone', x0_0), ('prev', h_edge)],
             x4_0=x4_0,
             stream_down=[h3_1_mask, h2_2_mask, h1_3_mask]
         )

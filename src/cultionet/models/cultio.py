@@ -146,7 +146,6 @@ class CultioNet(torch.nn.Module):
         self.ds_num_bands = int(self.ds_num_features / self.ds_num_time)
         self.filters = filters
         self.num_classes = num_classes
-        out_mask_channels = 2
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
@@ -156,13 +155,16 @@ class CultioNet(torch.nn.Module):
                 in_channels=self.ds_num_bands,
                 in_time=self.ds_num_time,
                 init_filter=self.filters,
+                num_classes=self.num_classes,
                 double_dilation=2
             )
         elif model_type == 'ResUNet3Psi':
             self.mask_model = ResUNet3Psi(
                 in_channels=self.ds_num_bands,
                 in_time=self.ds_num_time,
-                init_filter=self.filters
+                init_filter=self.filters,
+                num_classes=self.num_classes,
+                double_dilation=2
             )
         else:
             raise NameError('Model type not supported.')
