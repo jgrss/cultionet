@@ -2,7 +2,7 @@
 """
 import typing as T
 
-from .base_layers import LogSoftmax
+from .base_layers import Softmax
 
 import torch
 from torch.autograd import Variable
@@ -170,7 +170,7 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
         padding = int(kernel_size / 2)
-        final_activation = torch.nn.Sigmoid() if num_classes_last == 1 else LogSoftmax(dim=1)
+        final_activation = torch.nn.Sigmoid() if num_classes_last == 1 else Softmax(dim=1)
 
         # Crop-type layer
         if self.crop_type_layer:
