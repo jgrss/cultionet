@@ -560,18 +560,29 @@ class CultioLitModel(pl.LightningModule):
         else:
             self.edge_class = num_classes
 
-        self.cultionet_model = CultioNet(
-            ds_features=num_features,
-            ds_time_features=num_time_features,
-            filters=filters,
-            num_classes=self.num_classes,
-            model_type=model_type
+        self.model_attr = f'{model_name}_{model_type}'
+        setattr(
+            self,
+            self.model_attr,
+            CultioNet(
+                ds_features=num_features,
+                ds_time_features=num_time_features,
+                filters=filters,
+                num_classes=self.num_classes,
+                model_type=model_type
+            )
         )
         self.configure_loss()
         self.configure_scorer()
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
+
+    @property
+    def cultionet_model(self):
+        return getattr(
+            self, self.model_attr
+        )
 
     def forward(
         self, batch: Data, batch_idx: int = None
