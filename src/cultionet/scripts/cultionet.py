@@ -1059,7 +1059,7 @@ def generate_model_graph(args):
     )
 
     data = ds[0]
-    xrnn = x.reshape(
+    xrnn = data.x.reshape(
         1, data.nbands, data.ntime, data.height, data.width
     )
     filters = 32
