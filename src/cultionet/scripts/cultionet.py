@@ -1044,6 +1044,42 @@ def spatial_kfoldcv(args):
         )
 
 
+def generate_model_graph(args):
+    from cultionet.models.convstar import StarRNN
+    from cultionet.models.nunet import ResUNet3Psi
+
+    ppaths = setup_paths(args.project_path)
+    data_values = torch.load(str(ppaths.norm_file))
+    ds = EdgeDataset(
+        ppaths.train_path,
+        data_means=data_values.mean,
+        data_stds=data_values.std,
+        crop_counts=data_values.crop_counts,
+        edge_counts=data_values.edge_counts
+    )
+
+    data = ds[0]
+    xrnn = x.reshape(
+        1, data.nbands, data.ntime, data.height, data.width
+    )
+    filters = 32
+    star_rnn_model = StarRNN(
+        input_dim=data.nbands,
+        hidden_dim=filters,
+        n_layers=6,
+        num_classes_last=2
+    )
+    x, __ = star_rnn_model(xrnn)
+    torch.onnx.export(star_rnn_model, xrnn, ppaths.ckpt_path / 'cultionet_starrnn.onnx')
+    resunet_model = ResUNet3Psi(
+        in_channels=int(filters * 3),
+        init_filter=filters,
+        num_classes=2,
+        double_dilation=2
+    )
+    torch.onnx.export(resunet_model, x, ppaths.ckpt_path / 'cultionet_resunet.onnx')
+
+
 def train_model(args):
     seed_everything(args.random_seed, workers=True)
 
@@ -1213,7 +1249,14 @@ def main():
 
     subparsers = parser.add_subparsers(dest='process')
     available_processes = [
-        'create', 'create-predict', 'skfoldcv', 'train', 'maskrcnn', 'predict', 'version'
+        'create',
+        'create-predict',
+        'skfoldcv',
+        'train',
+        'maskrcnn',
+        'predict',
+        'graph',
+        'version'
     ]
     for process in available_processes:
         subparser = subparsers.add_parser(process)
@@ -1227,6 +1270,8 @@ def main():
             dest='project_path',
             help='The project path (the directory that contains the grid ids)'
         )
+        if process == 'graph':
+            break
 
         process_dict = args_config[process.replace('-', '_')]
         if process in ('skfoldcv', 'maskrcnn'):
@@ -1290,6 +1335,8 @@ def main():
         train_maskrcnn(args)
     elif args.process == 'predict':
         predict_image(args)
+    elif args.process == 'graph':
+        generate_model_graph(args)
 
 
 if __name__ == '__main__':
