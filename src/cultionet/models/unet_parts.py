@@ -101,6 +101,7 @@ class UNet3Connector(torch.nn.Module):
                     up_channels,
                     dilations=[double_dilation]
                 )
+            self.cat_channels += up_channels
         if self.is_side_stream:
             if model_type == ModelTypes.unet:
                 # Backbone, same level
@@ -116,7 +117,7 @@ class UNet3Connector(torch.nn.Module):
                     up_channels,
                     dilations=[double_dilation]
                 )
-        self.cat_channels += up_channels
+            self.cat_channels += up_channels
         # Previous output, downstream
         if self.n_prev_down > 0:
             for n in range(0, self.n_prev_down):
