@@ -652,9 +652,7 @@ class ResUNet3Psi(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        in_time: int,
         init_filter: int = 32,
-        rnn_filters: int = 16,
         num_classes: int = 2,
         double_dilation: int = 1,
         attention: bool = False
@@ -678,7 +676,7 @@ class ResUNet3Psi(torch.nn.Module):
         # Reduced channels (x2) for mean and max
         # Input filters for RNN hidden logits
         self.conv0_0 = ResidualConvInit(
-            rnn_filters,
+            in_channels,
             channels[0]
         )
         self.conv1_0 = PoolResidualConv(

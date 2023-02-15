@@ -168,10 +168,8 @@ class CultioNet(torch.nn.Module):
             )
         elif model_type == 'ResUNet3Psi':
             self.mask_model = ResUNet3Psi(
-                in_channels=self.ds_num_bands,
-                in_time=self.ds_num_time,
+                in_channels=int(self.filters * 3),
                 init_filter=self.filters,
-                rnn_filters=int(self.filters / 2.0),
                 num_classes=self.num_classes,
                 double_dilation=2
             )
