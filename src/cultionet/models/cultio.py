@@ -3,6 +3,7 @@ import typing as T
 from . import model_utils
 from .base_layers import ConvBlock2d
 from .nunet import UNet3, UNet3Psi, ResUNet3Psi
+from .convstar import StarRNN
 
 import torch
 from torch_geometric.data import Data
@@ -150,6 +151,13 @@ class CultioNet(torch.nn.Module):
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
+        self.star_rnn = StarRNN(
+            input_dim=self.ds_num_bands,
+            hidden_dim=int(self.filters / 2.0),
+            n_layers=6,
+            num_classes_last=self.num_classes,
+            crop_type_layer=True if self.num_classes > 2 else False
+        )
         if model_type == 'UNet3Psi':
             self.mask_model = UNet3Psi(
                 in_channels=self.ds_num_bands,
@@ -163,6 +171,7 @@ class CultioNet(torch.nn.Module):
                 in_channels=self.ds_num_bands,
                 in_time=self.ds_num_time,
                 init_filter=self.filters,
+                rnn_filters=int(self.filters / 2.0),
                 num_classes=self.num_classes,
                 double_dilation=2
             )
@@ -185,8 +194,11 @@ class CultioNet(torch.nn.Module):
         x = x.reshape(
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
+        # StarRNN
+        logits_star_h, logits_star_last = self.star_rnn(x)
+        logits_star_last = self.cg(logits_star_last)
         # Main stream
-        logits = self.mask_model(x)
+        logits = self.mask_model(x, logits_star_h)
         logits_distance = self.cg(logits['dist'])
         logits_edges = self.cg(logits['edge'])
         logits_crop = self.cg(logits['mask'])
@@ -195,7 +207,8 @@ class CultioNet(torch.nn.Module):
             'dist': logits_distance,
             'edge': logits_edges,
             'crop': logits_crop,
-            'crop_type': None
+            'crop_type': None,
+            'crop_star': logits_star_last
         }
 
         return out

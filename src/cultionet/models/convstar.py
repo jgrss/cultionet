@@ -2,7 +2,7 @@
 """
 import typing as T
 
-from .base_layers import Softmax
+from .base_layers import LogSoftmax
 
 import torch
 from torch.autograd import Variable
@@ -148,7 +148,7 @@ class StarRNN(torch.nn.Module):
         input_dim: int = 3,
         hidden_dim: int = 64,
         num_classes_l2: int = 3,
-        num_classes_last: int = 3,
+        num_classes_last: int = 2,
         n_stage: int = 3,
         kernel_size: int = 3,
         n_layers: int = 6,
@@ -170,7 +170,7 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
         padding = int(kernel_size / 2)
-        final_activation = torch.nn.Sigmoid() if num_classes_last == 1 else Softmax(dim=1)
+        final_activation = torch.nn.Sigmoid() if num_classes_last == 1 else LogSoftmax(dim=1)
 
         # Crop-type layer
         if self.crop_type_layer:
@@ -214,15 +214,28 @@ class StarRNN(torch.nn.Module):
         for iter_ in range(0, time_size):
             hidden_s = self.rnn(x[:, :, iter_, :, :], hidden_s)
 
+        h_final = hidden_s[-1]
         if self.crop_type_layer:
-            last_l2 = self.final_l2(hidden_s[-2])
-            last = self.final_last(hidden_s[-1])
-            h = torch.cat([hidden_s[-2], hidden_s[-1]], dim=1)
+            if self.n_layers == 3:
+                # local_1 = hidden_s[0]
+                local_2 = hidden_s[1]
+            elif self.nstage==3:
+                # local_1 = hidden_s[1]
+                local_2 = hidden_s[3]
+            elif self.nstage==2:
+                # local_1 = hidden_s[1]
+                local_2 = hidden_s[2]
+            elif self.nstage==1:
+                # local_1 = hidden_s[-1]
+                local_2 = hidden_s[-1]
+
+            last_l2 = self.final_l2(local_2)
+            last = self.final_last(h)
+            h = torch.cat([local_2, h_final], dim=1)
 
             return h, last_l2, last
         else:
-            h = hidden_s[-1]
-            last = self.final_last(h)
+            last = self.final_last(h_final)
 
             # The output is (B x C x H x W)
             return h, last

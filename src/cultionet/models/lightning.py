@@ -709,13 +709,15 @@ class CultioLitModel(pl.LightningModule):
             batch, crop_type=predictions['crop_type']
         )
 
+        crop_star_loss = self.crop_star_loss(predictions['crop_star'], true_crop)
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
         crop_loss = self.crop_loss(predictions['crop'], true_crop)
 
         # Main loss
         loss = (
-            dist_loss
+            crop_star_loss
+            + dist_loss
             + edge_loss
             + crop_loss
         )
@@ -873,6 +875,7 @@ class CultioLitModel(pl.LightningModule):
         self.dist_loss = TanimotoDistLoss()
         self.edge_loss = TanimotoDistLoss()
         self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=True)
         if self.num_classes > 2:
             self.crop_type_star_loss = TanimotoDistLoss(scale_pos_weight=True)
             self.crop_type_loss = TanimotoDistLoss(scale_pos_weight=True)

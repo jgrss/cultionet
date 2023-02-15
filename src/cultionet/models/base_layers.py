@@ -7,6 +7,16 @@ import torch.nn.functional as F
 from torch_geometric import nn
 
 
+class LogSoftmax(torch.nn.Module):
+    def __init__(self, dim: int = 1):
+        super(LogSoftmax, self).__init__()
+
+        self.dim = dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.log_softmax(x, dim=self.dim, dtype=x.dtype)
+
+
 class Softmax(torch.nn.Module):
     def __init__(self, dim: int = 1):
         super(Softmax, self).__init__()

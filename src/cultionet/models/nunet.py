@@ -653,7 +653,8 @@ class ResUNet3Psi(torch.nn.Module):
         self,
         in_channels: int,
         in_time: int,
-        init_filter: int = 64,
+        init_filter: int = 32,
+        rnn_filters: int = 16,
         num_classes: int = 2,
         double_dilation: int = 1,
         attention: bool = False
@@ -695,8 +696,12 @@ class ResUNet3Psi(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
+        # Inputs =
+        # Reduced time dimensions
+        # Reduced channels (x2) for mean and max
+        # Input filters for RNN hidden logits
         self.conv0_0 = ResidualConvInit(
-            in_time + channels[0] + channels[0],
+            in_time + channels[0] + channels[0] + rnn_filters,
             channels[0]
         )
         self.conv1_0 = PoolResidualConv(
@@ -789,7 +794,7 @@ class ResUNet3Psi(torch.nn.Module):
                 m.apply(weights_init_kaiming)
 
     def forward(
-        self, x: torch.Tensor
+        self, x: torch.Tensor, xrnn: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
         # Inputs shape is (B x C X T|D x H x W)
         h = self.time_conv0(x)
@@ -797,7 +802,8 @@ class ResUNet3Psi(torch.nn.Module):
             [
                 self.reduce_to_time(h),
                 self.reduce_to_channels_max(h),
-                self.reduce_to_channels_mean(h)
+                self.reduce_to_channels_mean(h),
+                xrnn
             ],
             dim=1
         )
