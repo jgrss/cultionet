@@ -11,7 +11,9 @@ from torch.autograd import Variable
 class ConvSTARCell(torch.nn.Module):
     """Generates a convolutional STAR cell
     """
-    def __init__(self, input_size, hidden_size, kernel_size):
+    def __init__(
+        self, input_size: int, hidden_size: int, kernel_size: int
+    ):
         super(ConvSTARCell, self).__init__()
 
         padding = int(kernel_size / 2.0)
@@ -37,7 +39,11 @@ class ConvSTARCell(torch.nn.Module):
         torch.nn.init.constant(self.update.bias, 0.0)
         torch.nn.init.constant(self.gate.bias, 1.0)
 
-    def forward(self, inputs, prev_state):
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        prev_state: T.Union[None, torch.Tensor]
+    ) -> torch.Tensor:
         # get batch and spatial sizes
         batch_size = inputs.data.size()[0]
         spatial_size = inputs.data.size()[2:]
@@ -57,7 +63,13 @@ class ConvSTARCell(torch.nn.Module):
 
 
 class ConvSTAR(torch.nn.Module):
-    def __init__(self, input_size, hidden_sizes, kernel_sizes, n_layers):
+    def __init__(
+        self,
+        input_size: int,
+        hidden_sizes: int,
+        kernel_sizes: int,
+        n_layers: int
+    ):
         """Generates a multi-layer convolutional GRU. Preserves spatial dimensions across
         cells, only altering depth.
 
@@ -93,14 +105,18 @@ class ConvSTAR(torch.nn.Module):
                 input_dim = self.hidden_sizes[i - 1]
 
             cell = ConvSTARCell(input_dim, self.hidden_sizes[i], self.kernel_sizes[i])
-            name = 'ConvSTARCell_' + str(i).zfill(2)
+            name = f"ConvSTARCell_{str(i).zfill(2)}"
 
             setattr(self, name, cell)
             cells.append(getattr(self, name))
 
         self.cells = cells
 
-    def forward(self, x, hidden=None):
+    def forward(
+        self,
+        x: torch.Tensor,
+        hidden: T.Union[None, T.List[torch.Tensor]]
+    ) -> T.List[torch.Tensor]:
         """
         :param x: 4D input tensor. (batch, channels, height, width).
         :param hidden: list of 4D hidden state representations. (batch, channels, height, width).
@@ -154,7 +170,7 @@ class StarRNN(torch.nn.Module):
             n_layers=n_layers
         )
         padding = int(kernel_size / 2)
-        # final_activation = torch.nn.Sigmoid() if num_classes_last == 1 else Softmax(dim=1)
+        final_activation = torch.nn.Sigmoid() if num_classes_last == 1 else Softmax(dim=1)
 
         # Crop-type layer
         if self.crop_type_layer:
@@ -165,21 +181,16 @@ class StarRNN(torch.nn.Module):
                 kernel_size,
                 padding=padding
             )
-            # Last level (crop-type)
-            self.final_last = torch.nn.Conv2d(
+        # Last level (crop|non-crop)
+        self.final_last = torch.nn.Sequential(
+            torch.nn.Conv2d(
                 hidden_dim,
                 num_classes_last,
                 kernel_size,
                 padding=padding
-            )
-        else:
-            # Last level (crop|non-crop)
-            self.final_last = torch.nn.Conv2d(
-                hidden_dim,
-                num_classes_last,
-                kernel_size,
-                padding=padding
-            )
+            ),
+            final_activation
+        )
 
     def forward(
         self,
@@ -190,7 +201,7 @@ class StarRNN(torch.nn.Module):
         batch_size, __, time_size, height, width = x.shape
 
         # convRNN step
-        # hidden_s is a list (number of layer) of hidden states of size [b x c x h x w]
+        # hidden_s is a list (number of layer) of hidden states of size [B x C x H x W]
         if hidden_s is None:
             hidden_s = [
                 torch.zeros(

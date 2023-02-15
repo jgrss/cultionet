@@ -579,7 +579,7 @@ class CultioLitModel(pl.LightningModule):
         return self.forward(*args, **kwargs)
 
     @property
-    def cultionet_model(self):
+    def cultionet_model(self) -> CultioNet:
         return getattr(
             self, self.model_attr
         )
