@@ -87,9 +87,9 @@ class UNet3Connector(torch.nn.Module):
                     )
                 pool_size = int(pool_size / 2)
                 self.cat_channels += channels[0]
-        if is_side_stream:
+        if self.use_backbone:
             if model_type == ModelTypes.unet:
-                self.prev = DoubleConv(
+                self.prev_backbone = DoubleConv(
                     up_channels,
                     up_channels,
                     init_point_conv=init_point_conv,
@@ -97,14 +97,14 @@ class UNet3Connector(torch.nn.Module):
                 )
             else:
                 self.prev_backbone = ResidualConv(
-                    channels[prev_backbone_channel_index],
+                    up_channels,
                     up_channels,
                     dilations=[double_dilation]
                 )
-        else:
+        if self.is_side_stream:
             if model_type == ModelTypes.unet:
                 # Backbone, same level
-                self.prev_backbone = DoubleConv(
+                self.prev = DoubleConv(
                     channels[prev_backbone_channel_index],
                     up_channels,
                     init_point_conv=init_point_conv,
@@ -112,7 +112,7 @@ class UNet3Connector(torch.nn.Module):
                 )
             else:
                 self.prev = ResidualConv(
-                    up_channels,
+                    channels[prev_backbone_channel_index],
                     up_channels,
                     dilations=[double_dilation]
                 )
