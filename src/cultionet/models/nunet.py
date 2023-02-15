@@ -802,7 +802,7 @@ class ResUNet3Psi(torch.nn.Module):
         # h shape is (B x C x H x W)
         # Backbone
         # 1/1
-        x0_0 = self.conv0_0(x)
+        x0_0 = self.conv0_0(h)
         # 1/2
         x1_0 = self.conv1_0(x0_0)
         # 1/4
