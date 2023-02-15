@@ -217,13 +217,13 @@ class StarRNN(torch.nn.Module):
         if self.n_layers == 3:
             local_1 = hidden_s[0]
             local_2 = hidden_s[1]
-        elif self.nstage == 3:
+        elif self.n_stage == 3:
             local_1 = hidden_s[1]
             local_2 = hidden_s[3]
-        elif self.nstage == 2:
+        elif self.n_stage == 2:
             local_1 = hidden_s[1]
             local_2 = hidden_s[2]
-        elif self.nstage == 1:
+        elif self.n_stage == 1:
             local_1 = hidden_s[-1]
             local_2 = hidden_s[-1]
 
