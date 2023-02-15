@@ -11,7 +11,9 @@ from .base_layers import (
     AttentionGate,
     DoubleConv,
     SpatioTemporalConv3d,
+    ResSpatioTemporalConv3d,
     Max,
+    Mean,
     Permute,
     PoolConv,
     PoolResidualConv,
@@ -648,9 +650,7 @@ class ResUNet3Psi(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        out_dist_channels: int = 1,
-        out_edge_channels: int = 2,
-        out_mask_channels: int = 2,
+        in_time: int,
         init_filter: int = 64,
         dilations: T.List[int] = None,
         attention: bool = False
@@ -669,10 +669,33 @@ class ResUNet3Psi(torch.nn.Module):
         if dilations is None:
             dilations = [2]
 
+        self.time_conv0 = ResSpatioTemporalConv3d(
+            in_channels=in_channels,
+            out_channels=channels[0]
+        )
+        self.reduce_to_time = torch.nn.Sequential(
+            ResSpatioTemporalConv3d(
+                in_channels=channels[0],
+                out_channels=1
+            ),
+            Squeeze()
+        )
+        # (B x C x T|D x H x W)
+        # Temporal max logit
+        # Squeeze to 2d (B x C x H x W)
+        self.reduce_to_channels_max = torch.nn.Sequential(
+            Max(dim=2),
+            Squeeze()
+        )
+        self.reduce_to_channels_mean = torch.nn.Sequential(
+            Mean(dim=2),
+            Squeeze()
+        )
+
         self.up = model_utils.UpSample()
 
         self.conv0_0 = ResidualConvInit(
-            in_channels,
+            in_time + channels[0] + channels[0],
             channels[0]
         )
         self.conv1_0 = PoolResidualConv(
@@ -722,12 +745,10 @@ class ResUNet3Psi(torch.nn.Module):
             attention=attention
         )
 
-        edge_activation = torch.nn.Sigmoid() if out_edge_channels == 1 else Softmax(dim=1)
-
         self.final_dist = torch.nn.Sequential(
             torch.nn.Conv2d(
                 up_channels,
-                out_dist_channels,
+                1,
                 kernel_size=1,
                 padding=0
             ),
@@ -736,27 +757,49 @@ class ResUNet3Psi(torch.nn.Module):
         self.final_edge = torch.nn.Sequential(
             torch.nn.Conv2d(
                 up_channels,
-                out_edge_channels,
+                1,
                 kernel_size=1,
                 padding=0
             ),
-            edge_activation
+            torch.nn.Sigmoid()
         )
-        self.final_mask = torch.nn.Conv2d(
-            up_channels,
-            out_mask_channels,
-            kernel_size=1,
-            padding=0
+        self.final_mask = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                up_channels,
+                2,
+                kernel_size=1,
+                padding=0
+            ),
+            Softmax(dim=1)
         )
 
         # Initialise weights
         for m in self.modules():
-            if isinstance(m, (torch.nn.Conv2d, torch.nn.BatchNorm2d)):
+            if isinstance(
+                m,
+                (
+                    torch.nn.Conv2d,
+                    torch.nn.BatchNorm2d,
+                    torch.nn.Conv3d,
+                    torch.nn.BatchNorm3d
+                )
+            ):
                 m.apply(weights_init_kaiming)
 
     def forward(
         self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
+        # Inputs shape is (B x C X T|D x H x W)
+        h = self.time_conv0(x)
+        h = torch.cat(
+            [
+                self.reduce_to_time(h),
+                self.reduce_to_channels_max(h),
+                self.reduce_to_channels_mean(h)
+            ],
+            dim=1
+        )
+        # h shape is (B x C x H x W)
         # Backbone
         # 1/1
         x0_0 = self.conv0_0(x)

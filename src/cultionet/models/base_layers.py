@@ -550,6 +550,44 @@ class ChannelAttention(torch.nn.Module):
         return x * self.module(x)
 
 
+class ResSpatioTemporalConv3d(torch.nn.Module):
+    """A spatio-temporal convolution layer
+    """
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int
+    ):
+        super(ResSpatioTemporalConv3d, self).__init__()
+
+        layers = [
+            ConvBlock3d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1
+            ),
+            torch.nn.Conv3d(
+                in_channels=out_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=2,
+                dilation=2
+            )
+        ]
+
+        self.seq = torch.nn.Sequential(*layers)
+        self.skip = torch.nn.Conv3d(
+            in_channels,
+            out_channels,
+            kernel_size=1,
+            padding=0
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x) + self.skip(x)
+
+
 class SpatioTemporalConv3d(torch.nn.Module):
     """A spatio-temporal convolution layer
     """
@@ -716,17 +754,26 @@ class ResidualConvInit(torch.nn.Module):
     ):
         super(ResidualConvInit, self).__init__()
 
-        self.seq = ConvBlock2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=3,
-            padding=1
+        self.seq = torch.nn.Sequential(
+            ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1
+            ),
+            torch.nn.Conv2d(
+                out_channels,
+                out_channels,
+                kernel_size=3,
+                padding=2,
+                dilation=2
+            )
         )
-        self.skip = ConvBlock2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
+        self.skip = torch.nn.Conv2d(
+            in_channels,
+            out_channels,
             kernel_size=1,
-            add_activation=False
+            padding=0
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -740,7 +787,6 @@ class ResidualConv(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        init_conv: bool = False,
         fractal_attention: bool = False,
         channel_attention: bool = False,
         dilations: T.List[int] = None
@@ -750,21 +796,7 @@ class ResidualConv(torch.nn.Module):
         assert not all([fractal_attention, channel_attention]), \
             'Only one attention method should be used.'
 
-        init_in_channels = in_channels
-
-        layers = []
-        if init_conv:
-            layers += [
-                ConvBlock2d(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=3,
-                    padding=1
-                )
-            ]
-            in_channels = out_channels
-
-        layers += [
+        layers = [
             ResBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -787,7 +819,7 @@ class ResidualConv(torch.nn.Module):
         self.fractal_weights = None
         if fractal_attention:
             self.fractal_weights = FractalAttention(
-                in_channels=init_in_channels,
+                in_channels=in_channels,
                 out_channels=out_channels
             )
             self.gamma = torch.nn.Parameter(torch.ones(1))
@@ -796,9 +828,10 @@ class ResidualConv(torch.nn.Module):
 
         self.seq = torch.nn.Sequential(*layers)
         self.skip = ConvBlock2d(
-            in_channels=init_in_channels,
+            in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=1,
+            padding=0,
             add_activation=False
         )
 
@@ -878,8 +911,7 @@ class PoolResidualConv(torch.nn.Module):
         dropout: T.Optional[float] = None,
         dilations: T.List[int] = None,
         fractal_attention: bool = False,
-        channel_attention: bool = False,
-        res_blocks: int = 0
+        channel_attention: bool = False
     ):
         super(PoolResidualConv, self).__init__()
 
@@ -889,33 +921,15 @@ class PoolResidualConv(torch.nn.Module):
             assert isinstance(dropout, float), 'The dropout arg must be a float.'
             layers += [torch.nn.Dropout(dropout)]
 
-        if res_blocks > 0:
-            layers += [
-                ResidualConvRCAB(
-                    in_channels,
-                    out_channels,
-                    fractal_attention=fractal_attention,
-                    channel_attention=channel_attention,
-                    res_blocks=res_blocks
-                ),
-                torch.nn.Conv2d(
-                    out_channels,
-                    out_channels,
-                    kernel_size=3,
-                    padding=1
-                )
-            ]
-
-        else:
-            layers += [
-                ResidualConv(
-                    in_channels,
-                    out_channels,
-                    fractal_attention=fractal_attention,
-                    channel_attention=channel_attention,
-                    dilations=dilations
-                )
-            ]
+        layers += [
+            ResidualConv(
+                in_channels,
+                out_channels,
+                fractal_attention=fractal_attention,
+                channel_attention=channel_attention,
+                dilations=dilations
+            )
+        ]
 
         self.seq = torch.nn.Sequential(*layers)
 

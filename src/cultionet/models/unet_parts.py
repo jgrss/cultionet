@@ -748,8 +748,7 @@ class ResUNet3Connector(torch.nn.Module):
                 up_channels,
                 dilations=dilations
             )
-        if not self.attention or (self.n_stream_down == 0):
-            self.cat_channels += up_channels
+        self.cat_channels += up_channels
         # Previous output, downstream
         if self.n_prev_down > 0:
             for n in range(0, self.n_prev_down):
@@ -766,11 +765,22 @@ class ResUNet3Connector(torch.nn.Module):
         # Previous output, (same) downstream
         if self.n_stream_down > 0:
             for n in range(0, self.n_stream_down):
+                in_stream_channels = up_channels
+                if self.attention:
+                    attention_module = AttentionGate(
+                        up_channels, up_channels
+                    )
+                    setattr(
+                        self,
+                        f'attn_stream_{n}',
+                        attention_module
+                    )
+                    in_stream_channels = up_channels * 2
                 setattr(
                     self,
                     f'stream_{n}',
                     ResidualConv(
-                        up_channels,
+                        in_stream_channels,
                         up_channels,
                         fractal_attention=attention,
                         dilations=dilations
@@ -800,35 +810,63 @@ class ResUNet3Connector(torch.nn.Module):
         stream_down: T.List[torch.Tensor] = None
     ):
         h = []
-        # Pooling backbone
+        # Pooling layer of the backbone
         if pools is not None:
             assert self.n_pools == len(pools), \
                 'There are no convolutions available for the pool layers.'
             for n, x in zip(range(self.n_pools), pools):
                 c = getattr(self, f'pool_{n}')
                 h += [c(x)]
-        if not self.attention or stream_down is None:
-            for conv_name, prev_inputs in prev_same:
-                c = getattr(self, conv_name)
-                h += [c(prev_inputs)]
+        # Up down layers from the previous head
         if prev_down is not None:
             assert self.n_prev_down == len(prev_down), \
                 'There are no convolutions available for the previous downstream layers.'
             for n, x in zip(range(self.n_prev_down), prev_down):
                 c = getattr(self, f'prev_{n}')
                 h += [
-                    c(self.up(x, size=prev_same[0][1].shape[-2:]))
+                    c(
+                        self.up(
+                            x, size=prev_same[0][1].shape[-2:], mode='bilinear'
+                        )
+                    )
                 ]
+        # Previous same layers from the previous head
+        for conv_name, prev_inputs in prev_same:
+            c = getattr(self, conv_name)
+            h += [c(prev_inputs)]
+        if self.attention:
+            prev_same_hidden = h[-1].clone()
+        # Previous down layers from the same head
         if stream_down is not None:
             assert self.n_stream_down == len(stream_down), \
                 'There are no convolutions available for the downstream layers.'
             for n, x in zip(range(self.n_stream_down), stream_down):
-                c = getattr(self, f'stream_{n}')
-                h += [
-                    c(self.up(x, size=prev_same[0][1].shape[-2:]))
-                ]
+                if self.attention:
+                    # Gate
+                    g = self.up(x, size=prev_same[0][1].shape[-2:], mode='bilinear')
+                    c_attn = getattr(self, f'attn_stream_{n}')
+                    # Attention gate
+                    attn_out = c_attn(g, prev_same_hidden)
+                    c = getattr(self, f'stream_{n}')
+                    # Concatenate attention weights
+                    h += [c(torch.cat([attn_out, g], dim=1))]
+                else:
+                    c = getattr(self, f'stream_{n}')
+                    h += [
+                        c(
+                            self.up(
+                                x, size=prev_same[0][1].shape[-2:], mode='bilinear'
+                            )
+                        )
+                    ]
+
+        # Lowest level
         h += [
-            self.conv4_0(self.up(x4_0, size=prev_same[0][1].shape[-2:]))
+            self.conv4_0(
+                self.up(
+                    x4_0, size=prev_same[0][1].shape[-2:], mode='bilinear'
+                )
+            )
         ]
         h = torch.cat(h, dim=1)
         h = self.final(h)
@@ -844,8 +882,7 @@ class ResUNet3_3_1(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.List[int] = None,
-        attention: bool = False,
-        rcsb: bool = False
+        attention: bool = False
     ):
         super(ResUNet3_3_1, self).__init__()
 
@@ -868,10 +905,7 @@ class ResUNet3_3_1(torch.nn.Module):
             prev_backbone_channel_index=3,
             n_pools=3,
             dilations=dilations,
-            attention=attention,
-            rcsb=rcsb,
-            rcsb_recursion=3,
-            rcsb_g=1
+            attention=attention
         )
         # Mask stream connection
         self.conv_mask = ResUNet3Connector(
@@ -925,8 +959,7 @@ class ResUNet3_2_2(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.List[int] = None,
-        attention: bool = False,
-        rcsb: bool = False
+        attention: bool = False
     ):
         super(ResUNet3_2_2, self).__init__()
 
@@ -949,10 +982,7 @@ class ResUNet3_2_2(torch.nn.Module):
             n_pools=2,
             n_stream_down=1,
             dilations=dilations,
-            attention=attention,
-            rcsb=rcsb,
-            rcsb_recursion=3,
-            rcsb_g=1
+            attention=attention
         )
         self.conv_mask = ResUNet3Connector(
             channels=channels,
@@ -1008,8 +1038,7 @@ class ResUNet3_1_3(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.List[int] = None,
-        attention: bool = False,
-        rcsb: bool = False
+        attention: bool = False
     ):
         super(ResUNet3_1_3, self).__init__()
 
@@ -1032,10 +1061,7 @@ class ResUNet3_1_3(torch.nn.Module):
             n_pools=1,
             n_stream_down=2,
             dilations=dilations,
-            attention=attention,
-            rcsb=rcsb,
-            rcsb_recursion=3,
-            rcsb_g=1
+            attention=attention
         )
         self.conv_mask = ResUNet3Connector(
             channels=channels,
@@ -1063,19 +1089,19 @@ class ResUNet3_1_3(torch.nn.Module):
             prev_same=[('prev_backbone', x1_0)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h2_2_dist, h3_1_dist]
+            stream_down=[h3_1_dist, h2_2_dist]
         )
         h_edge = self.conv_edge(
             prev_same=[('prev', h_dist)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h2_2_edge, h3_1_edge]
+            stream_down=[h3_1_edge, h2_2_edge]
         )
         h_mask = self.conv_mask(
             prev_same=[('prev', h_edge)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h2_2_mask, h3_1_mask]
+            stream_down=[h3_1_mask, h2_2_mask]
         )
 
         return {
@@ -1093,8 +1119,7 @@ class ResUNet3_0_4(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.List[int] = None,
-        attention: bool = False,
-        rcsb: bool = False
+        attention: bool = False
     ):
         super(ResUNet3_0_4, self).__init__()
 
@@ -1115,10 +1140,7 @@ class ResUNet3_0_4(torch.nn.Module):
             prev_backbone_channel_index=0,
             n_stream_down=3,
             dilations=dilations,
-            attention=attention,
-            rcsb=rcsb,
-            rcsb_recursion=3,
-            rcsb_g=1
+            attention=attention
         )
         self.conv_mask = ResUNet3Connector(
             channels=channels,
@@ -1146,17 +1168,17 @@ class ResUNet3_0_4(torch.nn.Module):
         h_dist = self.conv_dist(
             prev_same=[('prev_backbone', x0_0)],
             x4_0=x4_0,
-            stream_down=[h1_3_dist, h2_2_dist, h3_1_dist]
+            stream_down=[h3_1_dist, h2_2_dist, h1_3_dist]
         )
         h_edge = self.conv_edge(
             prev_same=[('prev', h_dist)],
             x4_0=x4_0,
-            stream_down=[h1_3_edge, h2_2_edge, h3_1_edge]
+            stream_down=[h3_1_edge, h2_2_edge, h1_3_edge]
         )
         h_mask = self.conv_mask(
             prev_same=[('prev', h_edge)],
             x4_0=x4_0,
-            stream_down=[h1_3_mask, h2_2_mask, h3_1_mask]
+            stream_down=[h3_1_mask, h2_2_mask, h1_3_mask]
         )
 
         return {
