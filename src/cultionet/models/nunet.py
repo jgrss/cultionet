@@ -669,7 +669,6 @@ class ResUNet3Psi(torch.nn.Module):
             init_filter*16
         ]
         up_channels = int(channels[0] * 5)
-        dilations = [double_dilation]
 
         self.time_conv0 = ResSpatioTemporalConv3d(
             in_channels=in_channels,
@@ -703,47 +702,47 @@ class ResUNet3Psi(torch.nn.Module):
         self.conv1_0 = PoolResidualConv(
             channels[0],
             channels[1],
-            dilations=dilations
+            dilations=[double_dilation]
         )
         self.conv2_0 = PoolResidualConv(
             channels[1],
             channels[2],
-            dilations=dilations
+            dilations=[double_dilation]
         )
         self.conv3_0 = PoolResidualConv(
             channels[2],
             channels[3],
-            dilations=dilations
+            dilations=[double_dilation]
         )
         self.conv4_0 = PoolResidualConv(
             channels[3],
             channels[4],
-            dilations=dilations
+            dilations=[double_dilation]
         )
 
         # Connect 3
         self.convs_3_1 = ResUNet3_3_1(
             channels=channels,
             up_channels=up_channels,
-            dilations=dilations,
+            double_dilation=double_dilation,
             attention=attention
         )
         self.convs_2_2 = ResUNet3_2_2(
             channels=channels,
             up_channels=up_channels,
-            dilations=dilations,
+            double_dilation=double_dilation,
             attention=attention
         )
         self.convs_1_3 = ResUNet3_1_3(
             channels=channels,
             up_channels=up_channels,
-            dilations=dilations,
+            double_dilation=double_dilation,
             attention=attention
         )
         self.convs_0_4 = ResUNet3_0_4(
             channels=channels,
             up_channels=up_channels,
-            dilations=dilations,
+            double_dilation=double_dilation,
             attention=attention
         )
 

@@ -352,13 +352,6 @@ train:
     kwargs:
       default: 30
       type: '&int'
-  learning_rate:
-    short: lr
-    long: learning-rate
-    help: The learning rate
-    kwargs:
-      default: 1e-4
-      type: '&float'
   threads:
     short: t
     long: threads
@@ -449,6 +442,22 @@ train:
     kwargs:
       default: 7
       type: '&int'
+  optimizer:
+    short: ''
+    long: optimizer
+    help: The optimizer
+    kwargs:
+      default: 'AdamW'
+      choices:
+        - 'AdamW'
+        - 'SGD'
+  learning_rate:
+    short: lr
+    long: learning-rate
+    help: The learning rate
+    kwargs:
+      default: 1e-4
+      type: '&float'
   weight_decay:
     short: ''
     long: weight-decay

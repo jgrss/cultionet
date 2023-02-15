@@ -225,6 +225,7 @@ def fit(
     edge_class: T.Optional[int] = None,
     class_weights: T.Sequence[float] = None,
     edge_weights: T.Sequence[float] = None,
+    optimizer: str = 'AdamW',
     learning_rate: T.Optional[float] = 0.001,
     epochs: T.Optional[int] = 30,
     save_top_k: T.Optional[int] = 1,
@@ -257,6 +258,7 @@ def fit(
         batch_size (Optional[int]): The data batch size.
         load_batch_workers (Optional[int]): The number of parallel batches to load.
         filters (Optional[int]): The number of initial model filters.
+        optimizer (Optional[str]): The optimizer.
         learning_rate (Optional[float]): The model learning rate.
         epochs (Optional[int]): The number of epochs.
         save_top_k (Optional[int]): The number of top-k model checkpoints to save.
@@ -318,6 +320,7 @@ def fit(
         num_time_features=train_ds.num_time_features,
         num_classes=num_classes,
         filters=filters,
+        optimizer=optimizer,
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         class_weights=class_weights,

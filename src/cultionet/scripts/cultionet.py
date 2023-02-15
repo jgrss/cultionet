@@ -1019,6 +1019,7 @@ def spatial_kfoldcv(args):
             load_batch_workers=args.load_batch_workers,
             epochs=args.epochs,
             accumulate_grad_batches=args.accumulate_grad_batches,
+            optimizer=args.optimizer,
             learning_rate=args.learning_rate,
             filters=args.filters,
             num_classes=args.num_classes if args.num_classes is not None else class_info['max_crop_class'] + 1,
