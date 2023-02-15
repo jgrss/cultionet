@@ -69,8 +69,8 @@ class UNet3Connector(torch.nn.Module):
                         self,
                         f'pool_{n}',
                         PoolConv(
-                            channels[n],
-                            channels[0],
+                            in_channels=channels[n],
+                            out_channels=channels[0],
                             pool_size=pool_size
                         )
                     )
@@ -79,8 +79,8 @@ class UNet3Connector(torch.nn.Module):
                         self,
                         f'pool_{n}',
                         PoolResidualConv(
-                            channels[n],
-                            channels[0],
+                            in_channels=channels[n],
+                            out_channels=channels[0],
                             pool_size=pool_size,
                             dilations=[double_dilation]
                         )
@@ -90,15 +90,15 @@ class UNet3Connector(torch.nn.Module):
         if self.use_backbone:
             if model_type == ModelTypes.unet:
                 self.prev_backbone = DoubleConv(
-                    up_channels,
-                    up_channels,
+                    in_channels=channels[prev_backbone_channel_index],
+                    out_channels=up_channels,
                     init_point_conv=init_point_conv,
                     double_dilation=double_dilation
                 )
             else:
                 self.prev_backbone = ResidualConv(
-                    up_channels,
-                    up_channels,
+                    in_channels=channels[prev_backbone_channel_index],
+                    out_channels=up_channels,
                     dilations=[double_dilation]
                 )
             self.cat_channels += up_channels
@@ -106,15 +106,15 @@ class UNet3Connector(torch.nn.Module):
             if model_type == ModelTypes.unet:
                 # Backbone, same level
                 self.prev = DoubleConv(
-                    channels[prev_backbone_channel_index],
-                    up_channels,
+                    in_channels=up_channels,
+                    out_channels=up_channels,
                     init_point_conv=init_point_conv,
                     double_dilation=double_dilation
                 )
             else:
                 self.prev = ResidualConv(
-                    channels[prev_backbone_channel_index],
-                    up_channels,
+                    in_channels=up_channels,
+                    out_channels=up_channels,
                     dilations=[double_dilation]
                 )
             self.cat_channels += up_channels
@@ -126,8 +126,8 @@ class UNet3Connector(torch.nn.Module):
                         self,
                         f'prev_{n}',
                         DoubleConv(
-                            up_channels,
-                            up_channels,
+                            in_channels=up_channels,
+                            out_channels=up_channels,
                             init_point_conv=init_point_conv,
                             double_dilation=double_dilation
                         )
@@ -137,8 +137,8 @@ class UNet3Connector(torch.nn.Module):
                         self,
                         f'prev_{n}',
                         ResidualConv(
-                            up_channels,
-                            up_channels,
+                            in_channels=up_channels,
+                            out_channels=up_channels,
                             dilations=[double_dilation]
                         )
                     )
@@ -160,8 +160,8 @@ class UNet3Connector(torch.nn.Module):
                         self,
                         f'stream_{n}',
                         DoubleConv(
-                            in_stream_channels,
-                            up_channels,
+                            in_channels=in_stream_channels,
+                            out_channels=up_channels,
                             init_point_conv=init_point_conv,
                             double_dilation=double_dilation
                         )
@@ -171,8 +171,8 @@ class UNet3Connector(torch.nn.Module):
                         self,
                         f'stream_{n}',
                         ResidualConv(
-                            in_stream_channels,
-                            up_channels,
+                            in_channels=in_stream_channels,
+                            out_channels=up_channels,
                             dilations=[double_dilation]
                         )
                     )
@@ -181,24 +181,24 @@ class UNet3Connector(torch.nn.Module):
         self.cat_channels += channels[0]
         if model_type == ModelTypes.unet:
             self.conv4_0 = DoubleConv(
-                channels[4],
-                channels[0],
+                in_channels=channels[4],
+                out_channels=channels[0],
                 init_point_conv=init_point_conv
             )
             self.final = DoubleConv(
-                self.cat_channels,
-                up_channels,
+                in_channels=self.cat_channels,
+                out_channels=up_channels,
                 init_point_conv=init_point_conv,
                 double_dilation=double_dilation
             )
         else:
             self.conv4_0 = ResidualConv(
-                channels[4],
-                channels[0]
+                in_channels=channels[4],
+                out_channels=channels[0],
             )
             self.final = ResidualConv(
-                self.cat_channels,
-                up_channels,
+                in_channels=self.cat_channels,
+                out_channels=up_channels,
                 dilations=[double_dilation]
             )
 
@@ -815,7 +815,6 @@ class ResUNet3_3_1(torch.nn.Module):
         x4_0: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
         # Distance logits
-        import ipdb; ipdb.set_trace()
         h_dist = self.conv_dist(
             prev_same=[('prev_backbone', x3_0)],
             pools=[x0_0, x1_0, x2_0],
