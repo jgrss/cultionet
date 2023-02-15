@@ -671,29 +671,6 @@ class ResUNet3Psi(torch.nn.Module):
         ]
         up_channels = int(channels[0] * 5)
 
-        self.time_conv0 = ResSpatioTemporalConv3d(
-            in_channels=in_channels,
-            out_channels=channels[0]
-        )
-        self.reduce_to_time = torch.nn.Sequential(
-            ResSpatioTemporalConv3d(
-                in_channels=channels[0],
-                out_channels=1
-            ),
-            Squeeze()
-        )
-        # (B x C x T|D x H x W)
-        # Temporal max logit
-        # Squeeze to 2d (B x C x H x W)
-        self.reduce_to_channels_max = torch.nn.Sequential(
-            Max(dim=2),
-            Squeeze()
-        )
-        self.reduce_to_channels_mean = torch.nn.Sequential(
-            Mean(dim=2),
-            Squeeze()
-        )
-
         self.up = model_utils.UpSample()
 
         # Inputs =
@@ -701,7 +678,7 @@ class ResUNet3Psi(torch.nn.Module):
         # Reduced channels (x2) for mean and max
         # Input filters for RNN hidden logits
         self.conv0_0 = ResidualConvInit(
-            in_time + channels[0] + channels[0] + rnn_filters,
+            rnn_filters,
             channels[0]
         )
         self.conv1_0 = PoolResidualConv(
@@ -794,23 +771,12 @@ class ResUNet3Psi(torch.nn.Module):
                 m.apply(weights_init_kaiming)
 
     def forward(
-        self, x: torch.Tensor, xrnn: torch.Tensor
+        self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
-        # Inputs shape is (B x C X T|D x H x W)
-        h = self.time_conv0(x)
-        h = torch.cat(
-            [
-                self.reduce_to_time(h),
-                self.reduce_to_channels_max(h),
-                self.reduce_to_channels_mean(h),
-                xrnn
-            ],
-            dim=1
-        )
-        # h shape is (B x C x H x W)
+        # x shape is (B x C x H x W)
         # Backbone
         # 1/1
-        x0_0 = self.conv0_0(h)
+        x0_0 = self.conv0_0(x)
         # 1/2
         x1_0 = self.conv1_0(x0_0)
         # 1/4

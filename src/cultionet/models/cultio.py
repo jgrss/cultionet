@@ -195,10 +195,10 @@ class CultioNet(torch.nn.Module):
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
         # StarRNN
-        logits_star_h, logits_star_last = self.star_rnn(x)
+        x, logits_star_last = self.star_rnn(x)
         logits_star_last = self.cg(logits_star_last)
         # Main stream
-        logits = self.mask_model(x, logits_star_h)
+        logits = self.mask_model(x)
         logits_distance = self.cg(logits['dist'])
         logits_edges = self.cg(logits['edge'])
         logits_crop = self.cg(logits['mask'])
