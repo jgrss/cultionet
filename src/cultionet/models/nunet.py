@@ -707,11 +707,15 @@ class ResUNet3Psi(torch.nn.Module):
         # Squeeze to 2d (B x C x H x W)
         self.reduce_to_channels_max = torch.nn.Sequential(
             Max(dim=2),
-            Squeeze()
+            Squeeze(),
+            torch.nn.BatchNorm2d(channels[0]),
+            torch.nn.LeakyReLU(inplace=False)
         )
         self.reduce_to_channels_mean = torch.nn.Sequential(
             Mean(dim=2),
-            Squeeze()
+            Squeeze(),
+            torch.nn.BatchNorm2d(channels[0]),
+            torch.nn.LeakyReLU(inplace=False)
         )
 
         # Inputs =
