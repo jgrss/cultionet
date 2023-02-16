@@ -812,10 +812,20 @@ class ResUNet3Psi(torch.nn.Module):
     def forward(
         self, x: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
-        # x shape is (B x C x H x W)
+        # Inputs shape is (B x C X T|D x H x W)
+        h = self.time_conv0(x)
+        h = torch.cat(
+            [
+                self.reduce_to_time(h),
+                self.reduce_to_channels_max(h),
+                self.reduce_to_channels_mean(h)
+            ],
+            dim=1
+        )
+        # h shape is (B x C x H x W)
         # Backbone
         # 1/1
-        x0_0 = self.conv0_0(x)
+        x0_0 = self.conv0_0(h)
         # 1/2
         x1_0 = self.conv1_0(x0_0)
         # 1/4
