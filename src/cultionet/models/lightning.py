@@ -528,8 +528,7 @@ class CultioLitModel(pl.LightningModule):
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
         model_type: str = 'ResUNet3Psi',
-        class_weights: T.Sequence[float] = None,
-        edge_weights: T.Sequence[float] = None,
+        class_counts: T.Sequence[float] = None,
         edge_class: T.Optional[int] = None,
         edge_temperature: T.Optional[float] = None,
         crop_temperature: T.Optional[float] = None,
@@ -549,8 +548,7 @@ class CultioLitModel(pl.LightningModule):
         self.model_name = model_name
         self.num_classes = num_classes
         self.num_time_features = num_time_features
-        self.class_weights = class_weights
-        self.edge_weights = edge_weights
+        self.class_counts = class_counts
         self.edge_temperature = edge_temperature
         self.crop_temperature = crop_temperature
         self.temperature_lit_model = temperature_lit_model
@@ -874,8 +872,14 @@ class CultioLitModel(pl.LightningModule):
     def configure_loss(self):
         self.dist_loss = TanimotoDistLoss()
         self.edge_loss = TanimotoDistLoss()
-        self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
-        self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.crop_loss = TanimotoDistLoss(
+            scale_pos_weight=True,
+            class_counts=self.class_counts
+        )
+        self.crop_star_loss = TanimotoDistLoss(
+            scale_pos_weight=True,
+            class_counts=self.class_counts
+        )
         if self.num_classes > 2:
             self.crop_type_star_loss = TanimotoDistLoss(scale_pos_weight=True)
             self.crop_type_loss = TanimotoDistLoss(scale_pos_weight=True)

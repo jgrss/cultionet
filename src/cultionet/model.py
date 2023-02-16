@@ -223,7 +223,7 @@ def fit(
     filters: T.Optional[int] = 64,
     num_classes: T.Optional[int] = 2,
     edge_class: T.Optional[int] = None,
-    class_weights: T.Sequence[float] = None,
+    class_counts: T.Sequence[float] = None,
     edge_weights: T.Sequence[float] = None,
     optimizer: str = 'AdamW',
     learning_rate: T.Optional[float] = 0.001,
@@ -323,7 +323,7 @@ def fit(
         optimizer=optimizer,
         learning_rate=learning_rate,
         weight_decay=weight_decay,
-        class_weights=class_weights,
+        class_counts=class_counts,
         edge_weights=edge_weights,
         edge_class=edge_class
     )
