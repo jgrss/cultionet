@@ -352,6 +352,13 @@ train:
     kwargs:
       default: 30
       type: '&int'
+  save_top_k:
+    short: ''
+    long: save-top-k
+    help: The number of model checkpoints to save (in addition to the last/best)
+    kwargs:
+      default: 1
+      type: '&int'
   threads:
     short: t
     long: threads
