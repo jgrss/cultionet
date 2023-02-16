@@ -339,7 +339,7 @@ class TemperatureScaling(pl.LightningModule):
 
         self.final_model = FinalRefinement(
             in_channels=4,
-            n_features=32,
+            n_features=16,
             out_channels=2,
             double_dilation=2
         )
