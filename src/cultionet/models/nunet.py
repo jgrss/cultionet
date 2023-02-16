@@ -689,6 +689,29 @@ class ResUNet3Psi(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
+        self.time_conv0 = ResSpatioTemporalConv3d(
+            in_channels=in_channels,
+            out_channels=channels[0]
+        )
+        self.reduce_to_time = torch.nn.Sequential(
+            ResSpatioTemporalConv3d(
+                in_channels=channels[0],
+                out_channels=1
+            ),
+            Squeeze()
+        )
+        # (B x C x T|D x H x W)
+        # Temporal max logit
+        # Squeeze to 2d (B x C x H x W)
+        self.reduce_to_channels_max = torch.nn.Sequential(
+            Max(dim=2),
+            Squeeze()
+        )
+        self.reduce_to_channels_mean = torch.nn.Sequential(
+            Mean(dim=2),
+            Squeeze()
+        )
+
         # Inputs =
         # Reduced time dimensions
         # Reduced channels (x2) for mean and max
