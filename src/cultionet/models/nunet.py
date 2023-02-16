@@ -14,6 +14,7 @@ from .base_layers import (
     ResSpatioTemporalConv3d,
     Max,
     Mean,
+    Var,
     Permute,
     PoolConv,
     PoolResidualConv,
@@ -717,13 +718,19 @@ class ResUNet3Psi(torch.nn.Module):
             torch.nn.BatchNorm2d(channels[0]),
             torch.nn.LeakyReLU(inplace=False)
         )
+        self.reduce_to_channels_var = torch.nn.Sequential(
+            Var(dim=2),
+            Squeeze(),
+            torch.nn.BatchNorm2d(channels[0]),
+            torch.nn.LeakyReLU(inplace=False)
+        )
 
         # Inputs =
         # Reduced time dimensions
         # Reduced channels (x2) for mean and max
         # Input filters for RNN hidden logits
         self.conv0_0 = ResidualConvInit(
-            in_time + channels[0] + channels[0] + in_rnn_channels,
+            in_time + int(channels[0] * 3) + in_rnn_channels,
             channels[0]
         )
         self.conv1_0 = PoolResidualConv(
@@ -825,6 +832,7 @@ class ResUNet3Psi(torch.nn.Module):
                 self.reduce_to_time(h),
                 self.reduce_to_channels_max(h),
                 self.reduce_to_channels_mean(h),
+                self.reduce_to_channels_var(h),
                 rnn_h
             ],
             dim=1

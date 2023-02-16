@@ -66,6 +66,27 @@ class Mean(torch.nn.Module):
         return x.mean(dim=self.dim, keepdim=self.keepdim)
 
 
+class Var(torch.nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        keepdim: bool = False,
+        unbiased: bool = False
+    ):
+        super(Var, self).__init__()
+
+        self.dim = dim
+        self.keepdim = keepdim
+        self.unbiased = unbiased
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.var(
+            dim=self.dim,
+            keepdim=self.keepdim,
+            unbiased=self.unbiased
+        )
+
+
 class Squeeze(torch.nn.Module):
     def __init__(self):
         super(Squeeze, self).__init__()
