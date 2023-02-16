@@ -163,6 +163,7 @@ class CultioNet(torch.nn.Module):
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
             hidden_dim=self.filters,
+            n_stage=2,
             n_layers=3,
             num_classes_last=self.num_classes,
             crop_type_layer=True if self.num_classes > 2 else False
