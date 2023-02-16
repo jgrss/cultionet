@@ -177,7 +177,9 @@ class CultioNet(torch.nn.Module):
             )
         elif model_type == 'ResUNet3Psi':
             self.mask_model = ResUNet3Psi(
-                in_channels=int(self.filters * 3),
+                in_channels=self.ds_num_bands,
+                in_time=self.ds_num_time,
+                in_rnn_channels=int(self.filters * 3),
                 init_filter=self.filters,
                 num_classes=self.num_classes,
                 double_dilation=2
@@ -202,10 +204,10 @@ class CultioNet(torch.nn.Module):
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
         # StarRNN
-        x, logits_star_last = self.star_rnn(x)
+        logits_star_hidden, logits_star_last = self.star_rnn(x)
         logits_star_last = self.cg(logits_star_last)
         # Main stream
-        logits = self.mask_model(x)
+        logits = self.mask_model(x, logits_star_hidden)
         logits_distance = self.cg(logits['dist'])
         logits_edges = self.cg(logits['edge'])
         logits_crop = self.cg(logits['mask'])
