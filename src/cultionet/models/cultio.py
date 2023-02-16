@@ -14,7 +14,8 @@ class FinalRefinement(torch.nn.Module):
         self,
         in_channels: int,
         n_features: int,
-        out_channels: int
+        out_channels: int,
+        double_dilation: int = 1
     ):
         super(FinalRefinement, self).__init__()
 
@@ -24,8 +25,12 @@ class FinalRefinement(torch.nn.Module):
         self.model = UNet3(
             in_channels=in_channels,
             out_channels=out_channels,
-            init_filter=n_features
+            init_filter=n_features,
+            double_dilation=double_dilation
         )
+
+    def proba_to_logit(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.log(x / (1.0 - x))
 
     def forward(
         self,
@@ -34,6 +39,10 @@ class FinalRefinement(torch.nn.Module):
         crop: torch.Tensor,
         data: Data
     ) -> torch.Tensor:
+        """A single forward pass
+
+        Edger and crop inputs should be probabilities
+        """
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
@@ -41,8 +50,8 @@ class FinalRefinement(torch.nn.Module):
         x = torch.cat(
             [
                 distance,
-                edge,
-                crop
+                self.proba_to_logit(edge),
+                self.proba_to_logit(crop)
             ],
             dim=1
         )

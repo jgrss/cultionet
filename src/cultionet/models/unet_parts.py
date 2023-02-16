@@ -283,17 +283,21 @@ class UNet3P_3_1(torch.nn.Module):
     def __init__(
         self,
         channels: T.Sequence[int],
-        up_channels: int
+        up_channels: int,
+        init_point_conv: bool = False,
+        double_dilation: int = 1
     ):
         super(UNet3P_3_1, self).__init__()
 
-        # Distance stream connection
         self.conv = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
             is_side_stream=False,
             prev_backbone_channel_index=3,
-            n_pools=3
+            n_pools=3,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
 
     def forward(
@@ -304,7 +308,6 @@ class UNet3P_3_1(torch.nn.Module):
         x3_0: torch.Tensor,
         x4_0: torch.Tensor,
     ) -> torch.Tensor:
-        # Distance logits
         h = self.conv(
             prev_same=[('prev_backbone', x3_0)],
             pools=[x0_0, x1_0, x2_0],
@@ -320,17 +323,22 @@ class UNet3P_2_2(torch.nn.Module):
     def __init__(
         self,
         channels: T.Sequence[int],
-        up_channels: int
+        up_channels: int,
+        init_point_conv: bool = False,
+        double_dilation: int = 1
     ):
         super(UNet3P_2_2, self).__init__()
 
         self.conv = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
             is_side_stream=False,
             prev_backbone_channel_index=2,
             n_pools=2,
-            n_stream_down=1
+            n_stream_down=1,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
 
     def forward(
@@ -357,17 +365,22 @@ class UNet3P_1_3(torch.nn.Module):
     def __init__(
         self,
         channels: T.Sequence[int],
-        up_channels: int
+        up_channels: int,
+        init_point_conv: bool = False,
+        double_dilation: int = 1
     ):
         super(UNet3P_1_3, self).__init__()
 
         self.conv = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
             is_side_stream=False,
             prev_backbone_channel_index=1,
             n_pools=1,
-            n_stream_down=2
+            n_stream_down=2,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
 
     def forward(
@@ -382,7 +395,7 @@ class UNet3P_1_3(torch.nn.Module):
             prev_same=[('prev_backbone', x1_0)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h2_2, h3_1]
+            stream_down=[h3_1, h2_2]
         )
 
         return h
@@ -394,7 +407,9 @@ class UNet3P_0_4(torch.nn.Module):
     def __init__(
         self,
         channels: T.Sequence[int],
-        up_channels: int
+        up_channels: int,
+        init_point_conv: bool = False,
+        double_dilation: int = 1
     ):
         super(UNet3P_0_4, self).__init__()
 
@@ -403,9 +418,12 @@ class UNet3P_0_4(torch.nn.Module):
         self.conv = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
+            use_backbone=True,
             is_side_stream=False,
             prev_backbone_channel_index=0,
-            n_stream_down=3
+            n_stream_down=3,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
 
     def forward(
@@ -419,7 +437,7 @@ class UNet3P_0_4(torch.nn.Module):
         h = self.conv(
             prev_same=[('prev_backbone', x0_0)],
             x4_0=x4_0,
-            stream_down=[h1_3, h2_2, h3_1]
+            stream_down=[h3_1, h2_2, h1_3]
         )
 
         return h

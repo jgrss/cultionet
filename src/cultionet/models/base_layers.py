@@ -740,6 +740,8 @@ class PoolConv(torch.nn.Module):
         in_channels: int,
         out_channels: int,
         pool_size: int = 2,
+        init_point_conv: bool = False,
+        double_dilation: int = 1,
         dropout: T.Optional[float] = None
     ):
         super(PoolConv, self).__init__()
@@ -747,7 +749,14 @@ class PoolConv(torch.nn.Module):
         layers = [torch.nn.MaxPool2d(pool_size)]
         if dropout is not None:
             layers += [torch.nn.Dropout(dropout)]
-        layers += [DoubleConv(in_channels, out_channels)]
+        layers += [
+            DoubleConv(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                init_point_conv=init_point_conv,
+                double_dilation=double_dilation
+            )
+        ]
         self.seq = torch.nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

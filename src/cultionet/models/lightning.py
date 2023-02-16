@@ -2,12 +2,10 @@ import typing as T
 from pathlib import Path
 import json
 
-from ..losses import (
-    TanimotoDistLoss,
-    TopologicalLoss
-)
+from ..losses import TanimotoDistLoss
 from .cultio import CultioNet, FinalRefinement
 from .maskcrnn import BFasterRCNN
+from .base_layers import Softmax
 from . import model_utils
 
 import torch
@@ -319,15 +317,14 @@ class TemperatureScaling(pl.LightningModule):
         cultionet_model: CultioNet = None,
         learning_rate: float = 1e-4,
         learning_rate_lbfgs: float = 0.01,
-        weight_decay: float = 1e-4,
-        eps: float = 1e-8,
+        weight_decay: float = 0.01,
+        eps: float = 1e-4,
         max_iter: float = 25,
-        edge_class: int = 2
+        edge_class: int = 2,
+        class_counts: T.Optional[torch.Tensor] = None
     ):
         super(TemperatureScaling, self).__init__()
 
-        # FIXME
-        self.edge_temperature = torch.ones(1)
         self.crop_temperature = torch.nn.Parameter(torch.ones(1))
 
         self.cultionet_model = cultionet_model
@@ -337,11 +334,14 @@ class TemperatureScaling(pl.LightningModule):
         self.eps = eps
         self.max_iter = max_iter
         self.edge_class = edge_class
+        self.class_counts = class_counts
+        self.softmax = Softmax(dim=1)
 
         self.final_model = FinalRefinement(
             in_channels=4,
             n_features=32,
-            out_channels=2
+            out_channels=2,
+            double_dilation=2
         )
 
         self.cultionet_model.eval()
@@ -354,11 +354,11 @@ class TemperatureScaling(pl.LightningModule):
     def forward(
         self,
         batch: Data,
-        edge_temperature: torch.Tensor,
         crop_temperature: torch.Tensor,
         batch_idx: int = None
     ) -> T.Dict[str, torch.Tensor]:
         self.final_model.eval()
+        self.final_model.freeze()
         with torch.no_grad():
             # Cultionet predictions
             predictions = self.cultionet_model(batch)
@@ -371,6 +371,7 @@ class TemperatureScaling(pl.LightningModule):
         predictions['crop'] = scale_logits(
             predictions['crop'], crop_temperature
         )
+        predictions['crop'] = self.softmax(predictions['crop'])
 
         return predictions
 
@@ -384,6 +385,7 @@ class TemperatureScaling(pl.LightningModule):
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
 
+        # Predicted crop values are logits
         loss = self.crop_loss_refine(predictions['crop'], true_crop)
 
         return loss
@@ -399,6 +401,7 @@ class TemperatureScaling(pl.LightningModule):
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
 
+        # Predicted crop values are probabilities
         loss = self.crop_loss(predictions['crop'], true_crop)
 
         return loss
@@ -411,11 +414,15 @@ class TemperatureScaling(pl.LightningModule):
     ):
         """Executes one training step
         """
+        # Apply inference with the main cultionet model
         with torch.no_grad():
             predictions = self.cultionet_model(batch)
 
         if optimizer_idx == 0:
+            # The first optimizer is used for the refinement model
             self.final_model.train()
+            # The inputs from cultionet are probabilities
+            # The output crop predictions are logits
             predictions['crop'] = self.final_model(
                 predictions['dist'],
                 predictions['edge'],
@@ -427,8 +434,11 @@ class TemperatureScaling(pl.LightningModule):
                 predictions
             )
         else:
+            # The second optimizer is used for the probability calibration
             self.final_model.eval()
             with torch.no_grad():
+                # The inputs from cultionet are probabilities
+                # The output crop predictions are logits
                 predictions['crop'] = self.final_model(
                     predictions['dist'],
                     predictions['edge'],
@@ -438,6 +448,7 @@ class TemperatureScaling(pl.LightningModule):
             predictions['crop'] = scale_logits(
                 predictions['crop'], self.crop_temperature
             )
+            predictions['crop'] = self.softmax(predictions['crop'])
 
             loss = self.calc_loss(
                 batch,
@@ -446,7 +457,6 @@ class TemperatureScaling(pl.LightningModule):
 
         metrics = {
             'loss': loss,
-            'edge_temp': self.edge_temperature,
             'crop_temp': self.crop_temperature
         }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
@@ -460,21 +470,20 @@ class TemperatureScaling(pl.LightningModule):
             scale_file = Path(self.logger.save_dir) / 'temperature.scales'
 
             temperature_scales = {
-                'edge': self.edge_temperature.item(),
                 'crop': self.crop_temperature.item()
             }
             with open(scale_file, mode='w') as f:
                 f.write(json.dumps(temperature_scales))
 
     def configure_loss(self):
-        self.edge_loss = TanimotoDistLoss()
         self.crop_loss = TanimotoDistLoss(
-            transform_logits=False,
-            scale_pos_weight=True
+            scale_pos_weight=True,
+            class_counts=self.class_counts
         )
         self.crop_loss_refine = TanimotoDistLoss(
-            transform_logits=False,
-            scale_pos_weight=True
+            scale_pos_weight=True,
+            class_counts=self.class_counts,
+            transform_logits=True
         )
 
     def configure_optimizers(self):
@@ -485,9 +494,7 @@ class TemperatureScaling(pl.LightningModule):
             eps=self.eps
         )
         optimizer_lbfgs = torch.optim.LBFGS(
-            [
-                self.crop_temperature
-            ],
+            [self.crop_temperature],
             lr=self.learning_rate_lbfgs,
             max_iter=self.max_iter,
             line_search_fn=None
@@ -528,9 +535,8 @@ class CultioLitModel(pl.LightningModule):
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
         model_type: str = 'ResUNet3Psi',
-        class_counts: T.Sequence[float] = None,
+        class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
-        edge_temperature: T.Optional[float] = None,
         crop_temperature: T.Optional[float] = None,
         temperature_lit_model: T.Optional[pl.LightningModule] = None
     ):
@@ -549,7 +555,6 @@ class CultioLitModel(pl.LightningModule):
         self.num_classes = num_classes
         self.num_time_features = num_time_features
         self.class_counts = class_counts
-        self.edge_temperature = edge_temperature
         self.crop_temperature = crop_temperature
         self.temperature_lit_model = temperature_lit_model
         self.sigmoid = torch.nn.Sigmoid()
@@ -611,7 +616,6 @@ class CultioLitModel(pl.LightningModule):
         if self.temperature_lit_model is not None:
             predictions = self.temperature_lit_model(
                 batch,
-                self.edge_temperature,
                 self.crop_temperature,
                 batch_idx
             )

@@ -288,7 +288,9 @@ class UNet3(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        init_filter: int = 64
+        init_filter: int = 64,
+        init_point_conv: bool = False,
+        double_dilation: int = 1
     ):
         super(UNet3, self).__init__()
 
@@ -309,43 +311,59 @@ class UNet3(torch.nn.Module):
             channels[0]
         )
         self.conv1_0 = PoolConv(
-            channels[0],
-            channels[1]
+            in_channels=channels[0],
+            out_channels=channels[1],
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.conv2_0 = PoolConv(
-            channels[1],
-            channels[2]
+            in_channels=channels[1],
+            out_channels=channels[2],
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.conv3_0 = PoolConv(
-            channels[2],
-            channels[3]
+            in_channels=channels[2],
+            out_channels=channels[3],
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.conv4_0 = PoolConv(
-            channels[3],
-            channels[4]
+            in_channels=channels[3],
+            out_channels=channels[4],
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
 
         # Connect 3
         self.convs_3_1 = UNet3P_3_1(
             channels=channels,
-            up_channels=up_channels
+            up_channels=up_channels,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.convs_2_2 = UNet3P_2_2(
             channels=channels,
-            up_channels=up_channels
+            up_channels=up_channels,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.convs_1_3 = UNet3P_1_3(
             channels=channels,
-            up_channels=up_channels
+            up_channels=up_channels,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
         self.convs_0_4 = UNet3P_0_4(
             channels=channels,
-            up_channels=up_channels
+            up_channels=up_channels,
+            init_point_conv=init_point_conv,
+            double_dilation=double_dilation
         )
 
         self.final = torch.nn.Conv2d(
-            up_channels,
-            out_channels,
+            in_channels=up_channels,
+            out_channels=out_channels,
             kernel_size=1,
             padding=0
         )
