@@ -2,7 +2,7 @@ import typing as T
 from pathlib import Path
 import json
 
-from ..losses import TanimotoDistLoss, TopologicalLoss
+from ..losses import TanimotoDistLoss
 from .cultio import CultioNet, FinalRefinement
 from .maskcrnn import BFasterRCNN
 from .base_layers import Softmax
@@ -711,7 +711,6 @@ class CultioLitModel(pl.LightningModule):
             batch, crop_type=predictions['crop_type']
         )
 
-        topo_loss = self.topo_loss(predictions['edge'], true_edge, batch)
         crop_star_loss = self.crop_star_loss(predictions['crop_star'], true_crop)
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         edge_loss = self.edge_loss(predictions['edge'], true_edge)
@@ -719,8 +718,7 @@ class CultioLitModel(pl.LightningModule):
 
         # Main loss
         loss = (
-            0.1 * topo_loss
-            + 0.5 * crop_star_loss
+            0.5 * crop_star_loss
             + dist_loss
             + edge_loss
             + crop_loss
@@ -876,7 +874,6 @@ class CultioLitModel(pl.LightningModule):
             )
 
     def configure_loss(self):
-        self.topo_loss = TopologicalLoss()
         self.dist_loss = TanimotoDistLoss()
         self.edge_loss = TanimotoDistLoss()
         self.crop_loss = TanimotoDistLoss(
