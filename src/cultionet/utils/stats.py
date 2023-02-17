@@ -240,83 +240,6 @@ class Mean(Stat):
         )
 
 
-class Variance(Stat):
-    """Running computation of mean and variance. Use this when you just need
-    basic stats without covariance.
-    """
-    def __init__(self, state=None):
-        if state is not None:
-            return super().__init__(state)
-
-        self.count = 0
-        self.batchcount = 0
-        self._mean = None
-        self.v_cmom2 = None
-        self.data_shape = None
-
-    def add(self, a):
-        a = self._normalize_add_shape(a)
-        if len(a) == 0:
-            return
-        batch_count = a.shape[0]
-        batch_mean = a.sum(0) / batch_count
-        centered = a - batch_mean
-        self.batchcount += 1
-        # Initial batch.
-        if self._mean is None:
-            self.count = batch_count
-            self._mean = batch_mean
-            self.v_cmom2 = centered.pow(2).sum(0)
-            return
-        # Update a batch using Chan-style update for numerical stability.
-        oldcount = self.count
-        self.count += batch_count
-        new_frac = float(batch_count) / self.count
-        # Update the mean according to the batch deviation from the old mean.
-        delta = batch_mean.sub_(self._mean).mul_(new_frac)
-        self._mean.add_(delta)
-        # Update the variance using the batch deviation
-        self.v_cmom2.add_(centered.pow(2).sum(0))
-        self.v_cmom2.add_(delta.pow_(2).mul_(new_frac * oldcount))
-
-    def size(self):
-        return self.count
-
-    def mean(self):
-        return self._restore_result_shape(self._mean)
-
-    def var(self, unbiased=True):
-        return self._restore_result_shape(
-            self.v_cmom2 / (self.count - (1 if unbiased else 0))
-        )
-
-    def std(self, unbiased=True):
-        return self.var(unbiased=unbiased).sqrt()
-
-    def to_(self, device):
-        if self._mean is not None:
-            self._mean = self._mean.to(device)
-        if self.v_cmom2 is not None:
-            self.v_cmom2 = self.v_cmom2.to(device)
-
-    def load_state_dict(self, state):
-        self.count = state['count']
-        self.batchcount = state['batchcount']
-        self._mean = torch.from_numpy(state['mean'])
-        self.v_cmom2 = torch.from_numpy(state['cmom2'])
-        self.data_shape = None if state['data_shape'] is None else tuple(state['data_shape'])
-
-    def state_dict(self):
-        return dict(
-            constructor=self.__module__ + '.' + self.__class__.__name__ + '()',
-            count=self.count,
-            data_shape=self.data_shape and tuple(self.data_shape),
-            batchcount=self.batchcount,
-            mean=self._mean.cpu().numpy(),
-            cmom2=self.v_cmom2.cpu().numpy()
-        )
-
-
 class Quantile(Stat):
     """Streaming randomized quantile computation for torch.
 
@@ -687,6 +610,88 @@ class Quantile(Stat):
             result[d] = normed
 
         return result
+
+
+class Variance(Stat):
+    """Running computation of mean|median and variance. Use this when you just need
+    basic stats without covariance.
+    """
+    def __init__(self, method: str = 'mean', state=None):
+        if state is not None:
+            return super().__init__(state)
+
+        self.method = method
+        self.count = 0
+        self.batchcount = 0
+        self._mean = None
+        self.v_cmom2 = None
+        self.data_shape = None
+
+    def add(self, a: torch.Tensor):
+        a = self._normalize_add_shape(a)
+        if len(a) == 0:
+            return
+        batch_count = a.shape[0]
+        # batch_mean = a.sum(0) / batch_count
+        if self.method == 'median':
+            batch_reduce = a.median(dim=0)[0]
+        else:
+            batch_reduce = a.mean(dim=0)
+        centered = a - batch_reduce
+        self.batchcount += 1
+        # Initial batch.
+        if self._mean is None:
+            self.count = batch_count
+            self._mean = batch_reduce
+            self.v_cmom2 = centered.pow(2).sum(0)
+            return
+        # Update a batch using Chan-style update for numerical stability.
+        oldcount = self.count
+        self.count += batch_count
+        new_frac = float(batch_count) / self.count
+        # Update the mean according to the batch deviation from the old mean.
+        delta = batch_reduce.sub_(self._mean).mul_(new_frac)
+        self._mean.add_(delta)
+        # Update the variance using the batch deviation
+        self.v_cmom2.add_(centered.pow(2).sum(0))
+        self.v_cmom2.add_(delta.pow_(2).mul_(new_frac * oldcount))
+
+    def size(self):
+        return self.count
+
+    def mean(self):
+        return self._restore_result_shape(self._mean)
+
+    def var(self, unbiased=True):
+        return self._restore_result_shape(
+            self.v_cmom2 / (self.count - (1 if unbiased else 0))
+        )
+
+    def std(self, unbiased=True):
+        return self.var(unbiased=unbiased).sqrt()
+
+    def to_(self, device):
+        if self._mean is not None:
+            self._mean = self._mean.to(device)
+        if self.v_cmom2 is not None:
+            self.v_cmom2 = self.v_cmom2.to(device)
+
+    def load_state_dict(self, state):
+        self.count = state['count']
+        self.batchcount = state['batchcount']
+        self._mean = torch.from_numpy(state['mean'])
+        self.v_cmom2 = torch.from_numpy(state['cmom2'])
+        self.data_shape = None if state['data_shape'] is None else tuple(state['data_shape'])
+
+    def state_dict(self):
+        return dict(
+            constructor=self.__module__ + '.' + self.__class__.__name__ + '()',
+            count=self.count,
+            data_shape=self.data_shape and tuple(self.data_shape),
+            batchcount=self.batchcount,
+            mean=self._mean.cpu().numpy(),
+            cmom2=self.v_cmom2.cpu().numpy()
+        )
 
 
 def tally_stats(

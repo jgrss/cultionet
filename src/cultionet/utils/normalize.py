@@ -95,7 +95,7 @@ def get_norm_values(
             num_workers=num_workers
         )
 
-        stat_var = Variance()
+        stat_var = Variance(method='median')
         stat_q = Quantile(r=1024*6)
         tmp_cache_path = Path.home().absolute() / '.cultionet'
         tmp_cache_path.mkdir(parents=True, exist_ok=True)

@@ -62,9 +62,11 @@ def test_norm():
     train_path = PROJECT_PATH / 'data' / 'train' / 'small_chips'
     mean_data_cache = PROJECT_PATH / 'data' / 'train' / 'small_chips' / 'data_means.npz'
     var_data_cache = PROJECT_PATH / 'data' / 'train' / 'small_chips' / 'data_vars.npz'
+    var_median_data_cache = PROJECT_PATH / 'data' / 'train' / 'small_chips' / 'data_vars_median.npz'
     q_data_cache = PROJECT_PATH / 'data' / 'train' / 'small_chips' / 'data_quantiles.npz'
     ref_q_data_cache = PROJECT_PATH / 'data' / 'train' / 'small_chips' / 'ref_data_quantiles.npz'
     ref_var_data_cache = PROJECT_PATH / 'data' / 'train' / 'small_chips' / 'ref_data_vars.npz'
+    ref_var_median_data_cache = PROJECT_PATH / 'data' / 'train' / 'small_chips' / 'ref_data_vars_median.npz'
 
     ds = EdgeDataset(
         train_path,
@@ -82,26 +84,34 @@ def test_norm():
     ref_data = []
     stat_mean = Mean()
     stat_var = Variance()
+    stat_var_median = Variance(method='median')
     stat_q = Quantile()
     with cache_load_enabled(False):
         for batch in tally_stats(
-            stats=(stat_mean, stat_var, stat_q),
+            stats=(stat_mean, stat_var, stat_var_median, stat_q),
             loader=data_module.train_dataloader(),
-            caches=(mean_data_cache, var_data_cache, q_data_cache)
+            caches=(mean_data_cache, var_data_cache, var_median_data_cache, q_data_cache)
         ):
             ref_data.append(batch.x)
             stat_mean.add(batch.x)
-            stat_var.add(batch.x)
             stat_q.add(batch.x)
+            stat_var.add(batch.x)
+            stat_var_median.add(batch.x)
     ref_data = torch.cat(ref_data, dim=0)
     mean = stat_mean.mean()
     std = stat_var.std()
+    std_median = stat_var_median.std()
     median = stat_q.median()
 
     ref_stat_var = Variance()
     cached_state = load_cached_state(ref_var_data_cache)
     ref_stat_var.load_state_dict(cached_state)
     ref_std = ref_stat_var.std()
+
+    ref_stat_var_median = Variance(method='median')
+    cached_state = load_cached_state(ref_var_median_data_cache)
+    ref_stat_var_median.load_state_dict(cached_state)
+    ref_std_median = ref_stat_var_median.std()
 
     ref_stat_q = Quantile()
     cached_state = load_cached_state(ref_q_data_cache)
@@ -112,5 +122,7 @@ def test_norm():
         'The data means do not match the expected values.'
     assert torch.allclose(std, ref_std, rtol=1e-4), \
         'The data standard deviations do not match the cached values.'
+    assert torch.allclose(std_median, ref_std_median, rtol=1e-4), \
+        'The data median standard deviations do not match the cached values.'
     assert torch.allclose(median, ref_median, rtol=1e-4), \
         'The data medians do not match the cached values.'
