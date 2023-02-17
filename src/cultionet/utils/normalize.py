@@ -102,19 +102,25 @@ def get_norm_values(
         crop_counts = torch.zeros(class_info['max_crop_class']+1).long()
         edge_counts = torch.zeros(2).long()
         with cache_load_enabled(False):
-            for batch in tally_stats(
-                stats=(stat_var, stat_q),
-                loader=data_module.train_dataloader(),
-                caches=(var_data_cache, q_data_cache)
-            ):
-                stat_var.add(batch.x)
-                stat_q.add(batch.x)
+            with tqdm(
+                total=int(len(dataset) / batch_size),
+                desc='Calculating dataset statistics'
+            ) as pbar:
+                for batch in tally_stats(
+                    stats=(stat_var, stat_q),
+                    loader=data_module.train_dataloader(),
+                    caches=(var_data_cache, q_data_cache)
+                ):
+                    stat_var.add(batch.x)
+                    stat_q.add(batch.x)
 
-                crop_counts[0] += ((batch.y == 0) | (batch.y == class_info['edge_class'])).sum()
-                for i in range(1, class_info['edge_class']):
-                    crop_counts[i] += (batch.y == i).sum()
-                edge_counts[0] += (batch.y != class_info['edge_class']).sum()
-                edge_counts[1] += (batch.y == class_info['edge_class']).sum()
+                    crop_counts[0] += ((batch.y == 0) | (batch.y == class_info['edge_class'])).sum()
+                    for i in range(1, class_info['edge_class']):
+                        crop_counts[i] += (batch.y == i).sum()
+                    edge_counts[0] += (batch.y != class_info['edge_class']).sum()
+                    edge_counts[1] += (batch.y == class_info['edge_class']).sum()
+
+                    pbar.update(batch_size)
         Path(var_data_cache).unlink()
         Path(q_data_cache).unlink()
 
