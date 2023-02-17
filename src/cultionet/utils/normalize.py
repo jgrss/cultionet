@@ -103,7 +103,7 @@ def get_norm_values(
         q_data_cache = tmp_cache_path / '_q.npz'
         crop_counts = torch.zeros(class_info['max_crop_class']+1).long()
         edge_counts = torch.zeros(2).long()
-        with cache_load_enabled(False):
+        with cache_load_enabled(True):
             with tqdm(
                 total=int(len(dataset) / batch_size),
                 desc='Calculating dataset statistics'
