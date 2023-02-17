@@ -3,7 +3,7 @@ import typing as T
 from .datasets import EdgeDataset
 
 import pytorch_lightning as pl
-from torch_geometric.data import DataLoader
+from torch_geometric.loader import DataLoader
 
 
 class EdgeDataModule(pl.LightningDataModule):
