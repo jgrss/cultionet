@@ -97,8 +97,10 @@ def get_norm_values(
 
         stat_var = Variance()
         stat_q = Quantile(r=1024*6)
-        var_data_cache = '_var.npz'
-        q_data_cache = '_q.npz'
+        tmp_cache_path = Path.home().absolute() / '.cultionet'
+        tmp_cache_path.mkdir(parents=True, exist_ok=True)
+        var_data_cache = tmp_cache_path / '_var.npz'
+        q_data_cache = tmp_cache_path / '_q.npz'
         crop_counts = torch.zeros(class_info['max_crop_class']+1).long()
         edge_counts = torch.zeros(2).long()
         with cache_load_enabled(False):
@@ -121,11 +123,13 @@ def get_norm_values(
                     edge_counts[1] += (batch.y == class_info['edge_class']).sum()
 
                     pbar.update(1)
-        Path(var_data_cache).unlink()
-        Path(q_data_cache).unlink()
 
         data_stds = stat_var.std()
         data_means = stat_q.median()
+
+        var_data_cache.unlink()
+        q_data_cache.unlink()
+        tmp_cache_path.rmdir()
         # def get_info(
         #     x: torch.Tensor, y: torch.Tensor
         # ) -> T.Tuple[torch.Tensor, int, torch.Tensor, torch.Tensor]:
