@@ -120,9 +120,7 @@ def get_norm_values(
                     edge_counts[0] += (batch.y != class_info['edge_class']).sum()
                     edge_counts[1] += (batch.y == class_info['edge_class']).sum()
 
-                    import ipdb; ipdb.set_trace()
-
-                    pbar.update(batch_size)
+                    pbar.update(1)
         Path(var_data_cache).unlink()
         Path(q_data_cache).unlink()
 
