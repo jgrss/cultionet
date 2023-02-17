@@ -1,4 +1,5 @@
 import typing as T
+import warnings
 
 from . import topological
 from ..models import model_utils
@@ -292,7 +293,10 @@ class TanimotoDistLoss(torch.nn.Module):
         super(TanimotoDistLoss, self).__init__()
 
         if scale_pos_weight and (class_counts is None):
-            raise ValueError('Cannot balance classes without class weights.')
+            warnings.warn(
+                'Cannot balance classes without class weights. Weights will be derived for each batch.',
+                UserWarning
+            )
 
         self.smooth = smooth
         self.beta = beta
@@ -339,9 +343,13 @@ class TanimotoDistLoss(torch.nn.Module):
         def tanimoto_loss(yhat: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             y = y.to(dtype=yhat.dtype)
             if self.scale_pos_weight:
-                effective_num = 1.0 - self.beta ** self.class_counts
+                if self.class_counts is None:
+                    class_counts = y.sum(dim=0)
+                else:
+                    class_counts = self.class_counts
+                effective_num = 1.0 - self.beta ** class_counts
                 weights = (1.0 - self.beta) / effective_num
-                weights = weights / weights.sum() * self.class_counts.shape[0]
+                weights = weights / weights.sum() * class_counts.shape[0]
             else:
                 weights = torch.ones(
                     inputs.shape[1], dtype=inputs.dtype, device=inputs.device

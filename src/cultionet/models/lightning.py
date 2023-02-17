@@ -476,13 +476,9 @@ class TemperatureScaling(pl.LightningModule):
                 f.write(json.dumps(temperature_scales))
 
     def configure_loss(self):
-        self.crop_loss = TanimotoDistLoss(
-            scale_pos_weight=True,
-            class_counts=self.class_counts
-        )
+        self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
         self.crop_loss_refine = TanimotoDistLoss(
             scale_pos_weight=True,
-            class_counts=self.class_counts,
             transform_logits=True
         )
 
@@ -876,14 +872,8 @@ class CultioLitModel(pl.LightningModule):
     def configure_loss(self):
         self.dist_loss = TanimotoDistLoss()
         self.edge_loss = TanimotoDistLoss()
-        self.crop_loss = TanimotoDistLoss(
-            scale_pos_weight=True,
-            class_counts=self.class_counts
-        )
-        self.crop_star_loss = TanimotoDistLoss(
-            scale_pos_weight=True,
-            class_counts=self.class_counts
-        )
+        self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=True)
         if self.num_classes > 2:
             self.crop_type_star_loss = TanimotoDistLoss(scale_pos_weight=True)
             self.crop_type_loss = TanimotoDistLoss(scale_pos_weight=True)
