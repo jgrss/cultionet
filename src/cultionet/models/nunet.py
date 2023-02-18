@@ -441,7 +441,8 @@ class UNet3Psi(torch.nn.Module):
         num_classes: int = 2,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        attention: bool = False
+        attention: bool = False,
+        activation_type: str = 'LeakyReLU'
     ):
         super(UNet3Psi, self).__init__()
 
@@ -459,19 +460,22 @@ class UNet3Psi(torch.nn.Module):
             SpatioTemporalConv3d(
                 in_channels=in_channels,
                 out_channels=channels[0],
-                double_dilation=1
+                double_dilation=1,
+                activation_type=activation_type
             ),
             SpatioTemporalConv3d(
                 in_channels=channels[0],
                 out_channels=channels[0],
-                double_dilation=2
+                double_dilation=2,
+                activation_type=activation_type
             )
         )
         self.reduce_to_time = torch.nn.Sequential(
             SpatioTemporalConv3d(
                 in_channels=channels[0],
                 out_channels=1,
-                double_dilation=1
+                double_dilation=1,
+                activation_type=activation_type
             ),
             Squeeze()
         )
@@ -485,23 +489,28 @@ class UNet3Psi(torch.nn.Module):
 
         self.conv0_0 = SingleConv(
             in_time + channels[0],
-            channels[0]
+            channels[0],
+            activation_type=activation
         )
         self.conv1_0 = PoolConv(
             channels[0],
-            channels[1]
+            channels[1],
+            activation_type=activation
         )
         self.conv2_0 = PoolConv(
             channels[1],
-            channels[2]
+            channels[2],
+            activation_type=activation
         )
         self.conv3_0 = PoolConv(
             channels[2],
-            channels[3]
+            channels[3],
+            activation_type=activation
         )
         self.conv4_0 = PoolConv(
             channels[3],
-            channels[4]
+            channels[4],
+            activation_type=activation
         )
 
         # Connect 3
@@ -510,28 +519,32 @@ class UNet3Psi(torch.nn.Module):
             up_channels=up_channels,
             attention=attention,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation
+            double_dilation=double_dilation,
+            activation_type=activation_type
         )
         self.convs_2_2 = UNet3_2_2(
             channels=channels,
             up_channels=up_channels,
             attention=attention,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation
+            double_dilation=double_dilation,
+            activation_type=activation_type
         )
         self.convs_1_3 = UNet3_1_3(
             channels=channels,
             up_channels=up_channels,
             attention=attention,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation
+            double_dilation=double_dilation,
+            activation_type=activation_type
         )
         self.convs_0_4 = UNet3_0_4(
             channels=channels,
             up_channels=up_channels,
             attention=attention,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation
+            double_dilation=double_dilation,
+            activation_type=activation_type
         )
 
         self.final_dist = torch.nn.Sequential(
@@ -676,7 +689,8 @@ class ResUNet3Psi(torch.nn.Module):
         init_filter: int = 32,
         num_classes: int = 2,
         double_dilation: int = 1,
-        attention: bool = False
+        attention: bool = False,
+        activation_type: str = 'LeakyReLU'
     ):
         super(ResUNet3Psi, self).__init__()
 
@@ -694,12 +708,14 @@ class ResUNet3Psi(torch.nn.Module):
 
         self.time_conv0 = ResSpatioTemporalConv3d(
             in_channels=in_channels,
-            out_channels=channels[0]
+            out_channels=channels[0],
+            activation_type=activation_type
         )
         self.reduce_to_time = torch.nn.Sequential(
             ResSpatioTemporalConv3d(
                 in_channels=channels[0],
-                out_channels=1
+                out_channels=1,
+                activation_type=activation_type
             ),
             Squeeze()
         )
@@ -710,19 +726,19 @@ class ResUNet3Psi(torch.nn.Module):
             Max(dim=2),
             Squeeze(),
             torch.nn.BatchNorm2d(channels[0]),
-            torch.nn.LeakyReLU(inplace=False)
+            getattr(torch.nn, activation_type)(inplace=False)
         )
         self.reduce_to_channels_mean = torch.nn.Sequential(
             Mean(dim=2),
             Squeeze(),
             torch.nn.BatchNorm2d(channels[0]),
-            torch.nn.LeakyReLU(inplace=False)
+            getattr(torch.nn, activation_type)(inplace=False)
         )
         self.reduce_to_channels_var = torch.nn.Sequential(
             Var(dim=2),
             Squeeze(),
             torch.nn.BatchNorm2d(channels[0]),
-            torch.nn.LeakyReLU(inplace=False)
+            getattr(torch.nn, activation_type)(inplace=False)
         )
 
         # Inputs =
@@ -731,27 +747,32 @@ class ResUNet3Psi(torch.nn.Module):
         # Input filters for RNN hidden logits
         self.conv0_0 = ResidualConvInit(
             in_time + int(channels[0] * 3) + in_rnn_channels,
-            channels[0]
+            channels[0],
+            activation_type=activation_type
         )
         self.conv1_0 = PoolResidualConv(
             channels[0],
             channels[1],
-            dilations=[double_dilation]
+            dilations=[double_dilation],
+            activation_type=activation_type
         )
         self.conv2_0 = PoolResidualConv(
             channels[1],
             channels[2],
-            dilations=[double_dilation]
+            dilations=[double_dilation],
+            activation_type=activation_type
         )
         self.conv3_0 = PoolResidualConv(
             channels[2],
             channels[3],
-            dilations=[double_dilation]
+            dilations=[double_dilation],
+            activation_type=activation_type
         )
         self.conv4_0 = PoolResidualConv(
             channels[3],
             channels[4],
-            dilations=[double_dilation]
+            dilations=[double_dilation],
+            activation_type=activation_type
         )
 
         # Connect 3
@@ -759,25 +780,29 @@ class ResUNet3Psi(torch.nn.Module):
             channels=channels,
             up_channels=up_channels,
             double_dilation=double_dilation,
-            attention=attention
+            attention=attention,
+            activation_type=activation_type
         )
         self.convs_2_2 = ResUNet3_2_2(
             channels=channels,
             up_channels=up_channels,
             double_dilation=double_dilation,
-            attention=attention
+            attention=attention,
+            activation_type=activation_type
         )
         self.convs_1_3 = ResUNet3_1_3(
             channels=channels,
             up_channels=up_channels,
             double_dilation=double_dilation,
-            attention=attention
+            attention=attention,
+            activation_type=activation_type
         )
         self.convs_0_4 = ResUNet3_0_4(
             channels=channels,
             up_channels=up_channels,
             double_dilation=double_dilation,
-            attention=attention
+            attention=attention,
+            activation_type=activation_type
         )
 
         self.final_dist = torch.nn.Sequential(

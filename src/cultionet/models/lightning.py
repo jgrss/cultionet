@@ -531,6 +531,7 @@ class CultioLitModel(pl.LightningModule):
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
         model_type: str = 'ResUNet3Psi',
+        activation_type: str = 'LeakyReLU',
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         crop_temperature: T.Optional[float] = None,
@@ -568,7 +569,8 @@ class CultioLitModel(pl.LightningModule):
                 ds_time_features=num_time_features,
                 filters=filters,
                 num_classes=self.num_classes,
-                model_type=model_type
+                model_type=model_type,
+                activation_type=activation_type
             )
         )
         self.configure_loss()

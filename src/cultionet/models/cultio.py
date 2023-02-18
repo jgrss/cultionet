@@ -144,7 +144,8 @@ class CultioNet(torch.nn.Module):
         ds_time_features: int,
         filters: int = 64,
         num_classes: int = 2,
-        model_type: str = 'UNet3Psi'
+        model_type: str = 'UNet3Psi',
+        activation_type: str = 'LeakyReLU'
     ):
         super(CultioNet, self).__init__()
 
@@ -173,7 +174,8 @@ class CultioNet(torch.nn.Module):
                 in_time=self.ds_num_time,
                 init_filter=self.filters,
                 num_classes=self.num_classes,
-                double_dilation=2
+                double_dilation=2,
+                activation_type=activation_type
             )
         elif model_type == 'ResUNet3Psi':
             self.mask_model = ResUNet3Psi(
@@ -182,7 +184,8 @@ class CultioNet(torch.nn.Module):
                 in_rnn_channels=int(self.filters * 3),
                 init_filter=self.filters,
                 num_classes=self.num_classes,
-                double_dilation=2
+                double_dilation=2,
+                activation_type=activation_type
             )
         else:
             raise NameError('Model type not supported.')
