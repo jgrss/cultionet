@@ -12,12 +12,12 @@ class Swish(torch.nn.Module):
         super(Swish, self).__init__()
 
         self.sigmoid = torch.nn.Sigmoid()
-        assert dims in (2, 3)
-        if dims == 2:
-            ones = torch.ones((1, channels, 1, 1))
-        else:
-            ones = torch.ones((1, channels, 1, 1, 1))
-        self.beta = torch.nn.Parameter(ones)
+        # assert dims in (2, 3)
+        # if dims == 2:
+        #     ones = torch.ones((1, channels, 1, 1))
+        # else:
+        #     ones = torch.ones((1, channels, 1, 1, 1))
+        self.beta = torch.nn.Parameter(torch.ones(1))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x * self.sigmoid(self.beta * x)
