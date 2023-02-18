@@ -531,7 +531,7 @@ class CultioLitModel(pl.LightningModule):
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
         model_type: str = 'ResUNet3Psi',
-        activation_type: str = 'SiLU',
+        activation_type: str = 'LeakyReLU',
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         crop_temperature: T.Optional[float] = None,
