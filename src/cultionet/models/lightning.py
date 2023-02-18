@@ -531,7 +531,7 @@ class CultioLitModel(pl.LightningModule):
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
         model_type: str = 'ResUNet3Psi',
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = 'SiLU',
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         crop_temperature: T.Optional[float] = None,
@@ -782,6 +782,15 @@ class CultioLitModel(pl.LightningModule):
         edge_jaccard = self.edge_jaccard(edge_ypred, edge_ytrue)
         crop_jaccard = self.crop_jaccard(crop_ypred, crop_ytrue)
 
+        total_score = (
+            loss
+            + (1.0 - edge_score)
+            + (1.0 - crop_score)
+            + dist_mae
+            + (1.0 - edge_mcc)
+            + (1.0 - crop_mcc)
+        )
+
         metrics = {
             'loss': loss,
             'dist_mae': dist_mae,
@@ -793,7 +802,8 @@ class CultioLitModel(pl.LightningModule):
             'edge_dice': edge_dice,
             'crop_dice': crop_dice,
             'edge_jaccard': edge_jaccard,
-            'crop_jaccard': crop_jaccard
+            'crop_jaccard': crop_jaccard,
+            'score': total_score
         }
         if predictions['crop_type'] is not None:
             crop_type_ypred = self.probas_to_labels(
@@ -815,9 +825,8 @@ class CultioLitModel(pl.LightningModule):
             'val_loss': eval_metrics['loss'],
             'vef1': eval_metrics['edge_f1'],
             'vcf1': eval_metrics['crop_f1'],
-            'vemcc': eval_metrics['edge_mcc'],
-            'vcmcc': eval_metrics['crop_mcc'],
-            'vmae': eval_metrics['dist_mae']
+            'vmae': eval_metrics['dist_mae'],
+            'val_score': eval_metrics['score']
         }
         if 'crop_type_f1' in eval_metrics:
             metrics['vctf1'] = eval_metrics['crop_type_f1']
@@ -841,7 +850,8 @@ class CultioLitModel(pl.LightningModule):
             'tedice': eval_metrics['edge_dice'],
             'tcdice': eval_metrics['crop_dice'],
             'tejaccard': eval_metrics['edge_jaccard'],
-            'tcjaccard': eval_metrics['crop_jaccard']
+            'tcjaccard': eval_metrics['crop_jaccard'],
+            'test_score': eval_metrics['score']
         }
         if 'crop_type_f1' in eval_metrics:
             metrics['tctf1'] = eval_metrics['crop_type_f1']

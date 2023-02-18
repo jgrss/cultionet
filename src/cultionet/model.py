@@ -335,20 +335,22 @@ def fit(
 
     # Checkpoint
     cb_train_loss = ModelCheckpoint(
+        monitor='loss'
+    )
+    # Validation and test loss
+    cb_val_loss = ModelCheckpoint(
         dirpath=ckpt_file.parent,
         filename=ckpt_file.stem,
         save_last=True,
         save_top_k=save_top_k,
         mode='min',
-        monitor='loss',
+        monitor='val_score',
         every_n_train_steps=0,
         every_n_epochs=1
     )
-    # Validation and test loss
-    cb_val_loss = ModelCheckpoint(monitor='val_loss')
     # Early stopping
     early_stop_callback = EarlyStopping(
-        monitor='val_loss',
+        monitor='val_score',
         min_delta=early_stopping_min_delta,
         patience=early_stopping_patience,
         mode='min',
@@ -467,7 +469,7 @@ def fit(
             trainer.test(
                 model=lit_model,
                 dataloaders=data_module.test_dataloader(),
-                ckpt_path='last'
+                ckpt_path='best'
             )
             logged_metrics = trainer.logged_metrics
             for k, v in logged_metrics.items():
@@ -740,7 +742,9 @@ def predict_lightning(
     )
 
     trainer = pl.Trainer(**trainer_kwargs)
-    lit_model = CultioLitModel.load_from_checkpoint(checkpoint_path=str(ckpt_file))
+    lit_model = CultioLitModel.load_from_checkpoint(
+        checkpoint_path=str(ckpt_file)
+    )
 
     temperature_lit_model = None
     if crop_temperature is not None:
