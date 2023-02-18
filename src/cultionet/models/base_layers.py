@@ -8,11 +8,16 @@ from torch_geometric import nn
 
 
 class Swish(torch.nn.Module):
-    def __init__(self, channels: int):
+    def __init__(self, channels: int, dims: int):
         super(Swish, self).__init__()
 
         self.sigmoid = torch.nn.Sigmoid()
-        self.beta = torch.nn.Parameter(torch.ones(channels))
+        assert dims in (2, 3)
+        if dims == 2:
+            ones = torch.ones((1, channels, 1, 1))
+        else:
+            ones = torch.ones((1, channels, 1, 1, 1))
+        self.beta = torch.nn.Parameter(ones)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x * self.sigmoid(self.beta * x)
@@ -25,7 +30,8 @@ class SetActivation(torch.nn.Module):
     def __init__(
         self,
         activation_type: str,
-        channels: T.Optional[int] = None
+        channels: T.Optional[int] = None,
+        dims: T.Optional[int] = None
     ):
         """
         Examples:
@@ -42,7 +48,8 @@ class SetActivation(torch.nn.Module):
 
         if activation_type == 'Swish':
             assert isinstance(channels, int), 'Swish requires the input channels.'
-            self.act = Swish(channels)
+            assert isinstance(dims, int), 'Swish requires the tensor dimension.'
+            self.act = Swish(channels=channels, dims=dims)
         else:
             self.act = getattr(torch.nn, activation_type)(inplace=False)
 
@@ -174,7 +181,9 @@ class ConvBlock2d(torch.nn.Module):
         ]
         if add_activation:
             layers += [
-                SetActivation(activation_type, channels=out_channels)
+                SetActivation(
+                    activation_type, channels=out_channels, dims=2
+                )
             ]
 
         self.seq = torch.nn.Sequential(*layers)
@@ -197,7 +206,7 @@ class ResBlock2d(torch.nn.Module):
 
         layers = [
             torch.nn.BatchNorm2d(in_channels),
-            SetActivation(activation_type, channels=in_channels),
+            SetActivation(activation_type, channels=in_channels, dims=2),
             torch.nn.Conv2d(
                 in_channels,
                 out_channels,
@@ -243,10 +252,12 @@ class ConvBlock3d(torch.nn.Module):
                 Squeeze(),
                 torch.nn.BatchNorm2d(in_time)
             ]
+            dims = 2
         else:
             layers += [torch.nn.BatchNorm3d(out_channels)]
+            dims = 3
         if add_activation:
-            layers += [SetActivation(activation_type, channels=out_channels)]
+            layers += [SetActivation(activation_type, channels=out_channels, dims=dims)]
 
         self.seq = torch.nn.Sequential(*layers)
 
