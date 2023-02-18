@@ -17,6 +17,9 @@ class Swish(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x * self.sigmoid(self.beta * x)
 
+    def reset_parameters(self):
+        torch.nn.init.ones_(self.beta)
+
 
 class SetActivation(torch.nn.Module):
     def __init__(
