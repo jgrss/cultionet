@@ -647,6 +647,7 @@ class ResSpatioTemporalConv3d(torch.nn.Module):
         super(ResSpatioTemporalConv3d, self).__init__()
 
         layers = [
+            # Conv -> Batchnorm -> Activation
             ConvBlock3d(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -654,25 +655,32 @@ class ResSpatioTemporalConv3d(torch.nn.Module):
                 padding=1,
                 activation_type=activation_type
             ),
-            torch.nn.Conv3d(
+            # Conv -> Batchnorm
+            ConvBlock3d(
                 in_channels=out_channels,
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=2,
-                dilation=2
+                dilation=2,
+                add_activation=False
             )
         ]
 
         self.seq = torch.nn.Sequential(*layers)
-        self.skip = torch.nn.Conv3d(
-            in_channels,
-            out_channels,
+        # Conv -> Batchnorm
+        self.skip = ConvBlock3d(
+            in_channels=in_channels,
+            out_channels=out_channels,
             kernel_size=1,
-            padding=0
+            padding=0,
+            add_activation=False
         )
+        self.final_act = SetActivation(activation_type=activation_type)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.seq(x) + self.skip(x)
+        x = self.seq(x) + self.skip(x)
+
+        return self.final_act(x)
 
 
 class SpatioTemporalConv3d(torch.nn.Module):
@@ -862,6 +870,7 @@ class ResidualConvInit(torch.nn.Module):
         super(ResidualConvInit, self).__init__()
 
         self.seq = torch.nn.Sequential(
+            # Conv -> Batchnorm -> Activation
             ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -869,23 +878,30 @@ class ResidualConvInit(torch.nn.Module):
                 padding=1,
                 activation_type=activation_type
             ),
-            torch.nn.Conv2d(
-                out_channels,
-                out_channels,
+            # Conv -> Batchnorm
+            ConvBlock2d(
+                in_channels=out_channels,
+                out_channels=out_channels,
                 kernel_size=3,
                 padding=2,
-                dilation=2
+                dilation=2,
+                add_activation=False
             )
         )
-        self.skip = torch.nn.Conv2d(
-            in_channels,
-            out_channels,
+        # Conv -> Batchnorm
+        self.skip = ConvBlock2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
             kernel_size=1,
-            padding=0
+            padding=0,
+            add_activation=False
         )
+        self.final_act = SetActivation(activation_type=activation_type)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.seq(x) + self.skip(x)
+        x = self.seq(x) + self.skip(x)
+
+        return self.final_act(x)
 
 
 class ResidualConv(torch.nn.Module):
@@ -906,7 +922,8 @@ class ResidualConv(torch.nn.Module):
             'Only one attention method should be used.'
 
         layers = [
-            ResBlock2d(
+            # Conv -> Batchnorm -> Activation
+            ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=3,
@@ -916,14 +933,15 @@ class ResidualConv(torch.nn.Module):
         ]
         if dilations is not None:
             for dilation in dilations:
+                # Conv -> Batchnorm
                 layers += [
-                    ResBlock2d(
+                    ConvBlock2d(
                         in_channels=out_channels,
                         out_channels=out_channels,
                         kernel_size=3,
                         padding=dilation,
                         dilation=dilation,
-                activation_type=activation_type
+                        add_activation=False
                     )
                 ]
 
@@ -938,6 +956,7 @@ class ResidualConv(torch.nn.Module):
             layers += [ChannelAttention(channels=out_channels)]
 
         self.seq = torch.nn.Sequential(*layers)
+        # Conv -> Batchnorm 
         self.skip = ConvBlock2d(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -945,6 +964,7 @@ class ResidualConv(torch.nn.Module):
             padding=0,
             add_activation=False
         )
+        self.final_act = SetActivation(activation_type=activation_type)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.seq(x) + self.skip(x)
@@ -956,7 +976,7 @@ class ResidualConv(torch.nn.Module):
             attention = 1.0 + self.gamma * attention
             out = out * attention
 
-        return out
+        return self.final_act(out)
 
 
 class ResidualConvRCAB(torch.nn.Module):

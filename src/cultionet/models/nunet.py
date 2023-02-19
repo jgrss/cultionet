@@ -22,7 +22,8 @@ from .base_layers import (
     ResidualConv,
     SingleConv,
     Softmax,
-    Squeeze
+    Squeeze,
+    SetActivation
 )
 from .unet_parts import (
     UNet3P_3_1,
@@ -726,28 +727,29 @@ class ResUNet3Psi(torch.nn.Module):
             Max(dim=2),
             Squeeze(),
             torch.nn.BatchNorm2d(channels[0]),
-            getattr(torch.nn, activation_type)(inplace=False)
+            SetActivation(activation_type=activation_type)
         )
         self.reduce_to_channels_mean = torch.nn.Sequential(
             Mean(dim=2),
             Squeeze(),
             torch.nn.BatchNorm2d(channels[0]),
-            getattr(torch.nn, activation_type)(inplace=False)
+            SetActivation(activation_type=activation_type)
         )
         self.reduce_to_channels_var = torch.nn.Sequential(
             Var(dim=2),
             Squeeze(),
             torch.nn.BatchNorm2d(channels[0]),
-            getattr(torch.nn, activation_type)(inplace=False)
+            SetActivation(activation_type=activation_type)
         )
 
         # Inputs =
         # Reduced time dimensions
         # Reduced channels (x2) for mean and max
         # Input filters for RNN hidden logits
-        self.conv0_0 = ResidualConvInit(
+        self.conv0_0 = ResidualConv(
             in_time + int(channels[0] * 3) + in_rnn_channels,
             channels[0],
+            dilations=[double_dilation],
             activation_type=activation_type
         )
         self.conv1_0 = PoolResidualConv(
