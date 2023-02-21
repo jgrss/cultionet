@@ -94,6 +94,17 @@ class Add(torch.nn.Module):
         return x + y
 
 
+class Min(torch.nn.Module):
+    def __init__(self, dim: int, keepdim: bool = False):
+        super(Min, self).__init__()
+
+        self.dim = dim
+        self.keepdim = keepdim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.min(dim=self.dim, keepdim=self.keepdim)[0]
+
+
 class Max(torch.nn.Module):
     def __init__(self, dim: int, keepdim: bool = False):
         super(Max, self).__init__()
@@ -131,6 +142,27 @@ class Var(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x.var(
+            dim=self.dim,
+            keepdim=self.keepdim,
+            unbiased=self.unbiased
+        )
+
+
+class Std(torch.nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        keepdim: bool = False,
+        unbiased: bool = False
+    ):
+        super(Std, self).__init__()
+
+        self.dim = dim
+        self.keepdim = keepdim
+        self.unbiased = unbiased
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.std(
             dim=self.dim,
             keepdim=self.keepdim,
             unbiased=self.unbiased
@@ -198,7 +230,7 @@ class SigmoidCrisp(torch.nn.Module):
         out = self.sigmoid(out)
 
         return out
-    
+
 
 class ConvBlock2d(torch.nn.Module):
     def __init__(

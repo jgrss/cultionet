@@ -12,9 +12,10 @@ from .base_layers import (
     DoubleConv,
     SpatioTemporalConv3d,
     ResSpatioTemporalConv3d,
+    Min,
     Max,
     Mean,
-    Var,
+    Std,
     Permute,
     PoolConv,
     PoolResidualConv,
@@ -725,8 +726,14 @@ class ResUNet3Psi(torch.nn.Module):
             Squeeze()
         )
         # (B x C x T|D x H x W)
-        # Temporal max logit
+        # Temporal reductions
         # Squeeze to 2d (B x C x H x W)
+        self.reduce_to_channels_min = torch.nn.Sequential(
+            Min(dim=2),
+            Squeeze(),
+            torch.nn.BatchNorm2d(channels[0]),
+            SetActivation(activation_type=activation_type)
+        )
         self.reduce_to_channels_max = torch.nn.Sequential(
             Max(dim=2),
             Squeeze(),
@@ -739,8 +746,8 @@ class ResUNet3Psi(torch.nn.Module):
             torch.nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type)
         )
-        self.reduce_to_channels_var = torch.nn.Sequential(
-            Var(dim=2),
+        self.reduce_to_channels_std = torch.nn.Sequential(
+            Std(dim=2),
             Squeeze(),
             torch.nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type)
@@ -751,7 +758,7 @@ class ResUNet3Psi(torch.nn.Module):
         # Reduced channels (x2) for mean and max
         # Input filters for RNN hidden logits
         self.conv0_0 = ResidualConv(
-            in_time + int(channels[0] * 3) + in_rnn_channels,
+            in_time + int(channels[0] * 4) + in_rnn_channels,
             channels[0],
             dilations=dilations,
             activation_type=activation_type,
@@ -921,9 +928,10 @@ class ResUNet3Psi(torch.nn.Module):
         h = torch.cat(
             [
                 self.reduce_to_time(h),
+                self.reduce_to_channels_min(h),
                 self.reduce_to_channels_max(h),
                 self.reduce_to_channels_mean(h),
-                self.reduce_to_channels_var(h),
+                self.reduce_to_channels_std(h),
                 rnn_h
             ],
             dim=1
