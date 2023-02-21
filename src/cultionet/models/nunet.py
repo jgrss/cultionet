@@ -448,7 +448,7 @@ class UNet3Psi(torch.nn.Module):
         deep_cgm_mask: T.Optional[bool] = False,
         mask_activation: T.Union[Softmax, torch.nn.Sigmoid] = Softmax(dim=1)
     ):
-        super(ResUNet3Psi, self).__init__()
+        super(UNet3Psi, self).__init__()
 
         self.deep_cgm_edge = deep_cgm_edge
         self.deep_cgm_mask = deep_cgm_mask
