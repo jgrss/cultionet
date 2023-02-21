@@ -904,7 +904,7 @@ class ResUNet3_2_2(torch.nn.Module):
         self,
         channels: T.Sequence[int],
         up_channels: int,
-        double_dilation: int = 1,
+        dilations: T.Sequence[int] = None,
         attention: bool = False,
         activation_type: str = 'LeakyReLU'
     ):
@@ -920,7 +920,7 @@ class ResUNet3_2_2(torch.nn.Module):
             prev_backbone_channel_index=2,
             n_pools=2,
             n_stream_down=1,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             model_type=ModelTypes.resunet,
             activation_type=activation_type
@@ -933,7 +933,7 @@ class ResUNet3_2_2(torch.nn.Module):
             prev_backbone_channel_index=2,
             n_pools=2,
             n_stream_down=1,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             model_type=ModelTypes.resunet,
             activation_type=activation_type
@@ -946,7 +946,7 @@ class ResUNet3_2_2(torch.nn.Module):
             prev_backbone_channel_index=2,
             n_pools=2,
             n_stream_down=1,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             model_type=ModelTypes.resunet,
             activation_type=activation_type
@@ -995,7 +995,7 @@ class ResUNet3_1_3(torch.nn.Module):
         self,
         channels: T.Sequence[int],
         up_channels: int,
-        double_dilation: int = 1,
+        dilations: T.Sequence[int] = None,
         attention: bool = False,
         activation_type: str = 'LeakyReLU'
     ):
@@ -1011,7 +1011,7 @@ class ResUNet3_1_3(torch.nn.Module):
             prev_backbone_channel_index=1,
             n_pools=1,
             n_stream_down=2,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             model_type=ModelTypes.resunet,
             activation_type=activation_type
@@ -1024,7 +1024,7 @@ class ResUNet3_1_3(torch.nn.Module):
             prev_backbone_channel_index=1,
             n_pools=1,
             n_stream_down=2,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             model_type=ModelTypes.resunet,
             activation_type=activation_type
@@ -1037,7 +1037,7 @@ class ResUNet3_1_3(torch.nn.Module):
             prev_backbone_channel_index=1,
             n_pools=1,
             n_stream_down=2,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             model_type=ModelTypes.resunet,
             activation_type=activation_type
@@ -1088,7 +1088,7 @@ class ResUNet3_0_4(torch.nn.Module):
         self,
         channels: T.Sequence[int],
         up_channels: int,
-        double_dilation: int = 1,
+        dilations: T.Sequence[int] = None,
         attention: bool = False,
         activation_type: str = 'LeakyReLU'
     ):
@@ -1103,7 +1103,7 @@ class ResUNet3_0_4(torch.nn.Module):
             is_side_stream=False,
             prev_backbone_channel_index=0,
             n_stream_down=3,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             model_type=ModelTypes.resunet,
             activation_type=activation_type
@@ -1115,7 +1115,7 @@ class ResUNet3_0_4(torch.nn.Module):
             is_side_stream=True,
             prev_backbone_channel_index=0,
             n_stream_down=3,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             model_type=ModelTypes.resunet,
             activation_type=activation_type
@@ -1127,7 +1127,7 @@ class ResUNet3_0_4(torch.nn.Module):
             is_side_stream=True,
             prev_backbone_channel_index=0,
             n_stream_down=3,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             model_type=ModelTypes.resunet,
             activation_type=activation_type
