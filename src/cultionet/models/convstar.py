@@ -2,7 +2,7 @@
 """
 import typing as T
 
-from .base_layers import Softmax
+from .base_layers import Softmax, ResidualConv
 
 import torch
 from torch.autograd import Variable
@@ -147,13 +147,15 @@ class StarRNN(torch.nn.Module):
         self,
         input_dim: int = 3,
         hidden_dim: int = 64,
-        num_classes_l2: int = 3,
-        num_classes_last: int = 2,
+        num_classes_l2: int = 2,
+        num_classes_last: int = 3,
         n_stage: int = 3,
         kernel_size: int = 3,
         n_layers: int = 6,
         cell: str = 'star',
-        crop_type_layer: bool = False
+        crop_type_layer: bool = False,
+        activation_type: str = 'LeakyReLU',
+        final_activation: str = Softmax(dim=1)
     ):
         super(StarRNN, self).__init__()
 
@@ -169,34 +171,47 @@ class StarRNN(torch.nn.Module):
             kernel_sizes=kernel_size,
             n_layers=n_layers
         )
-        padding = int(kernel_size / 2)
-        final_activation = torch.nn.Sigmoid() if num_classes_last == 1 else Softmax(dim=1)
 
-        # Crop-type layer
-        if self.crop_type_layer:
-            # Level 2
-            self.final_l2 = torch.nn.Conv2d(
-                hidden_dim,
-                num_classes_l2,
-                kernel_size,
-                padding=padding
-            )
-        # Last level (crop|non-crop)
-        self.final_last = torch.nn.Sequential(
+        # Level 2 level (non-crop; crop)
+        self.final_l2 = torch.nn.Sequential(
+            ResidualConv(
+                in_channels=int(hidden_dim * 2),
+                out_channels=hidden_dim,
+                dilations=[2],
+                activation_type=activation_type
+            ),
+            torch.nn.Dropout(0.5),
             torch.nn.Conv2d(
-                hidden_dim,
-                num_classes_last,
-                kernel_size,
-                padding=padding
+                in_channels=hidden_dim,
+                out_channels=num_classes_l2,
+                kernel_size=1,
+                padding=0
             ),
             final_activation
+        )
+        # Last level (non-crop; crop; edges)
+        self.final_last = torch.nn.Sequential(
+            ResidualConv(
+                in_channels=int(hidden_dim * 3),
+                out_channels=hidden_dim,
+                dilations=[2],
+                activation_type=activation_type
+            ),
+            torch.nn.Dropout(0.5),
+            torch.nn.Conv2d(
+                in_channels=hidden_dim,
+                out_channels=num_classes_last,
+                kernel_size=1,
+                padding=0
+            ),
+            Softmax(dim=1)
         )
 
     def forward(
         self,
         x,
         hidden_s: T.Optional[torch.Tensor] = None
-    ) -> T.Tuple[torch.Tensor, torch.Tensor]:
+    ) -> T.Sequence[torch.Tensor]:
         # input shape = (B x C x T x H x W)
         batch_size, __, time_size, height, width = x.shape
 
@@ -235,10 +250,13 @@ class StarRNN(torch.nn.Module):
 
             return h, last_l2, last
         else:
-            last = self.final_last(h_last)
             h = torch.cat(
                 [local_1, local_2, h_last], dim=1
             )
+            last_l2 = self.final_l2(
+                torch.cat([local_1, local_2], dim=1)
+            )
+            last = self.final_last(h)
 
             # The output is (B x C x H x W)
-            return h, last
+            return h, last_l2, last
