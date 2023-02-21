@@ -10,7 +10,7 @@ from . import model_utils
 
 import torch
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim import lr_scheduler
 from torch_geometric.data import Data
 import pytorch_lightning as pl
 from torchvision.ops import box_iou
@@ -294,7 +294,7 @@ class MaskRCNNLitModel(pl.LightningModule):
             weight_decay=self.weight_decay,
             eps=1e-4
         )
-        lr_scheduler = ReduceLROnPlateau(
+        lr_scheduler = lr_scheduler.ReduceLROnPlateau(
             optimizer,
             factor=0.1,
             patience=5
@@ -495,7 +495,7 @@ class TemperatureScaling(pl.LightningModule):
             max_iter=self.max_iter,
             line_search_fn=None
         )
-        lr_scheduler_lbfgs = ReduceLROnPlateau(
+        lr_scheduler_lbfgs = lr_scheduler.ReduceLROnPlateau(
             optimizer_lbfgs,
             factor=0.1,
             patience=5
@@ -526,6 +526,8 @@ class CultioLitModel(pl.LightningModule):
         filters: int = 32,
         optimizer: str = 'AdamW',
         learning_rate: float = 1e-3,
+        lr_scheduler: str = 'CosineAnnealingLR',
+        steplr_step_size: int = 5,
         weight_decay: float = 0.01,
         eps: float = 1e-4,
         ckpt_name: str = 'last',
@@ -535,7 +537,8 @@ class CultioLitModel(pl.LightningModule):
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         crop_temperature: T.Optional[float] = None,
-        temperature_lit_model: T.Optional[pl.LightningModule] = None
+        temperature_lit_model: T.Optional[pl.LightningModule] = None,
+        scale_pos_weight: T.Optional[bool] = True
     ):
         """Lightning model
         """
@@ -545,6 +548,8 @@ class CultioLitModel(pl.LightningModule):
 
         self.optimizer = optimizer
         self.learning_rate = learning_rate
+        self.lr_scheduler = lr_scheduler
+        self.steplr_step_size = steplr_step_size
         self.weight_decay = weight_decay
         self.eps = eps
         self.ckpt_name = ckpt_name
@@ -554,6 +559,7 @@ class CultioLitModel(pl.LightningModule):
         self.class_counts = class_counts
         self.crop_temperature = crop_temperature
         self.temperature_lit_model = temperature_lit_model
+        self.scale_pos_weight = scale_pos_weight
         self.sigmoid = torch.nn.Sigmoid()
         if edge_class is not None:
             self.edge_class = edge_class
@@ -624,19 +630,26 @@ class CultioLitModel(pl.LightningModule):
 
     def get_true_labels(
         self, batch: Data, crop_type: torch.Tensor = None
-    ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, T.Union[None, torch.Tensor]
-    ]:
+    ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
+        """Gets true labels from the data batch
+        """
         true_edge = torch.where(
             batch.y == self.edge_class, 1, 0
         ).long()
         # Recode all crop classes to 1, otherwise 0
         true_crop = torch.where(
-            (batch.y > 0) & (batch.y != self.edge_class), 1, 0
+            (batch.y > 0) & (batch.y < self.edge_class), 1, 0
         ).long()
-        # Same as above, with additional edge class included
-        true_crop_plus_edge = torch.where(
-            (batch.y > 0) & (batch.y != self.edge_class), 1,
+        # Same as above, with additional edge class
+        # Non-crop = 0
+        # Crop | Edge = 1
+        true_crop_and_edge = torch.where(batch.y > 0, 1, 0).long()
+        # Same as above, with additional edge class
+        # Non-crop = 0
+        # Crop = 1
+        # Edge = 2
+        true_crop_or_edge = torch.where(
+            (batch.y > 0) & (batch.y < self.edge_class), 1,
             torch.where(
                 batch.y == self.edge_class, 2, 0
             )
@@ -648,7 +661,13 @@ class CultioLitModel(pl.LightningModule):
                 batch.y == self.edge_class, 0, batch.y
             ).long()
 
-        return true_edge, true_crop, true_crop_plus_edge, true_crop_type
+        return {
+            'true_edge': true_edge,
+            'true_crop': true_crop,
+            'true_crop_and_edge': true_crop_and_edge,
+            'true_crop_or_edge': true_crop_or_edge,
+            'true_crop_type': true_crop_type
+        }
 
     def softmax(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
         return F.softmax(x, dim=dim, dtype=x.dtype)
@@ -705,31 +724,57 @@ class CultioLitModel(pl.LightningModule):
         Returns:
             Total loss
         """
-        true_edge, true_crop, __, true_crop_type = self.get_true_labels(
+        true_labels_dict = self.get_true_labels(
             batch, crop_type=predictions['crop_type']
         )
 
-        crop_star_loss = self.crop_star_loss(predictions['crop_star'], true_crop)
+        # RNN level 2 loss (non-crop=0; crop|edge=1)
+        crop_star_l2_loss = self.crop_star_l2_loss(
+            predictions['crop_star_l2'], true_labels_dict['true_crop_and_edge']
+        )
+        # RNN final loss (non-crop=0; crop=1; edge=2)
+        crop_star_loss = self.crop_star_loss(
+            predictions['crop_star'], true_labels_dict['true_crop_or_edge']
+        )
+        # Distance transform loss
         dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
-        edge_loss = self.edge_loss(predictions['edge'], true_edge)
-        crop_loss = self.crop_loss(predictions['crop'], true_crop)
+        # Edge losses
+        edge_loss_3_1 = self.edge_loss_3_1(predictions['edge_3_1'], true_labels_dict['true_edge'])
+        edge_loss_2_2 = self.edge_loss_2_2(predictions['edge_2_2'], true_labels_dict['true_edge'])
+        edge_loss_1_3 = self.edge_loss_1_3(predictions['edge_1_3'], true_labels_dict['true_edge'])
+        edge_loss = self.edge_loss(predictions['edge'], true_labels_dict['true_edge'])
+        # Crop mask losses
+        crop_loss_3_1 = self.crop_loss_3_1(predictions['crop_3_1'], true_labels_dict['true_crop'])
+        crop_loss_2_2 = self.crop_loss_2_2(predictions['crop_2_2'], true_labels_dict['true_crop'])
+        crop_loss_1_3 = self.crop_loss_1_3(predictions['crop_1_3'], true_labels_dict['true_crop'])
+        crop_loss = self.crop_loss(predictions['crop'], true_labels_dict['true_crop'])
 
         # Main loss
         loss = (
-            0.5 * crop_star_loss
+            # RNN losses
+            0.25 * crop_star_l2_loss
+            + 0.5 * crop_star_loss
             + dist_loss
+            # Edge losses
             + edge_loss
+            + 0.1 * edge_loss_3_1
+            + 0.25 * edge_loss_2_2
+            + 0.5 * edge_loss_1_3
+            # Crop mask losses
             + crop_loss
+            + 0.1 * crop_loss_3_1
+            + 0.25 * crop_loss_2_2
+            + 0.5 * crop_loss_1_3
         )
         if predictions['crop_type'] is not None:
             # Upstream (deep) loss on crop-type
             crop_type_star_loss = self.crop_type_star_loss(
-                predictions['crop_type_star'], true_crop_type
+                predictions['crop_type_star'], true_labels_dict['true_crop_type']
             )
             loss = loss + crop_type_star_loss
             # Loss on crop-type
             crop_type_loss = self.crop_type_loss(
-                predictions['crop_type'], true_crop_type
+                predictions['crop_type'], true_labels_dict['true_crop_type']
             )
             loss = loss + crop_type_loss
 
@@ -766,21 +811,21 @@ class CultioLitModel(pl.LightningModule):
         edge_ypred = self.probas_to_labels(predictions['edge'])
         crop_ypred = self.probas_to_labels(predictions['crop'])
         # Get the true edge and crop labels
-        edge_ytrue, crop_ytrue, __, crop_type_ytrue = self.get_true_labels(
+        true_labels_dict = self.get_true_labels(
             batch, crop_type=predictions['crop_type']
         )
         # F1-score
-        edge_score = self.edge_f1(edge_ypred, edge_ytrue)
-        crop_score = self.crop_f1(crop_ypred, crop_ytrue)
+        edge_score = self.edge_f1(edge_ypred, true_labels_dict['true_edge'])
+        crop_score = self.crop_f1(crop_ypred, true_labels_dict['true_crop'])
         # MCC
-        edge_mcc = self.edge_mcc(edge_ypred, edge_ytrue)
-        crop_mcc = self.crop_mcc(crop_ypred, crop_ytrue)
+        edge_mcc = self.edge_mcc(edge_ypred, true_labels_dict['true_edge'])
+        crop_mcc = self.crop_mcc(crop_ypred, true_labels_dict['true_crop'])
         # Dice
-        edge_dice = self.edge_dice(edge_ypred, edge_ytrue)
-        crop_dice = self.crop_dice(crop_ypred, crop_ytrue)
+        edge_dice = self.edge_dice(edge_ypred, true_labels_dict['true_edge'])
+        crop_dice = self.crop_dice(crop_ypred, true_labels_dict['true_crop'])
         # Jaccard/IoU
-        edge_jaccard = self.edge_jaccard(edge_ypred, edge_ytrue)
-        crop_jaccard = self.crop_jaccard(crop_ypred, crop_ytrue)
+        edge_jaccard = self.edge_jaccard(edge_ypred, true_labels_dict['true_edge'])
+        crop_jaccard = self.crop_jaccard(crop_ypred, true_labels_dict['true_crop'])
 
         total_score = (
             loss
@@ -811,7 +856,9 @@ class CultioLitModel(pl.LightningModule):
                     predictions['crop_type']
                 )
             )
-            crop_type_score = self.crop_type_f1(crop_type_ypred, crop_type_ytrue)
+            crop_type_score = self.crop_type_f1(
+                crop_type_ypred, true_labels_dict['true_crop_type']
+            )
             metrics['crop_type_f1'] = crop_type_score
 
         return metrics
@@ -883,12 +930,22 @@ class CultioLitModel(pl.LightningModule):
 
     def configure_loss(self):
         self.dist_loss = TanimotoDistLoss()
+        # Edge losses
         self.edge_loss = TanimotoDistLoss()
-        self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
-        self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=True)
+        self.edge_loss_3_1 = TanimotoDistLoss()
+        self.edge_loss_2_2 = TanimotoDistLoss()
+        self.edge_loss_1_3 = TanimotoDistLoss()
+        # Crop mask losses
+        self.crop_loss = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
+        self.crop_loss_3_1 = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
+        self.crop_loss_2_2 = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
+        self.crop_loss_1_3 = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
+        # Crop RNN losses
+        self.crop_star_l2_loss = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
+        self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
         if self.num_classes > 2:
-            self.crop_type_star_loss = TanimotoDistLoss(scale_pos_weight=True)
-            self.crop_type_loss = TanimotoDistLoss(scale_pos_weight=True)
+            self.crop_type_star_loss = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
+            self.crop_type_loss = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
 
     def configure_optimizers(self):
         params_list = list(self.cultionet_model.parameters())
@@ -909,17 +966,33 @@ class CultioLitModel(pl.LightningModule):
         else:
             raise NameError("Choose either 'AdamW' or 'SGD'.")
 
-        lr_scheduler = ReduceLROnPlateau(
-            optimizer,
-            factor=0.1,
-            patience=5
-        )
+        if self.lr_scheduler == 'ExponentialLR':
+            model_lr_scheduler = lr_scheduler.ExponentialLR(
+                optimizer,
+                gamma=0.5
+            )
+        elif self.lr_scheduler == 'CosineAnnealingLR':
+            model_lr_scheduler = lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=20,
+                eta_min=1e-5,
+                last_epoch=-1
+            )
+        elif self.lr_scheduler == 'StepLR':
+            model_lr_scheduler = lr_scheduler.StepLR(
+                optimizer,
+                step_size=self.steplr_step_size,
+                gamma=0.5
+            )
+        else:
+            raise NameError('The learning rate scheduler is not implemented in Cultionet.')
 
         return {
             'optimizer': optimizer,
             'lr_scheduler': {
-                'scheduler': lr_scheduler,
-                'monitor': 'val_loss',
+                'scheduler': model_lr_scheduler,
+                'name': 'lr_sch',
+                'monitor': 'val_score',
                 'interval': 'epoch',
                 'frequency': 1
             },

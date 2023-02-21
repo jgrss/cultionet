@@ -18,10 +18,10 @@ from .base_layers import (
     Permute,
     PoolConv,
     PoolResidualConv,
-    ResidualConvInit,
     ResidualConv,
     SingleConv,
     Softmax,
+    SigmoidCrisp,
     Squeeze,
     SetActivation
 )
@@ -689,12 +689,17 @@ class ResUNet3Psi(torch.nn.Module):
         in_rnn_channels: int,
         init_filter: int = 32,
         num_classes: int = 2,
-        double_dilation: int = 1,
+        dilations: T.Sequence[int] = None,
         attention: bool = False,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = 'LeakyReLU',
+        deep_cgm_edge: T.Optional[bool] = False,
+        deep_cgm_mask: T.Optional[bool] = False,
+        mask_activation: T.Union[Softmax, torch.nn.Sigmoid] = Softmax(dim=1)
     ):
         super(ResUNet3Psi, self).__init__()
 
+        self.deep_cgm_edge = deep_cgm_edge
+        self.deep_cgm_mask = deep_cgm_mask
         init_filter = int(init_filter)
         channels = [
             init_filter,
@@ -749,60 +754,65 @@ class ResUNet3Psi(torch.nn.Module):
         self.conv0_0 = ResidualConv(
             in_time + int(channels[0] * 3) + in_rnn_channels,
             channels[0],
-            dilations=[double_dilation],
-            activation_type=activation_type
+            dilations=dilations,
+            activation_type=activation_type,
+            fractal_attention=attention
         )
         self.conv1_0 = PoolResidualConv(
             channels[0],
             channels[1],
-            dilations=[double_dilation],
-            activation_type=activation_type
+            dilations=dilations,
+            activation_type=activation_type,
+            fractal_attention=attention
         )
         self.conv2_0 = PoolResidualConv(
             channels[1],
             channels[2],
-            dilations=[double_dilation],
-            activation_type=activation_type
+            dilations=dilations,
+            activation_type=activation_type,
+            fractal_attention=attention
         )
         self.conv3_0 = PoolResidualConv(
             channels[2],
             channels[3],
-            dilations=[double_dilation],
-            activation_type=activation_type
+            dilations=dilations,
+            activation_type=activation_type,
+            fractal_attention=attention
         )
         self.conv4_0 = PoolResidualConv(
             channels[3],
             channels[4],
-            dilations=[double_dilation],
-            activation_type=activation_type
+            dilations=dilations,
+            activation_type=activation_type,
+            fractal_attention=attention
         )
 
         # Connect 3
         self.convs_3_1 = ResUNet3_3_1(
             channels=channels,
             up_channels=up_channels,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             activation_type=activation_type
         )
         self.convs_2_2 = ResUNet3_2_2(
             channels=channels,
             up_channels=up_channels,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             activation_type=activation_type
         )
         self.convs_1_3 = ResUNet3_1_3(
             channels=channels,
             up_channels=up_channels,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             activation_type=activation_type
         )
         self.convs_0_4 = ResUNet3_0_4(
             channels=channels,
             up_channels=up_channels,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             activation_type=activation_type
         )
@@ -823,9 +833,8 @@ class ResUNet3Psi(torch.nn.Module):
                 kernel_size=1,
                 padding=0
             ),
-            torch.nn.Sigmoid()
+            SigmoidCrisp()
         )
-        mask_activation = torch.nn.Sigmoid() if num_classes == 1 else Softmax(dim=1)
         self.final_mask = torch.nn.Sequential(
             torch.nn.Conv2d(
                 up_channels,
@@ -835,6 +844,62 @@ class ResUNet3Psi(torch.nn.Module):
             ),
             mask_activation
         )
+        if self.deep_cgm_edge:
+            self.final_edge_3_1 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    1,
+                    kernel_size=1,
+                    padding=0
+                ),
+                SigmoidCrisp()
+            )
+            self.final_edge_2_2 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    1,
+                    kernel_size=1,
+                    padding=0
+                ),
+                SigmoidCrisp()
+            )
+            self.final_edge_1_3 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    1,
+                    kernel_size=1,
+                    padding=0
+                ),
+                SigmoidCrisp()
+            )
+        if self.deep_cgm_mask:
+            self.final_mask_3_1 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    num_classes,
+                    kernel_size=1,
+                    padding=0
+                ),
+                mask_activation
+            )
+            self.final_mask_2_2 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    num_classes,
+                    kernel_size=1,
+                    padding=0
+                ),
+                mask_activation
+            )
+            self.final_mask_1_3 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    num_classes,
+                    kernel_size=1,
+                    padding=0
+                ),
+                mask_activation
+            )
 
         # Initialise weights
         for m in self.modules():
@@ -929,7 +994,34 @@ class ResUNet3Psi(torch.nn.Module):
         out = {
             'dist': dist,
             'edge': edge,
-            'mask': mask
+            'mask': mask,
+            'edge_3_1': None,
+            'edge_2_2': None,
+            'edge_1_3': None,
+            'mask_3_1': None,
+            'mask_2_2': None,
+            'mask_1_3': None
         }
+
+        if self.deep_cgm_edge:
+            out['edge_3_1'] = self.final_edge_3_1(
+                self.up(out_3_1['edge'], size=edge.shape[-2:], mode='bilinear')
+            )
+            out['edge_2_2'] = self.final_edge_2_2(
+                self.up(out_2_2['edge'], size=edge.shape[-2:], mode='bilinear')
+            )
+            out['edge_1_3'] = self.final_edge_1_3(
+                self.up(out_1_3['edge'], size=edge.shape[-2:], mode='bilinear')
+            )
+        if self.deep_cgm_mask:
+            out['mask_3_1'] = self.final_mask_3_1(
+                self.up(out_3_1['mask'], size=mask.shape[-2:], mode='bilinear')
+            )
+            out['mask_2_2'] = self.final_mask_2_2(
+                self.up(out_2_2['mask'], size=mask.shape[-2:], mode='bilinear')
+            )
+            out['mask_1_3'] = self.final_mask_1_3(
+                self.up(out_1_3['mask'], size=mask.shape[-2:], mode='bilinear')
+            )
 
         return out

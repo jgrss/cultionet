@@ -226,6 +226,8 @@ def fit(
     class_counts: T.Sequence[float] = None,
     optimizer: str = 'AdamW',
     learning_rate: T.Optional[float] = 0.001,
+    lr_scheduler: str = 'CosineAnnealingLR',
+    steplr_step_size: T.Optional[T.Sequence[int]] = None,
     epochs: T.Optional[int] = 30,
     save_top_k: T.Optional[int] = 1,
     early_stopping_patience: T.Optional[int] = 7,
@@ -259,6 +261,8 @@ def fit(
         filters (Optional[int]): The number of initial model filters.
         optimizer (Optional[str]): The optimizer.
         learning_rate (Optional[float]): The model learning rate.
+        lr_scheduler (Optional[str]): The learning rate scheduler.
+        steplr_step_size (Optional[list]): The multiplicative step size factor.
         epochs (Optional[int]): The number of epochs.
         save_top_k (Optional[int]): The number of top-k model checkpoints to save.
         early_stopping_patience (Optional[int]): The patience (epochs) before early stopping.
@@ -321,6 +325,8 @@ def fit(
         filters=filters,
         optimizer=optimizer,
         learning_rate=learning_rate,
+        lr_scheduler=lr_scheduler,
+        steplr_step_size=steplr_step_size,
         weight_decay=weight_decay,
         class_counts=class_counts,
         edge_class=edge_class
@@ -357,7 +363,7 @@ def fit(
         check_on_train_epoch_end=False
     )
     # Learning rate
-    lr_monitor = LearningRateMonitor(logging_interval='step')
+    lr_monitor = LearningRateMonitor(logging_interval='epoch')
     callbacks = [
         lr_monitor,
         cb_train_loss,

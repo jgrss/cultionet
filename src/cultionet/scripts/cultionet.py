@@ -1222,6 +1222,8 @@ def train_model(args):
         save_top_k=args.save_top_k,
         accumulate_grad_batches=args.accumulate_grad_batches,
         learning_rate=args.learning_rate,
+        lr_scheduler=args.lr_scheduler,
+        steplr_step_size=args.steplr_step_size,
         filters=args.filters,
         num_classes=args.num_classes if args.num_classes is not None else class_info['max_crop_class'] + 1,
         edge_class=args.edge_class if args.edge_class is not None else class_info['edge_class'],

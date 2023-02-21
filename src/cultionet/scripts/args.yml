@@ -447,7 +447,7 @@ train:
     long: patience
     help: The early stopping patience
     kwargs:
-      default: 7
+      default: 20
       type: '&int'
   optimizer:
     short: ''
@@ -465,6 +465,23 @@ train:
     kwargs:
       default: 1e-4
       type: '&float'
+  lr_scheduler:
+    short: lrs
+    long: lr-scheduler
+    help: The learning rate scheduler
+    kwargs:
+      default: 'CosineAnnealingLR'
+      choices:
+        - 'ExponentialLR'
+        - 'CosineAnnealingLR'
+        - 'StepLR'
+  steplr_step_size:
+    short: ''
+    long: steplr-step-size
+    help: The multiplicative step size factor (for --lr-scheduler=StepLR)
+    kwargs:
+      default: 5
+      type: '&int'
   weight_decay:
     short: ''
     long: weight-decay

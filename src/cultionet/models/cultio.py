@@ -1,7 +1,7 @@
 import typing as T
 
 from . import model_utils
-from .base_layers import ConvBlock2d
+from .base_layers import ConvBlock2d, Softmax
 from .nunet import UNet3, UNet3Psi, ResUNet3Psi
 from .convstar import StarRNN
 
@@ -165,8 +165,11 @@ class CultioNet(torch.nn.Module):
             input_dim=self.ds_num_bands,
             hidden_dim=self.filters,
             n_layers=3,
-            num_classes_last=self.num_classes,
-            crop_type_layer=True if self.num_classes > 2 else False
+            num_classes_l2=self.num_classes,
+            num_classes_last=self.num_classes + 1,
+            crop_type_layer=True if self.num_classes > 2 else False,
+            activation_type=activation_type,
+            final_activation=Softmax(dim=1)
         )
         if model_type == 'UNet3Psi':
             self.mask_model = UNet3Psi(
@@ -184,8 +187,12 @@ class CultioNet(torch.nn.Module):
                 in_rnn_channels=int(self.filters * 3),
                 init_filter=self.filters,
                 num_classes=self.num_classes,
-                double_dilation=2,
-                activation_type=activation_type
+                dilations=[1, 2],
+                activation_type=activation_type,
+                attention=True,
+                deep_cgm_edge=True,
+                deep_cgm_mask=True,
+                mask_activation=Softmax(dim=1)
             )
         else:
             raise NameError('Model type not supported.')
@@ -207,7 +214,8 @@ class CultioNet(torch.nn.Module):
             nbatch, self.ds_num_bands, self.ds_num_time, height, width
         )
         # StarRNN
-        logits_star_hidden, logits_star_last = self.star_rnn(x)
+        logits_star_hidden, logits_star_l2, logits_star_last = self.star_rnn(x)
+        logits_star_l2 = self.cg(logits_star_l2)
         logits_star_last = self.cg(logits_star_last)
         # Main stream
         logits = self.mask_model(x, logits_star_hidden)
@@ -220,7 +228,17 @@ class CultioNet(torch.nn.Module):
             'edge': logits_edges,
             'crop': logits_crop,
             'crop_type': None,
+            'crop_star_l2': logits_star_l2,
             'crop_star': logits_star_last
         }
+
+        if logits['mask_3_1'] is not None:
+            out['crop_3_1'] = self.cg(logits['mask_3_1'])
+            out['crop_2_2'] = self.cg(logits['mask_2_2'])
+            out['crop_1_3'] = self.cg(logits['mask_1_3'])
+        if logits['edge_3_1'] is not None:
+            out['edge_3_1'] = self.cg(logits['edge_3_1'])
+            out['edge_2_2'] = self.cg(logits['edge_2_2'])
+            out['edge_1_3'] = self.cg(logits['edge_1_3'])
 
         return out
