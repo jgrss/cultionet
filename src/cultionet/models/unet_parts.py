@@ -529,13 +529,13 @@ class UNet3_3_1(torch.nn.Module):
         )
         # Output distance logits pass to edge layer
         h_edge = self.conv_edge(
-            prev_same=[('prev', h_dist)],
+            prev_same=[('prev_backbone', x3_0), ('prev', h_dist)],
             pools=[x0_0, x1_0, x2_0],
             x4_0=x4_0
         )
         # Output edge logits pass to mask layer
         h_mask = self.conv_mask(
-            prev_same=[('prev', h_edge)],
+            prev_same=[('prev_backbone', x3_0), ('prev', h_edge)],
             pools=[x0_0, x1_0, x2_0],
             x4_0=x4_0
         )
@@ -615,13 +615,13 @@ class UNet3_2_2(torch.nn.Module):
             stream_down=[h3_1_dist]
         )
         h_edge = self.conv_edge(
-            prev_same=[('prev', h_dist)],
+            prev_same=[('prev_backbone', x2_0), ('prev', h_dist)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
             stream_down=[h3_1_edge]
         )
         h_mask = self.conv_mask(
-            prev_same=[('prev', h_edge)],
+            prev_same=[('prev_backbone', x2_0), ('prev', h_edge)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
             stream_down=[h3_1_mask]
@@ -704,13 +704,13 @@ class UNet3_1_3(torch.nn.Module):
             stream_down=[h3_1_dist, h2_2_dist]
         )
         h_edge = self.conv_edge(
-            prev_same=[('prev', h_dist)],
+            prev_same=[('prev_backbone', x1_0), ('prev', h_dist)],
             pools=[x0_0],
             x4_0=x4_0,
             stream_down=[h3_1_edge, h2_2_edge]
         )
         h_mask = self.conv_mask(
-            prev_same=[('prev', h_edge)],
+            prev_same=[('prev_backbone', x1_0), ('prev', h_edge)],
             pools=[x0_0],
             x4_0=x4_0,
             stream_down=[h3_1_mask, h2_2_mask]
@@ -791,12 +791,12 @@ class UNet3_0_4(torch.nn.Module):
             stream_down=[h3_1_dist, h2_2_dist, h1_3_dist]
         )
         h_edge = self.conv_edge(
-            prev_same=[('prev', h_dist)],
+            prev_same=[('prev_backbone', x0_0), ('prev', h_dist)],
             x4_0=x4_0,
             stream_down=[h3_1_edge, h2_2_edge, h1_3_edge]
         )
         h_mask = self.conv_mask(
-            prev_same=[('prev', h_edge)],
+            prev_same=[('prev_backbone', x0_0), ('prev', h_edge)],
             x4_0=x4_0,
             stream_down=[h3_1_mask, h2_2_mask, h1_3_mask]
         )
