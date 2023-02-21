@@ -171,30 +171,23 @@ class CultioNet(torch.nn.Module):
             activation_type=activation_type,
             final_activation=Softmax(dim=1)
         )
+        unet3_kwargs = {
+            'in_channels': self.ds_num_bands,
+            'in_time': self.ds_num_time,
+            'in_rnn_channels': int(self.filters * 3),
+            'init_filter': self.filters,
+            'num_classes': self.num_classes,
+            'dilations': [2],
+            'activation_type': activation_type,
+            'deep_cgm_edge': True,
+            'deep_cgm_mask': True,
+            'mask_activation': Softmax(dim=1)
+        }
+        assert model_type in ('UNet3Psi', 'ResUNet3Psi'), 'Model type not supported.'
         if model_type == 'UNet3Psi':
-            self.mask_model = UNet3Psi(
-                in_channels=self.ds_num_bands,
-                in_time=self.ds_num_time,
-                init_filter=self.filters,
-                num_classes=self.num_classes,
-                double_dilation=2,
-                activation_type=activation_type
-            )
+            self.mask_model = UNet3Psi(**unet3_kwargs)
         elif model_type == 'ResUNet3Psi':
-            self.mask_model = ResUNet3Psi(
-                in_channels=self.ds_num_bands,
-                in_time=self.ds_num_time,
-                in_rnn_channels=int(self.filters * 3),
-                init_filter=self.filters,
-                num_classes=self.num_classes,
-                dilations=[2],
-                activation_type=activation_type,
-                deep_cgm_edge=True,
-                deep_cgm_mask=True,
-                mask_activation=Softmax(dim=1)
-            )
-        else:
-            raise NameError('Model type not supported.')
+            self.mask_model = ResUNet3Psi(**unet3_kwargs)
 
     def forward(
         self, data: Data
