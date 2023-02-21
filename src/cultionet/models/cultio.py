@@ -187,9 +187,8 @@ class CultioNet(torch.nn.Module):
                 in_rnn_channels=int(self.filters * 3),
                 init_filter=self.filters,
                 num_classes=self.num_classes,
-                dilations=[1, 2],
+                dilations=[2],
                 activation_type=activation_type,
-                attention=True,
                 deep_cgm_edge=True,
                 deep_cgm_mask=True,
                 mask_activation=Softmax(dim=1)
