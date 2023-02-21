@@ -458,6 +458,15 @@ train:
       choices:
         - 'AdamW'
         - 'SGD'
+  model_type:
+    short: ''
+    long: model-type
+    help: The model type
+    kwargs:
+      default: 'ResUNet3Psi'
+      choices:
+        - 'UNet3Psi'
+        - 'ResUNet3Psi'
   learning_rate:
     short: lr
     long: learning-rate

@@ -224,6 +224,7 @@ def fit(
     num_classes: T.Optional[int] = 2,
     edge_class: T.Optional[int] = None,
     class_counts: T.Sequence[float] = None,
+    model_type: str = 'ResUNet3Psi',
     optimizer: str = 'AdamW',
     learning_rate: T.Optional[float] = 0.001,
     lr_scheduler: str = 'CosineAnnealingLR',
@@ -260,6 +261,7 @@ def fit(
         load_batch_workers (Optional[int]): The number of parallel batches to load.
         filters (Optional[int]): The number of initial model filters.
         optimizer (Optional[str]): The optimizer.
+        model_type (Optionalp[str]): The model type.
         learning_rate (Optional[float]): The model learning rate.
         lr_scheduler (Optional[str]): The learning rate scheduler.
         steplr_step_size (Optional[list]): The multiplicative step size factor.
@@ -323,6 +325,7 @@ def fit(
         num_time_features=train_ds.num_time_features,
         num_classes=num_classes,
         filters=filters,
+        model_type=model_type,
         optimizer=optimizer,
         learning_rate=learning_rate,
         lr_scheduler=lr_scheduler,

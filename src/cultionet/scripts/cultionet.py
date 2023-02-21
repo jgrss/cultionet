@@ -1221,6 +1221,8 @@ def train_model(args):
         epochs=args.epochs,
         save_top_k=args.save_top_k,
         accumulate_grad_batches=args.accumulate_grad_batches,
+        model_type=args.model_type,
+        optimizer=args.optimizer,
         learning_rate=args.learning_rate,
         lr_scheduler=args.lr_scheduler,
         steplr_step_size=args.steplr_step_size,
