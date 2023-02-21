@@ -41,7 +41,6 @@ from .unet_parts import (
 )
 
 import torch
-import torch.nn.functional as F
 
 
 def weights_init_kaiming(m):
