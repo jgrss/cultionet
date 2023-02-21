@@ -34,7 +34,7 @@ class UNet3Connector(torch.nn.Module):
         attention: bool = False,
         attention_weights: str = 'gate',
         init_point_conv: bool = False,
-        double_dilation: int = 1,
+        dilations: T.Sequence[int] = None,
         model_type: enum = ModelTypes.unet,
         activation_type: str = 'LeakyReLU'
     ):
@@ -55,6 +55,9 @@ class UNet3Connector(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
+        if dilations is None:
+            dilations = [2]
+
         # Pool layers
         if n_pools > 0:
             if n_pools == 3:
@@ -73,6 +76,7 @@ class UNet3Connector(torch.nn.Module):
                             in_channels=channels[n],
                             out_channels=channels[0],
                             pool_size=pool_size,
+                            double_dilation=dilations[0],
                             activation_type=activation_type
                         )
                     )
@@ -84,7 +88,7 @@ class UNet3Connector(torch.nn.Module):
                             in_channels=channels[n],
                             out_channels=channels[0],
                             pool_size=pool_size,
-                            dilations=[double_dilation],
+                            dilations=dilations,
                             activation_type=activation_type
                         )
                     )
@@ -96,14 +100,14 @@ class UNet3Connector(torch.nn.Module):
                     in_channels=channels[prev_backbone_channel_index],
                     out_channels=up_channels,
                     init_point_conv=init_point_conv,
-                    double_dilation=double_dilation,
+                    double_dilation=dilations[0],
                     activation_type=activation_type
                 )
             else:
                 self.prev_backbone = ResidualConv(
                     in_channels=channels[prev_backbone_channel_index],
                     out_channels=up_channels,
-                    dilations=[double_dilation],
+                    dilations=dilations,
                     activation_type=activation_type
                 )
             self.cat_channels += up_channels
@@ -114,14 +118,14 @@ class UNet3Connector(torch.nn.Module):
                     in_channels=up_channels,
                     out_channels=up_channels,
                     init_point_conv=init_point_conv,
-                    double_dilation=double_dilation,
+                    double_dilation=dilations[0],
                     activation_type=activation_type
                 )
             else:
                 self.prev = ResidualConv(
                     in_channels=up_channels,
                     out_channels=up_channels,
-                    dilations=[double_dilation],
+                    dilations=dilations,
                     activation_type=activation_type
                 )
             self.cat_channels += up_channels
@@ -136,7 +140,7 @@ class UNet3Connector(torch.nn.Module):
                             in_channels=up_channels,
                             out_channels=up_channels,
                             init_point_conv=init_point_conv,
-                            double_dilation=double_dilation,
+                            double_dilation=dilations[0],
                             activation_type=activation_type
                         )
                     )
@@ -147,7 +151,7 @@ class UNet3Connector(torch.nn.Module):
                         ResidualConv(
                             in_channels=up_channels,
                             out_channels=up_channels,
-                            dilations=[double_dilation],
+                            dilations=dilations,
                             activation_type=activation_type
                         )
                     )
@@ -172,7 +176,7 @@ class UNet3Connector(torch.nn.Module):
                             in_channels=in_stream_channels,
                             out_channels=up_channels,
                             init_point_conv=init_point_conv,
-                            double_dilation=double_dilation,
+                            double_dilation=dilations[0],
                             activation_type=activation_type
                         )
                     )
@@ -183,7 +187,7 @@ class UNet3Connector(torch.nn.Module):
                         ResidualConv(
                             in_channels=in_stream_channels,
                             out_channels=up_channels,
-                            dilations=[double_dilation],
+                            dilations=dilations,
                             activation_type=activation_type
                         )
                     )
@@ -201,7 +205,7 @@ class UNet3Connector(torch.nn.Module):
                 in_channels=self.cat_channels,
                 out_channels=up_channels,
                 init_point_conv=init_point_conv,
-                double_dilation=double_dilation,
+                double_dilation=dilations[0],
                 activation_type=activation_type
             )
         else:
@@ -213,7 +217,7 @@ class UNet3Connector(torch.nn.Module):
             self.final = ResidualConv(
                 in_channels=self.cat_channels,
                 out_channels=up_channels,
-                dilations=[double_dilation],
+                dilations=dilations,
                 activation_type=activation_type
             )
 
@@ -468,7 +472,7 @@ class UNet3_3_1(torch.nn.Module):
         attention: bool = False,
         attention_weights: str = 'gate',
         init_point_conv: bool = False,
-        double_dilation: int = 1,
+        dilations: T.Sequence[int] = None,
         activation_type: str = 'LeakyReLU'
     ):
         super(UNet3_3_1, self).__init__()
@@ -483,7 +487,7 @@ class UNet3_3_1(torch.nn.Module):
             prev_backbone_channel_index=3,
             n_pools=3,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
+            dilations=dilations,
             activation_type=activation_type
         )
         # Edge stream connection
@@ -493,7 +497,7 @@ class UNet3_3_1(torch.nn.Module):
             prev_backbone_channel_index=3,
             n_pools=3,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
+            dilations=dilations,
             activation_type=activation_type
         )
         # Mask stream connection
@@ -505,7 +509,7 @@ class UNet3_3_1(torch.nn.Module):
             attention=attention,
             attention_weights=attention_weights,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
+            dilations=dilations,
             activation_type=activation_type
         )
 
@@ -553,7 +557,7 @@ class UNet3_2_2(torch.nn.Module):
         attention: bool = False,
         attention_weights: str = 'gate',
         init_point_conv: bool = False,
-        double_dilation: int = 1,
+        dilations: T.Sequence[int] = None,
         activation_type: str = 'LeakyReLU'
     ):
         super(UNet3_2_2, self).__init__()
@@ -568,7 +572,7 @@ class UNet3_2_2(torch.nn.Module):
             n_pools=2,
             n_stream_down=1,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
+            dilations=dilations,
             activation_type=activation_type
         )
         self.conv_edge = UNet3Connector(
@@ -578,7 +582,7 @@ class UNet3_2_2(torch.nn.Module):
             n_pools=2,
             n_stream_down=1,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
+            dilations=dilations,
             activation_type=activation_type
         )
         self.conv_mask = UNet3Connector(
@@ -590,7 +594,7 @@ class UNet3_2_2(torch.nn.Module):
             attention=attention,
             attention_weights=attention_weights,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
+            dilations=dilations,
             activation_type=activation_type
         )
 
@@ -640,7 +644,7 @@ class UNet3_1_3(torch.nn.Module):
         attention: bool = False,
         attention_weights: str = 'gate',
         init_point_conv: bool = False,
-        double_dilation: int = 1,
+        dilations: T.Sequence[int] = None,
         activation_type: str = 'LeakyReLU'
     ):
         super(UNet3_1_3, self).__init__()
@@ -655,7 +659,7 @@ class UNet3_1_3(torch.nn.Module):
             n_pools=1,
             n_stream_down=2,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
+            dilations=dilations,
             activation_type=activation_type
         )
         self.conv_edge = UNet3Connector(
@@ -665,7 +669,7 @@ class UNet3_1_3(torch.nn.Module):
             n_pools=1,
             n_stream_down=2,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
+            dilations=dilations,
             activation_type=activation_type
         )
         self.conv_mask = UNet3Connector(
@@ -677,7 +681,7 @@ class UNet3_1_3(torch.nn.Module):
             attention=attention,
             attention_weights=attention_weights,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
+            dilations=dilations,
             activation_type=activation_type
         )
 
@@ -729,7 +733,7 @@ class UNet3_0_4(torch.nn.Module):
         attention: bool = False,
         attention_weights: str = 'gate',
         init_point_conv: bool = False,
-        double_dilation: int = 1,
+        dilations: T.Sequence[int] = None,
         activation_type: str = 'LeakyReLU'
     ):
         super(UNet3_0_4, self).__init__()
@@ -743,7 +747,7 @@ class UNet3_0_4(torch.nn.Module):
             prev_backbone_channel_index=0,
             n_stream_down=3,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
+            dilations=dilations,
             activation_type=activation_type
         )
         self.conv_edge = UNet3Connector(
@@ -752,7 +756,7 @@ class UNet3_0_4(torch.nn.Module):
             prev_backbone_channel_index=0,
             n_stream_down=3,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
+            dilations=dilations,
             activation_type=activation_type
         )
         self.conv_mask = UNet3Connector(
@@ -763,7 +767,7 @@ class UNet3_0_4(torch.nn.Module):
             attention=attention,
             attention_weights=attention_weights,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
+            dilations=dilations,
             activation_type=activation_type
         )
 
@@ -811,7 +815,7 @@ class ResUNet3_3_1(torch.nn.Module):
         self,
         channels: T.Sequence[int],
         up_channels: int,
-        double_dilation: int = 1,
+        dilations: T.Sequence[int] = None,
         attention: bool = False,
         activation_type: str = 'LeakyReLU'
     ):
@@ -827,7 +831,7 @@ class ResUNet3_3_1(torch.nn.Module):
             is_side_stream=False,
             prev_backbone_channel_index=3,
             n_pools=3,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             model_type=ModelTypes.resunet,
             activation_type=activation_type
@@ -840,7 +844,7 @@ class ResUNet3_3_1(torch.nn.Module):
             is_side_stream=True,
             prev_backbone_channel_index=3,
             n_pools=3,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             model_type=ModelTypes.resunet,
             activation_type=activation_type
@@ -853,7 +857,7 @@ class ResUNet3_3_1(torch.nn.Module):
             is_side_stream=True,
             prev_backbone_channel_index=3,
             n_pools=3,
-            double_dilation=double_dilation,
+            dilations=dilations,
             attention=attention,
             model_type=ModelTypes.resunet,
             activation_type=activation_type

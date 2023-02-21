@@ -767,32 +767,26 @@ class SpatioTemporalConv3d(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        double_dilation: int = 1,
         activation_type: str = 'LeakyReLU'
     ):
         super(SpatioTemporalConv3d, self).__init__()
 
         layers = [
+            # Conv -> Batchnorm -> Activation
             ConvBlock3d(
                 in_channels=in_channels,
                 out_channels=out_channels,
-                kernel_size=(3, 1, 1),
-                padding=(1, 0, 0),
+                kernel_size=3,
+                padding=1,
                 activation_type=activation_type
             ),
-            ConvBlock3d(
-                in_channels=out_channels,
-                out_channels=out_channels,
-                kernel_size=(1, 3, 3),
-                padding=(0, 1, 1),
-                activation_type=activation_type
-            ),
+            # Conv -> Batchnorm
             ConvBlock3d(
                 in_channels=out_channels,
                 out_channels=out_channels,
                 kernel_size=3,
-                padding=double_dilation,
-                dilation=double_dilation,
+                padding=2,
+                dilation=2,
                 activation_type=activation_type
             )
         ]

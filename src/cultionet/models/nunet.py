@@ -438,15 +438,20 @@ class UNet3Psi(torch.nn.Module):
         self,
         in_channels: int,
         in_time: int,
-        init_filter: int = 64,
+        in_rnn_channels: int,
+        init_filter: int = 32,
         num_classes: int = 2,
-        init_point_conv: bool = False,
-        double_dilation: int = 1,
+        dilations: T.Sequence[int] = None,
         attention: bool = False,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = 'LeakyReLU',
+        deep_cgm_edge: T.Optional[bool] = False,
+        deep_cgm_mask: T.Optional[bool] = False,
+        mask_activation: T.Union[Softmax, torch.nn.Sigmoid] = Softmax(dim=1)
     ):
-        super(UNet3Psi, self).__init__()
+        super(ResUNet3Psi, self).__init__()
 
+        self.deep_cgm_edge = deep_cgm_edge
+        self.deep_cgm_mask = deep_cgm_mask
         init_filter = int(init_filter)
         channels = [
             init_filter,
@@ -457,94 +462,110 @@ class UNet3Psi(torch.nn.Module):
         ]
         up_channels = int(channels[0] * 5)
 
-        self.time_conv0 = torch.nn.Sequential(
-            SpatioTemporalConv3d(
-                in_channels=in_channels,
-                out_channels=channels[0],
-                double_dilation=1,
-                activation_type=activation_type
-            ),
-            SpatioTemporalConv3d(
-                in_channels=channels[0],
-                out_channels=channels[0],
-                double_dilation=2,
-                activation_type=activation_type
-            )
+        self.up = model_utils.UpSample()
+
+        self.time_conv0 = SpatioTemporalConv3d(
+            in_channels=in_channels,
+            out_channels=channels[0],
+            activation_type=activation_type
         )
         self.reduce_to_time = torch.nn.Sequential(
             SpatioTemporalConv3d(
                 in_channels=channels[0],
                 out_channels=1,
-                double_dilation=1,
                 activation_type=activation_type
             ),
             Squeeze()
         )
         # (B x C x T|D x H x W)
-        # Temporal max logit
+        # Temporal reductions
         # Squeeze to 2d (B x C x H x W)
-        self.reduce_to_channels = torch.nn.Sequential(
+        self.reduce_to_channels_min = torch.nn.Sequential(
+            Min(dim=2),
+            Squeeze(),
+            torch.nn.BatchNorm2d(channels[0]),
+            SetActivation(activation_type=activation_type)
+        )
+        self.reduce_to_channels_max = torch.nn.Sequential(
             Max(dim=2),
-            Squeeze()
+            Squeeze(),
+            torch.nn.BatchNorm2d(channels[0]),
+            SetActivation(activation_type=activation_type)
+        )
+        self.reduce_to_channels_mean = torch.nn.Sequential(
+            Mean(dim=2),
+            Squeeze(),
+            torch.nn.BatchNorm2d(channels[0]),
+            SetActivation(activation_type=activation_type)
+        )
+        self.reduce_to_channels_std = torch.nn.Sequential(
+            Std(dim=2),
+            Squeeze(),
+            torch.nn.BatchNorm2d(channels[0]),
+            SetActivation(activation_type=activation_type)
         )
 
+        # Inputs =
+        # Reduced time dimensions
+        # Reduced channels (x2) for mean and max
+        # Input filters for RNN hidden logits
         self.conv0_0 = SingleConv(
-            in_time + channels[0],
-            channels[0],
-            activation_type=activation
+            in_channels=in_time + int(channels[0] * 4) + in_rnn_channels,
+            out_channels=channels[0],
+            activation_type=activation_type
         )
         self.conv1_0 = PoolConv(
             channels[0],
             channels[1],
-            activation_type=activation
+            double_dilation=dilations[0],
+            activation_type=activation_type
         )
         self.conv2_0 = PoolConv(
             channels[1],
             channels[2],
-            activation_type=activation
+            double_dilation=dilations[0],
+            activation_type=activation_type
         )
         self.conv3_0 = PoolConv(
             channels[2],
             channels[3],
-            activation_type=activation
+            double_dilation=dilations[0],
+            activation_type=activation_type
         )
         self.conv4_0 = PoolConv(
             channels[3],
             channels[4],
-            activation_type=activation
+            double_dilation=dilations[0],
+            activation_type=activation_type
         )
 
         # Connect 3
         self.convs_3_1 = UNet3_3_1(
             channels=channels,
             up_channels=up_channels,
+            dilations=dilations,
             attention=attention,
-            init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
             activation_type=activation_type
         )
         self.convs_2_2 = UNet3_2_2(
             channels=channels,
             up_channels=up_channels,
+            dilations=dilations,
             attention=attention,
-            init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
             activation_type=activation_type
         )
         self.convs_1_3 = UNet3_1_3(
             channels=channels,
             up_channels=up_channels,
+            dilations=dilations,
             attention=attention,
-            init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
             activation_type=activation_type
         )
         self.convs_0_4 = UNet3_0_4(
             channels=channels,
             up_channels=up_channels,
+            dilations=dilations,
             attention=attention,
-            init_point_conv=init_point_conv,
-            double_dilation=double_dilation,
             activation_type=activation_type
         )
 
@@ -564,9 +585,8 @@ class UNet3Psi(torch.nn.Module):
                 kernel_size=1,
                 padding=0
             ),
-            torch.nn.Sigmoid()
+            SigmoidCrisp()
         )
-        activation = torch.nn.Sigmoid() if num_classes == 1 else Softmax(dim=1)
         self.final_mask = torch.nn.Sequential(
             torch.nn.Conv2d(
                 up_channels,
@@ -574,8 +594,64 @@ class UNet3Psi(torch.nn.Module):
                 kernel_size=1,
                 padding=0
             ),
-            activation
+            mask_activation
         )
+        if self.deep_cgm_edge:
+            self.final_edge_3_1 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    1,
+                    kernel_size=1,
+                    padding=0
+                ),
+                SigmoidCrisp()
+            )
+            self.final_edge_2_2 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    1,
+                    kernel_size=1,
+                    padding=0
+                ),
+                SigmoidCrisp()
+            )
+            self.final_edge_1_3 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    1,
+                    kernel_size=1,
+                    padding=0
+                ),
+                SigmoidCrisp()
+            )
+        if self.deep_cgm_mask:
+            self.final_mask_3_1 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    num_classes,
+                    kernel_size=1,
+                    padding=0
+                ),
+                mask_activation
+            )
+            self.final_mask_2_2 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    num_classes,
+                    kernel_size=1,
+                    padding=0
+                ),
+                mask_activation
+            )
+            self.final_mask_1_3 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    num_classes,
+                    kernel_size=1,
+                    padding=0
+                ),
+                mask_activation
+            )
 
         # Initialise weights
         for m in self.modules():
@@ -591,14 +667,18 @@ class UNet3Psi(torch.nn.Module):
                 m.apply(weights_init_kaiming)
 
     def forward(
-        self, x: torch.Tensor
+        self, x: torch.Tensor, rnn_h: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
         # Inputs shape is (B x C X T|D x H x W)
         h = self.time_conv0(x)
         h = torch.cat(
             [
                 self.reduce_to_time(h),
-                self.reduce_to_channels(h)
+                self.reduce_to_channels_min(h),
+                self.reduce_to_channels_max(h),
+                self.reduce_to_channels_mean(h),
+                self.reduce_to_channels_std(h),
+                rnn_h
             ],
             dim=1
         )
@@ -667,8 +747,35 @@ class UNet3Psi(torch.nn.Module):
         out = {
             'dist': dist,
             'edge': edge,
-            'mask': mask
+            'mask': mask,
+            'edge_3_1': None,
+            'edge_2_2': None,
+            'edge_1_3': None,
+            'mask_3_1': None,
+            'mask_2_2': None,
+            'mask_1_3': None
         }
+
+        if self.deep_cgm_edge:
+            out['edge_3_1'] = self.final_edge_3_1(
+                self.up(out_3_1['edge'], size=edge.shape[-2:], mode='bilinear')
+            )
+            out['edge_2_2'] = self.final_edge_2_2(
+                self.up(out_2_2['edge'], size=edge.shape[-2:], mode='bilinear')
+            )
+            out['edge_1_3'] = self.final_edge_1_3(
+                self.up(out_1_3['edge'], size=edge.shape[-2:], mode='bilinear')
+            )
+        if self.deep_cgm_mask:
+            out['mask_3_1'] = self.final_mask_3_1(
+                self.up(out_3_1['mask'], size=mask.shape[-2:], mode='bilinear')
+            )
+            out['mask_2_2'] = self.final_mask_2_2(
+                self.up(out_2_2['mask'], size=mask.shape[-2:], mode='bilinear')
+            )
+            out['mask_1_3'] = self.final_mask_1_3(
+                self.up(out_1_3['mask'], size=mask.shape[-2:], mode='bilinear')
+            )
 
         return out
 
@@ -797,28 +904,28 @@ class ResUNet3Psi(torch.nn.Module):
         self.convs_3_1 = ResUNet3_3_1(
             channels=channels,
             up_channels=up_channels,
-            double_dilation=dilations[0],
+            dilations=dilations,
             attention=attention,
             activation_type=activation_type
         )
         self.convs_2_2 = ResUNet3_2_2(
             channels=channels,
             up_channels=up_channels,
-            double_dilation=dilations[0],
+            dilations=dilations,
             attention=attention,
             activation_type=activation_type
         )
         self.convs_1_3 = ResUNet3_1_3(
             channels=channels,
             up_channels=up_channels,
-            double_dilation=dilations[0],
+            dilations=dilations,
             attention=attention,
             activation_type=activation_type
         )
         self.convs_0_4 = ResUNet3_0_4(
             channels=channels,
             up_channels=up_channels,
-            double_dilation=dilations[0],
+            dilations=dilations,
             attention=attention,
             activation_type=activation_type
         )
