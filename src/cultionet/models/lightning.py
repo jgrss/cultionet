@@ -534,8 +534,9 @@ class CultioLitModel(pl.LightningModule):
         ckpt_name: str = 'last',
         model_name: str = 'cultionet',
         activation_type: str = 'SiLU',
-        deep_cgm_edge: bool = False,
-        deep_cgm_mask: bool = False,
+        deep_sup_dist: bool = False,
+        deep_sup_edge: bool = False,
+        deep_sup_mask: bool = False,
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         crop_temperature: T.Optional[float] = None,
@@ -562,8 +563,9 @@ class CultioLitModel(pl.LightningModule):
         self.crop_temperature = crop_temperature
         self.temperature_lit_model = temperature_lit_model
         self.scale_pos_weight = scale_pos_weight
-        self.deep_cgm_edge = deep_cgm_edge
-        self.deep_cgm_mask = deep_cgm_mask
+        self.deep_sup_dist = deep_sup_dist
+        self.deep_sup_edge = deep_sup_edge
+        self.deep_sup_mask = deep_sup_mask
         self.sigmoid = torch.nn.Sigmoid()
         if edge_class is not None:
             self.edge_class = edge_class
@@ -581,8 +583,9 @@ class CultioLitModel(pl.LightningModule):
                 num_classes=self.num_classes,
                 model_type=model_type,
                 activation_type=activation_type,
-                deep_cgm_edge=deep_cgm_edge,
-                deep_cgm_mask=deep_cgm_mask
+                deep_sup_dist=deep_sup_dist,
+                deep_sup_edge=deep_sup_edge,
+                deep_sup_mask=deep_sup_mask
             )
         )
         self.configure_loss()
@@ -752,7 +755,18 @@ class CultioLitModel(pl.LightningModule):
             + dist_loss
         )
         # Edge losses
-        if self.deep_cgm_edge:
+        if self.deep_sup_dist:
+            dist_loss_3_1 = self.dist_loss_3_1(predictions['dist_3_1'], batch.bdist)
+            dist_loss_2_2 = self.dist_loss_2_2(predictions['dist_2_2'], batch.bdist)
+            dist_loss_1_3 = self.dist_loss_1_3(predictions['dist_1_3'], batch.bdist)
+            # Main loss
+            loss = (
+                loss
+                + 0.1 * dist_loss_3_1
+                + 0.25 * dist_loss_2_2
+                + 0.5 * dist_loss_1_3
+            )
+        if self.deep_sup_edge:
             edge_loss_3_1 = self.edge_loss_3_1(predictions['edge_3_1'], true_labels_dict['true_edge'])
             edge_loss_2_2 = self.edge_loss_2_2(predictions['edge_2_2'], true_labels_dict['true_edge'])
             edge_loss_1_3 = self.edge_loss_1_3(predictions['edge_1_3'], true_labels_dict['true_edge'])
@@ -767,7 +781,7 @@ class CultioLitModel(pl.LightningModule):
         # Main loss
         loss = loss + edge_loss
         # Crop mask losses
-        if self.deep_cgm_mask:
+        if self.deep_sup_mask:
             crop_loss_3_1 = self.crop_loss_3_1(predictions['crop_3_1'], true_labels_dict['true_crop'])
             crop_loss_2_2 = self.crop_loss_2_2(predictions['crop_2_2'], true_labels_dict['true_crop'])
             crop_loss_1_3 = self.crop_loss_1_3(predictions['crop_1_3'], true_labels_dict['true_crop'])
@@ -946,21 +960,25 @@ class CultioLitModel(pl.LightningModule):
 
     def configure_loss(self):
         self.dist_loss = TanimotoDistLoss()
+        if self.deep_sup_dist:
+            self.dist_loss_3_1 = TanimotoDistLoss()
+            self.dist_loss_2_2 = TanimotoDistLoss()
+            self.dist_loss_1_3 = TanimotoDistLoss()
         # Edge losses
         self.edge_loss = TanimotoDistLoss()
-        if self.deep_cgm_edge:
+        if self.deep_sup_edge:
             self.edge_loss_3_1 = TanimotoDistLoss()
             self.edge_loss_2_2 = TanimotoDistLoss()
             self.edge_loss_1_3 = TanimotoDistLoss()
         # Crop mask losses
         self.crop_loss = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
-        if self.deep_cgm_mask:
+        if self.deep_sup_mask:
             self.crop_loss_3_1 = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
             self.crop_loss_2_2 = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
             self.crop_loss_1_3 = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
         # Crop RNN losses
-        self.crop_star_l2_loss = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
-        self.crop_star_loss = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)
+        self.crop_star_l2_loss = TanimotoDistLoss()
+        self.crop_star_loss = TanimotoDistLoss()
         # FIXME:
         if self.num_classes > 2:
             self.crop_type_star_loss = TanimotoDistLoss(scale_pos_weight=self.scale_pos_weight)

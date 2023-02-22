@@ -444,14 +444,16 @@ class UNet3Psi(torch.nn.Module):
         dilations: T.Sequence[int] = None,
         attention: bool = False,
         activation_type: str = 'LeakyReLU',
-        deep_cgm_edge: T.Optional[bool] = False,
-        deep_cgm_mask: T.Optional[bool] = False,
+        deep_sup_dist: T.Optional[bool] = False,
+        deep_sup_edge: T.Optional[bool] = False,
+        deep_sup_mask: T.Optional[bool] = False,
         mask_activation: T.Union[Softmax, torch.nn.Sigmoid] = Softmax(dim=1)
     ):
         super(UNet3Psi, self).__init__()
 
-        self.deep_cgm_edge = deep_cgm_edge
-        self.deep_cgm_mask = deep_cgm_mask
+        self.deep_sup_dist = deep_sup_dist
+        self.deep_sup_edge = deep_sup_edge
+        self.deep_sup_mask = deep_sup_mask
         init_filter = int(init_filter)
         channels = [
             init_filter,
@@ -596,7 +598,35 @@ class UNet3Psi(torch.nn.Module):
             ),
             mask_activation
         )
-        if self.deep_cgm_edge:
+        if self.deep_sup_dist:
+            self.final_dist_3_1 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    1,
+                    kernel_size=1,
+                    padding=0
+                ),
+                torch.nn.Sigmoid()
+            )
+            self.final_dist_2_2 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    1,
+                    kernel_size=1,
+                    padding=0
+                ),
+                torch.nn.Sigmoid()
+            )
+            self.final_dist_1_3 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    1,
+                    kernel_size=1,
+                    padding=0
+                ),
+                torch.nn.Sigmoid()
+            )
+        if self.deep_sup_edge:
             self.final_edge_3_1 = torch.nn.Sequential(
                 torch.nn.Conv2d(
                     up_channels,
@@ -624,7 +654,7 @@ class UNet3Psi(torch.nn.Module):
                 ),
                 SigmoidCrisp()
             )
-        if self.deep_cgm_mask:
+        if self.deep_sup_mask:
             self.final_mask_3_1 = torch.nn.Sequential(
                 torch.nn.Conv2d(
                     up_channels,
@@ -748,6 +778,9 @@ class UNet3Psi(torch.nn.Module):
             'dist': dist,
             'edge': edge,
             'mask': mask,
+            'dist_3_1': None,
+            'dist_2_2': None,
+            'dist_1_3': None,
             'edge_3_1': None,
             'edge_2_2': None,
             'edge_1_3': None,
@@ -756,7 +789,17 @@ class UNet3Psi(torch.nn.Module):
             'mask_1_3': None
         }
 
-        if self.deep_cgm_edge:
+        if self.deep_sup_dist:
+            out['dist_3_1'] = self.final_dist_3_1(
+                self.up(out_3_1['dist'], size=dist.shape[-2:], mode='bilinear')
+            )
+            out['dist_2_2'] = self.final_dist_2_2(
+                self.up(out_2_2['dist'], size=dist.shape[-2:], mode='bilinear')
+            )
+            out['dist_1_3'] = self.final_dist_1_3(
+                self.up(out_1_3['dist'], size=dist.shape[-2:], mode='bilinear')
+            )
+        if self.deep_sup_edge:
             out['edge_3_1'] = self.final_edge_3_1(
                 self.up(out_3_1['edge'], size=edge.shape[-2:], mode='bilinear')
             )
@@ -766,7 +809,7 @@ class UNet3Psi(torch.nn.Module):
             out['edge_1_3'] = self.final_edge_1_3(
                 self.up(out_1_3['edge'], size=edge.shape[-2:], mode='bilinear')
             )
-        if self.deep_cgm_mask:
+        if self.deep_sup_mask:
             out['mask_3_1'] = self.final_mask_3_1(
                 self.up(out_3_1['mask'], size=mask.shape[-2:], mode='bilinear')
             )
@@ -799,14 +842,16 @@ class ResUNet3Psi(torch.nn.Module):
         dilations: T.Sequence[int] = None,
         attention: bool = False,
         activation_type: str = 'LeakyReLU',
-        deep_cgm_edge: T.Optional[bool] = False,
-        deep_cgm_mask: T.Optional[bool] = False,
+        deep_sup_dist: T.Optional[bool] = False,
+        deep_sup_edge: T.Optional[bool] = False,
+        deep_sup_mask: T.Optional[bool] = False,
         mask_activation: T.Union[Softmax, torch.nn.Sigmoid] = Softmax(dim=1)
     ):
         super(ResUNet3Psi, self).__init__()
 
-        self.deep_cgm_edge = deep_cgm_edge
-        self.deep_cgm_mask = deep_cgm_mask
+        self.deep_sup_dist = deep_sup_dist
+        self.deep_sup_edge = deep_sup_edge
+        self.deep_sup_mask = deep_sup_mask
         init_filter = int(init_filter)
         channels = [
             init_filter,
@@ -957,7 +1002,35 @@ class ResUNet3Psi(torch.nn.Module):
             ),
             mask_activation
         )
-        if self.deep_cgm_edge:
+        if self.deep_sup_dist:
+            self.final_dist_3_1 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    1,
+                    kernel_size=1,
+                    padding=0
+                ),
+                torch.nn.Sigmoid()
+            )
+            self.final_dist_2_2 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    1,
+                    kernel_size=1,
+                    padding=0
+                ),
+                torch.nn.Sigmoid()
+            )
+            self.final_dist_1_3 = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    up_channels,
+                    1,
+                    kernel_size=1,
+                    padding=0
+                ),
+                torch.nn.Sigmoid()
+            )
+        if self.deep_sup_edge:
             self.final_edge_3_1 = torch.nn.Sequential(
                 torch.nn.Conv2d(
                     up_channels,
@@ -985,7 +1058,7 @@ class ResUNet3Psi(torch.nn.Module):
                 ),
                 SigmoidCrisp()
             )
-        if self.deep_cgm_mask:
+        if self.deep_sup_mask:
             self.final_mask_3_1 = torch.nn.Sequential(
                 torch.nn.Conv2d(
                     up_channels,
@@ -1109,6 +1182,9 @@ class ResUNet3Psi(torch.nn.Module):
             'dist': dist,
             'edge': edge,
             'mask': mask,
+            'dist_3_1': None,
+            'dist_2_2': None,
+            'dist_1_3': None,
             'edge_3_1': None,
             'edge_2_2': None,
             'edge_1_3': None,
@@ -1117,7 +1193,17 @@ class ResUNet3Psi(torch.nn.Module):
             'mask_1_3': None
         }
 
-        if self.deep_cgm_edge:
+        if self.deep_sup_dist:
+            out['dist_3_1'] = self.final_dist_3_1(
+                self.up(out_3_1['dist'], size=dist.shape[-2:], mode='bilinear')
+            )
+            out['dist_2_2'] = self.final_dist_2_2(
+                self.up(out_2_2['dist'], size=dist.shape[-2:], mode='bilinear')
+            )
+            out['dist_1_3'] = self.final_dist_1_3(
+                self.up(out_1_3['dist'], size=dist.shape[-2:], mode='bilinear')
+            )
+        if self.deep_sup_edge:
             out['edge_3_1'] = self.final_edge_3_1(
                 self.up(out_3_1['edge'], size=edge.shape[-2:], mode='bilinear')
             )
@@ -1127,7 +1213,7 @@ class ResUNet3Psi(torch.nn.Module):
             out['edge_1_3'] = self.final_edge_1_3(
                 self.up(out_1_3['edge'], size=edge.shape[-2:], mode='bilinear')
             )
-        if self.deep_cgm_mask:
+        if self.deep_sup_mask:
             out['mask_3_1'] = self.final_mask_3_1(
                 self.up(out_3_1['mask'], size=mask.shape[-2:], mode='bilinear')
             )

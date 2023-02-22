@@ -473,16 +473,22 @@ train:
     help: The activation to use
     kwargs:
       default: 'SiLU'
-  deep_cgm_edge:
+  deep_sup_dist:
     short: ''
-    long: deep-cgm-edge
-    help: Whether to use deep guided module for edges
+    long: deep-sup-dist
+    help: Whether to use deep supervision for distances
     kwargs:
       action: store_true
-  deep_cgm_mask:
+  deep_sup_edge:
     short: ''
-    long: deep-cgm-mask
-    help: Whether to use deep guided module for masks
+    long: deep-sup-edge
+    help: Whether to use deep supervision for edges
+    kwargs:
+      action: store_true
+  deep_sup_mask:
+    short: ''
+    long: deep-sup-mask
+    help: Whether to use deep supervision for masks
     kwargs:
       action: store_true
   learning_rate:

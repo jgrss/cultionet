@@ -226,8 +226,9 @@ def fit(
     class_counts: T.Sequence[float] = None,
     model_type: str = 'ResUNet3Psi',
     activation_type: str = 'LeakyReLU',
-    deep_cgm_edge: bool = False,
-    deep_cgm_mask: bool = False,
+    deep_sup_dist: bool = False,
+    deep_sup_edge: bool = False,
+    deep_sup_mask: bool = False,
     optimizer: str = 'AdamW',
     learning_rate: T.Optional[float] = 0.001,
     lr_scheduler: str = 'CosineAnnealingLR',
@@ -267,8 +268,9 @@ def fit(
         optimizer (Optional[str]): The optimizer.
         model_type (Optional[str]): The model type.
         activation_type (Optional[str]): The activation type.
-        deep_cgm_edge (Optional[bool]): Whether to use deep guided module for edges.
-        deep_cgm_mask (Optional[bool]): Whether to use deep guided module for masks.
+        deep_sup_dist (Optional[bool]): Whether to use deep supervision for distances.
+        deep_sup_edge (Optional[bool]): Whether to use deep supervision for edges.
+        deep_sup_mask (Optional[bool]): Whether to use deep supervision for masks.
         learning_rate (Optional[float]): The model learning rate.
         lr_scheduler (Optional[str]): The learning rate scheduler.
         steplr_step_size (Optional[list]): The multiplicative step size factor.
@@ -335,8 +337,9 @@ def fit(
         filters=filters,
         model_type=model_type,
         activation_type=activation_type,
-        deep_cgm_edge=deep_cgm_edge,
-        deep_cgm_mask=deep_cgm_mask,
+        deep_sup_dist=deep_sup_dist,
+        deep_sup_edge=deep_sup_edge,
+        deep_sup_mask=deep_sup_mask,
         optimizer=optimizer,
         learning_rate=learning_rate,
         lr_scheduler=lr_scheduler,
