@@ -145,7 +145,9 @@ class CultioNet(torch.nn.Module):
         filters: int = 64,
         num_classes: int = 2,
         model_type: str = 'UNet3Psi',
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = 'LeakyReLU',
+        deep_cgm_edge: bool = False,
+        deep_cgm_mask: bool = False
     ):
         super(CultioNet, self).__init__()
 
@@ -179,8 +181,8 @@ class CultioNet(torch.nn.Module):
             'num_classes': self.num_classes,
             'dilations': [2],
             'activation_type': activation_type,
-            'deep_cgm_edge': True,
-            'deep_cgm_mask': True,
+            'deep_cgm_edge': deep_cgm_edge,
+            'deep_cgm_mask': deep_cgm_mask,
             'mask_activation': Softmax(dim=1)
         }
         assert model_type in ('UNet3Psi', 'ResUNet3Psi'), 'Model type not supported.'

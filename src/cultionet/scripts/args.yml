@@ -467,6 +467,24 @@ train:
       choices:
         - 'UNet3Psi'
         - 'ResUNet3Psi'
+  activation_type:
+    short: ''
+    long: activation-type
+    help: The activation to use
+    kwargs:
+      default: 'SiLU'
+  deep_cgm_edge:
+    short: ''
+    long: deep-cgm-edge
+    help: Whether to use deep guided module for edges
+    kwargs:
+      action: store_true
+  deep_cgm_mask:
+    short: ''
+    long: deep-cgm-mask
+    help: Whether to use deep guided module for masks
+    kwargs:
+      action: store_true
   learning_rate:
     short: lr
     long: learning-rate
@@ -491,6 +509,12 @@ train:
     kwargs:
       default: 5
       type: '&int'
+  scale_pos_weight:
+    short: ''
+    long: scale-pos-weight
+    help: Whether to balance class weights
+    kwargs:
+      action: store_true
   weight_decay:
     short: ''
     long: weight-decay

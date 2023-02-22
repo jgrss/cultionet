@@ -225,10 +225,14 @@ def fit(
     edge_class: T.Optional[int] = None,
     class_counts: T.Sequence[float] = None,
     model_type: str = 'ResUNet3Psi',
+    activation_type: str = 'LeakyReLU',
+    deep_cgm_edge: bool = False,
+    deep_cgm_mask: bool = False,
     optimizer: str = 'AdamW',
     learning_rate: T.Optional[float] = 0.001,
     lr_scheduler: str = 'CosineAnnealingLR',
     steplr_step_size: T.Optional[T.Sequence[int]] = None,
+    scale_pos_weight: T.Optional[bool] = True,
     epochs: T.Optional[int] = 30,
     save_top_k: T.Optional[int] = 1,
     early_stopping_patience: T.Optional[int] = 7,
@@ -261,10 +265,14 @@ def fit(
         load_batch_workers (Optional[int]): The number of parallel batches to load.
         filters (Optional[int]): The number of initial model filters.
         optimizer (Optional[str]): The optimizer.
-        model_type (Optionalp[str]): The model type.
+        model_type (Optional[str]): The model type.
+        activation_type (Optional[str]): The activation type.
+        deep_cgm_edge (Optional[bool]): Whether to use deep guided module for edges.
+        deep_cgm_mask (Optional[bool]): Whether to use deep guided module for masks.
         learning_rate (Optional[float]): The model learning rate.
         lr_scheduler (Optional[str]): The learning rate scheduler.
         steplr_step_size (Optional[list]): The multiplicative step size factor.
+        scale_pos_weight (Optional[bool]): Whether to scale class weights (i.e., balance classes).
         epochs (Optional[int]): The number of epochs.
         save_top_k (Optional[int]): The number of top-k model checkpoints to save.
         early_stopping_patience (Optional[int]): The patience (epochs) before early stopping.
@@ -326,13 +334,17 @@ def fit(
         num_classes=num_classes,
         filters=filters,
         model_type=model_type,
+        activation_type=activation_type,
+        deep_cgm_edge=deep_cgm_edge,
+        deep_cgm_mask=deep_cgm_mask,
         optimizer=optimizer,
         learning_rate=learning_rate,
         lr_scheduler=lr_scheduler,
         steplr_step_size=steplr_step_size,
         weight_decay=weight_decay,
         class_counts=class_counts,
-        edge_class=edge_class
+        edge_class=edge_class,
+        scale_pos_weight=scale_pos_weight
     )
 
     if reset_model:
