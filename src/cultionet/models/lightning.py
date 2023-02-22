@@ -745,14 +745,11 @@ class CultioLitModel(pl.LightningModule):
         crop_star_loss = self.crop_star_loss(
             predictions['crop_star'], true_labels_dict['true_crop_or_edge']
         )
-        # Distance transform loss
-        dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
         # Main loss
         loss = (
             # RNN losses
             0.25 * crop_star_l2_loss
             + 0.5 * crop_star_loss
-            + dist_loss
         )
         # Edge losses
         if self.deep_sup_dist:
@@ -766,6 +763,11 @@ class CultioLitModel(pl.LightningModule):
                 + 0.25 * dist_loss_2_2
                 + 0.5 * dist_loss_1_3
             )
+        # Distance transform loss
+        dist_loss = self.dist_loss(predictions['dist'], batch.bdist)
+        # Main loss
+        loss = loss + dist_loss
+        # Distance transform losses
         if self.deep_sup_edge:
             edge_loss_3_1 = self.edge_loss_3_1(predictions['edge_3_1'], true_labels_dict['true_edge'])
             edge_loss_2_2 = self.edge_loss_2_2(predictions['edge_2_2'], true_labels_dict['true_edge'])
@@ -777,6 +779,7 @@ class CultioLitModel(pl.LightningModule):
                 + 0.25 * edge_loss_2_2
                 + 0.5 * edge_loss_1_3
             )
+        # Edge loss
         edge_loss = self.edge_loss(predictions['edge'], true_labels_dict['true_edge'])
         # Main loss
         loss = loss + edge_loss
@@ -792,6 +795,7 @@ class CultioLitModel(pl.LightningModule):
                 + 0.25 * crop_loss_2_2
                 + 0.5 * crop_loss_1_3
             )
+        # Crop mask loss
         crop_loss = self.crop_loss(predictions['crop'], true_labels_dict['true_crop'])
         # Main loss
         loss = loss + crop_loss

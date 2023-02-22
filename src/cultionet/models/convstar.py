@@ -180,7 +180,7 @@ class StarRNN(torch.nn.Module):
                 dilations=[2],
                 activation_type=activation_type
             ),
-            torch.nn.Dropout(0.5),
+            torch.nn.Dropout(0.1),
             torch.nn.Conv2d(
                 in_channels=hidden_dim,
                 out_channels=num_classes_l2,
@@ -197,7 +197,7 @@ class StarRNN(torch.nn.Module):
                 dilations=[2],
                 activation_type=activation_type
             ),
-            torch.nn.Dropout(0.5),
+            torch.nn.Dropout(0.1),
             torch.nn.Conv2d(
                 in_channels=hidden_dim,
                 out_channels=num_classes_last,
@@ -251,11 +251,10 @@ class StarRNN(torch.nn.Module):
             return h, last_l2, last
         else:
             h = torch.cat(
-                [local_1, local_2, h_last], dim=1
+                [local_1, local_2], dim=1
             )
-            last_l2 = self.final_l2(
-                torch.cat([local_1, local_2], dim=1)
-            )
+            last_l2 = self.final_l2(h)
+            h = torch.cat([h, h_last], dim=1)
             last = self.final_last(h)
 
             # The output is (B x C x H x W)
