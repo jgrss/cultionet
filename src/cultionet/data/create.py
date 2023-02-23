@@ -381,6 +381,8 @@ def create_image_vars(
                         data=src_ts,
                         all_touched=False
                     ).squeeze().gw.compute(num_workers=num_workers)
+                    if not edges.flags['WRITEABLE']:
+                        edges = edges.copy()
                     edges[edges > 0] = 1
                     assert edges.max() <= 1, 'Edges were not created.'
                     if edges.max() == 0:
