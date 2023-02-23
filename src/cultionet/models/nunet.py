@@ -478,6 +478,14 @@ class UNet3Psi(torch.nn.Module):
             kernel_size=trend_kernel_size, direction='negative'
         )
         trend_out_channels = int(in_time - (trend_kernel_size / 2) * 2)
+        self.reduce_trend_to_time = torch.nn.Sequential(
+            SpatioTemporalConv3d(
+                in_channels=trend_out_channels,
+                out_channels=1,
+                activation_type=activation_type
+            ),
+            Squeeze()
+        )
 
         self.time_conv0 = SpatioTemporalConv3d(
             in_channels=in_channels,
@@ -765,7 +773,6 @@ class UNet3Psi(torch.nn.Module):
 
         # Inputs shape is (B x C X T|D x H x W)
         h = self.time_conv0(x)
-        import ipdb; ipdb.set_trace()
         h = torch.cat(
             [
                 self.reduce_to_time(h),
@@ -774,7 +781,7 @@ class UNet3Psi(torch.nn.Module):
                 self.reduce_to_channels_mean(h),
                 self.reduce_to_channels_std(h),
                 rnn_h,
-                trend_kernels
+                self.reduce_trend_to_time(trend_kernels)
             ],
             dim=1
         )
