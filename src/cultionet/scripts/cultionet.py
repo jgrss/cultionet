@@ -1338,6 +1338,9 @@ def main():
         if args.replace_dict is not None:
             setattr(args, 'replace_dict', ast.literal_eval(args.replace_dict))
 
+    with open(args.project_path / f"{args.process}_command.json", mode='w') as f:
+        f.write(json.dumps(vars(args), indent=4))
+
     if args.process in ('create', 'create-predict'):
         create_datasets(args)
     elif args.process == 'skfoldcv':
