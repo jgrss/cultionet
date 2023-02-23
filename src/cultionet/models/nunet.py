@@ -537,7 +537,7 @@ class UNet3Psi(torch.nn.Module):
                 + int(channels[0] * 4)
                 + in_rnn_channels
                 # Peak kernels and Trend kernels
-                + int(in_time * 3)
+                + in_time
             ),
             out_channels=channels[0],
             activation_type=activation_type
@@ -781,7 +781,6 @@ class UNet3Psi(torch.nn.Module):
             ],
             dim=1
         )
-        import ipdb; ipdb.set_trace()
         # h shape is (B x C x H x W)
         # Backbone
         # 1/1
