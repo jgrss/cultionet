@@ -48,7 +48,7 @@ class Trend(torch.nn.Module):
         # x = (B x C x T)
         x = F.conv1d(
             x,
-            self.weights,
+            self.weights.to(dtype=x.dtype, device=x.device),
             bias=None,
             stride=1,
             padding=self.padding,
@@ -83,7 +83,7 @@ class Peaks(torch.nn.Module):
         # x = (B x C x T)
         x = F.conv1d(
             x,
-            self.weights,
+            self.weights.to(dtype=x.dtype, device=x.device),
             bias=None,
             stride=1,
             padding=self.padding,

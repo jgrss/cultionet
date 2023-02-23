@@ -16,14 +16,32 @@ The model inputs are satellite time series--they can be either bands or spectral
 ```python
 from torch_geometric.data import Data
 
-batch = Data(x=x, y=y, edge_index=edge_index, edge_attrs=edge_attrs)
+Data(
+  x=[10000, 65], y=[10000], bdist=[10000],
+  height=100, width=100, ntime=13, nbands=5,
+  zero_padding=0, start_year=2020, end_year=2021,
+  left=<longitude>, bottom=<latitude>,
+  right=<longitude>, top=<latitude>,
+  res=10.0, train_id='{site id}_2021_1_none', num_nodes=10000
+)
 ```
 
 where
 
 ```
-x = torch.Tensor of (samples x bands*time)
-y = torch.Tensor of (samples,)
+x = input features = torch.Tensor of (samples x bands*time)
+y = labels = torch.Tensor of (samples,)
+bdist = distance transform = torch.Tensor of (samples,)
+height = image height/rows = int
+width = image width/columns = int
+ntime = image time dimensions/sequence length = int
+nbands = image band dimensions/channels = int
+left = image left coordinate bounds = float
+bottom = image bottom coordinate bounds = float
+right = image right coordinate bounds = float
+top = image top coordinate bounds = float
+res = image spatial resolution = float
+train_id = image id = str
 ```
 
 As an example, for a time series of red, green, blue, and NIR with 25 time steps (bi-weekly + 1 additional end point), the data would be shaped like:
@@ -204,8 +222,17 @@ After a model has been fit, the last checkpoint file can be found at `/project_d
 
 ## Predicting on an image with a trained model
 
+### First, a prediction dataset is needed
+
 ```commandline
-(venv.cultionet) cultionet predict --project-path /project_dir --out-path predictions.tif --grid-id 1 --window-size 100 --config-file project_config.yml --device cpu --processes 4
+(venv.cultionet) cultionet create-predict --project-path /project_dir --year 2022 --ts-path /features
+--num-workers 4 --config-file project_config.yml
+```
+
+### Apply inference over the predictin dataset
+
+```commandline
+(venv.cultionet) cultionet predict --project-path /project_dir --out-path predictions.tif --grid-id 1 --window-size 100 --config-file project_config.yml --device gpu --processes 4
 ```
 
 ## Installation

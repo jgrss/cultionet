@@ -410,19 +410,19 @@ train:
     long: dim-color
     help: The progress bar color for dimension checks
     kwargs:
-      default: ffffff
+      default: '#ffffff'
   mean_color:
     short: ''
     long: mean-color
     help: The progress bar color for means
     kwargs:
-      default: ffffff
+      default: '#ffffff'
   sse_color:
     short: ''
     long: sse-color
     help: The progress bar color for sum of squared errors
     kwargs:
-      default: ffffff
+      default: '#ffffff'
   auto_lr_find:
     short: ''
     long: lr-find
