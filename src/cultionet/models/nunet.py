@@ -477,10 +477,9 @@ class UNet3Psi(torch.nn.Module):
         self.neg_trend_kernel = kernels.Trend(
             kernel_size=trend_kernel_size, direction='negative'
         )
-        trend_out_channels = int(in_time - (trend_kernel_size / 2) * 2)
         self.reduce_trend_to_time = torch.nn.Sequential(
             SpatioTemporalConv3d(
-                in_channels=trend_out_channels,
+                in_channels=in_time,
                 out_channels=1,
                 activation_type=activation_type
             ),
@@ -538,10 +537,10 @@ class UNet3Psi(torch.nn.Module):
                 + int(channels[0] * 4)
                 + in_rnn_channels
                 # Peak kernels
-                + int(in_channels * trend_out_channels)
+                + int(in_channels * in_time)
                 # Trend kernels
-                + int(in_channels * trend_out_channels)
-                + int(in_channels * trend_out_channels)
+                + int(in_channels * in_time)
+                + int(in_channels * in_time)
             ),
             out_channels=channels[0],
             activation_type=activation_type
