@@ -2,6 +2,7 @@ from pathlib import Path
 
 from cultionet.data.datasets import EdgeDataset
 from cultionet.data.modules import EdgeDataModule
+from cultionet.utils.normalize import get_norm_values
 from cultionet.utils.stats import (
     tally_stats,
     cache_load_enabled,
@@ -16,6 +17,10 @@ from torch_geometric.data import Data
 
 
 PROJECT_PATH = Path(__file__).parent.absolute()
+CLASS_INFO = {
+    'max_crop_class': 1,
+    'edge_class': 2
+}
 
 
 def create_small_chips(b: torch.Tensor, rc_slice: tuple) -> Data:
@@ -58,6 +63,62 @@ def create_small_chips(b: torch.Tensor, rc_slice: tuple) -> Data:
     )
 
 
+def test_cumnorm_serial():
+    train_path = PROJECT_PATH / 'data' / 'train' / 'small_chips'
+
+    ds = EdgeDataset(
+        train_path,
+        processes=1,
+        threads_per_worker=1,
+        random_seed=100
+    )
+    ref_data = torch.cat([batch.x for batch in ds], dim=0)
+
+    norm_values = get_norm_values(
+        dataset=ds,
+        batch_size=1,
+        class_info=CLASS_INFO,
+        num_workers=1,
+        processes=1,
+        threads_per_worker=1,
+        mean_color='#3edf2b',
+        sse_color='#dfb92b'
+    )
+
+    assert torch.allclose(norm_values.mean, ref_data.mean(dim=0), rtol=1e-4), \
+        'The mean values do not match the expected values.'
+    assert torch.allclose(norm_values.std, ref_data.std(dim=0, unbiased=False), rtol=1e-4), \
+        'The mean values do not match the expected values.'
+
+
+def test_cumnorm_concurrent():
+    train_path = PROJECT_PATH / 'data' / 'train' / 'small_chips'
+
+    ds = EdgeDataset(
+        train_path,
+        processes=1,
+        threads_per_worker=1,
+        random_seed=100
+    )
+    ref_data = torch.cat([batch.x for batch in ds], dim=0)
+
+    norm_values = get_norm_values(
+        dataset=ds,
+        batch_size=1,
+        class_info=CLASS_INFO,
+        num_workers=1,
+        processes=4,
+        threads_per_worker=2,
+        mean_color='#df4a2b',
+        sse_color='#2ba0df'
+    )
+
+    assert torch.allclose(norm_values.mean, ref_data.mean(dim=0), rtol=1e-4), \
+        'The mean values do not match the expected values.'
+    assert torch.allclose(norm_values.std, ref_data.std(dim=0, unbiased=False), rtol=1e-4), \
+        'The mean values do not match the expected values.'
+
+
 def test_norm():
     train_path = PROJECT_PATH / 'data' / 'train' / 'small_chips'
     mean_data_cache = PROJECT_PATH / 'data' / 'train' / 'small_chips' / 'data_means.npz'
@@ -74,6 +135,15 @@ def test_norm():
         threads_per_worker=1,
         random_seed=100
     )
+    # TODO: test this
+    # norm_values = get_norm_values(
+    #     dataset=ds,
+    #     batch_size=1,
+    #     class_info=CLASS_INFO,
+    #     num_workers=4,
+    #     centering='median'
+    # )
+
     data_module = EdgeDataModule(
         train_ds=ds,
         batch_size=1,
