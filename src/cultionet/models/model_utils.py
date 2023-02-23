@@ -52,6 +52,24 @@ class ConvToGraph(torch.nn.Module):
         return x.permute(0, 2, 3, 1).reshape(nbatch*nrows*ncols, n_channels)
 
 
+class ConvToTime(torch.nn.Module):
+    """Reshapes a 4d tensor to a 5d tensor
+    """
+    def __init__(self):
+        super(ConvToTime, self).__init__()
+
+    def forward(self, x: torch.Tensor, nbands: int, ntime: int) -> torch.Tensor:
+        nbatch, __, height, width = x.shape
+
+        return x.reshape(
+            nbatch,
+            nbands,
+            ntime,
+            height,
+            width
+        )
+
+
 def max_pool_neighbor_x(x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
     return nn.max_pool_neighbor_x(Data(x=x, edge_index=edge_index)).x
 

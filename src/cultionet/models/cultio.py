@@ -163,6 +163,7 @@ class CultioNet(torch.nn.Module):
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
+        self.ct = model_utils.ConvToTime()
 
         self.star_rnn = StarRNN(
             input_dim=self.ds_num_bands,
@@ -200,15 +201,12 @@ class CultioNet(torch.nn.Module):
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
+        # Reshape from ((H*W) x (C*T)) -> (B x C x H x W)
         x = self.gc(
             data.x, batch_size, height, width
         )
         # Reshape from (B x C x H x W) -> (B x C x T|D x H x W)
-        # nbatch, ntime, height, width
-        nbatch, __, height, width = x.shape
-        x = x.reshape(
-            nbatch, self.ds_num_bands, self.ds_num_time, height, width
-        )
+        x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
         # StarRNN
         logits_star_hidden, logits_star_l2, logits_star_last = self.star_rnn(x)
         logits_star_l2 = self.cg(logits_star_l2)
