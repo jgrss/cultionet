@@ -781,6 +781,7 @@ class UNet3Psi(torch.nn.Module):
             ],
             dim=1
         )
+        import ipdb; ipdb.set_trace()
         # h shape is (B x C x H x W)
         # Backbone
         # 1/1
