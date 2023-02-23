@@ -1338,7 +1338,9 @@ def main():
         if args.replace_dict is not None:
             setattr(args, 'replace_dict', ast.literal_eval(args.replace_dict))
 
-    with open(Path(args.project_path) / f"{args.process}_command.json", mode='w') as f:
+    project_path = Path(args.project_path) / 'ckpt'
+    project_path.mkdir(parents=True, exist_ok=True)
+    with open(project_path / f"{args.process}_command.json", mode='w') as f:
         f.write(json.dumps(vars(args), indent=4))
 
     if args.process in ('create', 'create-predict'):
