@@ -7,6 +7,7 @@ Copyright (c) 2018 Takato Kimura
 import typing as T
 
 from . import model_utils
+from . import kernels
 from .base_layers import (
     AttentionGate,
     DoubleConv,
@@ -464,7 +465,19 @@ class UNet3Psi(torch.nn.Module):
         ]
         up_channels = int(channels[0] * 5)
 
+        self.cg = model_utils.ConvToGraph()
+        self.gc = model_utils.GraphToConv()
         self.up = model_utils.UpSample()
+
+        trend_kernel_size = 5
+        self.peak_kernel = kernels.Peaks(kernel_size=trend_kernel_size)
+        self.pos_trend_kernel = kernels.Trend(
+            kernel_size=trend_kernel_size, direction='positive'
+        )
+        self.neg_trend_kernel = kernels.Trend(
+            kernel_size=trend_kernel_size, direction='negative'
+        )
+        trend_out_channels = int(in_time - (trend_kernel_size / 2) * 2)
 
         self.time_conv0 = SpatioTemporalConv3d(
             in_channels=in_channels,
@@ -512,7 +525,16 @@ class UNet3Psi(torch.nn.Module):
         # Reduced channels (x2) for mean and max
         # Input filters for RNN hidden logits
         self.conv0_0 = SingleConv(
-            in_channels=in_time + int(channels[0] * 4) + in_rnn_channels,
+            in_channels=(
+                in_time
+                + int(channels[0] * 4)
+                + in_rnn_channels
+                # Peak kernels
+                + int(in_channels * trend_out_channels)
+                # Trend kernels
+                + int(in_channels * trend_out_channels)
+                + int(in_channels * trend_out_channels)
+            ),
             out_channels=channels[0],
             activation_type=activation_type
         )
@@ -699,6 +721,48 @@ class UNet3Psi(torch.nn.Module):
     def forward(
         self, x: torch.Tensor, rnn_h: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
+        peak_kernels = []
+        pos_trend_kernels = []
+        neg_trend_kernels = []
+        for bidx in range(0, x.shape[1]):
+            # (B x C x T x H x W) -> (B x T x H x W) -> (B*H*W x T) -> (B*H*W x 1(C) x T)
+            band_input = self.cg(x[:, bidx].squeeze()).unsqueeze(1)
+            peak_res = self.peak_kernel(band_input)
+            pos_trend_res = self.pos_trend_kernel(band_input)
+            neg_trend_res = self.neg_trend_kernel(band_input)
+            # Reshape (B*H*W x 1(C) x T) -> (B x C X T x H x W)
+            peak_kernels += [
+                self.gc(
+                    # (B*H*W x T)
+                    peak_res.squeeze(),
+                    nbatch=x.shape[0],
+                    nrows=x.shape[-2],
+                    ncols=x.shape[-1]
+                ).unsqueeze(1)
+            ]
+            pos_trend_kernels += [
+                self.gc(
+                    # (B*H*W x T)
+                    pos_trend_res.squeeze(),
+                    nbatch=x.shape[0],
+                    nrows=x.shape[-2],
+                    ncols=x.shape[-1]
+                ).unsqueeze(1)
+            ]
+            neg_trend_kernels += [
+                self.gc(
+                    # (B*H*W x T)
+                    neg_trend_res.squeeze(),
+                    nbatch=x.shape[0],
+                    nrows=x.shape[-2],
+                    ncols=x.shape[-1]
+                ).unsqueeze(1)
+            ]
+        # Concatentate along the channels
+        trend_kernels = torch.cat(
+            peak_kernels + pos_trend_kernels + neg_trend_kernels, dim=1
+        )
+
         # Inputs shape is (B x C X T|D x H x W)
         h = self.time_conv0(x)
         h = torch.cat(
@@ -708,7 +772,8 @@ class UNet3Psi(torch.nn.Module):
                 self.reduce_to_channels_max(h),
                 self.reduce_to_channels_mean(h),
                 self.reduce_to_channels_std(h),
-                rnn_h
+                rnn_h,
+                trend_kernels
             ],
             dim=1
         )

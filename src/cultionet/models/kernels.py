@@ -26,16 +26,19 @@ class Trend(torch.nn.Module):
     def __init__(
         self,
         kernel_size: int,
-        direction: str = 'increasing'
+        direction: str = 'positive'
     ):
         super(Trend, self).__init__()
+
+        assert direction in ('positive', 'negative'), \
+            "The trend direction must be one of 'positive' or 'negative'."
 
         self.padding = int(kernel_size / 2)
         self.weights = torch.ones(kernel_size)
         indices_ = torch.arange(kernel_size)
-        if direction == 'increasing':
+        if direction == 'positive':
             self.weights[indices_ % 2 == 0] *= -1
-        elif direction == 'decreasing':
+        elif direction == 'negative':
             self.weights[indices_ % 2 > 0] *= -1
 
         self.weights = self.weights[(None,) * 2]
