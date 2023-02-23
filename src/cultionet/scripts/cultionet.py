@@ -1342,7 +1342,7 @@ def main():
     project_path.mkdir(parents=True, exist_ok=True)
     now = datetime.now()
     with open(
-        project_path / f"{args.process}_command_{now.strftime('%Y%m%d-%H:%M')}.json", mode='w'
+        project_path / f"{args.process}_command_{now.strftime('%Y%m%d-%H%M')}.json", mode='w'
     ) as f:
         f.write(json.dumps(vars(args), indent=4))
 
