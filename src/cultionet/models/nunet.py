@@ -479,7 +479,7 @@ class UNet3Psi(torch.nn.Module):
         )
         self.reduce_trend_to_time = torch.nn.Sequential(
             SpatioTemporalConv3d(
-                in_channels=in_time,
+                in_channels=int(in_channels * 3),
                 out_channels=1,
                 activation_type=activation_type
             ),
