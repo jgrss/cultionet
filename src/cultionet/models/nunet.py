@@ -730,11 +730,11 @@ class UNet3Psi(torch.nn.Module):
         neg_trend_kernels = []
         for bidx in range(0, x.shape[1]):
             # (B x C x T x H x W) -> (B x T x H x W)
-            x_in = x[:, bidx].squeeze()
-            if len(x_in.shape) < 4:
-                x_in = x_in.unsqueeze(0)
+            band_input = x[:, bidx].squeeze()
+            if len(band_input.shape) < 4:
+                band_input = band_input.unsqueeze(0)
             # (B x T x H x W) -> (B*H*W x T) -> (B*H*W x 1(C) x T)
-            band_input = self.cg(x_in).unsqueeze(1)
+            band_input = self.cg(band_input).unsqueeze(1)
             peak_res = self.peak_kernel(band_input)
             pos_trend_res = self.pos_trend_kernel(band_input)
             neg_trend_res = self.neg_trend_kernel(band_input)
