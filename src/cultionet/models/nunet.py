@@ -536,11 +536,8 @@ class UNet3Psi(torch.nn.Module):
                 in_time
                 + int(channels[0] * 4)
                 + in_rnn_channels
-                # Peak kernels
-                + int(in_channels * in_time)
-                # Trend kernels
-                + int(in_channels * in_time)
-                + int(in_channels * in_time)
+                # Peak kernels and Trend kernels
+                + int(in_time * 3)
             ),
             out_channels=channels[0],
             activation_type=activation_type
