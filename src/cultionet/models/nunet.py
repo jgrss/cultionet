@@ -773,6 +773,7 @@ class UNet3Psi(torch.nn.Module):
 
         # Inputs shape is (B x C X T|D x H x W)
         h = self.time_conv0(x)
+        import ipdb; ipdb.set_trace()
         h = torch.cat(
             [
                 self.reduce_to_time(h),
