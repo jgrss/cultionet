@@ -274,9 +274,9 @@ def augment(
     x = x.copy()
     if y is not None:
         y = y.copy()
+        label_dtype = 'float' if 'float' in y.dtype.name else 'int'
     if bdist is not None:
         bdist = bdist.copy()
-    label_dtype = 'float' if 'float' in y.dtype.name else 'int'
     # ori = None
     # if ori is not None:
     #     ori = ori.copy()
