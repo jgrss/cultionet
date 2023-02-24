@@ -56,7 +56,7 @@ shared_image:
     long: append-ts
     help: Whether to append time_series_vars to the image path
     kwargs:
-      default: y
+      default: 'y'
       choices: ['y', 'n']
   date_format:
     short: ''
@@ -117,13 +117,16 @@ create:
         - none
         - fliplr
         - flipud
-        - flipfb
         - rot90
         - rot180
         - rot270
         - ts-warp
         - ts-noise
         - ts-drift
+        - ts-peaks
+        - gaussian0.005
+        - s&p0.01
+        - speckle0.05
       choices:
         - none
         - fliplr
@@ -135,16 +138,18 @@ create:
         - ts-warp
         - ts-noise
         - ts-drift
+        - ts-peaks
         - roll
-        - gaussian
-        - s&p
+        - gaussian0.005
+        - s&p0.01
+        - speckle0.05
       nargs: '+'
   n_ts:
     short: n-ta
     long: num-temporal-aug
     help: The number of temporal augmentations
     kwargs:
-      default: 6
+      default: 1
       type: '&int'
   grid_size:
     short: gs

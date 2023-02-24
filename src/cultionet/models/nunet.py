@@ -501,7 +501,7 @@ class UNet3Psi(torch.nn.Module):
         )
         # (B x C x T|D x H x W)
         # Temporal reductions
-        # Squeeze to 2d (B x C x H x W)
+        # Reduce to 2d (B x C x H x W)
         self.reduce_to_channels_min = torch.nn.Sequential(
             Min(dim=2),
             torch.nn.BatchNorm2d(channels[0]),
