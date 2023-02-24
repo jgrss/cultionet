@@ -273,8 +273,8 @@ def augment(
 
     x = x.copy()
     y = y.copy()
-    label_dtype = 'float' if 'float' in y.dtype.name else 'int'
     bdist = bdist.copy()
+    label_dtype = 'float' if 'float' in y.dtype.name else 'int'
     # ori = None
     # if ori is not None:
     #     ori = ori.copy()
@@ -405,7 +405,8 @@ def augment(
             )
 
     else:
-        raise NameError(f'The augmentation {aug} is not supported.')
+        if aug != 'none':
+            raise NameError(f'The augmentation {aug} is not supported.')
 
     # Create the network
     nwk = SingleSensorNetwork(np.ascontiguousarray(x, dtype='float64'), k=k)
