@@ -272,8 +272,10 @@ def augment(
         ori = zpad(torch.tensor(ori)).numpy()
 
     x = x.copy()
-    y = y.copy()
-    bdist = bdist.copy()
+    if y is not None:
+        y = y.copy()
+    if bdist is not None:
+        bdist = bdist.copy()
     label_dtype = 'float' if 'float' in y.dtype.name else 'int'
     # ori = None
     # if ori is not None:
@@ -417,10 +419,10 @@ def augment(
 
     # Create the node position tensor
     dims, height, width = x.shape
-    pos_x = np.arange(0, width * kwargs['res'], kwargs['res'])
-    pos_y = np.arange(height * kwargs['res'], 0, -kwargs['res'])
-    grid_x, grid_y = np.meshgrid(pos_x, pos_y, indexing='xy')
-    xy = np.c_[grid_x.flatten(), grid_y.flatten()]
+    # pos_x = np.arange(0, width * kwargs['res'], kwargs['res'])
+    # pos_y = np.arange(height * kwargs['res'], 0, -kwargs['res'])
+    # grid_x, grid_y = np.meshgrid(pos_x, pos_y, indexing='xy')
+    # xy = np.c_[grid_x.flatten(), grid_y.flatten()]
 
     x = nd_to_columns(x, dims, height, width)
 
