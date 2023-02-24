@@ -483,7 +483,7 @@ class UNet3Psi(torch.nn.Module):
                 out_channels=1,
                 activation_type=activation_type
             ),
-            Squeeze()
+            Squeeze(dim=1)
         )
 
         self.time_conv0 = SpatioTemporalConv3d(
@@ -497,32 +497,28 @@ class UNet3Psi(torch.nn.Module):
                 out_channels=1,
                 activation_type=activation_type
             ),
-            Squeeze()
+            Squeeze(dim=1)
         )
         # (B x C x T|D x H x W)
         # Temporal reductions
         # Squeeze to 2d (B x C x H x W)
         self.reduce_to_channels_min = torch.nn.Sequential(
             Min(dim=2),
-            Squeeze(),
             torch.nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type)
         )
         self.reduce_to_channels_max = torch.nn.Sequential(
             Max(dim=2),
-            Squeeze(),
             torch.nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type)
         )
         self.reduce_to_channels_mean = torch.nn.Sequential(
             Mean(dim=2),
-            Squeeze(),
             torch.nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type)
         )
         self.reduce_to_channels_std = torch.nn.Sequential(
             Std(dim=2),
-            Squeeze(),
             torch.nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type)
         )
@@ -730,9 +726,7 @@ class UNet3Psi(torch.nn.Module):
         neg_trend_kernels = []
         for bidx in range(0, x.shape[1]):
             # (B x C x T x H x W) -> (B x T x H x W)
-            band_input = x[:, bidx].squeeze()
-            if len(band_input.shape) < 4:
-                band_input = band_input.unsqueeze(0)
+            band_input = x[:, bidx]
             # (B x T x H x W) -> (B*H*W x T) -> (B*H*W x 1(C) x T)
             band_input = self.cg(band_input).unsqueeze(1)
             peak_res = self.peak_kernel(band_input)
@@ -773,7 +767,6 @@ class UNet3Psi(torch.nn.Module):
 
         # Inputs shape is (B x C X T|D x H x W)
         h = self.time_conv0(x)
-        import ipdb; ipdb.set_trace()
         h = torch.cat(
             [
                 self.reduce_to_time(h),

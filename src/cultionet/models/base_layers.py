@@ -170,11 +170,13 @@ class Std(torch.nn.Module):
 
 
 class Squeeze(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, dim: T.Optional[int] = None):
         super(Squeeze, self).__init__()
 
+        self.dim = dim
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x.squeeze()
+        return x.squeeze(dim=self.dim)
 
 
 class Unsqueeze(torch.nn.Module):
