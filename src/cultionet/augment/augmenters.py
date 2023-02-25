@@ -612,6 +612,9 @@ class SpeckleNoise(SKLearnMixin):
 
 
 class NoAugmentation(AugmenterModule):
+    def __init__(self):
+        self.name_ = 'none'
+
     def forward(
         self,
         cdata: DataCopies,
