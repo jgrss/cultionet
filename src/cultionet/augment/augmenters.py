@@ -563,11 +563,12 @@ class Flip(AugmenterModule):
                 x[b:b+aug_args.ntime] = x[b:b+aug_args.ntime][::-1]
             cdata = replace(cdata)
         else:
+            flip_func = getattr(np, self.direction)
             for i in range(0, x.shape[0]):
-                x[i] = getattr(np, self.direction)(x[i])
+                x[i] = flip_func(x[i])
 
-            y = getattr(np, self.direction)(cdata.y)
-            bdist = getattr(np, self.direction)(cdata.bdist)
+            y = flip_func(cdata.y)
+            bdist = flip_func(cdata.bdist)
             # ori_aug = getattr(np, aug)(ori)
             cdata = replace(cdata, x=x, y=y, bdist=bdist)
 
