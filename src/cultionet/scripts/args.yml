@@ -124,9 +124,9 @@ create:
         - ts-noise
         - ts-drift
         - ts-peaks
-        - gaussian0.005
-        - s&p0.01
-        - speckle0.05
+        - gaussian
+        - salt-pepper
+        - speckle
       choices:
         - none
         - fliplr
@@ -140,9 +140,9 @@ create:
         - ts-drift
         - ts-peaks
         - roll
-        - gaussian0.005
-        - s&p0.01
-        - speckle0.05
+        - gaussian
+        - salt-pepper
+        - speckle
       nargs: '+'
   n_ts:
     short: n-ta

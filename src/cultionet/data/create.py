@@ -4,6 +4,7 @@ from functools import partial
 
 from .utils import LabeledData, get_image_list_dims
 from ..augment.augmentation import augment
+from ..augment.augmenters import Augmenters
 from ..errors import TopologyClipError
 from ..utils.logging import set_color_logger
 from ..utils.model_preprocessing import TqdmParallel
@@ -817,68 +818,97 @@ def create_dataset(
                     segments=segments,
                     props=props
                 )
-                def save_and_update(train_data: Data) -> None:
-                    train_path = process_path / f'data_{train_data.train_id}.pt'
-                    joblib.dump(
-                        train_data,
-                        train_path,
+                # def save_and_update(train_data: Data) -> None:
+                #     train_path = process_path / f'data_{train_data.train_id}.pt'
+                #     joblib.dump(
+                #         train_data,
+                #         train_path,
+                #         compress=5
+                #     )
+
+                aug = Augmenters(
+                    augmentations=transforms,
+                    ntime=ntime,
+                    nbands=nbands,
+                    max_crop_class=max_crop_class,
+                    k=3,
+                    instance_seg=instance_seg,
+                    zero_padding=zero_padding,
+                    start_year=start_year,
+                    end_year=end_year,
+                    left=left,
+                    bottom=bottom,
+                    right=right,
+                    top=top,
+                    res=ref_res
+                )
+                for aug_method in aug:
+                    aug_kwargs = aug_method.aug_args.kwargs
+                    aug_kwargs['train_id'] = f'{group_id}_{row_grid_id}_{aug_method.name_}'
+                    aug_method.update_aug_args(kwargs=aug_kwargs)
+                    import ipdb; ipdb.set_trace()
+
+                    aug_data = aug_method(ldata, aug_args=aug.aug_args)
+                    aug_method.save(
+                        out_directory=process_path,
+                        data=aug_data,
                         compress=5
                     )
 
-                for aug in transforms:
-                    if aug.startswith('ts-'):
-                        for i in range(0, n_ts):
-                            train_id = f'{group_id}_{row_grid_id}_{aug}_{i:03d}'
-                            train_data = augment(
-                                ldata,
-                                aug=aug,
-                                ntime=ntime,
-                                nbands=nbands,
-                                max_crop_class=max_crop_class,
-                                k=3,
-                                instance_seg=instance_seg,
-                                zero_padding=zero_padding,
-                                start_year=start_year,
-                                end_year=end_year,
-                                left=left,
-                                bottom=bottom,
-                                right=right,
-                                top=top,
-                                res=ref_res,
-                                train_id=train_id
-                            )
-                            if instance_seg:
-                                if hasattr(train_data, 'boxes') and train_data.boxes is not None:
-                                    save_and_update(train_data)
-                            else:
-                                save_and_update(train_data)
-                    else:
-                        train_id = f'{group_id}_{row_grid_id}_{aug}'
-                        train_data = augment(
-                            ldata,
-                            aug=aug,
-                            ntime=ntime,
-                            nbands=nbands,
-                            max_crop_class=max_crop_class,
-                            k=3,
-                            instance_seg=instance_seg,
-                            zero_padding=zero_padding,
-                            start_year=start_year,
-                            end_year=end_year,
-                            left=left,
-                            bottom=bottom,
-                            right=right,
-                            top=top,
-                            res=ref_res,
-                            train_id=train_id
-                        )
-                        if instance_seg:
-                            # Grids without boxes are set as None, and Data() does not
-                            # keep None types.
-                            if hasattr(train_data, 'boxes') and train_data.boxes is not None:
-                                save_and_update(train_data)
-                        else:
-                            save_and_update(train_data)
+                # for aug in transforms:
+                #     if aug.startswith('ts-'):
+                #         for i in range(0, n_ts):
+                #             train_id = f'{group_id}_{row_grid_id}_{aug}_{i:03d}'
+                #             train_data = augment(
+                #                 ldata,
+                #                 aug=aug,
+                #                 ntime=ntime,
+                #                 nbands=nbands,
+                #                 max_crop_class=max_crop_class,
+                #                 k=3,
+                #                 instance_seg=instance_seg,
+                #                 zero_padding=zero_padding,
+                #                 start_year=start_year,
+                #                 end_year=end_year,
+                #                 left=left,
+                #                 bottom=bottom,
+                #                 right=right,
+                #                 top=top,
+                #                 res=ref_res,
+                #                 train_id=train_id
+                #             )
+                #             if instance_seg:
+                #                 if hasattr(train_data, 'boxes') and train_data.boxes is not None:
+                #                     save_and_update(train_data)
+                #             else:
+                #                 save_and_update(train_data)
+                #     else:
+                #         train_id = f'{group_id}_{row_grid_id}_{aug}'
+                #         train_data = augment(
+                #             ldata,
+                #             aug=aug,
+                #             ntime=ntime,
+                #             nbands=nbands,
+                #             max_crop_class=max_crop_class,
+                #             k=3,
+                #             instance_seg=instance_seg,
+                #             zero_padding=zero_padding,
+                #             start_year=start_year,
+                #             end_year=end_year,
+                #             left=left,
+                #             bottom=bottom,
+                #             right=right,
+                #             top=top,
+                #             res=ref_res,
+                #             train_id=train_id
+                #         )
+                #         if instance_seg:
+                #             # Grids without boxes are set as None, and Data() does not
+                #             # keep None types.
+                #             if hasattr(train_data, 'boxes') and train_data.boxes is not None:
+                #                 save_and_update(train_data)
+                #         else:
+                #             save_and_update(train_data)
 
             pbar.update(1)
             pbar.set_description(group_id)
