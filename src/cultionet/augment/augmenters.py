@@ -291,6 +291,7 @@ class AugmenterModule(object):
         return data
 
     def save(
+        self,
         out_directory: Path,
         data: Data,
         prefix: str = 'data_',
