@@ -870,7 +870,7 @@ def create_dataset(
                 for aug_method in augmenters:
                     aug_kwargs = augmenters.aug_args.kwargs
                     aug_kwargs['train_id'] = f'{group_id}_{row_grid_id}_{aug_method.name_}'
-                    aug_method.update_aug_args(kwargs=aug_kwargs)
+                    augmenters.update_aug_args(kwargs=aug_kwargs)
                     import ipdb; ipdb.set_trace()
 
                     aug_data = aug_method(ldata, aug_args=augmenters.aug_args)
