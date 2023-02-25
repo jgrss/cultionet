@@ -306,7 +306,7 @@ class AugmenterModule(object):
         )
 
     def prepare_data(self, ldata: LabeledData) -> DataCopies:
-        x = ldata.x
+        x = ldata.x.copy()
         y = ldata.y
         bdist = ldata.bdist
         # ori = ldata.ori
@@ -317,7 +317,6 @@ class AugmenterModule(object):
         #     bdist = zpad(torch.tensor(bdist)).numpy()
         #     ori = zpad(torch.tensor(ori)).numpy()
 
-        x = x.copy()
         if y is not None:
             y = y.copy()
         if bdist is not None:
@@ -541,6 +540,7 @@ class Roll(AugmenterModule):
             )
             cdata = replace(cdata, x=x)
 
+        # y and bdist are unaltered
         return cdata
 
 
@@ -561,6 +561,8 @@ class Flip(AugmenterModule):
             for b in range(0, cdata.x.shape[0], aug_args.ntime):
                 # Get the slice for the current band, n time steps
                 x[b:b+aug_args.ntime] = x[b:b+aug_args.ntime][::-1]
+
+            # y and bdist are unaltered
             cdata = replace(cdata)
         else:
             flip_func = getattr(np, self.direction)
@@ -590,6 +592,8 @@ class SKLearnMixin(AugmenterModule):
                 clip=True,
                 **self.kwargs
             )
+
+        # y and bdist are unaltered
         cdata = replace(cdata, x=x)
 
         return cdata
