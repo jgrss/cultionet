@@ -751,7 +751,6 @@ class CultioLitModel(pl.LightningModule):
             0.25 * crop_star_l2_loss
             + 0.5 * crop_star_loss
         )
-        import ipdb; ipdb.set_trace()
         # Edge losses
         if self.deep_sup_dist:
             dist_loss_3_1 = self.dist_loss_3_1(predictions['dist_3_1'], batch.bdist)

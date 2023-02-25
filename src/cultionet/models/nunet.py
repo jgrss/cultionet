@@ -855,7 +855,7 @@ class UNet3Psi(torch.nn.Module):
             'mask_2_2': None,
             'mask_1_3': None
         }
-
+        import ipdb; ipdb.set_trace()
         if self.deep_sup_dist:
             out['dist_3_1'] = self.final_dist_3_1(
                 self.up(out_3_1['dist'], size=dist.shape[-2:], mode='bilinear')
