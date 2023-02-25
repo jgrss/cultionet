@@ -226,6 +226,10 @@ class CultioNet(torch.nn.Module):
             'crop_star': logits_star_last
         }
 
+        if logits['dist_3_1'] is not None:
+            out['dist_3_1'] = self.cg(logits['dist_3_1'])
+            out['dist_2_2'] = self.cg(logits['dist_2_2'])
+            out['dist_1_3'] = self.cg(logits['dist_1_3'])
         if logits['mask_3_1'] is not None:
             out['crop_3_1'] = self.cg(logits['mask_3_1'])
             out['crop_2_2'] = self.cg(logits['mask_2_2'])
