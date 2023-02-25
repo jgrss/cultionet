@@ -1,6 +1,7 @@
 import typing as T
 from pathlib import Path
 from functools import partial
+import warnings
 
 from .utils import LabeledData, get_image_list_dims
 from ..augment.augmentation import augment
@@ -692,6 +693,9 @@ def create_dataset(
     with gw.open(image_list[0]) as src:
         image_crs = src.crs
 
+    input_height = None
+    input_width = None
+    unprocessed = []
     with tqdm(total=df_grids.shape[0], desc='Check') as pbar:
         for row in df_grids.itertuples():
             # Clip the edges to the current grid
@@ -826,7 +830,28 @@ def create_dataset(
                 #         compress=5
                 #     )
 
-                aug = Augmenters(
+                if input_height is None:
+                    input_height = ldata.y.shape[0]
+                else:
+                    if ldata.y.shape[0] != input_height:
+                        warnings.warn(
+                            f"{group_id}_{row_grid_id} does not have the same height as the rest of the dataset.",
+                            UserWarning
+                        )
+                        unprocessed.append(f"{group_id}_{row_grid_id}")
+                        continue
+                if input_width is None:
+                    input_width = ldata.y.shape[1]
+                else:
+                    if ldata.y.shape[1] != input_width:
+                        warnings.warn(
+                            f"{group_id}_{row_grid_id} does not have the same width as the rest of the dataset.",
+                            UserWarning
+                        )
+                        unprocessed.append(f"{group_id}_{row_grid_id}")
+                        continue
+
+                augmenters = Augmenters(
                     augmentations=transforms,
                     ntime=ntime,
                     nbands=nbands,
@@ -842,13 +867,13 @@ def create_dataset(
                     top=top,
                     res=ref_res
                 )
-                for aug_method in aug:
+                for aug_method in augmenters:
                     aug_kwargs = aug_method.aug_args.kwargs
                     aug_kwargs['train_id'] = f'{group_id}_{row_grid_id}_{aug_method.name_}'
                     aug_method.update_aug_args(kwargs=aug_kwargs)
                     import ipdb; ipdb.set_trace()
 
-                    aug_data = aug_method(ldata, aug_args=aug.aug_args)
+                    aug_data = aug_method(ldata, aug_args=augmenters.aug_args)
                     aug_method.save(
                         out_directory=process_path,
                         data=aug_data,
@@ -912,3 +937,7 @@ def create_dataset(
 
             pbar.update(1)
             pbar.set_description(group_id)
+
+    if unprocessed:
+        logger.warning('Could not process the following grids.')
+        logger.info(', '.join(unprocessed))
