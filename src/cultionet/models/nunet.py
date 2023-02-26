@@ -12,7 +12,6 @@ from .base_layers import (
     AttentionGate,
     DoubleConv,
     SpatioTemporalConv3d,
-    ResSpatioTemporalConv3d,
     Min,
     Max,
     Mean,
@@ -21,6 +20,7 @@ from .base_layers import (
     PoolConv,
     PoolResidualConv,
     ResidualConv,
+    ResidualAConv,
     SingleConv,
     Softmax,
     SigmoidCrisp,
@@ -28,6 +28,7 @@ from .base_layers import (
     SetActivation
 )
 from .unet_parts import (
+    ResBlockTypes,
     UNet3P_3_1,
     UNet3P_2_2,
     UNet3P_1_3,
@@ -427,49 +428,19 @@ class UNet3(torch.nn.Module):
         return out
 
 
-class UNet3Psi(torch.nn.Module):
-    """UNet+++ with Psi-Net
-
-    References:
-        https://arxiv.org/ftp/arxiv/papers/2004/2004.08790.pdf
-        https://arxiv.org/abs/1902.04099
-        https://github.com/Bala93/Multi-task-deep-network
-    """
+class PreUnet3Psi(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        in_time: int,
-        in_rnn_channels: int,
-        init_filter: int = 32,
-        num_classes: int = 2,
-        dilations: T.Sequence[int] = None,
-        attention: bool = False,
-        activation_type: str = 'LeakyReLU',
-        deep_sup_dist: T.Optional[bool] = False,
-        deep_sup_edge: T.Optional[bool] = False,
-        deep_sup_mask: T.Optional[bool] = False,
-        mask_activation: T.Union[Softmax, torch.nn.Sigmoid] = Softmax(dim=1)
+        channels: T.Sequence[int],
+        activation_type: str,
+        trend_kernel_size: int = 5
     ):
-        super(UNet3Psi, self).__init__()
-
-        self.deep_sup_dist = deep_sup_dist
-        self.deep_sup_edge = deep_sup_edge
-        self.deep_sup_mask = deep_sup_mask
-        init_filter = int(init_filter)
-        channels = [
-            init_filter,
-            init_filter*2,
-            init_filter*4,
-            init_filter*8,
-            init_filter*16
-        ]
-        up_channels = int(channels[0] * 5)
+        super(PreUnet3Psi).__init__()
 
         self.cg = model_utils.ConvToGraph()
         self.gc = model_utils.GraphToConv()
-        self.up = model_utils.UpSample()
 
-        trend_kernel_size = 5
         self.peak_kernel = kernels.Peaks(kernel_size=trend_kernel_size)
         self.pos_trend_kernel = kernels.Trend(
             kernel_size=trend_kernel_size, direction='positive'
@@ -523,204 +494,7 @@ class UNet3Psi(torch.nn.Module):
             SetActivation(activation_type=activation_type)
         )
 
-        # Inputs =
-        # Reduced time dimensions
-        # Reduced channels (x2) for mean and max
-        # Input filters for RNN hidden logits
-        self.conv0_0 = SingleConv(
-            in_channels=(
-                in_time
-                + int(channels[0] * 4)
-                + in_rnn_channels
-                # Peak kernels and Trend kernels
-                + in_time
-            ),
-            out_channels=channels[0],
-            activation_type=activation_type
-        )
-        self.conv1_0 = PoolConv(
-            channels[0],
-            channels[1],
-            double_dilation=dilations[0],
-            activation_type=activation_type
-        )
-        self.conv2_0 = PoolConv(
-            channels[1],
-            channels[2],
-            double_dilation=dilations[0],
-            activation_type=activation_type
-        )
-        self.conv3_0 = PoolConv(
-            channels[2],
-            channels[3],
-            double_dilation=dilations[0],
-            activation_type=activation_type
-        )
-        self.conv4_0 = PoolConv(
-            channels[3],
-            channels[4],
-            double_dilation=dilations[0],
-            activation_type=activation_type
-        )
-
-        # Connect 3
-        self.convs_3_1 = UNet3_3_1(
-            channels=channels,
-            up_channels=up_channels,
-            dilations=dilations,
-            attention=attention,
-            activation_type=activation_type
-        )
-        self.convs_2_2 = UNet3_2_2(
-            channels=channels,
-            up_channels=up_channels,
-            dilations=dilations,
-            attention=attention,
-            activation_type=activation_type
-        )
-        self.convs_1_3 = UNet3_1_3(
-            channels=channels,
-            up_channels=up_channels,
-            dilations=dilations,
-            attention=attention,
-            activation_type=activation_type
-        )
-        self.convs_0_4 = UNet3_0_4(
-            channels=channels,
-            up_channels=up_channels,
-            dilations=dilations,
-            attention=attention,
-            activation_type=activation_type
-        )
-
-        self.final_dist = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                1,
-                kernel_size=1,
-                padding=0
-            ),
-            torch.nn.Sigmoid()
-        )
-        self.final_edge = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                1,
-                kernel_size=1,
-                padding=0
-            ),
-            SigmoidCrisp()
-        )
-        self.final_mask = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels,
-                num_classes,
-                kernel_size=1,
-                padding=0
-            ),
-            mask_activation
-        )
-        if self.deep_sup_dist:
-            self.final_dist_3_1 = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    up_channels,
-                    1,
-                    kernel_size=1,
-                    padding=0
-                ),
-                torch.nn.Sigmoid()
-            )
-            self.final_dist_2_2 = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    up_channels,
-                    1,
-                    kernel_size=1,
-                    padding=0
-                ),
-                torch.nn.Sigmoid()
-            )
-            self.final_dist_1_3 = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    up_channels,
-                    1,
-                    kernel_size=1,
-                    padding=0
-                ),
-                torch.nn.Sigmoid()
-            )
-        if self.deep_sup_edge:
-            self.final_edge_3_1 = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    up_channels,
-                    1,
-                    kernel_size=1,
-                    padding=0
-                ),
-                SigmoidCrisp()
-            )
-            self.final_edge_2_2 = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    up_channels,
-                    1,
-                    kernel_size=1,
-                    padding=0
-                ),
-                SigmoidCrisp()
-            )
-            self.final_edge_1_3 = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    up_channels,
-                    1,
-                    kernel_size=1,
-                    padding=0
-                ),
-                SigmoidCrisp()
-            )
-        if self.deep_sup_mask:
-            self.final_mask_3_1 = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    up_channels,
-                    num_classes,
-                    kernel_size=1,
-                    padding=0
-                ),
-                mask_activation
-            )
-            self.final_mask_2_2 = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    up_channels,
-                    num_classes,
-                    kernel_size=1,
-                    padding=0
-                ),
-                mask_activation
-            )
-            self.final_mask_1_3 = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    up_channels,
-                    num_classes,
-                    kernel_size=1,
-                    padding=0
-                ),
-                mask_activation
-            )
-
-        # Initialise weights
-        for m in self.modules():
-            if isinstance(
-                m,
-                (
-                    torch.nn.Conv2d,
-                    torch.nn.BatchNorm2d,
-                    torch.nn.Conv3d,
-                    torch.nn.BatchNorm3d
-                )
-            ):
-                m.apply(weights_init_kaiming)
-
-    def forward(
-        self, x: torch.Tensor, rnn_h: torch.Tensor
-    ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
+    def forward(self, x: torch.Tensor, rnn_h: torch.Tensor) -> torch.Tensor:
         peak_kernels = []
         pos_trend_kernels = []
         neg_trend_kernels = []
@@ -779,268 +553,27 @@ class UNet3Psi(torch.nn.Module):
             ],
             dim=1
         )
-        # h shape is (B x C x H x W)
-        # Backbone
-        # 1/1
-        x0_0 = self.conv0_0(h)
-        # 1/2
-        x1_0 = self.conv1_0(x0_0)
-        # 1/4
-        x2_0 = self.conv2_0(x1_0)
-        # 1/8
-        x3_0 = self.conv3_0(x2_0)
-        # 1/16
-        x4_0 = self.conv4_0(x3_0)
 
-        # 1/8 connection
-        out_3_1 = self.convs_3_1(
-            x0_0=x0_0,
-            x1_0=x1_0,
-            x2_0=x2_0,
-            x3_0=x3_0,
-            x4_0=x4_0
-        )
-        # 1/4 connection
-        out_2_2 = self.convs_2_2(
-            x0_0=x0_0,
-            x1_0=x1_0,
-            x2_0=x2_0,
-            h3_1_dist=out_3_1['dist'],
-            h3_1_edge=out_3_1['edge'],
-            h3_1_mask=out_3_1['mask'],
-            x4_0=x4_0
-        )
-        # 1/2 connection
-        out_1_3 = self.convs_1_3(
-            x0_0=x0_0,
-            x1_0=x1_0,
-            h2_2_dist=out_2_2['dist'],
-            h3_1_dist=out_3_1['dist'],
-            h2_2_edge=out_2_2['edge'],
-            h3_1_edge=out_3_1['edge'],
-            h2_2_mask=out_2_2['mask'],
-            h3_1_mask=out_3_1['mask'],
-            x4_0=x4_0
-        )
-        # 1/1 connection
-        out_0_4 = self.convs_0_4(
-            x0_0=x0_0,
-            h1_3_dist=out_1_3['dist'],
-            h2_2_dist=out_2_2['dist'],
-            h3_1_dist=out_3_1['dist'],
-            h1_3_edge=out_1_3['edge'],
-            h2_2_edge=out_2_2['edge'],
-            h3_1_edge=out_3_1['edge'],
-            h1_3_mask=out_1_3['mask'],
-            h2_2_mask=out_2_2['mask'],
-            h3_1_mask=out_3_1['mask'],
-            x4_0=x4_0
-        )
-
-        dist = self.final_dist(out_0_4['dist'])
-        edge = self.final_edge(out_0_4['edge'])
-        mask = self.final_mask(out_0_4['mask'])
-
-        out = {
-            'dist': dist,
-            'edge': edge,
-            'mask': mask,
-            'dist_3_1': None,
-            'dist_2_2': None,
-            'dist_1_3': None,
-            'edge_3_1': None,
-            'edge_2_2': None,
-            'edge_1_3': None,
-            'mask_3_1': None,
-            'mask_2_2': None,
-            'mask_1_3': None
-        }
-
-        if self.deep_sup_dist:
-            out['dist_3_1'] = self.final_dist_3_1(
-                self.up(out_3_1['dist'], size=dist.shape[-2:], mode='bilinear')
-            )
-            out['dist_2_2'] = self.final_dist_2_2(
-                self.up(out_2_2['dist'], size=dist.shape[-2:], mode='bilinear')
-            )
-            out['dist_1_3'] = self.final_dist_1_3(
-                self.up(out_1_3['dist'], size=dist.shape[-2:], mode='bilinear')
-            )
-        if self.deep_sup_edge:
-            out['edge_3_1'] = self.final_edge_3_1(
-                self.up(out_3_1['edge'], size=edge.shape[-2:], mode='bilinear')
-            )
-            out['edge_2_2'] = self.final_edge_2_2(
-                self.up(out_2_2['edge'], size=edge.shape[-2:], mode='bilinear')
-            )
-            out['edge_1_3'] = self.final_edge_1_3(
-                self.up(out_1_3['edge'], size=edge.shape[-2:], mode='bilinear')
-            )
-        if self.deep_sup_mask:
-            out['mask_3_1'] = self.final_mask_3_1(
-                self.up(out_3_1['mask'], size=mask.shape[-2:], mode='bilinear')
-            )
-            out['mask_2_2'] = self.final_mask_2_2(
-                self.up(out_2_2['mask'], size=mask.shape[-2:], mode='bilinear')
-            )
-            out['mask_1_3'] = self.final_mask_1_3(
-                self.up(out_1_3['mask'], size=mask.shape[-2:], mode='bilinear')
-            )
-
-        return out
+        return h
 
 
-class ResUNet3Psi(torch.nn.Module):
-    """Residual UNet+++ with Psi-Net (Multi-head streams) and Attention
-
-    References:
-        https://arxiv.org/ftp/arxiv/papers/2004/2004.08790.pdf
-        https://arxiv.org/abs/1902.04099
-        https://github.com/Bala93/Multi-task-deep-network
-        https://github.com/hamidriasat/UNet-3-Plus
-    """
+class PostUNet3Psi(torch.nn.Module):
     def __init__(
         self,
-        in_channels: int,
-        in_time: int,
-        in_rnn_channels: int,
-        init_filter: int = 32,
-        num_classes: int = 2,
-        dilations: T.Sequence[int] = None,
-        attention: bool = False,
-        activation_type: str = 'LeakyReLU',
+        up_channels: int,
+        num_classes: int,
+        mask_activation: T.Callable,
         deep_sup_dist: T.Optional[bool] = False,
         deep_sup_edge: T.Optional[bool] = False,
-        deep_sup_mask: T.Optional[bool] = False,
-        mask_activation: T.Union[Softmax, torch.nn.Sigmoid] = Softmax(dim=1)
+        deep_sup_mask: T.Optional[bool] = False
     ):
-        super(ResUNet3Psi, self).__init__()
+        super(PostUNet3Psi, self).__init__()
 
         self.deep_sup_dist = deep_sup_dist
         self.deep_sup_edge = deep_sup_edge
         self.deep_sup_mask = deep_sup_mask
-        init_filter = int(init_filter)
-        channels = [
-            init_filter,
-            init_filter*2,
-            init_filter*4,
-            init_filter*8,
-            init_filter*16
-        ]
-        up_channels = int(channels[0] * 5)
 
         self.up = model_utils.UpSample()
-
-        self.time_conv0 = ResSpatioTemporalConv3d(
-            in_channels=in_channels,
-            out_channels=channels[0],
-            activation_type=activation_type
-        )
-        self.reduce_to_time = torch.nn.Sequential(
-            ResSpatioTemporalConv3d(
-                in_channels=channels[0],
-                out_channels=1,
-                activation_type=activation_type
-            ),
-            Squeeze()
-        )
-        # (B x C x T|D x H x W)
-        # Temporal reductions
-        # Squeeze to 2d (B x C x H x W)
-        self.reduce_to_channels_min = torch.nn.Sequential(
-            Min(dim=2),
-            Squeeze(),
-            torch.nn.BatchNorm2d(channels[0]),
-            SetActivation(activation_type=activation_type)
-        )
-        self.reduce_to_channels_max = torch.nn.Sequential(
-            Max(dim=2),
-            Squeeze(),
-            torch.nn.BatchNorm2d(channels[0]),
-            SetActivation(activation_type=activation_type)
-        )
-        self.reduce_to_channels_mean = torch.nn.Sequential(
-            Mean(dim=2),
-            Squeeze(),
-            torch.nn.BatchNorm2d(channels[0]),
-            SetActivation(activation_type=activation_type)
-        )
-        self.reduce_to_channels_std = torch.nn.Sequential(
-            Std(dim=2),
-            Squeeze(),
-            torch.nn.BatchNorm2d(channels[0]),
-            SetActivation(activation_type=activation_type)
-        )
-
-        # Inputs =
-        # Reduced time dimensions
-        # Reduced channels (x2) for mean and max
-        # Input filters for RNN hidden logits
-        self.conv0_0 = ResidualConv(
-            in_time + int(channels[0] * 4) + in_rnn_channels,
-            channels[0],
-            dilations=dilations,
-            activation_type=activation_type,
-            fractal_attention=attention
-        )
-        self.conv1_0 = PoolResidualConv(
-            channels[0],
-            channels[1],
-            dilations=dilations,
-            activation_type=activation_type,
-            fractal_attention=attention
-        )
-        self.conv2_0 = PoolResidualConv(
-            channels[1],
-            channels[2],
-            dilations=dilations,
-            activation_type=activation_type,
-            fractal_attention=attention
-        )
-        self.conv3_0 = PoolResidualConv(
-            channels[2],
-            channels[3],
-            dilations=dilations,
-            activation_type=activation_type,
-            fractal_attention=attention
-        )
-        self.conv4_0 = PoolResidualConv(
-            channels[3],
-            channels[4],
-            dilations=dilations,
-            activation_type=activation_type,
-            fractal_attention=attention
-        )
-
-        # Connect 3
-        self.convs_3_1 = ResUNet3_3_1(
-            channels=channels,
-            up_channels=up_channels,
-            dilations=dilations,
-            attention=attention,
-            activation_type=activation_type
-        )
-        self.convs_2_2 = ResUNet3_2_2(
-            channels=channels,
-            up_channels=up_channels,
-            dilations=dilations,
-            attention=attention,
-            activation_type=activation_type
-        )
-        self.convs_1_3 = ResUNet3_1_3(
-            channels=channels,
-            up_channels=up_channels,
-            dilations=dilations,
-            attention=attention,
-            activation_type=activation_type
-        )
-        self.convs_0_4 = ResUNet3_0_4(
-            channels=channels,
-            up_channels=up_channels,
-            dilations=dilations,
-            attention=attention,
-            activation_type=activation_type
-        )
 
         self.final_dist = torch.nn.Sequential(
             torch.nn.Conv2d(
@@ -1154,6 +687,181 @@ class ResUNet3Psi(torch.nn.Module):
                 mask_activation
             )
 
+    def forward(
+        self,
+        out_0_4: T.Dict[str, torch.Tensor],
+        out_3_1: T.Dict[str, torch.Tensor],
+        out_2_2: T.Dict[str, torch.Tensor],
+        out_1_3: T.Dict[str, torch.Tensor],
+    ) -> T.Dict[str, torch.Tensor]:
+        dist = self.final_dist(out_0_4['dist'])
+        edge = self.final_edge(out_0_4['edge'])
+        mask = self.final_mask(out_0_4['mask'])
+
+        out = {
+            'dist': dist,
+            'edge': edge,
+            'mask': mask,
+            'dist_3_1': None,
+            'dist_2_2': None,
+            'dist_1_3': None,
+            'edge_3_1': None,
+            'edge_2_2': None,
+            'edge_1_3': None,
+            'mask_3_1': None,
+            'mask_2_2': None,
+            'mask_1_3': None
+        }
+
+        if self.deep_sup_dist:
+            out['dist_3_1'] = self.final_dist_3_1(
+                self.up(out_3_1['dist'], size=dist.shape[-2:], mode='bilinear')
+            )
+            out['dist_2_2'] = self.final_dist_2_2(
+                self.up(out_2_2['dist'], size=dist.shape[-2:], mode='bilinear')
+            )
+            out['dist_1_3'] = self.final_dist_1_3(
+                self.up(out_1_3['dist'], size=dist.shape[-2:], mode='bilinear')
+            )
+        if self.deep_sup_edge:
+            out['edge_3_1'] = self.final_edge_3_1(
+                self.up(out_3_1['edge'], size=edge.shape[-2:], mode='bilinear')
+            )
+            out['edge_2_2'] = self.final_edge_2_2(
+                self.up(out_2_2['edge'], size=edge.shape[-2:], mode='bilinear')
+            )
+            out['edge_1_3'] = self.final_edge_1_3(
+                self.up(out_1_3['edge'], size=edge.shape[-2:], mode='bilinear')
+            )
+        if self.deep_sup_mask:
+            out['mask_3_1'] = self.final_mask_3_1(
+                self.up(out_3_1['mask'], size=mask.shape[-2:], mode='bilinear')
+            )
+            out['mask_2_2'] = self.final_mask_2_2(
+                self.up(out_2_2['mask'], size=mask.shape[-2:], mode='bilinear')
+            )
+            out['mask_1_3'] = self.final_mask_1_3(
+                self.up(out_1_3['mask'], size=mask.shape[-2:], mode='bilinear')
+            )
+
+        return out
+
+
+class UNet3Psi(torch.nn.Module):
+    """UNet+++ with Psi-Net
+
+    References:
+        https://arxiv.org/ftp/arxiv/papers/2004/2004.08790.pdf
+        https://arxiv.org/abs/1902.04099
+        https://github.com/Bala93/Multi-task-deep-network
+    """
+    def __init__(
+        self,
+        in_channels: int,
+        in_time: int,
+        in_rnn_channels: int,
+        init_filter: int = 32,
+        num_classes: int = 2,
+        dilation: int = 2,
+        activation_type: str = 'SiLU',
+        deep_sup_dist: T.Optional[bool] = False,
+        deep_sup_edge: T.Optional[bool] = False,
+        deep_sup_mask: T.Optional[bool] = False,
+        mask_activation: T.Union[Softmax, torch.nn.Sigmoid] = Softmax(dim=1)
+    ):
+        super(UNet3Psi, self).__init__()
+
+        init_filter = int(init_filter)
+        channels = [
+            init_filter,
+            init_filter*2,
+            init_filter*4,
+            init_filter*8,
+            init_filter*16
+        ]
+        up_channels = int(channels[0] * 5)
+
+        self.pre_unet = PreUnet3Psi(
+            in_channels=in_channels,
+            channels=channels,
+            activation_type=activation_type
+        )
+
+        # Inputs =
+        # Reduced time dimensions
+        # Reduced channels (x2) for mean and max
+        # Input filters for RNN hidden logits
+        self.conv0_0 = SingleConv(
+            in_channels=(
+                in_time
+                + int(channels[0] * 4)
+                + in_rnn_channels
+                # Peak kernels and Trend kernels
+                + in_time
+            ),
+            out_channels=channels[0],
+            activation_type=activation_type
+        )
+        self.conv1_0 = PoolConv(
+            channels[0],
+            channels[1],
+            double_dilation=dilation,
+            activation_type=activation_type
+        )
+        self.conv2_0 = PoolConv(
+            channels[1],
+            channels[2],
+            double_dilation=dilation,
+            activation_type=activation_type
+        )
+        self.conv3_0 = PoolConv(
+            channels[2],
+            channels[3],
+            double_dilation=dilation,
+            activation_type=activation_type
+        )
+        self.conv4_0 = PoolConv(
+            channels[3],
+            channels[4],
+            double_dilation=dilation,
+            activation_type=activation_type
+        )
+
+        # Connect 3
+        self.convs_3_1 = UNet3_3_1(
+            channels=channels,
+            up_channels=up_channels,
+            dilations=[dilation],
+            activation_type=activation_type
+        )
+        self.convs_2_2 = UNet3_2_2(
+            channels=channels,
+            up_channels=up_channels,
+            dilations=[dilation],
+            activation_type=activation_type
+        )
+        self.convs_1_3 = UNet3_1_3(
+            channels=channels,
+            up_channels=up_channels,
+            dilations=[dilation],
+            activation_type=activation_type
+        )
+        self.convs_0_4 = UNet3_0_4(
+            channels=channels,
+            up_channels=up_channels,
+            dilations=[dilation],
+            activation_type=activation_type
+        )
+
+        self.post_unet = PostUNet3Psi(
+            up_channels=up_channels,
+            num_classes=num_classes,
+            mask_activation=mask_activation,
+            deep_sup_dist=deep_sup_dist,
+            deep_sup_edge=deep_sup_edge,
+            deep_sup_mask=deep_sup_mask
+        )
+
         # Initialise weights
         for m in self.modules():
             if isinstance(
@@ -1171,18 +879,7 @@ class ResUNet3Psi(torch.nn.Module):
         self, x: torch.Tensor, rnn_h: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
         # Inputs shape is (B x C X T|D x H x W)
-        h = self.time_conv0(x)
-        h = torch.cat(
-            [
-                self.reduce_to_time(h),
-                self.reduce_to_channels_min(h),
-                self.reduce_to_channels_max(h),
-                self.reduce_to_channels_mean(h),
-                self.reduce_to_channels_std(h),
-                rnn_h
-            ],
-            dim=1
-        )
+        h = self.pre_unet(x, rnn_h)
         # h shape is (B x C x H x W)
         # Backbone
         # 1/1
@@ -1241,54 +938,247 @@ class ResUNet3Psi(torch.nn.Module):
             x4_0=x4_0
         )
 
-        dist = self.final_dist(out_0_4['dist'])
-        edge = self.final_edge(out_0_4['edge'])
-        mask = self.final_mask(out_0_4['mask'])
+        out = self.post_unet(
+            out_0_4=out_0_4,
+            out_3_1=out_3_1,
+            out_2_2=out_2_2,
+            out_1_3=out_1_3
+        )
 
-        out = {
-            'dist': dist,
-            'edge': edge,
-            'mask': mask,
-            'dist_3_1': None,
-            'dist_2_2': None,
-            'dist_1_3': None,
-            'edge_3_1': None,
-            'edge_2_2': None,
-            'edge_1_3': None,
-            'mask_3_1': None,
-            'mask_2_2': None,
-            'mask_1_3': None
-        }
+        return out
 
-        if self.deep_sup_dist:
-            out['dist_3_1'] = self.final_dist_3_1(
-                self.up(out_3_1['dist'], size=dist.shape[-2:], mode='bilinear')
+
+class ResUNet3Psi(torch.nn.Module):
+    """Residual UNet+++ with Psi-Net (Multi-head streams) and Attention
+
+    References:
+        https://arxiv.org/ftp/arxiv/papers/2004/2004.08790.pdf
+        https://arxiv.org/abs/1902.04099
+        https://github.com/Bala93/Multi-task-deep-network
+        https://github.com/hamidriasat/UNet-3-Plus
+    """
+    def __init__(
+        self,
+        in_channels: int,
+        in_time: int,
+        in_rnn_channels: int,
+        init_filter: int = 32,
+        num_classes: int = 2,
+        dilations: T.Sequence[int] = None,
+        activation_type: str = 'LeakyReLU',
+        res_block_type: str = 'resa',
+        attention_weights: T.Optional[str] = None,
+        deep_sup_dist: T.Optional[bool] = False,
+        deep_sup_edge: T.Optional[bool] = False,
+        deep_sup_mask: T.Optional[bool] = False,
+        mask_activation: T.Union[Softmax, torch.nn.Sigmoid] = Softmax(dim=1)
+    ):
+        super(ResUNet3Psi, self).__init__()
+
+        init_filter = int(init_filter)
+        channels = [
+            init_filter,
+            init_filter*2,
+            init_filter*4,
+            init_filter*8,
+            init_filter*16
+        ]
+        up_channels = int(channels[0] * 5)
+
+        self.pre_unet = PreUnet3Psi(
+            in_channels=in_channels,
+            channels=channels,
+            activation_type=activation_type
+        )
+
+        # Inputs =
+        # Reduced time dimensions
+        # Reduced channels (x2) for mean and max
+        # Input filters for RNN hidden logits
+        if res_block_type.lower() == 'res':
+            self.conv0_0 = ResidualConv(
+                in_channels=(
+                    in_time
+                    + int(channels[0] * 4)
+                    + in_rnn_channels
+                    # Peak kernels and Trend kernels
+                    + in_time
+                ),
+                out_channels=channels[0],
+                dilations=dilations[0],
+                activation_type=activation_type,
+                attention_weights=attention_weights
             )
-            out['dist_2_2'] = self.final_dist_2_2(
-                self.up(out_2_2['dist'], size=dist.shape[-2:], mode='bilinear')
+        else:
+            self.conv0_0 = ResidualAConv(
+                in_channels=(
+                    in_time
+                    + int(channels[0] * 4)
+                    + in_rnn_channels
+                    # Peak kernels and Trend kernels
+                    + in_time
+                ),
+                out_channels=channels[0],
+                dilations=dilations,
+                activation_type=activation_type,
+                attention_weights=attention_weights
             )
-            out['dist_1_3'] = self.final_dist_1_3(
-                self.up(out_1_3['dist'], size=dist.shape[-2:], mode='bilinear')
-            )
-        if self.deep_sup_edge:
-            out['edge_3_1'] = self.final_edge_3_1(
-                self.up(out_3_1['edge'], size=edge.shape[-2:], mode='bilinear')
-            )
-            out['edge_2_2'] = self.final_edge_2_2(
-                self.up(out_2_2['edge'], size=edge.shape[-2:], mode='bilinear')
-            )
-            out['edge_1_3'] = self.final_edge_1_3(
-                self.up(out_1_3['edge'], size=edge.shape[-2:], mode='bilinear')
-            )
-        if self.deep_sup_mask:
-            out['mask_3_1'] = self.final_mask_3_1(
-                self.up(out_3_1['mask'], size=mask.shape[-2:], mode='bilinear')
-            )
-            out['mask_2_2'] = self.final_mask_2_2(
-                self.up(out_2_2['mask'], size=mask.shape[-2:], mode='bilinear')
-            )
-            out['mask_1_3'] = self.final_mask_1_3(
-                self.up(out_1_3['mask'], size=mask.shape[-2:], mode='bilinear')
-            )
+        self.conv1_0 = PoolResidualConv(
+            channels[0],
+            channels[1],
+            dilations=dilations,
+            attention_weights=attention_weights,
+            res_block_type=ResBlockTypes[res_block_type.upper()]
+        )
+        self.conv2_0 = PoolResidualConv(
+            channels[1],
+            channels[2],
+            dilations=dilations,
+            activation_type=activation_type,
+            attention_weights=attention_weights,
+            res_block_type=ResBlockTypes[res_block_type.upper()]
+        )
+        self.conv3_0 = PoolResidualConv(
+            channels[2],
+            channels[3],
+            dilations=dilations,
+            activation_type=activation_type,
+            attention_weights=attention_weights,
+            res_block_type=ResBlockTypes[res_block_type.upper()]
+        )
+        self.conv4_0 = PoolResidualConv(
+            channels[3],
+            channels[4],
+            dilations=dilations,
+            activation_type=activation_type,
+            attention_weights=attention_weights,
+            res_block_type=ResBlockTypes[res_block_type.upper()]
+        )
+
+        # Connect 3
+        self.convs_3_1 = ResUNet3_3_1(
+            channels=channels,
+            up_channels=up_channels,
+            dilations=dilations,
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+            res_block_type=ResBlockTypes[res_block_type.upper()]
+        )
+        self.convs_2_2 = ResUNet3_2_2(
+            channels=channels,
+            up_channels=up_channels,
+            dilations=dilations,
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+            res_block_type=ResBlockTypes[res_block_type.upper()]
+        )
+        self.convs_1_3 = ResUNet3_1_3(
+            channels=channels,
+            up_channels=up_channels,
+            dilations=dilations,
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+            res_block_type=ResBlockTypes[res_block_type.upper()]
+        )
+        self.convs_0_4 = ResUNet3_0_4(
+            channels=channels,
+            up_channels=up_channels,
+            dilations=dilations,
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+            res_block_type=ResBlockTypes[res_block_type.upper()]
+        )
+
+        self.post_unet = PostUNet3Psi(
+            up_channels=up_channels,
+            num_classes=num_classes,
+            mask_activation=mask_activation,
+            deep_sup_dist=deep_sup_dist,
+            deep_sup_edge=deep_sup_edge,
+            deep_sup_mask=deep_sup_mask
+        )
+
+        # Initialise weights
+        for m in self.modules():
+            if isinstance(
+                m,
+                (
+                    torch.nn.Conv2d,
+                    torch.nn.BatchNorm2d,
+                    torch.nn.Conv3d,
+                    torch.nn.BatchNorm3d
+                )
+            ):
+                m.apply(weights_init_kaiming)
+
+    def forward(
+        self, x: torch.Tensor, rnn_h: torch.Tensor
+    ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
+        # Inputs shape is (B x C X T|D x H x W)
+        h = self.pre_unet(x, rnn_h)
+        # h shape is (B x C x H x W)
+        # Backbone
+        # 1/1
+        x0_0 = self.conv0_0(h)
+        # 1/2
+        x1_0 = self.conv1_0(x0_0)
+        # 1/4
+        x2_0 = self.conv2_0(x1_0)
+        # 1/8
+        x3_0 = self.conv3_0(x2_0)
+        # 1/16
+        x4_0 = self.conv4_0(x3_0)
+
+        # 1/8 connection
+        out_3_1 = self.convs_3_1(
+            x0_0=x0_0,
+            x1_0=x1_0,
+            x2_0=x2_0,
+            x3_0=x3_0,
+            x4_0=x4_0
+        )
+        # 1/4 connection
+        out_2_2 = self.convs_2_2(
+            x0_0=x0_0,
+            x1_0=x1_0,
+            x2_0=x2_0,
+            h3_1_dist=out_3_1['dist'],
+            h3_1_edge=out_3_1['edge'],
+            h3_1_mask=out_3_1['mask'],
+            x4_0=x4_0
+        )
+        # 1/2 connection
+        out_1_3 = self.convs_1_3(
+            x0_0=x0_0,
+            x1_0=x1_0,
+            h2_2_dist=out_2_2['dist'],
+            h3_1_dist=out_3_1['dist'],
+            h2_2_edge=out_2_2['edge'],
+            h3_1_edge=out_3_1['edge'],
+            h2_2_mask=out_2_2['mask'],
+            h3_1_mask=out_3_1['mask'],
+            x4_0=x4_0
+        )
+        # 1/1 connection
+        out_0_4 = self.convs_0_4(
+            x0_0=x0_0,
+            h1_3_dist=out_1_3['dist'],
+            h2_2_dist=out_2_2['dist'],
+            h3_1_dist=out_3_1['dist'],
+            h1_3_edge=out_1_3['edge'],
+            h2_2_edge=out_2_2['edge'],
+            h3_1_edge=out_3_1['edge'],
+            h1_3_mask=out_1_3['mask'],
+            h2_2_mask=out_2_2['mask'],
+            h3_1_mask=out_3_1['mask'],
+            x4_0=x4_0
+        )
+
+        out = self.post_unet(
+            out_0_4=out_0_4,
+            out_3_1=out_3_1,
+            out_2_2=out_2_2,
+            out_1_3=out_1_3
+        )
 
         return out

@@ -338,7 +338,11 @@ class TemperatureScaling(pl.LightningModule):
         self.softmax = Softmax(dim=1)
 
         self.final_model = FinalRefinement(
-            in_channels=4,
+            # StarRNN 3 + 2
+            # Distance transform x4
+            # Edge sigmoid x4
+            # Crop softmax x4
+            in_channels=3+2+4+4+(4*2),
             n_features=16,
             out_channels=2,
             double_dilation=2
@@ -363,9 +367,7 @@ class TemperatureScaling(pl.LightningModule):
             # Cultionet predictions
             predictions = self.cultionet_model(batch)
             predictions['crop'] = self.final_model(
-                predictions['dist'],
-                predictions['edge'],
-                predictions['crop'],
+                predictions,
                 data=batch
             )
         predictions['crop'] = scale_logits(
@@ -424,11 +426,10 @@ class TemperatureScaling(pl.LightningModule):
             # The inputs from cultionet are probabilities
             # The output crop predictions are logits
             predictions['crop'] = self.final_model(
-                predictions['dist'],
-                predictions['edge'],
-                predictions['crop'],
+                predictions,
                 data=batch
             )
+            predictions['crop'] = self.softmax(predictions['crop'])
             loss = self.calc_refined_loss(
                 batch,
                 predictions
@@ -440,9 +441,7 @@ class TemperatureScaling(pl.LightningModule):
                 # The inputs from cultionet are probabilities
                 # The output crop predictions are logits
                 predictions['crop'] = self.final_model(
-                    predictions['dist'],
-                    predictions['edge'],
-                    predictions['crop'],
+                    predictions,
                     data=batch
                 )
             predictions['crop'] = scale_logits(
@@ -478,8 +477,7 @@ class TemperatureScaling(pl.LightningModule):
     def configure_loss(self):
         self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
         self.crop_loss_refine = TanimotoDistLoss(
-            scale_pos_weight=True,
-            transform_logits=True
+            scale_pos_weight=True
         )
 
     def configure_optimizers(self):

@@ -34,14 +34,12 @@ class FinalRefinement(torch.nn.Module):
 
     def forward(
         self,
-        distance: torch.Tensor,
-        edge: torch.Tensor,
-        crop: torch.Tensor,
+        predictions: T.Dict[str, torch.Tensor],
         data: Data
     ) -> torch.Tensor:
         """A single forward pass
 
-        Edger and crop inputs should be probabilities
+        Edge and crop inputs should be probabilities
         """
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
@@ -49,9 +47,20 @@ class FinalRefinement(torch.nn.Module):
 
         x = torch.cat(
             [
-                distance,
-                self.proba_to_logit(edge),
-                self.proba_to_logit(crop)
+                predictions['crop_star_l2'],
+                predictions['crop_star'],
+                predictions['dist'],
+                predictions['dist_3_1'],
+                predictions['dist_2_2'],
+                predictions['dist_1_3'],
+                predictions['edge'],
+                predictions['edge_3_1'],
+                predictions['edge_2_2'],
+                predictions['edge_1_3'],
+                predictions['crop'],
+                predictions['crop_3_1'],
+                predictions['crop_2_2'],
+                predictions['crop_1_3']
             ],
             dim=1
         )
@@ -181,17 +190,22 @@ class CultioNet(torch.nn.Module):
             'in_rnn_channels': int(self.filters * 3),
             'init_filter': self.filters,
             'num_classes': self.num_classes,
-            'dilations': [2],
             'activation_type': activation_type,
             'deep_sup_dist': deep_sup_dist,
             'deep_sup_edge': deep_sup_edge,
             'deep_sup_mask': deep_sup_mask,
             'mask_activation': Softmax(dim=1)
         }
-        assert model_type in ('UNet3Psi', 'ResUNet3Psi'), 'Model type not supported.'
+        assert model_type in ('UNet3Psi', 'ResUNet3Psi'), \
+            'The model type is not supported.'
         if model_type == 'UNet3Psi':
+            unet3_kwargs['dilation'] = 2
             self.mask_model = UNet3Psi(**unet3_kwargs)
         elif model_type == 'ResUNet3Psi':
+            # ResUNet3Psi
+            unet3_kwargs['attention_weights'] = 'spatial_channel'
+            unet3_kwargs['res_block_type'] = 'resa'
+            unet3_kwargs['dilations'] = [1, 2, 3]
             self.mask_model = ResUNet3Psi(**unet3_kwargs)
 
     def forward(

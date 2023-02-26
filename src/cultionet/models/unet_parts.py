@@ -6,6 +6,7 @@ from .base_layers import (
     PoolConv,
     PoolResidualConv,
     ResidualConv,
+    ResidualAConv,
     AttentionGate
 )
 from . import model_utils
@@ -14,8 +15,13 @@ import torch
 
 
 class ModelTypes(enum.Enum):
-    unet = 'unet'
-    resunet = 'resunet'
+    UNET = enum.auto()
+    RESUNET = enum.auto()
+
+
+class ResBlockTypes(enum.Enum):
+    RES = enum.auto()
+    RESA = enum.auto()
 
 
 class UNet3Connector(torch.nn.Module):
@@ -31,24 +37,25 @@ class UNet3Connector(torch.nn.Module):
         n_pools: int = 0,
         n_prev_down: int = 0,
         n_stream_down: int = 0,
-        attention: bool = False,
-        attention_weights: str = 'gate',
+        attention_weights: str = 'spatial_channel',
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
-        model_type: enum = ModelTypes.unet,
+        model_type: enum = ModelTypes.UNET,
+        res_block_type: enum = ResBlockTypes.RESA,
         activation_type: str = 'LeakyReLU'
     ):
         super(UNet3Connector, self).__init__()
 
-        assert attention_weights in ['gate', 'fractal'], \
-            "Choose from 'gate' or 'fractal' attention weights."
+        assert attention_weights in ['gate', 'fractal', 'spatial_channel'], \
+            "Choose from 'gate', 'fractal', or 'spatial_channel' attention weights."
 
-        assert model_type in (ModelTypes.unet, ModelTypes.resunet)
+        assert model_type in (ModelTypes.UNET, ModelTypes.RESUNET)
+        assert res_block_type in (ResBlockTypes.RES, ResBlockTypes.RESA)
 
         self.n_pools = n_pools
         self.n_prev_down = n_prev_down
         self.n_stream_down = n_stream_down
-        self.attention = attention
+        self.attention_weights = attention_weights
         self.use_backbone = use_backbone
         self.is_side_stream = is_side_stream
         self.cat_channels = 0
@@ -68,7 +75,7 @@ class UNet3Connector(torch.nn.Module):
                 pool_size = 2
 
             for n in range(0, n_pools):
-                if model_type == ModelTypes.unet:
+                if model_type == ModelTypes.UNET:
                     setattr(
                         self,
                         f'pool_{n}',
@@ -89,13 +96,15 @@ class UNet3Connector(torch.nn.Module):
                             out_channels=channels[0],
                             pool_size=pool_size,
                             dilations=dilations,
-                            activation_type=activation_type
+                            attention_weights=attention_weights,
+                            activation_type=activation_type,
+                            res_block_type=res_block_type
                         )
                     )
                 pool_size = int(pool_size / 2)
                 self.cat_channels += channels[0]
         if self.use_backbone:
-            if model_type == ModelTypes.unet:
+            if model_type == ModelTypes.UNET:
                 self.prev_backbone = DoubleConv(
                     in_channels=channels[prev_backbone_channel_index],
                     out_channels=up_channels,
@@ -104,15 +113,25 @@ class UNet3Connector(torch.nn.Module):
                     activation_type=activation_type
                 )
             else:
-                self.prev_backbone = ResidualConv(
-                    in_channels=channels[prev_backbone_channel_index],
-                    out_channels=up_channels,
-                    dilations=dilations,
-                    activation_type=activation_type
-                )
+                if res_block_type == ResBlockTypes.RES:
+                    self.prev_backbone = ResidualConv(
+                        in_channels=channels[prev_backbone_channel_index],
+                        out_channels=up_channels,
+                        dilations=dilations[0],
+                        attention_weights=attention_weights,
+                        activation_type=activation_type
+                    )
+                else:
+                    self.prev_backbone = ResidualAConv(
+                        in_channels=channels[prev_backbone_channel_index],
+                        out_channels=up_channels,
+                        dilations=dilations,
+                        attention_weights=attention_weights,
+                        activation_type=activation_type
+                    )
             self.cat_channels += up_channels
         if self.is_side_stream:
-            if model_type == ModelTypes.unet:
+            if model_type == ModelTypes.UNET:
                 # Backbone, same level
                 self.prev = DoubleConv(
                     in_channels=up_channels,
@@ -122,17 +141,27 @@ class UNet3Connector(torch.nn.Module):
                     activation_type=activation_type
                 )
             else:
-                self.prev = ResidualConv(
-                    in_channels=up_channels,
-                    out_channels=up_channels,
-                    dilations=dilations,
-                    activation_type=activation_type
-                )
+                if res_block_type == ResBlockTypes.RES:
+                    self.prev = ResidualConv(
+                        in_channels=up_channels,
+                        out_channels=up_channels,
+                        dilations=dilations[0],
+                        attention_weights=attention_weights,
+                        activation_type=activation_type
+                    )
+                else:
+                    self.prev = ResidualAConv(
+                        in_channels=up_channels,
+                        out_channels=up_channels,
+                        dilations=dilations,
+                        attention_weights=attention_weights,
+                        activation_type=activation_type
+                    )
             self.cat_channels += up_channels
         # Previous output, downstream
         if self.n_prev_down > 0:
             for n in range(0, self.n_prev_down):
-                if model_type == ModelTypes.unet:
+                if model_type == ModelTypes.UNET:
                     setattr(
                         self,
                         f'prev_{n}',
@@ -145,22 +174,36 @@ class UNet3Connector(torch.nn.Module):
                         )
                     )
                 else:
-                    setattr(
-                        self,
-                        f'prev_{n}',
-                        ResidualConv(
-                            in_channels=up_channels,
-                            out_channels=up_channels,
-                            dilations=dilations,
-                            activation_type=activation_type
+                    if res_block_type == ResBlockTypes.RES:
+                        setattr(
+                            self,
+                            f'prev_{n}',
+                            ResidualConv(
+                                in_channels=up_channels,
+                                out_channels=up_channels,
+                                dilations=dilations[0],
+                                attention_weights=attention_weights,
+                                activation_type=activation_type
+                            )
                         )
-                    )
+                    else:
+                        setattr(
+                            self,
+                            f'prev_{n}',
+                            ResidualAConv(
+                                in_channels=up_channels,
+                                out_channels=up_channels,
+                                dilations=dilations,
+                                attention_weights=attention_weights,
+                                activation_type=activation_type
+                            )
+                        )
                 self.cat_channels += up_channels
         # Previous output, (same) downstream
         if self.n_stream_down > 0:
             for n in range(0, self.n_stream_down):
                 in_stream_channels = up_channels
-                if self.attention:
+                if self.attention_weights is not None and (self.attention_weights == 'gate'):
                     attention_module = AttentionGate(up_channels, up_channels)
                     setattr(
                         self,
@@ -168,7 +211,7 @@ class UNet3Connector(torch.nn.Module):
                         attention_module
                     )
                     in_stream_channels = up_channels * 2
-                if model_type == ModelTypes.unet:
+                if model_type == ModelTypes.UNET:
                     setattr(
                         self,
                         f'stream_{n}',
@@ -181,20 +224,34 @@ class UNet3Connector(torch.nn.Module):
                         )
                     )
                 else:
-                    setattr(
-                        self,
-                        f'stream_{n}',
-                        ResidualConv(
-                            in_channels=in_stream_channels,
-                            out_channels=up_channels,
-                            dilations=dilations,
-                            activation_type=activation_type
+                    if res_block_type == ResBlockTypes.RES:
+                        setattr(
+                            self,
+                            f'stream_{n}',
+                            ResidualConv(
+                                in_channels=in_stream_channels,
+                                out_channels=up_channels,
+                                dilations=dilations[0],
+                                attention_weights=attention_weights,
+                                activation_type=activation_type
+                            )
                         )
-                    )
+                    else:
+                        setattr(
+                            self,
+                            f'stream_{n}',
+                            ResidualAConv(
+                                in_channels=in_stream_channels,
+                                out_channels=up_channels,
+                                dilations=dilations,
+                                attention_weights=attention_weights,
+                                activation_type=activation_type
+                            )
+                        )
                 self.cat_channels += up_channels
 
         self.cat_channels += channels[0]
-        if model_type == ModelTypes.unet:
+        if model_type == ModelTypes.UNET:
             self.conv4_0 = DoubleConv(
                 in_channels=channels[4],
                 out_channels=channels[0],
@@ -214,12 +271,22 @@ class UNet3Connector(torch.nn.Module):
                 out_channels=channels[0],
                 activation_type=activation_type
             )
-            self.final = ResidualConv(
-                in_channels=self.cat_channels,
-                out_channels=up_channels,
-                dilations=dilations,
-                activation_type=activation_type
-            )
+            if res_block_type == ResBlockTypes.RES:
+                self.final = ResidualConv(
+                    in_channels=self.cat_channels,
+                    out_channels=up_channels,
+                    dilations=dilations[0],
+                    attention_weights=attention_weights,
+                    activation_type=activation_type
+                )
+            else:
+                self.final = ResidualAConv(
+                    in_channels=self.cat_channels,
+                    out_channels=up_channels,
+                    dilations=dilations,
+                    attention_weights=attention_weights,
+                    activation_type=activation_type
+                )
 
     def forward(
         self,
@@ -256,14 +323,14 @@ class UNet3Connector(torch.nn.Module):
         for conv_name, prev_inputs in prev_same:
             c = getattr(self, conv_name)
             h += [c(prev_inputs)]
-        if self.attention:
+        if self.attention_weights is not None and (self.attention_weights == 'gate'):
             prev_same_hidden = h[-1].clone()
         # Previous down layers from the same head
         if stream_down is not None:
             assert self.n_stream_down == len(stream_down), \
                 'There are no convolutions available for the downstream layers.'
             for n, x in zip(range(self.n_stream_down), stream_down):
-                if self.attention:
+                if self.attention_weights is not None and (self.attention_weights == 'gate'):
                     # Gate
                     g = self.up(x, size=prev_same[0][1].shape[-2:], mode='bilinear')
                     c_attn = getattr(self, f'attn_stream_{n}')
@@ -469,8 +536,6 @@ class UNet3_3_1(torch.nn.Module):
         self,
         channels: T.Sequence[int],
         up_channels: int,
-        attention: bool = False,
-        attention_weights: str = 'gate',
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
         activation_type: str = 'LeakyReLU'
@@ -506,8 +571,6 @@ class UNet3_3_1(torch.nn.Module):
             up_channels=up_channels,
             prev_backbone_channel_index=3,
             n_pools=3,
-            attention=attention,
-            attention_weights=attention_weights,
             init_point_conv=init_point_conv,
             dilations=dilations,
             activation_type=activation_type
@@ -554,8 +617,6 @@ class UNet3_2_2(torch.nn.Module):
         self,
         channels: T.Sequence[int],
         up_channels: int,
-        attention: bool = False,
-        attention_weights: str = 'gate',
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
         activation_type: str = 'LeakyReLU'
@@ -591,8 +652,6 @@ class UNet3_2_2(torch.nn.Module):
             prev_backbone_channel_index=2,
             n_pools=2,
             n_stream_down=1,
-            attention=attention,
-            attention_weights=attention_weights,
             init_point_conv=init_point_conv,
             dilations=dilations,
             activation_type=activation_type
@@ -641,8 +700,6 @@ class UNet3_1_3(torch.nn.Module):
         self,
         channels: T.Sequence[int],
         up_channels: int,
-        attention: bool = False,
-        attention_weights: str = 'gate',
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
         activation_type: str = 'LeakyReLU'
@@ -678,8 +735,6 @@ class UNet3_1_3(torch.nn.Module):
             prev_backbone_channel_index=1,
             n_pools=1,
             n_stream_down=2,
-            attention=attention,
-            attention_weights=attention_weights,
             init_point_conv=init_point_conv,
             dilations=dilations,
             activation_type=activation_type
@@ -730,8 +785,6 @@ class UNet3_0_4(torch.nn.Module):
         self,
         channels: T.Sequence[int],
         up_channels: int,
-        attention: bool = False,
-        attention_weights: str = 'gate',
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
         activation_type: str = 'LeakyReLU'
@@ -764,8 +817,6 @@ class UNet3_0_4(torch.nn.Module):
             up_channels=up_channels,
             prev_backbone_channel_index=0,
             n_stream_down=3,
-            attention=attention,
-            attention_weights=attention_weights,
             init_point_conv=init_point_conv,
             dilations=dilations,
             activation_type=activation_type
@@ -816,8 +867,9 @@ class ResUNet3_3_1(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.Sequence[int] = None,
-        attention: bool = False,
-        activation_type: str = 'LeakyReLU'
+        attention_weights: str = 'spatial_channel',
+        activation_type: str = 'LeakyReLU',
+        res_block_type: enum = ResBlockTypes.RESA
     ):
         super(ResUNet3_3_1, self).__init__()
 
@@ -832,8 +884,9 @@ class ResUNet3_3_1(torch.nn.Module):
             prev_backbone_channel_index=3,
             n_pools=3,
             dilations=dilations,
-            attention=attention,
-            model_type=ModelTypes.resunet,
+            attention_weights=attention_weights,
+            model_type=ModelTypes.RESUNET,
+            res_block_type=res_block_type,
             activation_type=activation_type
         )
         # Edge stream connection
@@ -845,8 +898,9 @@ class ResUNet3_3_1(torch.nn.Module):
             prev_backbone_channel_index=3,
             n_pools=3,
             dilations=dilations,
-            attention=attention,
-            model_type=ModelTypes.resunet,
+            attention_weights=attention_weights,
+            model_type=ModelTypes.RESUNET,
+            res_block_type=res_block_type,
             activation_type=activation_type
         )
         # Mask stream connection
@@ -858,8 +912,9 @@ class ResUNet3_3_1(torch.nn.Module):
             prev_backbone_channel_index=3,
             n_pools=3,
             dilations=dilations,
-            attention=attention,
-            model_type=ModelTypes.resunet,
+            attention_weights=attention_weights,
+            model_type=ModelTypes.RESUNET,
+            res_block_type=res_block_type,
             activation_type=activation_type
         )
 
@@ -905,8 +960,9 @@ class ResUNet3_2_2(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.Sequence[int] = None,
-        attention: bool = False,
-        activation_type: str = 'LeakyReLU'
+        attention_weights: str = 'spatial_channel',
+        activation_type: str = 'LeakyReLU',
+        res_block_type: enum = ResBlockTypes.RESA
     ):
         super(ResUNet3_2_2, self).__init__()
 
@@ -921,8 +977,9 @@ class ResUNet3_2_2(torch.nn.Module):
             n_pools=2,
             n_stream_down=1,
             dilations=dilations,
-            attention=attention,
-            model_type=ModelTypes.resunet,
+            attention_weights=attention_weights,
+            model_type=ModelTypes.RESUNET,
+            res_block_type=res_block_type,
             activation_type=activation_type
         )
         self.conv_edge = UNet3Connector(
@@ -934,8 +991,9 @@ class ResUNet3_2_2(torch.nn.Module):
             n_pools=2,
             n_stream_down=1,
             dilations=dilations,
-            attention=attention,
-            model_type=ModelTypes.resunet,
+            attention_weights=attention_weights,
+            model_type=ModelTypes.RESUNET,
+            res_block_type=res_block_type,
             activation_type=activation_type
         )
         self.conv_mask = UNet3Connector(
@@ -947,8 +1005,9 @@ class ResUNet3_2_2(torch.nn.Module):
             n_pools=2,
             n_stream_down=1,
             dilations=dilations,
-            attention=attention,
-            model_type=ModelTypes.resunet,
+            attention_weights=attention_weights,
+            model_type=ModelTypes.RESUNET,
+            res_block_type=res_block_type,
             activation_type=activation_type
         )
 
@@ -996,8 +1055,9 @@ class ResUNet3_1_3(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.Sequence[int] = None,
-        attention: bool = False,
-        activation_type: str = 'LeakyReLU'
+        attention_weights: str = 'spatial_channel',
+        activation_type: str = 'LeakyReLU',
+        res_block_type: enum = ResBlockTypes.RESA
     ):
         super(ResUNet3_1_3, self).__init__()
 
@@ -1012,8 +1072,9 @@ class ResUNet3_1_3(torch.nn.Module):
             n_pools=1,
             n_stream_down=2,
             dilations=dilations,
-            attention=attention,
-            model_type=ModelTypes.resunet,
+            attention_weights=attention_weights,
+            model_type=ModelTypes.RESUNET,
+            res_block_type=res_block_type,
             activation_type=activation_type
         )
         self.conv_edge = UNet3Connector(
@@ -1025,8 +1086,9 @@ class ResUNet3_1_3(torch.nn.Module):
             n_pools=1,
             n_stream_down=2,
             dilations=dilations,
-            attention=attention,
-            model_type=ModelTypes.resunet,
+            attention_weights=attention_weights,
+            model_type=ModelTypes.RESUNET,
+            res_block_type=res_block_type,
             activation_type=activation_type
         )
         self.conv_mask = UNet3Connector(
@@ -1038,8 +1100,9 @@ class ResUNet3_1_3(torch.nn.Module):
             n_pools=1,
             n_stream_down=2,
             dilations=dilations,
-            attention=attention,
-            model_type=ModelTypes.resunet,
+            attention_weights=attention_weights,
+            model_type=ModelTypes.RESUNET,
+            res_block_type=res_block_type,
             activation_type=activation_type
         )
 
@@ -1089,8 +1152,9 @@ class ResUNet3_0_4(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.Sequence[int] = None,
-        attention: bool = False,
-        activation_type: str = 'LeakyReLU'
+        attention_weights: str = 'spatial_channel',
+        activation_type: str = 'LeakyReLU',
+        res_block_type: enum = ResBlockTypes.RESA
     ):
         super(ResUNet3_0_4, self).__init__()
 
@@ -1104,8 +1168,9 @@ class ResUNet3_0_4(torch.nn.Module):
             prev_backbone_channel_index=0,
             n_stream_down=3,
             dilations=dilations,
-            attention=attention,
-            model_type=ModelTypes.resunet,
+            attention_weights=attention_weights,
+            model_type=ModelTypes.RESUNET,
+            res_block_type=res_block_type,
             activation_type=activation_type
         )
         self.conv_edge = UNet3Connector(
@@ -1116,8 +1181,9 @@ class ResUNet3_0_4(torch.nn.Module):
             prev_backbone_channel_index=0,
             n_stream_down=3,
             dilations=dilations,
-            attention=attention,
-            model_type=ModelTypes.resunet,
+            attention_weights=attention_weights,
+            model_type=ModelTypes.RESUNET,
+            res_block_type=res_block_type,
             activation_type=activation_type
         )
         self.conv_mask = UNet3Connector(
@@ -1128,8 +1194,9 @@ class ResUNet3_0_4(torch.nn.Module):
             prev_backbone_channel_index=0,
             n_stream_down=3,
             dilations=dilations,
-            attention=attention,
-            model_type=ModelTypes.resunet,
+            attention_weights=attention_weights,
+            model_type=ModelTypes.RESUNET,
+            res_block_type=res_block_type,
             activation_type=activation_type
         )
 
