@@ -1,7 +1,6 @@
 import typing as T
 from pathlib import Path
 import json
-import csv
 
 from ..losses import TanimotoDistLoss
 from .cultio import CultioNet, FinalRefinement
@@ -9,6 +8,7 @@ from .maskcrnn import BFasterRCNN
 from .base_layers import Softmax
 from . import model_utils
 
+import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch.optim import lr_scheduler
@@ -939,20 +939,10 @@ class CultioLitModel(pl.LightningModule):
             if self.logger.save_dir is not None:
                 metrics_file = Path(self.logger.save_dir) / 'batch_metrics.log'
                 if not metrics_file.is_file():
-                    with open(metrics_file, mode='w', newline='') as f:
-                        writer = csv.DictWriter(f, fieldnames=header)
-                        writer.writeheader()
-                        writer.writerows(write_metrics)
                     import ipdb; ipdb.set_trace()
+
                 else:
                     import ipdb; ipdb.set_trace()
-                    with open(metrics_file, mode='r') as f:
-                        written_metrics = csv.DictReader(f)
-                    # writer = csv.DictWriter(f, fieldnames=list(metrics.keys()))
-                    # writer.writeheader()
-                    # writer.writerows(self.metrics)
-                    # with open(scale_file, mode='w') as f:
-                    #     f.write(json.dumps(temperature_scales))
 
                 import ipdb; ipdb.set_trace()
 
