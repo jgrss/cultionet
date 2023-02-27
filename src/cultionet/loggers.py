@@ -35,7 +35,7 @@ class BatchMetricsLogger(Logger):
     def log_metrics(self, metrics: dict, step: int):
         # metrics is a dictionary of metric names and values
         # your code to record metrics goes here
-        if 'val_loss' in metrics:
+        if 'val_loss_step' in metrics:
             import ipdb; ipdb.set_trace()
         # output_path = Path(self.logger.save_dir) / ''
         # self._write_row()

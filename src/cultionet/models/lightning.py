@@ -909,9 +909,12 @@ class CultioLitModel(pl.LightningModule):
         }
         if 'crop_type_f1' in eval_metrics:
             metrics['vctf1'] = eval_metrics['crop_type_f1']
-        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         return metrics
+
+    def validation_epoch_end(self, outputs):
+        import ipdb; ipdb.set_trace()
+        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
     def test_step(self, batch: Data, batch_idx: int = None) -> dict:
         """Executes one test step
