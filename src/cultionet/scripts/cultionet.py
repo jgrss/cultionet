@@ -502,6 +502,7 @@ def predict_image(args):
             batch_size=args.batch_size,
             load_batch_workers=args.load_batch_workers,
             device=args.device,
+            devices=args.devices,
             precision=args.precision,
             num_classes=num_classes,
             ref_res=ds[0].res,
@@ -595,6 +596,7 @@ def predict_image(args):
                     data_values=data_values,
                     ppaths=ppaths,
                     device=args.device,
+                    devices=args.devices,
                     scale_factor=SCALE_FACTOR,
                     include_maskrcnn=args.include_maskrcnn
                 )
@@ -635,6 +637,7 @@ def predict_image(args):
                     data_values=data_values,
                     ppaths=ppaths,
                     device=args.device,
+                    devices=args.devices,
                     scale_factor=SCALE_FACTOR,
                     include_maskrcnn=args.include_maskrcnn
                 )
@@ -946,6 +949,7 @@ def train_maskrcnn(args):
         reset_model=args.reset_model,
         auto_lr_find=args.auto_lr_find,
         device=args.device,
+        devices=args.devices,
         gradient_clip_val=args.gradient_clip_val,
         gradient_clip_algorithm=args.gradient_clip_algorithm,
         early_stopping_patience=args.patience,
@@ -1028,6 +1032,7 @@ def spatial_kfoldcv(args):
             reset_model=True,
             auto_lr_find=False,
             device=args.device,
+            devices=args.devices,
             gradient_clip_val=args.gradient_clip_val,
             gradient_clip_algorithm=args.gradient_clip_algorithm,
             early_stopping_patience=args.patience,
@@ -1238,6 +1243,7 @@ def train_model(args):
         reset_model=args.reset_model,
         auto_lr_find=args.auto_lr_find,
         device=args.device,
+        devices=args.devices,
         profiler=args.profiler,
         gradient_clip_val=args.gradient_clip_val,
         gradient_clip_algorithm=args.gradient_clip_algorithm,
