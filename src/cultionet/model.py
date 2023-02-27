@@ -56,6 +56,7 @@ def fit_maskrcnn(
     reset_model: T.Optional[bool] = False,
     auto_lr_find: T.Optional[bool] = False,
     device: T.Optional[str] = 'gpu',
+    devices: T.Optional[int] = 1,
     weight_decay: T.Optional[float] = 1e-5,
     precision: T.Optional[int] = 32,
     stochastic_weight_averaging: T.Optional[bool] = False,
@@ -88,6 +89,7 @@ def fit_maskrcnn(
             an existing model.
         auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
         device (Optional[str]): The device to train on. Choices are ['cpu', 'gpu'].
+        devices (Optional[int]): The number of GPU devices to use.
         weight_decay (Optional[float]): The weight decay passed to the optimizer. Default is 1e-5.
         precision (Optional[int]): The data precision. Default is 32.
         stochastic_weight_averaging (Optional[bool]): Whether to use stochastic weight averaging.
@@ -186,7 +188,7 @@ def fit_maskrcnn(
         min_epochs=5 if epochs >= 5 else epochs,
         max_epochs=epochs,
         precision=precision,
-        devices=1 if device == 'gpu' else None,
+        devices=None if device == 'cpu' else devices,
         num_processes=0,
         accelerator=device,
         log_every_n_steps=50,
@@ -245,6 +247,7 @@ def fit(
     reset_model: T.Optional[bool] = False,
     auto_lr_find: T.Optional[bool] = False,
     device: T.Optional[str] = 'gpu',
+    devices: T.Optional[int] = 1,
     profiler: T.Optional[str] = None,
     weight_decay: T.Optional[float] = 1e-5,
     precision: T.Optional[int] = 32,
@@ -288,6 +291,7 @@ def fit(
             an existing model.
         auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
         device (Optional[str]): The device to train on. Choices are ['cpu', 'gpu'].
+        devices (Optional[int]): The number of GPU devices to use.
         profiler (Optional[str]): A profiler level. Choices are [None, 'simple', 'advanced'].
         weight_decay (Optional[float]): The weight decay passed to the optimizer. Default is 1e-5.
         precision (Optional[int]): The data precision. Default is 32.
@@ -418,7 +422,7 @@ def fit(
         min_epochs=5 if epochs >= 5 else epochs,
         max_epochs=epochs,
         precision=precision,
-        devices=1 if device == 'gpu' else None,
+        devices=None if device == 'cpu' else devices,
         num_processes=0,
         accelerator=device,
         log_every_n_steps=50,
@@ -464,7 +468,7 @@ def fit(
         min_epochs=5 if epochs >= 5 else epochs,
         max_epochs=10,
         precision=32,
-        devices=1 if device == 'gpu' else None,
+        devices=None if device == 'cpu' else devices,
         num_processes=0,
         accelerator=device,
         log_every_n_steps=50,
@@ -515,6 +519,7 @@ def load_model(
     num_classes: T.Optional[int] = None,
     filters: T.Optional[int] = None,
     device: T.Union[str, bytes] = 'gpu',
+    devices: T.Optional[int] = 1,
     lit_model: T.Optional[CultioLitModel] = None,
     enable_progress_bar: T.Optional[bool] = True,
     return_trainer: T.Optional[bool] = False
@@ -540,7 +545,7 @@ def load_model(
         trainer_kwargs = dict(
             default_root_dir=str(ckpt_file.parent),
             precision=32,
-            devices=1 if device == 'gpu' else None,
+            devices=None if device == 'cpu' else devices,
             gpus=1 if device == 'gpu' else None,
             accelerator=device,
             num_processes=0,
@@ -585,6 +590,7 @@ def predict_lightning(
     batch_size: int,
     load_batch_workers: int,
     device: str,
+    devices: int,
     precision: int,
     num_classes: int,
     resampling: str,
@@ -616,7 +622,7 @@ def predict_lightning(
         default_root_dir=str(ckpt_file.parent),
         callbacks=[pred_writer],
         precision=precision,
-        devices=1 if device == 'gpu' else None,
+        devices=None if device == 'cpu' else devices,
         gpus=1 if device == 'gpu' else None,
         accelerator=device,
         num_processes=0,

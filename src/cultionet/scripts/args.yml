@@ -239,6 +239,13 @@ train_predict:
     kwargs:
       default: gpu
       choices: ['cpu', 'gpu']
+  devices:
+    short: ''
+    long: devices
+    help: The number of GPU devices to use (Note that if --device=cpu then --devices becomes 0)
+    kwargs:
+      type: '&int'
+      default: 1
   processes:
     short: ''
     long: processes
