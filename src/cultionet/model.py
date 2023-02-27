@@ -418,7 +418,7 @@ def fit(
         devices=1 if device == 'gpu' else None,
         num_processes=0,
         accelerator=device,
-        logger=[BatchMetricsLogger],
+        logger=[BatchMetricsLogger(log_path=ckpt_file.parent / 'val_metrics.log')],
         log_every_n_steps=1,
         profiler=profiler,
         deterministic=False,
