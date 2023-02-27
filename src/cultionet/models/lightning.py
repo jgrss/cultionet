@@ -8,6 +8,7 @@ from .maskcrnn import BFasterRCNN
 from .base_layers import Softmax
 from . import model_utils
 
+import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch.optim import lr_scheduler
@@ -539,7 +540,8 @@ class CultioLitModel(pl.LightningModule):
         edge_class: T.Optional[int] = None,
         crop_temperature: T.Optional[float] = None,
         temperature_lit_model: T.Optional[pl.LightningModule] = None,
-        scale_pos_weight: T.Optional[bool] = True
+        scale_pos_weight: T.Optional[bool] = True,
+        save_batch_val_metrics: T.Optional[bool] = False
     ):
         """Lightning model
         """
@@ -561,6 +563,7 @@ class CultioLitModel(pl.LightningModule):
         self.crop_temperature = crop_temperature
         self.temperature_lit_model = temperature_lit_model
         self.scale_pos_weight = scale_pos_weight
+        self.save_batch_val_metrics = save_batch_val_metrics
         self.deep_sup_dist = deep_sup_dist
         self.deep_sup_edge = deep_sup_edge
         self.deep_sup_mask = deep_sup_mask
@@ -813,7 +816,7 @@ class CultioLitModel(pl.LightningModule):
         return loss
 
     def training_step(self, batch: Data, batch_idx: int = None):
-        """Executes one training step
+        """Executes one training step and logs training step metrics
         """
         predictions = self(batch)
         loss = self.calc_loss(
@@ -909,9 +912,39 @@ class CultioLitModel(pl.LightningModule):
         }
         if 'crop_type_f1' in eval_metrics:
             metrics['vctf1'] = eval_metrics['crop_type_f1']
+
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
+        if self.save_batch_val_metrics:
+            self._save_batch_metrics(metrics, self.current_epoch, batch)
+
         return metrics
+
+    def _save_batch_metrics(
+        self,
+        metrics: T.Dict[str, torch.Tensor],
+        epoch: int,
+        batch: Data
+    ) -> None:
+        """Saves batch metrics to a parquet file
+        """
+        if not self.trainer.sanity_checking:
+            write_metrics = {
+                'epoch': [epoch] * len(batch.train_id),
+                'train_ids': batch.train_id
+            }
+            for k, v in metrics.items():
+                write_metrics[k] = [float(v)] * len(batch.train_id)
+            if self.logger.save_dir is not None:
+                metrics_file = Path(self.logger.save_dir) / 'batch_metrics.parquet'
+                if not metrics_file.is_file():
+                    df = pd.DataFrame(write_metrics)
+                    df.to_parquet(metrics_file)
+                else:
+                    df_new = pd.DataFrame(write_metrics)
+                    df = pd.read_parquet(metrics_file)
+                    df = pd.concat((df, df_new), axis=0)
+                    df.to_parquet(metrics_file)
 
     def test_step(self, batch: Data, batch_idx: int = None) -> dict:
         """Executes one test step
@@ -934,6 +967,7 @@ class CultioLitModel(pl.LightningModule):
         }
         if 'crop_type_f1' in eval_metrics:
             metrics['tctf1'] = eval_metrics['crop_type_f1']
+
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         return metrics

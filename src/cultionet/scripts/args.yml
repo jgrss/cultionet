@@ -584,6 +584,12 @@ train:
     kwargs:
       default: !!null
       type: '&int'
+  save_batch_val_metrics:
+    short: ''
+    long: save-batch-val-metrics
+    help: Whether to save batch validation metrics
+    kwargs:
+      action: store_true
 
 predict:
   predict_year:
