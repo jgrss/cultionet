@@ -916,13 +916,11 @@ class CultioLitModel(pl.LightningModule):
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         if self.save_batch_metrics:
-            self.save_batch_metrics(metrics, self.current_epoch, batch)
-        # for k, v in metrics.items():
-        #     logged_metrics[k] = float(v)
+            self._save_batch_metrics(metrics, self.current_epoch, batch)
 
         return metrics
 
-    def save_batch_metrics(
+    def _save_batch_metrics(
         self,
         metrics: T.Dict[str, torch.Tensor],
         epoch: int,
