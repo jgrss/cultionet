@@ -910,16 +910,17 @@ class CultioLitModel(pl.LightningModule):
         if 'crop_type_f1' in eval_metrics:
             metrics['vctf1'] = eval_metrics['crop_type_f1']
 
+        import ipdb; ipdb.set_trace()
         # self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
         # BatchMetrics logger
-        self.loggers[1].log_metrics(batch, metrics)
+        self.loggers[1].log_metrics(metrics)
 
         return metrics
 
     def validation_epoch_end(self, outputs: T.Sequence[T.Dict[str, torch.Tensor]]):
         # Tensorboard logger
         # self.loggers[0].log_metrics(outputs[0])
-        print(outputs)
+        import ipdb; ipdb.set_trace()
         self.log_dict(outputs[0], on_step=False, on_epoch=True, prog_bar=True)
 
     def test_step(self, batch: Data, batch_idx: int = None) -> dict:

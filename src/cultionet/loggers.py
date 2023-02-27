@@ -35,7 +35,7 @@ class BatchMetricsLogger(Logger):
         # your code to record hyperparameters goes here
         pass
 
-    def log_metrics(self, batch: Data, metrics: dict):
+    def log_metrics(self, metrics: dict, step: int):
         # metrics is a dictionary of metric names and values
         # your code to record metrics goes here
         if 'val_loss_step' in metrics:
