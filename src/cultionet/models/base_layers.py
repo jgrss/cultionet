@@ -1252,14 +1252,16 @@ class ResidualAConv(torch.nn.Module):
                 ) for dilation in dilations
             ]
         )
-        # Conv2dAtrous -> Batchnorm
-        self.skip = ConvBlock2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=1,
-            padding=0,
-            add_activation=False
-        )
+        self.skip = None
+        if in_channels != out_channels:
+            # Conv2dAtrous -> Batchnorm
+            self.skip = ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding=0,
+                add_activation=False
+            )
         self.final_act = SetActivation(activation_type=activation_type)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
