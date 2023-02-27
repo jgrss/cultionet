@@ -349,7 +349,8 @@ def fit(
         weight_decay=weight_decay,
         class_counts=class_counts,
         edge_class=edge_class,
-        scale_pos_weight=scale_pos_weight
+        scale_pos_weight=scale_pos_weight,
+        save_batch_metrics=True
     )
 
     if reset_model:
@@ -418,17 +419,6 @@ def fit(
         devices=1 if device == 'gpu' else None,
         num_processes=0,
         accelerator=device,
-        logger=[
-            TensorBoardLogger(
-                save_dir=ckpt_file.parent,
-                name='lightning_logs'
-            ),
-            CSVLogger(
-                save_dir=ckpt_file.parent,
-                name='lightning_logs',
-                flush_logs_every_n_steps=1
-            )
-        ],
         log_every_n_steps=1,
         profiler=profiler,
         deterministic=False,

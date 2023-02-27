@@ -1,6 +1,7 @@
 import typing as T
 from pathlib import Path
 import json
+import csv
 
 from ..losses import TanimotoDistLoss
 from .cultio import CultioNet, FinalRefinement
@@ -539,7 +540,8 @@ class CultioLitModel(pl.LightningModule):
         edge_class: T.Optional[int] = None,
         crop_temperature: T.Optional[float] = None,
         temperature_lit_model: T.Optional[pl.LightningModule] = None,
-        scale_pos_weight: T.Optional[bool] = True
+        scale_pos_weight: T.Optional[bool] = True,
+        save_batch_metrics: T.Optional[bool] = False
     ):
         """Lightning model
         """
@@ -561,6 +563,7 @@ class CultioLitModel(pl.LightningModule):
         self.crop_temperature = crop_temperature
         self.temperature_lit_model = temperature_lit_model
         self.scale_pos_weight = scale_pos_weight
+        self.save_batch_metrics = save_batch_metrics
         self.deep_sup_dist = deep_sup_dist
         self.deep_sup_edge = deep_sup_edge
         self.deep_sup_mask = deep_sup_mask
@@ -912,13 +915,39 @@ class CultioLitModel(pl.LightningModule):
 
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
+        if self.save_batch_metrics:
+            self.save_batch_metrics(metrics, self.current_epoch, batch)
+        # for k, v in metrics.items():
+        #     logged_metrics[k] = float(v)
+
         return metrics
 
-    # def validation_epoch_end(self, outputs: T.Sequence[T.Dict[str, torch.Tensor]]):
-    #     # Tensorboard logger
-    #     # self.loggers[0].log_metrics(outputs[0])
-    #     import ipdb; ipdb.set_trace()
-    #     self.log_dict(outputs[0], on_step=False, on_epoch=True, prog_bar=True)
+    def save_batch_metrics(
+        self,
+        metrics: T.Dict[str, torch.Tensor],
+        epoch: int,
+        batch: Data
+    ) -> None:
+        """Save
+        """
+        if self.logger.save_dir is not None:
+            metrics_file = Path(self.logger.save_dir) / 'batch_metrics.log'
+            if not metrics_file.is_file():
+                import ipdb; ipdb.set_trace()
+                with open(metrics_file, mode='w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=list(metrics.keys()))
+                    writer.writeheader()
+                    writer.writerows(metrics)
+            else:
+                with open(metrics_file, mode='r') as f:
+                    written_metrics = csv.DictReader(f)
+                # writer = csv.DictWriter(f, fieldnames=list(metrics.keys()))
+                # writer.writeheader()
+                # writer.writerows(self.metrics)
+                # with open(scale_file, mode='w') as f:
+                #     f.write(json.dumps(temperature_scales))
+
+            import ipdb; ipdb.set_trace()
 
     def test_step(self, batch: Data, batch_idx: int = None) -> dict:
         """Executes one test step
@@ -941,6 +970,7 @@ class CultioLitModel(pl.LightningModule):
         }
         if 'crop_type_f1' in eval_metrics:
             metrics['tctf1'] = eval_metrics['crop_type_f1']
+
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         return metrics
