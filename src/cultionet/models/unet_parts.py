@@ -9,19 +9,10 @@ from .base_layers import (
     ResidualAConv,
     AttentionGate
 )
+from .enums import ModelTypes, ResBlockTypes
 from . import model_utils
 
 import torch
-
-
-class ModelTypes(enum.Enum):
-    UNET = enum.auto()
-    RESUNET = enum.auto()
-
-
-class ResBlockTypes(enum.Enum):
-    RES = enum.auto()
-    RESA = enum.auto()
 
 
 class UNet3Connector(torch.nn.Module):

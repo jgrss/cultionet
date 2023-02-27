@@ -2,7 +2,7 @@ import typing as T
 import enum
 
 from . import model_utils
-from .unet_parts import ResBlockTypes
+from .enums import ResBlockTypes
 
 import torch
 import torch.nn.functional as F

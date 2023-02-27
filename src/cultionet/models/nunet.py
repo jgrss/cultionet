@@ -27,8 +27,8 @@ from .base_layers import (
     Squeeze,
     SetActivation
 )
+from .enums import ResBlockTypes
 from .unet_parts import (
-    ResBlockTypes,
     UNet3P_3_1,
     UNet3P_2_2,
     UNet3P_1_3,
