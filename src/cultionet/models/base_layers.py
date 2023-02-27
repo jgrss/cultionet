@@ -1264,7 +1264,7 @@ class ResidualAConv(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.skip(x)
-        for seq in self.modules:
+        for seq in self.res_modules:
             out = out + seq(x)
         out = self.final_act(out)
 
