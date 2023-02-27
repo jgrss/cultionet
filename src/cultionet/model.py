@@ -251,7 +251,8 @@ def fit(
     stochastic_weight_averaging: T.Optional[bool] = False,
     stochastic_weight_averaging_lr: T.Optional[float] = 0.05,
     stochastic_weight_averaging_start: T.Optional[float] = 0.8,
-    model_pruning: T.Optional[bool] = False
+    model_pruning: T.Optional[bool] = False,
+    save_batch_val_metrics: T.Optional[bool] = False
 ):
     """Fits a model
 
@@ -297,6 +298,7 @@ def fit(
         stochastic_weight_averaging_start (Optional[float]): The stochastic weight averaging epoch start.
             Default is 0.8.
         model_pruning (Optional[bool]): Whether to prune the model. Default is False.
+        save_batch_val_metrics (Optional[bool]): Whether to save batch validation metrics to a parquet file.
     """
     ckpt_file = Path(ckpt_file)
 
@@ -350,7 +352,7 @@ def fit(
         class_counts=class_counts,
         edge_class=edge_class,
         scale_pos_weight=scale_pos_weight,
-        save_batch_metrics=True
+        save_batch_val_metrics=save_batch_val_metrics
     )
 
     if reset_model:

@@ -541,7 +541,7 @@ class CultioLitModel(pl.LightningModule):
         crop_temperature: T.Optional[float] = None,
         temperature_lit_model: T.Optional[pl.LightningModule] = None,
         scale_pos_weight: T.Optional[bool] = True,
-        save_batch_metrics: T.Optional[bool] = False
+        save_batch_val_metrics: T.Optional[bool] = False
     ):
         """Lightning model
         """
@@ -563,7 +563,7 @@ class CultioLitModel(pl.LightningModule):
         self.crop_temperature = crop_temperature
         self.temperature_lit_model = temperature_lit_model
         self.scale_pos_weight = scale_pos_weight
-        self.save_batch_metrics = save_batch_metrics
+        self.save_batch_val_metrics = save_batch_val_metrics
         self.deep_sup_dist = deep_sup_dist
         self.deep_sup_edge = deep_sup_edge
         self.deep_sup_mask = deep_sup_mask
@@ -915,7 +915,7 @@ class CultioLitModel(pl.LightningModule):
 
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
-        if self.save_batch_metrics:
+        if self.save_batch_val_metrics:
             self._save_batch_metrics(metrics, self.current_epoch, batch)
 
         return metrics
