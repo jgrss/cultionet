@@ -9,6 +9,7 @@ from .callbacks import LightningGTiffWriter
 from .data.const import SCALE_FACTOR
 from .data.datasets import EdgeDataset, zscores
 from .data.modules import EdgeDataModule
+from .loggers import BatchMetricsLogger
 from .models.lightning import (
     CultioLitModel,
     MaskRCNNLitModel,
@@ -417,6 +418,7 @@ def fit(
         devices=1 if device == 'gpu' else None,
         num_processes=0,
         accelerator=device,
+        logger=[BatchMetricsLogger],
         log_every_n_steps=50,
         profiler=profiler,
         deterministic=False,
