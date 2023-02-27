@@ -419,7 +419,7 @@ def fit(
         num_processes=0,
         accelerator=device,
         logger=[BatchMetricsLogger],
-        log_every_n_steps=50,
+        log_every_n_steps=1,
         profiler=profiler,
         deterministic=False,
         benchmark=False
