@@ -9,7 +9,6 @@ from .callbacks import LightningGTiffWriter
 from .data.const import SCALE_FACTOR
 from .data.datasets import EdgeDataset, zscores
 from .data.modules import EdgeDataModule
-from .loggers import BatchMetricsLogger
 from .models.lightning import (
     CultioLitModel,
     MaskRCNNLitModel,
@@ -30,7 +29,7 @@ from pytorch_lightning.callbacks import (
     ModelPruning
 )
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.loggers import CSVLogger, TensorBoardLogger
 from torchvision import transforms
 
 logging.getLogger('lightning').addHandler(logging.NullHandler())
@@ -424,8 +423,10 @@ def fit(
                 save_dir=ckpt_file.parent,
                 name='lightning_logs'
             ),
-            BatchMetricsLogger(
-                log_path=ckpt_file.parent / 'val_metrics.log'
+            CSVLogger(
+                save_dir=ckpt_file.parent,
+                name='lightning_logs',
+                flush_logs_every_n_steps=1
             )
         ],
         log_every_n_steps=1,

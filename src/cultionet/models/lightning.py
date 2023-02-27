@@ -911,8 +911,6 @@ class CultioLitModel(pl.LightningModule):
             metrics['vctf1'] = eval_metrics['crop_type_f1']
 
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
-        # BatchMetrics logger
-        self.loggers[1].log_metrics(metrics, batch_idx)
 
         return metrics
 
