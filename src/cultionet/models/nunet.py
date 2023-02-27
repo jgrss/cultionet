@@ -436,7 +436,7 @@ class PreUnet3Psi(torch.nn.Module):
         activation_type: str,
         trend_kernel_size: int = 5
     ):
-        super(PreUnet3Psi).__init__()
+        super(PreUnet3Psi, self).__init__()
 
         self.cg = model_utils.ConvToGraph()
         self.gc = model_utils.GraphToConv()
