@@ -177,7 +177,7 @@ class StarRNN(torch.nn.Module):
             ResidualConv(
                 in_channels=int(hidden_dim * 2),
                 out_channels=hidden_dim,
-                dilations=[2],
+                dilations=2,
                 activation_type=activation_type
             ),
             torch.nn.Dropout(0.1),
@@ -194,7 +194,7 @@ class StarRNN(torch.nn.Module):
             ResidualConv(
                 in_channels=int(hidden_dim * 3),
                 out_channels=hidden_dim,
-                dilations=[2],
+                dilations=2,
                 activation_type=activation_type
             ),
             torch.nn.Dropout(0.1),
