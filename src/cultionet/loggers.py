@@ -41,14 +41,3 @@ class BatchMetricsLogger(Logger):
         import ipdb; ipdb.set_trace()
         # output_path = Path(self.logger.save_dir) / ''
         # self._write_row()
-
-    @rank_zero_only
-    def save(self):
-        # Optional. Any code necessary to save logger data goes here
-        pass
-
-    @rank_zero_only
-    def finalize(self, status):
-        # Optional. Any code that needs to be run after training
-        # finishes goes here
-        pass
