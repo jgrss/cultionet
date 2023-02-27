@@ -813,14 +813,14 @@ class CultioLitModel(pl.LightningModule):
         return loss
 
     def training_step(self, batch: Data, batch_idx: int = None):
-        """Executes one training step
+        """Executes one training step and logs training step metrics
         """
         predictions = self(batch)
         loss = self.calc_loss(
             batch,
             predictions
         )
-        self.log('loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('loss', loss, on_step=True, on_epoch=True, prog_bar=True)
 
         return loss
 
