@@ -936,16 +936,15 @@ class CultioLitModel(pl.LightningModule):
             for k, v in metrics.items():
                 write_metrics[k] = [float(v)] * len(batch.train_id)
             if self.logger.save_dir is not None:
-                metrics_file = Path(self.logger.save_dir) / 'batch_metrics.log'
-                import ipdb; ipdb.set_trace()
+                metrics_file = Path(self.logger.save_dir) / 'batch_metrics.parquet'
                 if not metrics_file.is_file():
                     df = pd.DataFrame(write_metrics)
                     df.to_parquet(metrics_file)
                 else:
                     df_new = pd.DataFrame(write_metrics)
-                    df = pd.read_csv(metrics_file)
+                    df = pd.read_parquet(metrics_file)
                     df = pd.concat((df, df_new), axis=0)
-                    df.to_csv(metrics_file, sep=',', index=False)
+                    df.to_parquet(metrics_file)
 
     def test_step(self, batch: Data, batch_idx: int = None) -> dict:
         """Executes one test step
