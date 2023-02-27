@@ -1178,18 +1178,24 @@ class ResidualConv(torch.nn.Module):
             activation_type=activation_type,
             num_blocks=2
         )
-        # Conv -> Batchnorm
-        self.skip = ConvBlock2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=1,
-            padding=0,
-            add_activation=False
-        )
+        self.skip = None
+        if in_channels != out_channels:
+            # Conv -> Batchnorm
+            self.skip = ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding=0,
+                add_activation=False
+            )
         self.final_act = SetActivation(activation_type=activation_type)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.seq(x) + self.skip(x)
+        if self.skip is None:
+            out = x
+        else:
+            out = self.skip(x)
+        out = out + self.seq(x)
         out = self.final_act(out)
 
         if self.attention_weights is not None:
@@ -1265,7 +1271,10 @@ class ResidualAConv(torch.nn.Module):
         self.final_act = SetActivation(activation_type=activation_type)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.skip(x)
+        if self.skip is None:
+            out = x
+        else:
+            out = self.skip(x)
         for seq in self.res_modules:
             out = out + seq(x)
         out = self.final_act(out)
