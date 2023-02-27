@@ -928,24 +928,33 @@ class CultioLitModel(pl.LightningModule):
     ) -> None:
         """Save
         """
-        if self.logger.save_dir is not None:
-            metrics_file = Path(self.logger.save_dir) / 'batch_metrics.log'
-            if not metrics_file.is_file():
-                import ipdb; ipdb.set_trace()
-                with open(metrics_file, mode='w', newline='') as f:
-                    writer = csv.DictWriter(f, fieldnames=list(metrics.keys()))
-                    writer.writeheader()
-                    writer.writerows(metrics)
-            else:
-                with open(metrics_file, mode='r') as f:
-                    written_metrics = csv.DictReader(f)
-                # writer = csv.DictWriter(f, fieldnames=list(metrics.keys()))
-                # writer.writeheader()
-                # writer.writerows(self.metrics)
-                # with open(scale_file, mode='w') as f:
-                #     f.write(json.dumps(temperature_scales))
+        if not self.trainer.sanity_checking:
+            header = ['epoch', 'train_ids'] + list(metrics.keys())
+            write_metrics = {
+                'epoch': epoch,
+                'train_ids': ';'.join(batch.train_id)
+            }
+            for k, v in metrics.items():
+                write_metrics[k] = float(v)
+            if self.logger.save_dir is not None:
+                metrics_file = Path(self.logger.save_dir) / 'batch_metrics.log'
+                if not metrics_file.is_file():
+                    with open(metrics_file, mode='w', newline='') as f:
+                        writer = csv.DictWriter(f, fieldnames=header)
+                        writer.writeheader()
+                        writer.writerows(write_metrics)
+                    import ipdb; ipdb.set_trace()
+                else:
+                    import ipdb; ipdb.set_trace()
+                    with open(metrics_file, mode='r') as f:
+                        written_metrics = csv.DictReader(f)
+                    # writer = csv.DictWriter(f, fieldnames=list(metrics.keys()))
+                    # writer.writeheader()
+                    # writer.writerows(self.metrics)
+                    # with open(scale_file, mode='w') as f:
+                    #     f.write(json.dumps(temperature_scales))
 
-            import ipdb; ipdb.set_trace()
+                import ipdb; ipdb.set_trace()
 
     def test_step(self, batch: Data, batch_idx: int = None) -> dict:
         """Executes one test step
