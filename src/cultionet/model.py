@@ -189,7 +189,7 @@ def fit_maskrcnn(
         devices=1 if device == 'gpu' else None,
         num_processes=0,
         accelerator=device,
-        log_every_n_steps=10,
+        log_every_n_steps=50,
         profiler=None,
         deterministic=False,
         benchmark=False
@@ -421,7 +421,7 @@ def fit(
         devices=1 if device == 'gpu' else None,
         num_processes=0,
         accelerator=device,
-        log_every_n_steps=1,
+        log_every_n_steps=50,
         profiler=profiler,
         deterministic=False,
         benchmark=False
@@ -467,7 +467,7 @@ def fit(
         devices=1 if device == 'gpu' else None,
         num_processes=0,
         accelerator=device,
-        log_every_n_steps=10,
+        log_every_n_steps=50,
         profiler=profiler,
         deterministic=False,
         benchmark=False
