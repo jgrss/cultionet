@@ -2,7 +2,6 @@ from pathlib import Path
 import typing as T
 
 from pytorch_lightning.loggers.logger import Logger
-from pytorch_lightning.utilities import rank_zero_only
 import csv
 
 
@@ -21,7 +20,7 @@ class BatchMetricsLogger(Logger):
 
     @property
     def name(self):
-        return "BatchMetricsLogger"
+        return 'batch_metric_logs'
 
     @property
     def version(self):
@@ -36,6 +35,7 @@ class BatchMetricsLogger(Logger):
     def log_metrics(self, metrics: dict, step: int):
         # metrics is a dictionary of metric names and values
         # your code to record metrics goes here
-        print(metrics)
+        if 'val_loss' in metrics:
+            import ipdb; ipdb.set_trace()
         # output_path = Path(self.logger.save_dir) / ''
         # self._write_row()
