@@ -909,7 +909,7 @@ class CultioLitModel(pl.LightningModule):
         }
         if 'crop_type_f1' in eval_metrics:
             metrics['vctf1'] = eval_metrics['crop_type_f1']
-        self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True)
+        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         return metrics
 
@@ -934,7 +934,7 @@ class CultioLitModel(pl.LightningModule):
         }
         if 'crop_type_f1' in eval_metrics:
             metrics['tctf1'] = eval_metrics['crop_type_f1']
-        self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True)
+        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         return metrics
 
