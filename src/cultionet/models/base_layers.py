@@ -1268,6 +1268,8 @@ class ResidualAConv(torch.nn.Module):
             out = out + seq(x)
         out = self.final_act(out)
 
+        import ipdb; ipdb.set_trace()
+
         if self.attention_weights is not None:
             out = self.attention_conv(out)
 
