@@ -421,8 +421,8 @@ def fit(
         accelerator=device,
         logger=[
             TensorBoardLogger(
-                save_dir=ckpt_file.parent / 'lightning_logs',
-                name='cultionet'
+                save_dir=ckpt_file.parent,
+                name='lightning_logs'
             ),
             BatchMetricsLogger(
                 log_path=ckpt_file.parent / 'val_metrics.log'

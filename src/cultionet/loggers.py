@@ -2,6 +2,7 @@ from pathlib import Path
 import typing as T
 
 from pytorch_lightning.loggers.logger import Logger
+from torch_geometric.data import Data
 import csv
 
 
@@ -27,14 +28,14 @@ class BatchMetricsLogger(Logger):
     @property
     def version(self):
         # Return the experiment version, int or str.
-        return "0.1"
+        return None
 
     def log_hyperparams(self, params):
         # params is an argparse.Namespace
         # your code to record hyperparameters goes here
         pass
 
-    def log_metrics(self, metrics: dict, step: int):
+    def log_metrics(self, batch: Data, metrics: dict):
         # metrics is a dictionary of metric names and values
         # your code to record metrics goes here
         if 'val_loss_step' in metrics:
