@@ -30,6 +30,7 @@ from pytorch_lightning.callbacks import (
     ModelPruning
 )
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.loggers import TensorBoardLogger
 from torchvision import transforms
 
 logging.getLogger('lightning').addHandler(logging.NullHandler())
@@ -418,7 +419,15 @@ def fit(
         devices=1 if device == 'gpu' else None,
         num_processes=0,
         accelerator=device,
-        logger=[BatchMetricsLogger(log_path=ckpt_file.parent / 'val_metrics.log')],
+        logger=[
+            TensorBoardLogger(
+                save_dir=ckpt_file.parent / 'lightning_logs',
+                name='cultionet'
+            ),
+            BatchMetricsLogger(
+                log_path=ckpt_file.parent / 'val_metrics.log'
+            )
+        ],
         log_every_n_steps=1,
         profiler=profiler,
         deterministic=False,

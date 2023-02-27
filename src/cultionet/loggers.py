@@ -10,7 +10,9 @@ class BatchMetricsLogger(Logger):
         super().__init__()
 
         self.log_path = log_path
-        self.header = ['id', 'epoch', 'step', 'metric']
+        self.header = [
+            'id', 'epoch', 'step', 'val_loss'
+        ]
         self._write_row(self.header, mode='w')
 
     def _write_row(self, row: T.Sequence[str], mode: str) -> None:
