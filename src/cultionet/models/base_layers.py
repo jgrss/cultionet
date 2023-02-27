@@ -51,12 +51,12 @@ class SetActivation(torch.nn.Module):
         if activation_type == 'Swish':
             assert isinstance(channels, int), 'Swish requires the input channels.'
             assert isinstance(dims, int), 'Swish requires the tensor dimension.'
-            self.act = Swish(channels=channels, dims=dims)
+            self.activation = Swish(channels=channels, dims=dims)
         else:
-            self.act = getattr(torch.nn, activation_type)(inplace=False)
+            self.activation = getattr(torch.nn, activation_type)(inplace=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.act(x)
+        return self.activation(x)
 
 
 class LogSoftmax(torch.nn.Module):
@@ -1267,8 +1267,6 @@ class ResidualAConv(torch.nn.Module):
         for seq in self.res_modules:
             out = out + seq(x)
         out = self.final_act(out)
-
-        import ipdb; ipdb.set_trace()
 
         if self.attention_weights is not None:
             out = self.attention_conv(out)
