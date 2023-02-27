@@ -926,7 +926,7 @@ class CultioLitModel(pl.LightningModule):
         epoch: int,
         batch: Data
     ) -> None:
-        """Save
+        """Saves batch metrics to a parquet file
         """
         if not self.trainer.sanity_checking:
             write_metrics = {
