@@ -28,17 +28,14 @@ class BatchMetricsLogger(Logger):
         # Return the experiment version, int or str.
         return "0.1"
 
-    @rank_zero_only
     def log_hyperparams(self, params):
         # params is an argparse.Namespace
         # your code to record hyperparameters goes here
         pass
 
-    @rank_zero_only
     def log_metrics(self, metrics: dict, step: int):
         # metrics is a dictionary of metric names and values
         # your code to record metrics goes here
-        if 'val_loss' in metrics:
-            import ipdb; ipdb.set_trace()
+        print(metrics)
         # output_path = Path(self.logger.save_dir) / ''
         # self._write_row()
