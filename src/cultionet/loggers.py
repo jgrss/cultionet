@@ -35,9 +35,10 @@ class BatchMetricsLogger(Logger):
         pass
 
     @rank_zero_only
-    def log_metrics(self, metrics, step):
+    def log_metrics(self, metrics: dict, step: int):
         # metrics is a dictionary of metric names and values
         # your code to record metrics goes here
-        import ipdb; ipdb.set_trace()
+        if 'val_loss' in metrics:
+            import ipdb; ipdb.set_trace()
         # output_path = Path(self.logger.save_dir) / ''
         # self._write_row()
