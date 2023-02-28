@@ -597,6 +597,7 @@ class TanimotoDist(torch.nn.Module):
             Tanimoto distance loss (float)
         """
         def _tanimoto(yhat: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            import ipdb; ipdb.set_trace()
             tpl = torch.sum(yhat * y, dim=self.dim, keepdim=True)
             sq_sum = torch.sum(yhat**2 + y**2, dim=self.dim, keepdim=True)
             numerator = tpl + self.smooth
@@ -689,8 +690,6 @@ class FractalAttention(torch.nn.Module):
         q = self.query(x)
         k = self.key(x)
         v = self.value(x)
-
-        import ipdb; ipdb.set_trace()
 
         attention_spatial = self.spatial_sim(q, k)
         v_spatial = attention_spatial * v
