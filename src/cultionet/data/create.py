@@ -190,14 +190,14 @@ def is_grid_processed(
         aug_name = translations[aug] if aug in translations else aug
         train_id = f"{group_id}_{grid}_{aug_name}"
         train_path = process_path / f'{prefix}{train_id}{suffix}'
-        print(train_path)
+
         if train_path.is_file():
             batch_stored = True
         else:
             batch_stored = False
 
         batches_stored.append(batch_stored)
-    import ipdb; ipdb.set_trace()
+
     return all(batches_stored)
 
 
