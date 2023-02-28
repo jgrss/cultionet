@@ -838,7 +838,8 @@ class SpatialChannelAttention(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         channel_attention = self.channel_attention(x)
         spatial_attention = self.spatial_attention(x)
-        attention = channel_attention + spatial_attention
+        attention = (channel_attention + spatial_attention) * 0.5
+        attention = self.norm(attention)
 
         return attention
 
