@@ -187,7 +187,8 @@ def is_grid_processed(
     }
     batches_stored = []
     for aug in transforms:
-        train_id = f'{group_id}_{grid}_{aug}'
+        aug_name = translations[aug] if aug in translations else aug
+        train_id = f"{group_id}_{grid}_{aug_name}"
         train_path = process_path / f'{prefix}{train_id}{suffix}'
         print(train_path)
         if train_path.is_file():
