@@ -178,6 +178,13 @@ def is_grid_processed(
 ) -> bool:
     """Checks if a grid is already processed
     """
+    # FIX: this shouldn't be needed, so fix the names
+    translations = {
+        'rot90': 'rotate-90',
+        'rot180': 'rotate-180',
+        'rot270': 'rotate-270',
+        's&p': 'salt-pepper'
+    }
     batches_stored = []
     for aug in transforms:
         train_id = f'{group_id}_{grid}_{aug}'
