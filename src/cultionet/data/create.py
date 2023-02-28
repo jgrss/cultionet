@@ -183,7 +183,7 @@ def is_grid_processed(
         'rot90': 'rotate-90',
         'rot180': 'rotate-180',
         'rot270': 'rotate-270',
-        's&p': 'salt-pepper'
+        'salt-pepper': 's&p'
     }
     batches_stored = []
     for aug in transforms:
