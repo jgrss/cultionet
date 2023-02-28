@@ -1292,7 +1292,7 @@ class ResidualConv(torch.nn.Module):
 
         if self.attention_weights is not None:
             assert self.attention_weights in  ['fractal', 'spatial_channel'], \
-                'Only one attention method should be used.'
+                'The attention method is not supported.'
 
             self.gamma = torch.nn.Parameter(torch.ones(1))
 
@@ -1419,7 +1419,7 @@ class ResidualAConv(torch.nn.Module):
 
         if self.attention_weights is not None:
             assert self.attention_weights in  ['fractal', 'spatial_channel'], \
-                'Only one attention method should be used.'
+                'The attention method is not supported.'
 
             self.gamma = torch.nn.Parameter(torch.ones(1))
 
