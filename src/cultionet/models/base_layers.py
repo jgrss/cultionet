@@ -606,6 +606,8 @@ class TanimotoDist(torch.nn.Module):
             return tanimoto_score
 
         score = _tanimoto(inputs, targets)
+        compl_score = _tanimoto(1.0 - inputs, 1.0 - targets)
+        score = (score + compl_score) * 0.5
 
         return score
 
