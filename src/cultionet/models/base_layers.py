@@ -686,7 +686,7 @@ class FractalAttention(torch.nn.Module):
         q = self.query(x)
         k = self.key(x)
         v = self.value(x)
-        import ipdb; ipdb.set_trace()
+
         attention_spatial = self.spatial_sim(q, k)
         v_spatial = attention_spatial * v
 
