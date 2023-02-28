@@ -275,7 +275,7 @@ class UNet3Connector(torch.nn.Module):
                     activation_type=activation_type
                 )
             else:
-                self.conv4_0 = ResidualConv(
+                self.conv4_0 = ResidualAConv(
                     in_channels=channels[4],
                     out_channels=channels[0],
                     dilations=dilations,
