@@ -173,30 +173,23 @@ def is_grid_processed(
     transforms: T.List[str],
     group_id: str,
     grid: T.Union[str, int],
-    n_ts: int
+    prefix: str = 'data_',
+    suffix: str = '.pt'
 ) -> bool:
     """Checks if a grid is already processed
     """
-    batch_stored = False
+    batches_stored = []
     for aug in transforms:
-        if aug.startswith('ts-'):
-            for i in range(0, n_ts):
-                train_id = f'{group_id}_{grid}_{aug}_{i:03d}'
-                train_path = process_path / f'data_{train_id}.pt'
-                if train_path.is_file():
-                    train_data = joblib.load(train_path)
-                    if train_data.train_id == train_id:
-                        batch_stored = True
-
+        train_id = f'{group_id}_{grid}_{aug}'
+        train_path = process_path / f'{prefix}{train_id}{suffix}'
+        if train_path.is_file():
+            batch_stored = True
         else:
-            train_id = f'{group_id}_{grid}_{aug}'
-            train_path = process_path / f'data_{train_id}.pt'
-            if train_path.is_file():
-                train_data = joblib.load(train_path)
-                if train_data.train_id == train_id:
-                    batch_stored = True
+            batch_stored = False
 
-    return batch_stored
+        batches_stored.append(batch_stored)
+
+    return all(batches_stored)
 
 
 def create_boundary_distances(
@@ -789,8 +782,7 @@ def create_dataset(
                     process_path,
                     transforms,
                     group_id,
-                    row_grid_id,
-                    n_ts
+                    row_grid_id
                 )
                 if batch_stored:
                     pbar.update(1)
@@ -822,13 +814,6 @@ def create_dataset(
                     segments=segments,
                     props=props
                 )
-                # def save_and_update(train_data: Data) -> None:
-                #     train_path = process_path / f'data_{train_data.train_id}.pt'
-                #     joblib.dump(
-                #         train_data,
-                #         train_path,
-                #         compress=5
-                #     )
 
                 if input_height is None:
                     input_height = ldata.y.shape[0]
@@ -877,61 +862,6 @@ def create_dataset(
                         data=aug_data,
                         compress=5
                     )
-
-                # for aug in transforms:
-                #     if aug.startswith('ts-'):
-                #         for i in range(0, n_ts):
-                #             train_id = f'{group_id}_{row_grid_id}_{aug}_{i:03d}'
-                #             train_data = augment(
-                #                 ldata,
-                #                 aug=aug,
-                #                 ntime=ntime,
-                #                 nbands=nbands,
-                #                 max_crop_class=max_crop_class,
-                #                 k=3,
-                #                 instance_seg=instance_seg,
-                #                 zero_padding=zero_padding,
-                #                 start_year=start_year,
-                #                 end_year=end_year,
-                #                 left=left,
-                #                 bottom=bottom,
-                #                 right=right,
-                #                 top=top,
-                #                 res=ref_res,
-                #                 train_id=train_id
-                #             )
-                #             if instance_seg:
-                #                 if hasattr(train_data, 'boxes') and train_data.boxes is not None:
-                #                     save_and_update(train_data)
-                #             else:
-                #                 save_and_update(train_data)
-                #     else:
-                #         train_id = f'{group_id}_{row_grid_id}_{aug}'
-                #         train_data = augment(
-                #             ldata,
-                #             aug=aug,
-                #             ntime=ntime,
-                #             nbands=nbands,
-                #             max_crop_class=max_crop_class,
-                #             k=3,
-                #             instance_seg=instance_seg,
-                #             zero_padding=zero_padding,
-                #             start_year=start_year,
-                #             end_year=end_year,
-                #             left=left,
-                #             bottom=bottom,
-                #             right=right,
-                #             top=top,
-                #             res=ref_res,
-                #             train_id=train_id
-                #         )
-                #         if instance_seg:
-                #             # Grids without boxes are set as None, and Data() does not
-                #             # keep None types.
-                #             if hasattr(train_data, 'boxes') and train_data.boxes is not None:
-                #                 save_and_update(train_data)
-                #         else:
-                #             save_and_update(train_data)
 
             pbar.update(1)
             pbar.set_description(group_id)
