@@ -2,12 +2,13 @@ import typing as T
 import enum
 
 from .base_layers import (
+    AttentionGate,
+    AtrousPyramidPooling,
     DoubleConv,
     PoolConv,
     PoolResidualConv,
-    ResidualConv,
     ResidualAConv,
-    AttentionGate
+    ResidualConv
 )
 from .enums import ModelTypes, ResBlockTypes
 from . import model_utils
@@ -50,6 +51,7 @@ class UNet3Connector(torch.nn.Module):
         self.use_backbone = use_backbone
         self.is_side_stream = is_side_stream
         self.cat_channels = 0
+        self.pool4_0 = None
 
         self.up = model_utils.UpSample()
 
@@ -257,12 +259,14 @@ class UNet3Connector(torch.nn.Module):
                 activation_type=activation_type
             )
         else:
-            self.conv4_0 = ResidualConv(
-                in_channels=channels[4],
-                out_channels=channels[0],
-                activation_type=activation_type
-            )
             if res_block_type == ResBlockTypes.RES:
+                self.conv4_0 = ResidualConv(
+                    in_channels=channels[4],
+                    out_channels=channels[0],
+                    dilations=dilations[0],
+                    attention_weights=attention_weights,
+                    activation_type=activation_type
+                )
                 self.final = ResidualConv(
                     in_channels=self.cat_channels,
                     out_channels=up_channels,
@@ -271,6 +275,17 @@ class UNet3Connector(torch.nn.Module):
                     activation_type=activation_type
                 )
             else:
+                self.conv4_0 = ResidualConv(
+                    in_channels=channels[4],
+                    out_channels=channels[0],
+                    dilations=dilations,
+                    attention_weights=attention_weights,
+                    activation_type=activation_type
+                )
+                self.pool4_0 = AtrousPyramidPooling(
+                    in_channels=channels[0],
+                    out_channels=channels[0]
+                )
                 self.final = ResidualAConv(
                     in_channels=self.cat_channels,
                     out_channels=up_channels,
@@ -304,7 +319,9 @@ class UNet3Connector(torch.nn.Module):
                 h += [
                     c(
                         self.up(
-                            x, size=prev_same[0][1].shape[-2:], mode='bilinear'
+                            x,
+                            size=prev_same[0][1].shape[-2:],
+                            mode='bilinear'
                         )
                     )
                 ]
@@ -335,19 +352,25 @@ class UNet3Connector(torch.nn.Module):
                     h += [
                         c(
                             self.up(
-                                x, size=prev_same[0][1].shape[-2:], mode='bilinear'
+                                x,
+                                size=prev_same[0][1].shape[-2:],
+                                mode='bilinear'
                             )
                         )
                     ]
 
         # Lowest level
-        h += [
-            self.conv4_0(
-                self.up(
-                    x4_0, size=prev_same[0][1].shape[-2:], mode='bilinear'
-                )
+        x4_0_up = self.conv4_0(
+            self.up(
+                x4_0,
+                size=prev_same[0][1].shape[-2:],
+                mode='bilinear'
             )
-        ]
+        )
+        if self.pool4_0 is not None:
+            h += [self.pool4_0(x4_0_up)]
+        else:
+            h += [x4_0_up]
         h = torch.cat(h, dim=1)
         h = self.final(h)
 

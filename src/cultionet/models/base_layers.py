@@ -641,6 +641,7 @@ class FractalAttention(torch.nn.Module):
         Reference:
             https://arxiv.org/pdf/2009.02062.pdf
             https://github.com/waldnerf/decode/blob/9e922a2082e570e248eaee10f7a1f2f0bd852b42/FracTAL_ResUNet/nn/units/fractal_resnet.py
+            https://github.com/waldnerf/decode/blob/9e922a2082e570e248eaee10f7a1f2f0bd852b42/FracTAL_ResUNet/nn/layers/attention.py
     """
     def __init__(
         self,
@@ -648,8 +649,6 @@ class FractalAttention(torch.nn.Module):
         out_channels: int
     ):
         super(FractalAttention, self).__init__()
-
-        self.gamma = torch.nn.Parameter(torch.ones(1))
 
         self.query = torch.nn.Sequential(
             ConvBlock2d(
@@ -691,26 +690,23 @@ class FractalAttention(torch.nn.Module):
         k = self.key(x)
         v = self.value(x)
 
+        import ipdb; ipdb.set_trace()
+
         attention_spatial = self.spatial_sim(q, k)
         v_spatial = attention_spatial * v
 
         attention_channel = self.channel_sim(q, k)
         v_channel = attention_channel * v
 
-        v_channel_spatial = (v_spatial + v_channel) * 0.5
-        v_channel_spatial = self.norm(v_channel_spatial)
+        attention = (v_spatial + v_channel) * 0.5
+        attention = self.norm(attention)
 
-        # 1 + γA
-        attention = 1.0 + self.gamma * v_channel_spatial
-
-        return x * attention
+        return attention
 
 
 class ChannelAttention(torch.nn.Module):
     def __init__(self, out_channels: int, activation_type: str):
         super(ChannelAttention, self).__init__()
-
-        self.gamma = torch.nn.Parameter(torch.ones(1))
 
         # Channel attention
         self.channel_adaptive_avg = torch.nn.AdaptiveAvgPool2d(1)
@@ -737,21 +733,15 @@ class ChannelAttention(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         avg_attention = self.seq(self.channel_adaptive_avg(x))
         max_attention = self.seq(self.channel_adaptive_max(x))
-        attention = (avg_attention + max_attention) * 0.5
+        attention = avg_attention + max_attention
         attention = self.sigmoid(attention)
-        # 1 + γA
-        attention = 1.0 + self.gamma * attention
 
-        out = x * attention.expand_as(x)
-
-        return out
+        return attention.expand_as(x)
 
 
 class SpatialAttention(torch.nn.Module):
     def __init__(self):
         super(SpatialAttention, self).__init__()
-
-        self.gamma = torch.nn.Parameter(torch.ones(1))
 
         self.conv = torch.nn.Conv2d(
             in_channels=2,
@@ -770,12 +760,8 @@ class SpatialAttention(torch.nn.Module):
         attention = torch.cat([avg_attention, max_attention], dim=1)
         attention = self.conv(attention)
         attention = self.sigmoid(attention)
-        # 1 + γA
-        attention = 1.0 + self.gamma * attention
 
-        out = x * attention.expand_as(x)
-
-        return out
+        return attention.expand_as(x)
 
 
 class SpatialChannelAttention(torch.nn.Module):
@@ -795,17 +781,14 @@ class SpatialChannelAttention(torch.nn.Module):
             activation_type=activation_type
         )
         self.spatial_attention = SpatialAttention()
-        self.final = torch.nn.Sequential(
-            torch.nn.BatchNorm2d(out_channels),
-            SetActivation(activation_type=activation_type)
-        )
+        self.norm = torch.nn.BatchNorm2d(out_channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out_channel = self.channel_attention(x)
-        out_spatial = self.spatial_attention(x)
-        out = self.final(out_channel + out_spatial)
+        channel_attention = self.channel_attention(x)
+        spatial_attention = self.spatial_attention(x)
+        attention = channel_attention + spatial_attention
 
-        return out
+        return attention
 
 
 class ResSpatioTemporalConv3d(torch.nn.Module):
@@ -943,6 +926,104 @@ class DoubleConv(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
+
+
+class AtrousPyramidPooling(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        dilation_b: int = 2,
+        dilation_c: int = 3,
+        dilation_d: int = 4
+    ):
+        super(AtrousPyramidPooling, self).__init__()
+
+        self.up = model_utils.UpSample()
+
+        self.pool_a = torch.nn.AdaptiveAvgPool2d((1, 1))
+        self.pool_b = torch.nn.AdaptiveAvgPool2d((2, 2))
+        self.pool_c = torch.nn.AdaptiveAvgPool2d((4, 4))
+        self.pool_d = torch.nn.AdaptiveAvgPool2d((8, 8))
+
+        self.conv_a = ConvBlock2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=1,
+            padding=0,
+            add_activation=False
+        )
+        self.conv_b = ConvBlock2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=3,
+            padding=dilation_b,
+            dilation=dilation_b,
+            add_activation=False
+        )
+        self.conv_c = ConvBlock2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=3,
+            padding=dilation_c,
+            dilation=dilation_c,
+            add_activation=False
+        )
+        self.conv_d = ConvBlock2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=3,
+            padding=dilation_d,
+            dilation=dilation_d,
+            add_activation=False
+        )
+        self.final = ConvBlock2d(
+            in_channels=int(in_channels * 4) + int(out_channels * 4),
+            out_channels=out_channels,
+            kernel_size=3,
+            padding=1
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out_pa = self.up(
+            self.pool_a(x),
+            size=x.shape[-2:],
+            mode='bilinear'
+        )
+        out_pb = self.up(
+            self.pool_b(x),
+            size=x.shape[-2:],
+            mode='bilinear'
+        )
+        out_pc = self.up(
+            self.pool_c(x),
+            size=x.shape[-2:],
+            mode='bilinear'
+        )
+        out_pd = self.up(
+            self.pool_d(x),
+            size=x.shape[-2:],
+            mode='bilinear'
+        )
+        out_ca = self.conv_a(x)
+        out_cb = self.conv_b(x)
+        out_cc = self.conv_c(x)
+        out_cd = self.conv_d(x)
+        out = torch.cat(
+            [
+                out_pa,
+                out_pb,
+                out_pc,
+                out_pd,
+                out_ca,
+                out_cb,
+                out_cc,
+                out_cd
+            ], dim=1
+        )
+        out = self.final(out)
+
+        return out
 
 
 class PoolConvSingle(torch.nn.Module):
@@ -1160,6 +1241,8 @@ class ResidualConv(torch.nn.Module):
             assert self.attention_weights in  ['fractal', 'spatial_channel'], \
                 'Only one attention method should be used.'
 
+            self.gamma = torch.nn.Parameter(torch.ones(1))
+
             if self.attention_weights == 'fractal':
                 self.attention_conv = FractalAttention(
                     in_channels=in_channels,
@@ -1171,6 +1254,7 @@ class ResidualConv(torch.nn.Module):
                     activation_type=activation_type
                 )
 
+        # Ends with Conv2d -> BatchNorm2d
         self.seq = ResConvLayer(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -1180,7 +1264,7 @@ class ResidualConv(torch.nn.Module):
         )
         self.skip = None
         if in_channels != out_channels:
-            # Conv -> Batchnorm
+            # Conv2d -> BatchNorm2d
             self.skip = ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -1191,15 +1275,26 @@ class ResidualConv(torch.nn.Module):
         self.final_act = SetActivation(activation_type=activation_type)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.skip is None:
-            out = x
-        else:
-            out = self.skip(x)
-        out = out + self.seq(x)
-        out = self.final_act(out)
+        residual = x
+        if self.skip is not None:
+            # Align channels
+            residual = self.skip(x)
+        residual = residual + self.seq(x)
 
         if self.attention_weights is not None:
-            out = self.attention_conv(out)
+            # Get the attention weights
+            if self.attention_weights == 'spatial_channel':
+                # Get weights from the residual
+                attention = self.attention_conv(residual)
+            elif self.attention_weights == 'fractal':
+                # Get weights from the input
+                attention = self.attention_conv(x)
+
+            # 1 + γA
+            attention = 1.0 + self.gamma * attention
+            residual = residual * attention
+
+        out = self.final_act(residual)
 
         return out
 
@@ -1235,6 +1330,8 @@ class ResidualAConv(torch.nn.Module):
             assert self.attention_weights in  ['fractal', 'spatial_channel'], \
                 'Only one attention method should be used.'
 
+            self.gamma = torch.nn.Parameter(torch.ones(1))
+
             if self.attention_weights == 'fractal':
                 self.attention_conv = FractalAttention(
                     in_channels=in_channels,
@@ -1260,7 +1357,7 @@ class ResidualAConv(torch.nn.Module):
         )
         self.skip = None
         if in_channels != out_channels:
-            # Conv2dAtrous -> Batchnorm
+            # Conv2dAtrous -> BatchNorm2d
             self.skip = ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -1271,16 +1368,28 @@ class ResidualAConv(torch.nn.Module):
         self.final_act = SetActivation(activation_type=activation_type)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.skip is None:
-            out = x
-        else:
-            out = self.skip(x)
+        residual = x
+        if self.skip is not None:
+            # Align channels
+            residual = self.skip(x)
+
         for seq in self.res_modules:
-            out = out + seq(x)
-        out = self.final_act(out)
+            residual = residual + seq(x)
 
         if self.attention_weights is not None:
-            out = self.attention_conv(out)
+            # Get the attention weights
+            if self.attention_weights == 'spatial_channel':
+                # Get weights from the residual
+                attention = self.attention_conv(residual)
+            elif self.attention_weights == 'fractal':
+                # Get weights from the input
+                attention = self.attention_conv(x)
+
+            # 1 + γA
+            attention = 1.0 + self.gamma * attention
+            residual = residual * attention
+
+        out = self.final_act(residual)
 
         return out
 
