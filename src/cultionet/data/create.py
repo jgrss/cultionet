@@ -5,7 +5,7 @@ import warnings
 
 from .utils import LabeledData, get_image_list_dims
 from ..augment.augmentation import augment
-from ..augment.augmenters import Augmenters
+from ..augment.augmenters import Augmenters, AugmenterMapping
 from ..errors import TopologyClipError
 from ..utils.logging import set_color_logger
 from ..utils.model_preprocessing import TqdmParallel
@@ -172,24 +172,20 @@ def is_grid_processed(
     process_path: Path,
     transforms: T.List[str],
     group_id: str,
-    grid: T.Union[str, int],
-    prefix: str = 'data_',
-    suffix: str = '.pt'
+    grid_id: T.Union[str, int],
+    uid_format: str
 ) -> bool:
     """Checks if a grid is already processed
     """
-    # FIX: this shouldn't be needed, so fix the names
-    translations = {
-        'rot90': 'rotate-90',
-        'rot180': 'rotate-180',
-        'rot270': 'rotate-270',
-        'salt-pepper': 's&p'
-    }
     batches_stored = []
     for aug in transforms:
-        aug_name = translations[aug] if aug in translations else aug
-        train_id = f"{group_id}_{grid}_{aug_name}"
-        train_path = process_path / f'{prefix}{train_id}{suffix}'
+        aug_method = AugmenterMapping[aug.replace('-', '_')].value
+        train_id = uid_format.format(
+            GROUP_ID=group_id,
+            ROW_ID=grid_id,
+            AUGMENTER=aug_method.name_
+        )
+        train_path = process_path / aug_method.file_name(train_id)
 
         if train_path.is_file():
             batch_stored = True
@@ -707,11 +703,14 @@ def create_dataset(
         else:
             raise AttributeError("The grid id should be given as 'grid' or 'region'.")
 
+        uid_format = '{GROUP_ID}_{ROW_ID}_{AUGMENTER}'
+
         batch_stored = is_grid_processed(
-            process_path,
-            transforms,
-            group_id,
-            row_grid_id
+            process_path=process_path,
+            transforms=transforms,
+            group_id=group_id,
+            grid_id=row_grid_id,
+            uid_format=uid_format
         )
         if batch_stored:
             pbar.set_description(f'{group_id} stored.')
@@ -858,7 +857,11 @@ def create_dataset(
             )
             for aug_method in augmenters:
                 aug_kwargs = augmenters.aug_args.kwargs
-                aug_kwargs['train_id'] = f'{group_id}_{row_grid_id}_{aug_method.name_}'
+                aug_kwargs['train_id'] = uid_format.format(
+                    GROUP_ID=group_id,
+                    ROW_ID=row_grid_id,
+                    AUGMENTER=aug_method.name_
+                )
                 augmenters.update_aug_args(kwargs=aug_kwargs)
                 aug_data = aug_method(ldata, aug_args=augmenters.aug_args)
                 aug_method.save(
@@ -867,6 +870,8 @@ def create_dataset(
                     compress=5
                 )
 
-    if unprocessed:
-        logger.warning('Could not process the following grids.')
-        logger.info(', '.join(unprocessed))
+    # if unprocessed:
+    #     logger.warning('Could not process the following grids.')
+    #     logger.info(', '.join(unprocessed))
+
+    return pbar

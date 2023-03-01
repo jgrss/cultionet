@@ -42,6 +42,9 @@ class AugmenterArgs:
 class AugmenterModule(object):
     """Prepares, augments, and finalizes data
     """
+    prefix: str = 'data_'
+    suffix: str = '.pt'
+
     def __call__(
         self,
         ldata: LabeledData,
@@ -70,15 +73,16 @@ class AugmenterModule(object):
     ) -> DataCopies:
         raise NotImplementedError
 
+    def file_name(self, uid: str) -> str:
+        return f'{self.prefix}{uid}{self.suffix}'
+
     def save(
         self,
         out_directory: Path,
         data: Data,
-        prefix: str = 'data_',
-        suffix: str = '.pt',
         compress: int = 5
     ) -> None:
-        out_path = out_directory / f'{prefix}{data.train_id}{suffix}'
+        out_path = out_directory / self.file_name(data.train_id)
         joblib.dump(
             data,
             out_path,

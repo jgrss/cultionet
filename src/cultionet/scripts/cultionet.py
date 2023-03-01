@@ -741,7 +741,8 @@ def create_datasets(args):
     total_iters = len(
         list(
             itertools.product(
-                inputs.year_lists, inputs.regions_lists
+                inputs.year_lists,
+                inputs.regions_lists
             )
         )
     )
@@ -853,7 +854,7 @@ def create_datasets(args):
                         chunksize=args.chunksize
                     )
                 else:
-                    create_dataset(
+                    pbar = create_dataset(
                         image_list=image_list,
                         df_grids=df_grids,
                         df_edges=df_edges,
