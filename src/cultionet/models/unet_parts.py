@@ -289,10 +289,10 @@ class UNet3Connector(torch.nn.Module):
                     attention_weights=attention_weights,
                     activation_type=activation_type
                 )
-            self.pool4_0 = AtrousPyramidPooling(
-                in_channels=channels[0],
-                out_channels=channels[0]
-            )
+            # self.pool4_0 = AtrousPyramidPooling(
+            #     in_channels=channels[0],
+            #     out_channels=channels[0]
+            # )
 
     def forward(
         self,

@@ -1,4 +1,5 @@
 import typing as T
+import warnings
 
 from . import model_utils
 from .base_layers import ConvBlock2d, Softmax
@@ -136,6 +137,15 @@ class CropTypeFinal(torch.nn.Module):
         return out
 
 
+def check_batch_dims(batch: Data, attribute: str):
+    batch_var = getattr(batch, attribute)
+    if not (batch_var == batch_var[0]).all():
+        invalid = batch.train_id[batch_var != torch.mode(batch_var)[0]]
+        warnings.warn('The following ids do not match the batch mode.')
+        warnings.warn(invalid)
+        raise ValueError(f'The {attribute} dimensions do not align.')
+
+
 class CultioNet(torch.nn.Module):
     """The cultionet model framework
 
@@ -208,7 +218,7 @@ class CultioNet(torch.nn.Module):
             # unet3_kwargs['res_block_type'] = 'res'
             # unet3_kwargs['dilations'] = [2]
             unet3_kwargs['res_block_type'] = 'resa'
-            unet3_kwargs['dilations'] = [1, 2]
+            unet3_kwargs['dilations'] = [1, 2, 3]
             self.mask_model = ResUNet3Psi(**unet3_kwargs)
 
     def forward(
@@ -218,10 +228,8 @@ class CultioNet(torch.nn.Module):
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
-        assert (data.ntime == data.ntime[0]).all(), 'The time dimension must match.'
-        assert (data.nbands == data.nbands[0]).all(), 'The band dimension must match.'
-        assert (data.height == data.height[0]).all(), 'The height dimension must match.'
-        assert (data.width == data.width[0]).all(), 'The width dimension must match.'
+        for attribute in ('ntime', 'nbands', 'height', 'width'):
+            check_batch_dims(data, attribute)
 
         # Reshape from ((H*W) x (C*T)) -> (B x C x H x W)
         x = self.gc(
