@@ -4,7 +4,6 @@ from functools import partial
 import warnings
 
 from .utils import LabeledData, get_image_list_dims
-from ..augment.augmentation import augment
 from ..augment.augmenters import Augmenters, AugmenterMapping
 from ..errors import TopologyClipError
 from ..utils.logging import set_color_logger
@@ -526,9 +525,9 @@ def create_and_save_window(
         segments=None,
         props=None
     )
-    predict_data = augment(
-        ldata,
-        aug='none',
+
+    augmenters = Augmenters(
+        augmentations=['none'],
         ntime=ntime,
         nbands=nbands,
         max_crop_class=0,
@@ -550,9 +549,16 @@ def create_and_save_window(
         res=res,
         resampling=resampling
     )
-    save_and_update(
-        write_path, predict_data, f'{region}_{year}_{w.row_off}_{w.col_off}'
-    )
+    for aug_method in augmenters:
+        aug_kwargs = augmenters.aug_args.kwargs
+        aug_kwargs['train_id'] = f'{region}_{year}_{w.row_off}_{w.col_off}'
+        augmenters.update_aug_args(kwargs=aug_kwargs)
+        predict_data = aug_method(ldata, aug_args=augmenters.aug_args)
+        aug_method.save(
+            out_directory=write_path,
+            data=predict_data,
+            compress=5
+        )
 
 
 def create_predict_dataset(
