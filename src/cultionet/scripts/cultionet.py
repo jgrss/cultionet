@@ -745,7 +745,7 @@ def create_datasets(args):
             )
         )
     )
-    with tqdm(total=total_iters, position=0) as pbar:
+    with tqdm(total=total_iters, position=0, leave=True) as pbar:
         for region, end_year, project_path, ref_res in cycle_data(
             inputs.year_lists,
             inputs.regions_lists,
