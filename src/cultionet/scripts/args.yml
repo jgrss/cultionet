@@ -225,6 +225,42 @@ create_predict:
       type: '&int'
 
 train_predict:
+  model_type:
+    short: ''
+    long: model-type
+    help: The model type
+    kwargs:
+      default: 'ResUNet3Psi'
+      choices:
+        - 'UNet3Psi'
+        - 'ResUNet3Psi'
+  activation_type:
+    short: ''
+    long: activation-type
+    help: The activation to use
+    kwargs:
+      default: 'SiLU'
+  res_block_type:
+    short: ''
+    long: res-block-type
+    help: The residual block type (only relevant when --model-type=ResUNet3Psi)
+    kwargs:
+      default: 'resa'
+      choices: ['res', 'resa']
+  dilations:
+    short: ''
+    long: dilations
+    help: The dilations to use
+    kwargs:
+      default: [1, 2]
+      type: '&int'
+  attention_weights:
+    short: ''
+    long: attention-weights
+    help: The attention weights
+    kwargs:
+      default: 'spatial_channel'
+      choices: ['spatial_channel', 'fractal']
   filters:
     short: ''
     long: filters
@@ -470,21 +506,6 @@ train:
       choices:
         - 'AdamW'
         - 'SGD'
-  model_type:
-    short: ''
-    long: model-type
-    help: The model type
-    kwargs:
-      default: 'ResUNet3Psi'
-      choices:
-        - 'UNet3Psi'
-        - 'ResUNet3Psi'
-  activation_type:
-    short: ''
-    long: activation-type
-    help: The activation to use
-    kwargs:
-      default: 'SiLU'
   deep_sup_dist:
     short: ''
     long: deep-sup-dist
@@ -508,7 +529,7 @@ train:
     long: learning-rate
     help: The learning rate
     kwargs:
-      default: 1e-4
+      default: 1e-3
       type: '&float'
   lr_scheduler:
     short: lrs

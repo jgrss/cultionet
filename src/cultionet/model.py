@@ -224,17 +224,20 @@ def fit(
     batch_size: T.Optional[int] = 4,
     load_batch_workers: T.Optional[int] = 2,
     accumulate_grad_batches: T.Optional[int] = 1,
-    filters: T.Optional[int] = 64,
+    filters: T.Optional[int] = 32,
     num_classes: T.Optional[int] = 2,
     edge_class: T.Optional[int] = None,
     class_counts: T.Sequence[float] = None,
     model_type: str = 'ResUNet3Psi',
-    activation_type: str = 'LeakyReLU',
+    activation_type: str = 'SiLU',
+    dilations: T.Union[int, T.Sequence[int]] = None,
+    res_block_type: str = 'resa',
+    attention_weights: str = 'spatial_channel',
     deep_sup_dist: bool = False,
     deep_sup_edge: bool = False,
     deep_sup_mask: bool = False,
     optimizer: str = 'AdamW',
-    learning_rate: T.Optional[float] = 0.001,
+    learning_rate: T.Optional[float] = 1e-3,
     lr_scheduler: str = 'CosineAnnealingLR',
     steplr_step_size: T.Optional[T.Sequence[int]] = None,
     scale_pos_weight: T.Optional[bool] = True,
@@ -274,6 +277,9 @@ def fit(
         optimizer (Optional[str]): The optimizer.
         model_type (Optional[str]): The model type.
         activation_type (Optional[str]): The activation type.
+        dilations (Optional[list]): The dilation size or sizes.
+        res_block_type (Optional[str]): The residual block type.
+        attention_weights (Optional[str]): The attention weights.
         deep_sup_dist (Optional[bool]): Whether to use deep supervision for distances.
         deep_sup_edge (Optional[bool]): Whether to use deep supervision for edges.
         deep_sup_mask (Optional[bool]): Whether to use deep supervision for masks.
@@ -345,6 +351,9 @@ def fit(
         filters=filters,
         model_type=model_type,
         activation_type=activation_type,
+        dilations=dilations,
+        res_block_type=res_block_type,
+        attention_weights=attention_weights,
         deep_sup_dist=deep_sup_dist,
         deep_sup_edge=deep_sup_edge,
         deep_sup_mask=deep_sup_mask,

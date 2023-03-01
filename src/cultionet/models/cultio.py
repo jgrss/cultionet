@@ -164,7 +164,10 @@ class CultioNet(torch.nn.Module):
         filters: int = 64,
         num_classes: int = 2,
         model_type: str = 'UNet3Psi',
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = 'SiLU',
+        dilations: T.Union[int, T.Sequence[int]] = None,
+        res_block_type: str = 'resa',
+        attention_weights: str = 'spatial_channel',
         deep_sup_dist: bool = False,
         deep_sup_edge: bool = False,
         deep_sup_mask: bool = False
@@ -209,16 +212,22 @@ class CultioNet(torch.nn.Module):
         assert model_type in ('UNet3Psi', 'ResUNet3Psi'), \
             'The model type is not supported.'
         if model_type == 'UNet3Psi':
-            unet3_kwargs['dilation'] = 2
+            unet3_kwargs['dilation'] = 2 if dilations is None else dilations
+            assert isinstance(unet3_kwargs['dilation'], int), \
+                'The dilation for UNet3Psi must be an integer.'
             self.mask_model = UNet3Psi(**unet3_kwargs)
         elif model_type == 'ResUNet3Psi':
             # ResUNet3Psi
-            # spatial_channel | fractal
-            unet3_kwargs['attention_weights'] = 'spatial_channel'
-            unet3_kwargs['res_block_type'] = 'res'
-            unet3_kwargs['dilations'] = [2]
-            # unet3_kwargs['res_block_type'] = 'resa'
-            # unet3_kwargs['dilations'] = [1, 2]
+            unet3_kwargs['attention_weights'] = attention_weights
+            unet3_kwargs['res_block_type'] = res_block_type
+            if res_block_type == 'res':
+                unet3_kwargs['dilations'] = [2] if dilations is None else dilations
+                assert len(unet3_kwargs['dilations']) == 1, \
+                    'The dilations for ResUNet3Psi must be a length-1 integer sequence.'
+            elif res_block_type == 'resa':
+                unet3_kwargs['dilations'] = [1, 2] if dilations is None else dilations
+            assert isinstance(unet3_kwargs['dilations'], list), \
+                'The dilations for ResUNet3Psi must be a sequence of integers.'
             self.mask_model = ResUNet3Psi(**unet3_kwargs)
 
     def forward(
