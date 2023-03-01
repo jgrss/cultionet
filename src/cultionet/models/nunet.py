@@ -1005,7 +1005,7 @@ class ResUNet3Psi(torch.nn.Module):
                     + in_time
                 ),
                 out_channels=channels[0],
-                dilations=dilations[0],
+                dilation=dilations[0],
                 activation_type=activation_type,
                 attention_weights=attention_weights
             )

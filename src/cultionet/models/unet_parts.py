@@ -110,7 +110,7 @@ class UNet3Connector(torch.nn.Module):
                     self.prev_backbone = ResidualConv(
                         in_channels=channels[prev_backbone_channel_index],
                         out_channels=up_channels,
-                        dilations=dilations[0],
+                        dilation=dilations[0],
                         attention_weights=attention_weights,
                         activation_type=activation_type
                     )
@@ -138,7 +138,7 @@ class UNet3Connector(torch.nn.Module):
                     self.prev = ResidualConv(
                         in_channels=up_channels,
                         out_channels=up_channels,
-                        dilations=dilations[0],
+                        dilation=dilations[0],
                         attention_weights=attention_weights,
                         activation_type=activation_type
                     )
@@ -174,7 +174,7 @@ class UNet3Connector(torch.nn.Module):
                             ResidualConv(
                                 in_channels=up_channels,
                                 out_channels=up_channels,
-                                dilations=dilations[0],
+                                dilation=dilations[0],
                                 attention_weights=attention_weights,
                                 activation_type=activation_type
                             )
@@ -224,7 +224,7 @@ class UNet3Connector(torch.nn.Module):
                             ResidualConv(
                                 in_channels=in_stream_channels,
                                 out_channels=up_channels,
-                                dilations=dilations[0],
+                                dilation=dilations[0],
                                 attention_weights=attention_weights,
                                 activation_type=activation_type
                             )
@@ -263,14 +263,14 @@ class UNet3Connector(torch.nn.Module):
                 self.conv4_0 = ResidualConv(
                     in_channels=channels[4],
                     out_channels=channels[0],
-                    dilations=dilations[0],
+                    dilation=dilations[0],
                     attention_weights=attention_weights,
                     activation_type=activation_type
                 )
                 self.final = ResidualConv(
                     in_channels=self.cat_channels,
                     out_channels=up_channels,
-                    dilations=dilations[0],
+                    dilation=dilations[0],
                     attention_weights=attention_weights,
                     activation_type=activation_type
                 )

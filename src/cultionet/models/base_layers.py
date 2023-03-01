@@ -1515,7 +1515,7 @@ class PoolResidualConv(torch.nn.Module):
                     in_channels,
                     out_channels,
                     attention_weights=attention_weights,
-                    dilations=dilations[0],
+                    dilation=dilations[0],
                     activation_type=activation_type
                 )
             ]

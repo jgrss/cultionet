@@ -207,6 +207,8 @@ class CultioNet(torch.nn.Module):
             unet3_kwargs['attention_weights'] = 'spatial_channel'
             unet3_kwargs['res_block_type'] = 'res'
             unet3_kwargs['dilations'] = [2]
+            # unet3_kwargs['res_block_type'] = 'resa'
+            # unet3_kwargs['dilations'] = [1, 2]
             self.mask_model = ResUNet3Psi(**unet3_kwargs)
 
     def forward(
