@@ -218,13 +218,15 @@ class CultioNet(torch.nn.Module):
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
+        assert (data.ntime == data.ntime[0]).all(), 'The time dimension must match.'
+        assert (data.nbands == data.nbands[0]).all(), 'The band dimension must match.'
+        assert (data.height == data.height[0]).all(), 'The height dimension must match.'
+        assert (data.width == data.width[0]).all(), 'The width dimension must match.'
+
         # Reshape from ((H*W) x (C*T)) -> (B x C x H x W)
-        try:
-            x = self.gc(
-                data.x, batch_size, height, width
-            )
-        except:
-            import ipdb; ipdb.set_trace()
+        x = self.gc(
+            data.x, batch_size, height, width
+        )
         # Reshape from (B x C x H x W) -> (B x C x T|D x H x W)
         x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
         # StarRNN
