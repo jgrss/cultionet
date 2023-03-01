@@ -11,6 +11,7 @@ import filelock
 import builtins
 import json
 import ast
+import itertools
 
 import cultionet
 from cultionet.data.const import SCALE_FACTOR
@@ -737,128 +738,144 @@ def create_datasets(args):
             years=config['years']
         )
 
-    for region, end_year, project_path, ref_res in cycle_data(
-        inputs.year_lists,
-        inputs.regions_lists,
-        project_path_lists,
-        ref_res_lists
-    ):
-        ppaths = setup_paths(
-            project_path,
-            append_ts=True if args.append_ts == 'y' else False
+    total_iters = len(
+        list(
+            itertools.product(
+                inputs.year_lists, inputs.regions_lists
+            )
         )
-
-        try:
-            tmp = int(region)
-            region = f'{tmp:06d}'
-        except ValueError:
-            pass
-
-        if args.destination == 'predict':
-            df_grids = None
-            df_edges = None
-        else:
-            # Read the training data
-            grids = ppaths.edge_training_path / f'{region}_grid_{end_year}.gpkg'
-            edges = ppaths.edge_training_path / f'{region}_edges_{end_year}.gpkg'
-            if not grids.is_file():
-                logger.warning(f'{grids} does not exist.')
-                continue
-
-            df_grids = gpd.read_file(grids)
-
-            if not edges.is_file():
-                edges = ppaths.edge_training_path / f'{region}_poly_{end_year}.gpkg'
-            if not edges.is_file():
-                # No training polygons
-                df_edges = gpd.GeoDataFrame(data=[], geometry=[], crs=df_grids.crs)
-            else:
-                df_edges = gpd.read_file(edges)
-
-        image_list = []
-        for image_vi in model_preprocessing.VegetationIndices(
-            image_vis=config['image_vis']
-        ).image_vis:
-            # Set the full path to the images
-            vi_path = ppaths.image_path / args.feature_pattern.format(
-                region=region,
-                image_vi=image_vi
+    )
+    with tqdm(total=total_iters, position=0) as pbar:
+        for region, end_year, project_path, ref_res in cycle_data(
+            inputs.year_lists,
+            inputs.regions_lists,
+            project_path_lists,
+            ref_res_lists
+        ):
+            ppaths = setup_paths(
+                project_path,
+                append_ts=True if args.append_ts == 'y' else False
             )
 
-            if not vi_path.is_dir():
-                logger.warning(f'{str(vi_path)} does not exist')
-                continue
+            try:
+                tmp = int(region)
+                region = f'{tmp:06d}'
+            except ValueError:
+                pass
 
-            # Get the centroid coordinates of the grid
-            lat = None
-            if args.destination != 'predict':
-                lat = get_centroid_coords(df_grids.centroid, dst_crs='epsg:4326')[1]
-            # Get the start and end dates
-            start_date, end_date = get_start_end_dates(
-                vi_path,
-                start_year=end_year-1,
-                start_date=args.start_date,
-                end_date=args.end_date,
-                date_format=args.date_format,
-                lat=lat,
-            )
-            # Get the requested time slice
-            ts_list = model_preprocessing.get_time_series_list(
-                vi_path, end_year-1, start_date, end_date, date_format=args.date_format
-            )
-            if len(ts_list) <= 1:
-                continue
-
-            if args.skip_index > 0:
-                ts_list = ts_list[::args.skip_index]
-            image_list += ts_list
-
-        if args.destination != 'predict':
-            class_info = {
-                'max_crop_class': args.max_crop_class,
-                'edge_class': args.max_crop_class + 1
-            }
-            with open(ppaths.classes_info_path, mode='w') as f:
-                f.write(json.dumps(class_info))
-
-        if image_list:
             if args.destination == 'predict':
-                create_predict_dataset(
-                    image_list=image_list,
-                    region=region,
-                    year=end_year,
-                    process_path=ppaths.get_process_path(args.destination),
-                    gain=args.gain,
-                    offset=args.offset,
-                    ref_res=ref_res,
-                    resampling=args.resampling,
-                    window_size=args.window_size,
-                    padding=args.padding,
-                    num_workers=args.num_workers,
-                    chunksize=args.chunksize
-                )
+                df_grids = None
+                df_edges = None
             else:
-                create_dataset(
-                    image_list=image_list,
-                    df_grids=df_grids,
-                    df_edges=df_edges,
-                    max_crop_class=args.max_crop_class,
-                    group_id=f'{region}_{end_year}',
-                    process_path=ppaths.get_process_path(args.destination),
-                    transforms=args.transforms,
-                    gain=args.gain,
-                    offset=args.offset,
-                    ref_res=ref_res,
-                    resampling=args.resampling,
-                    num_workers=args.num_workers,
-                    grid_size=args.grid_size,
-                    n_ts=args.n_ts,
-                    instance_seg=args.instance_seg,
-                    zero_padding=args.zero_padding,
-                    crop_column=args.crop_column,
-                    keep_crop_classes=args.keep_crop_classes,
-                    replace_dict=args.replace_dict
+                # Read the training data
+                grids = ppaths.edge_training_path / f'{region}_grid_{end_year}.gpkg'
+                edges = ppaths.edge_training_path / f'{region}_edges_{end_year}.gpkg'
+                if not grids.is_file():
+                    pbar.update(1)
+                    pbar.set_description('File not exist')
+                    continue
+
+                df_grids = gpd.read_file(grids)
+
+                if not edges.is_file():
+                    edges = ppaths.edge_training_path / f'{region}_poly_{end_year}.gpkg'
+                if not edges.is_file():
+                    # No training polygons
+                    df_edges = gpd.GeoDataFrame(data=[], geometry=[], crs=df_grids.crs)
+                else:
+                    df_edges = gpd.read_file(edges)
+
+            image_list = []
+            for image_vi in model_preprocessing.VegetationIndices(
+                image_vis=config['image_vis']
+            ).image_vis:
+                # Set the full path to the images
+                vi_path = ppaths.image_path / args.feature_pattern.format(
+                    region=region,
+                    image_vi=image_vi
                 )
+
+                if not vi_path.is_dir():
+                    pbar.set_description('No directory')
+                    continue
+
+                # Get the centroid coordinates of the grid
+                lat = None
+                if args.destination != 'predict':
+                    lat = get_centroid_coords(df_grids.centroid, dst_crs='epsg:4326')[1]
+                # Get the start and end dates
+                start_date, end_date = get_start_end_dates(
+                    vi_path,
+                    start_year=end_year-1,
+                    start_date=args.start_date,
+                    end_date=args.end_date,
+                    date_format=args.date_format,
+                    lat=lat,
+                )
+                # Get the requested time slice
+                ts_list = model_preprocessing.get_time_series_list(
+                    vi_path,
+                    end_year-1,
+                    start_date,
+                    end_date,
+                    date_format=args.date_format
+                )
+                if len(ts_list) <= 1:
+                    pbar.set_description('TS too short')
+                    continue
+
+                if args.skip_index > 0:
+                    ts_list = ts_list[::args.skip_index]
+                image_list += ts_list
+
+            if args.destination != 'predict':
+                class_info = {
+                    'max_crop_class': args.max_crop_class,
+                    'edge_class': args.max_crop_class + 1
+                }
+                with open(ppaths.classes_info_path, mode='w') as f:
+                    f.write(json.dumps(class_info))
+
+            if image_list:
+                if args.destination == 'predict':
+                    create_predict_dataset(
+                        image_list=image_list,
+                        region=region,
+                        year=end_year,
+                        process_path=ppaths.get_process_path(args.destination),
+                        gain=args.gain,
+                        offset=args.offset,
+                        ref_res=ref_res,
+                        resampling=args.resampling,
+                        window_size=args.window_size,
+                        padding=args.padding,
+                        num_workers=args.num_workers,
+                        chunksize=args.chunksize
+                    )
+                else:
+                    create_dataset(
+                        image_list=image_list,
+                        df_grids=df_grids,
+                        df_edges=df_edges,
+                        max_crop_class=args.max_crop_class,
+                        group_id=f'{region}_{end_year}',
+                        process_path=ppaths.get_process_path(args.destination),
+                        transforms=args.transforms,
+                        gain=args.gain,
+                        offset=args.offset,
+                        ref_res=ref_res,
+                        resampling=args.resampling,
+                        num_workers=args.num_workers,
+                        grid_size=args.grid_size,
+                        instance_seg=args.instance_seg,
+                        zero_padding=args.zero_padding,
+                        crop_column=args.crop_column,
+                        keep_crop_classes=args.keep_crop_classes,
+                        replace_dict=args.replace_dict,
+                        pbar=pbar
+                    )
+
+            pbar.update(1)
 
 
 def train_maskrcnn(args):

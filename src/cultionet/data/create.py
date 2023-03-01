@@ -614,7 +614,7 @@ def create_predict_dataset(
             with tqdm(
                 total=len(windows),
                 desc='Creating prediction windows',
-                position=0
+                position=1
             ) as pbar_total:
                 with parallel_backend(
                     backend='loky',
@@ -625,7 +625,7 @@ def create_predict_dataset(
                             tqdm_kwargs={
                                 'total': len(window_chunk),
                                 'desc': 'Window chunks',
-                                'position': 1,
+                                'position': 2,
                                 'leave': False
                             },
                             temp_folder='/tmp'
@@ -652,12 +652,12 @@ def create_dataset(
     resampling: str = 'nearest',
     num_workers: int = 1,
     grid_size: T.Optional[T.Union[T.Tuple[int, int], T.List[int], None]] = None,
-    n_ts: T.Optional[int] = 2,
     instance_seg: T.Optional[bool] = False,
     zero_padding: T.Optional[int] = 0,
     crop_column: T.Optional[str] = 'class',
     keep_crop_classes: T.Optional[bool] = False,
-    replace_dict: T.Optional[T.Dict[int, int]] = None
+    replace_dict: T.Optional[T.Dict[int, int]] = None,
+    pbar: T.Optional[object] = None
 ) -> None:
     """Creates a dataset for training
 
@@ -698,182 +698,174 @@ def create_dataset(
     input_height = None
     input_width = None
     unprocessed = []
-    with tqdm(total=df_grids.shape[0], desc='Check') as pbar:
-        for row in df_grids.itertuples():
-            # Clip the edges to the current grid
-            try:
-                grid_edges = gpd.clip(df_edges, row.geometry)
-            except:
-                logger.warning(
-                    TopologyClipError('The input GeoDataFrame contains topology errors.')
-                )
-                df_edges = gpd.GeoDataFrame(
-                    data=df_edges[crop_column].values,
-                    columns=[crop_column],
-                    geometry=df_edges.buffer(0).geometry
-                )
-                grid_edges = gpd.clip(df_edges, row.geometry)
+    for row in df_grids.itertuples():
+        # Check if the grid has already been saved
+        if hasattr(row, 'grid'):
+            row_grid_id = row.grid
+        elif hasattr(row, 'region'):
+            row_grid_id = row.region
+        else:
+            raise AttributeError("The grid id should be given as 'grid' or 'region'.")
 
-            # These are grids with no crop fields. They should still
-            # be used for training.
-            if grid_edges.loc[~grid_edges.is_empty].empty:
-                grid_edges = df_grids.copy()
-                grid_edges = grid_edges.assign(**{crop_column: 0})
-            # Remove empty geometry
-            grid_edges = grid_edges.loc[~grid_edges.is_empty]
+        batch_stored = is_grid_processed(
+            process_path,
+            transforms,
+            group_id,
+            row_grid_id
+        )
+        if batch_stored:
+            pbar.set_description(f'{group_id} stored.')
+            continue
 
-            if not grid_edges.empty:
-                # Check if the edges overlap multiple grids
-                int_idx = sorted(
-                    list(
-                        sindex.intersection(
-                            tuple(grid_edges.total_bounds.flatten())
-                        )
+        # Clip the edges to the current grid
+        try:
+            grid_edges = gpd.clip(df_edges, row.geometry)
+        except:
+            logger.warning(
+                TopologyClipError('The input GeoDataFrame contains topology errors.')
+            )
+            df_edges = gpd.GeoDataFrame(
+                data=df_edges[crop_column].values,
+                columns=[crop_column],
+                geometry=df_edges.buffer(0).geometry
+            )
+            grid_edges = gpd.clip(df_edges, row.geometry)
+
+        # These are grids with no crop fields. They should still
+        # be used for training.
+        if grid_edges.loc[~grid_edges.is_empty].empty:
+            grid_edges = df_grids.copy()
+            grid_edges = grid_edges.assign(**{crop_column: 0})
+        # Remove empty geometry
+        grid_edges = grid_edges.loc[~grid_edges.is_empty]
+
+        if not grid_edges.empty:
+            # Check if the edges overlap multiple grids
+            int_idx = sorted(
+                list(
+                    sindex.intersection(
+                        tuple(grid_edges.total_bounds.flatten())
                     )
                 )
+            )
 
-                if len(int_idx) > 1:
-                    # Check if any of the grids have already been stored
-                    if any(
-                        [
-                            rowg in merged_grids for rowg in df_grids.iloc[int_idx].grid.values.tolist()
-                        ]
-                    ):
-                        pbar.update(1)
-                        pbar.set_description(f'No edges for {group_id}')
-                        continue
-
-                    grid_edges = gpd.clip(df_edges, df_grids.iloc[int_idx].geometry)
-                    merged_grids.append(row.grid)
-
-                nonzero_mask = grid_edges[crop_column] != 0
-
-                # left, bottom, right, top
-                ref_bounds = df_grids.to_crs(image_crs).iloc[int_idx].total_bounds.tolist()
-                if grid_size is not None:
-                    height, width = grid_size
-                    left, bottom, right, top = ref_bounds
-                    ref_bounds = [left, top-ref_res*height, left+ref_res*width, top]
-
-                # Data for graph network
-                xvars, labels_array, bdist, ori, ntime, nbands = create_image_vars(
-                    image=image_list,
-                    max_crop_class=max_crop_class,
-                    bounds=ref_bounds,
-                    num_workers=num_workers,
-                    gain=gain,
-                    offset=offset,
-                    grid_edges=grid_edges if nonzero_mask.any() else None,
-                    ref_res=ref_res,
-                    resampling=resampling,
-                    crop_column=crop_column,
-                    keep_crop_classes=keep_crop_classes,
-                    replace_dict=replace_dict
-                )
-                if xvars is None:
-                    pbar.update(1)
-                    pbar.set_description(f'No valid fields for {group_id}')
-                    continue
-                if (xvars.shape[1] < 5) or (xvars.shape[2] < 5):
-                    pbar.update(1)
-                    pbar.set_description(f'{group_id} is too small')
+            if len(int_idx) > 1:
+                # Check if any of the grids have already been stored
+                if any(
+                    [
+                        rowg in merged_grids for rowg in df_grids.iloc[int_idx].grid.values.tolist()
+                    ]
+                ):
+                    pbar.set_description(f'No edges in {group_id}')
                     continue
 
-                # Check if the grid has already been saved
-                if hasattr(row, 'grid'):
-                    row_grid_id = row.grid
-                elif hasattr(row, 'region'):
-                    row_grid_id = row.region
-                else:
-                    raise AttributeError("The grid id should be given as 'grid' or 'region'.")
+                grid_edges = gpd.clip(df_edges, df_grids.iloc[int_idx].geometry)
+                merged_grids.append(row.grid)
 
-                batch_stored = is_grid_processed(
-                    process_path,
-                    transforms,
-                    group_id,
-                    row_grid_id
-                )
-                if batch_stored:
-                    pbar.update(1)
-                    pbar.set_description(f'{group_id} is already stored.')
-                    continue
+            nonzero_mask = grid_edges[crop_column] != 0
 
-                # Get the upper left lat/lon
-                left, bottom, right, top = (
-                    df_grids.iloc[int_idx]
-                    .to_crs('epsg:4326')
-                    .total_bounds
-                    .tolist()
-                )
+            # left, bottom, right, top
+            ref_bounds = df_grids.to_crs(image_crs).iloc[int_idx].total_bounds.tolist()
+            if grid_size is not None:
+                height, width = grid_size
+                left, bottom, right, top = ref_bounds
+                ref_bounds = [left, top-ref_res*height, left+ref_res*width, top]
 
-                if isinstance(group_id, str):
-                    end_year = int(group_id.split('_')[-1])
-                    start_year = end_year - 1
-                else:
-                    start_year, end_year = None, None
+            # Data for graph network
+            xvars, labels_array, bdist, ori, ntime, nbands = create_image_vars(
+                image=image_list,
+                max_crop_class=max_crop_class,
+                bounds=ref_bounds,
+                num_workers=num_workers,
+                gain=gain,
+                offset=offset,
+                grid_edges=grid_edges if nonzero_mask.any() else None,
+                ref_res=ref_res,
+                resampling=resampling,
+                crop_column=crop_column,
+                keep_crop_classes=keep_crop_classes,
+                replace_dict=replace_dict
+            )
+            if xvars is None:
+                pbar.set_description(f'No fields in {group_id}')
+                continue
+            if (xvars.shape[1] < 5) or (xvars.shape[2] < 5):
+                pbar.set_description(f'{group_id} too small')
+                continue
 
-                segments = nd_label(labels_array)[0]
-                props = regionprops(segments)
+            # Get the upper left lat/lon
+            left, bottom, right, top = (
+                df_grids.iloc[int_idx]
+                .to_crs('epsg:4326')
+                .total_bounds
+                .tolist()
+            )
 
-                ldata = LabeledData(
-                    x=xvars,
-                    y=labels_array,
-                    bdist=bdist,
-                    ori=ori,
-                    segments=segments,
-                    props=props
-                )
+            if isinstance(group_id, str):
+                end_year = int(group_id.split('_')[-1])
+                start_year = end_year - 1
+            else:
+                start_year, end_year = None, None
 
-                if input_height is None:
-                    input_height = ldata.y.shape[0]
-                else:
-                    if ldata.y.shape[0] != input_height:
-                        warnings.warn(
-                            f"{group_id}_{row_grid_id} does not have the same height as the rest of the dataset.",
-                            UserWarning
-                        )
-                        unprocessed.append(f"{group_id}_{row_grid_id}")
-                        continue
-                if input_width is None:
-                    input_width = ldata.y.shape[1]
-                else:
-                    if ldata.y.shape[1] != input_width:
-                        warnings.warn(
-                            f"{group_id}_{row_grid_id} does not have the same width as the rest of the dataset.",
-                            UserWarning
-                        )
-                        unprocessed.append(f"{group_id}_{row_grid_id}")
-                        continue
+            segments = nd_label(labels_array)[0]
+            props = regionprops(segments)
 
-                augmenters = Augmenters(
-                    augmentations=transforms,
-                    ntime=ntime,
-                    nbands=nbands,
-                    max_crop_class=max_crop_class,
-                    k=3,
-                    instance_seg=instance_seg,
-                    zero_padding=zero_padding,
-                    start_year=start_year,
-                    end_year=end_year,
-                    left=left,
-                    bottom=bottom,
-                    right=right,
-                    top=top,
-                    res=ref_res
-                )
-                for aug_method in augmenters:
-                    aug_kwargs = augmenters.aug_args.kwargs
-                    aug_kwargs['train_id'] = f'{group_id}_{row_grid_id}_{aug_method.name_}'
-                    augmenters.update_aug_args(kwargs=aug_kwargs)
-                    aug_data = aug_method(ldata, aug_args=augmenters.aug_args)
-                    aug_method.save(
-                        out_directory=process_path,
-                        data=aug_data,
-                        compress=5
+            ldata = LabeledData(
+                x=xvars,
+                y=labels_array,
+                bdist=bdist,
+                ori=ori,
+                segments=segments,
+                props=props
+            )
+
+            if input_height is None:
+                input_height = ldata.y.shape[0]
+            else:
+                if ldata.y.shape[0] != input_height:
+                    warnings.warn(
+                        f"{group_id}_{row_grid_id} does not have the same height as the rest of the dataset.",
+                        UserWarning
                     )
+                    unprocessed.append(f"{group_id}_{row_grid_id}")
+                    continue
+            if input_width is None:
+                input_width = ldata.y.shape[1]
+            else:
+                if ldata.y.shape[1] != input_width:
+                    warnings.warn(
+                        f"{group_id}_{row_grid_id} does not have the same width as the rest of the dataset.",
+                        UserWarning
+                    )
+                    unprocessed.append(f"{group_id}_{row_grid_id}")
+                    continue
 
-            pbar.update(1)
-            pbar.set_description(group_id)
+            augmenters = Augmenters(
+                augmentations=transforms,
+                ntime=ntime,
+                nbands=nbands,
+                max_crop_class=max_crop_class,
+                k=3,
+                instance_seg=instance_seg,
+                zero_padding=zero_padding,
+                start_year=start_year,
+                end_year=end_year,
+                left=left,
+                bottom=bottom,
+                right=right,
+                top=top,
+                res=ref_res
+            )
+            for aug_method in augmenters:
+                aug_kwargs = augmenters.aug_args.kwargs
+                aug_kwargs['train_id'] = f'{group_id}_{row_grid_id}_{aug_method.name_}'
+                augmenters.update_aug_args(kwargs=aug_kwargs)
+                aug_data = aug_method(ldata, aug_args=augmenters.aug_args)
+                aug_method.save(
+                    out_directory=process_path,
+                    data=aug_data,
+                    compress=5
+                )
 
     if unprocessed:
         logger.warning('Could not process the following grids.')
