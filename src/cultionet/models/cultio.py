@@ -205,10 +205,10 @@ class CultioNet(torch.nn.Module):
             # ResUNet3Psi
             # spatial_channel | fractal
             unet3_kwargs['attention_weights'] = 'spatial_channel'
-            unet3_kwargs['res_block_type'] = 'res'
-            unet3_kwargs['dilations'] = [2]
-            # unet3_kwargs['res_block_type'] = 'resa'
-            # unet3_kwargs['dilations'] = [1, 2]
+            # unet3_kwargs['res_block_type'] = 'res'
+            # unet3_kwargs['dilations'] = [2]
+            unet3_kwargs['res_block_type'] = 'resa'
+            unet3_kwargs['dilations'] = [1, 2]
             self.mask_model = ResUNet3Psi(**unet3_kwargs)
 
     def forward(
@@ -219,9 +219,12 @@ class CultioNet(torch.nn.Module):
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
         # Reshape from ((H*W) x (C*T)) -> (B x C x H x W)
-        x = self.gc(
-            data.x, batch_size, height, width
-        )
+        try:
+            x = self.gc(
+                data.x, batch_size, height, width
+            )
+        except:
+            import ipdb; ipdb.set_trace()
         # Reshape from (B x C x H x W) -> (B x C x T|D x H x W)
         x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
         # StarRNN
