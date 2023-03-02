@@ -4,15 +4,15 @@ from dataclasses import dataclass
 from pathlib import Path
 import uuid
 
-from .datasets import EdgeDataset
-from ..networks import SingleSensorNetwork
-from ..utils.reshape import nd_to_columns
-from ..utils.normalize import NormValues
-
 import numpy as np
 import xarray as xr
 import torch
 from torch_geometric.data import Data
+
+from .datasets import EdgeDataset
+from ..networks import SingleSensorNetwork
+from ..utils.reshape import nd_to_columns
+from ..utils.normalize import NormValues
 
 
 @dataclass

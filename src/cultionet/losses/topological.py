@@ -1,7 +1,6 @@
 import typing as T
 
 import numpy as np
-
 import torch
 import gudhi
 

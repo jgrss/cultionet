@@ -1,12 +1,8 @@
 import typing as T
 from pathlib import Path
 import json
-
-from ..losses import TanimotoDistLoss
-from .cultio import CultioNet, FinalRefinement
-from .maskcrnn import BFasterRCNN
-from .base_layers import Softmax
-from . import model_utils
+import warnings
+import logging
 
 import pandas as pd
 import torch
@@ -18,8 +14,12 @@ from torchvision.ops import box_iou
 from torchvision import transforms
 import torchmetrics
 
-import warnings
-import logging
+from . import model_utils
+from .cultio import CultioNet, FinalRefinement
+from .maskcrnn import BFasterRCNN
+from .base_layers import Softmax
+from ..losses import TanimotoDistLoss
+
 
 warnings.filterwarnings('ignore')
 logging.getLogger('lightning').addHandler(logging.NullHandler())

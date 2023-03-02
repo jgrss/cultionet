@@ -3,12 +3,6 @@ from pathlib import Path
 from functools import partial
 import warnings
 
-from .utils import LabeledData, get_image_list_dims
-from ..augment.augmenters import Augmenters, AugmenterMapping
-from ..errors import TopologyClipError
-from ..utils.logging import set_color_logger
-from ..utils.model_preprocessing import TqdmParallel
-
 import geowombat as gw
 from geowombat.core import polygon_to_array
 from geowombat.core.windows import get_window_offsets
@@ -23,6 +17,12 @@ from tqdm.auto import tqdm
 from torch_geometric.data import Data
 import joblib
 from joblib import delayed, parallel_backend
+
+from .utils import LabeledData, get_image_list_dims
+from ..augment.augmenters import Augmenters, AugmenterMapping
+from ..errors import TopologyClipError
+from ..utils.logging import set_color_logger
+from ..utils.model_preprocessing import TqdmParallel
 
 
 logger = set_color_logger(__name__)

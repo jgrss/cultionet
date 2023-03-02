@@ -1,6 +1,9 @@
 import typing as T
 import enum
 
+import torch
+
+from . import model_utils
 from .base_layers import (
     AttentionGate,
     AtrousPyramidPooling,
@@ -11,9 +14,6 @@ from .base_layers import (
     ResidualConv
 )
 from .enums import ModelTypes, ResBlockTypes
-from . import model_utils
-
-import torch
 
 
 class UNet3Connector(torch.nn.Module):

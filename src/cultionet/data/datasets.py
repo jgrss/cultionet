@@ -2,10 +2,6 @@ import typing as T
 from pathlib import Path
 from functools import partial
 
-from ..errors import TensorShapeError
-from ..utils.logging import set_color_logger
-from ..utils.model_preprocessing import TqdmParallel
-
 import numpy as np
 import attr
 import torch
@@ -19,6 +15,11 @@ from shapely.geometry import box
 from pytorch_lightning import seed_everything
 from geosample import QuadTree
 from tqdm.auto import tqdm
+
+from ..errors import TensorShapeError
+from ..utils.logging import set_color_logger
+from ..utils.model_preprocessing import TqdmParallel
+
 
 ATTRVINSTANCE = attr.validators.instance_of
 ATTRVIN = attr.validators.in_

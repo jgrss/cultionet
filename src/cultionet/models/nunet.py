@@ -6,6 +6,8 @@ Copyright (c) 2018 Takato Kimura
 """
 import typing as T
 
+import torch
+
 from . import model_utils
 from . import kernels
 from .base_layers import (
@@ -42,8 +44,6 @@ from .unet_parts import (
     ResUNet3_1_3,
     ResUNet3_0_4
 )
-
-import torch
 
 
 def weights_init_kaiming(m):

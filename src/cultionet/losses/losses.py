@@ -1,14 +1,14 @@
 import typing as T
 import warnings
 
-from . import topological
-from ..models import model_utils
-
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch_geometric.data import Data
 import torchmetrics
+
+from . import topological
+from ..models import model_utils
 
 
 def one_hot(targets: torch.Tensor, dims: int) -> torch.Tensor:

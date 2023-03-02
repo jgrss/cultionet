@@ -1,13 +1,13 @@
 import typing as T
 import warnings
 
+import torch
+from torch_geometric.data import Data
+
 from . import model_utils
 from .base_layers import ConvBlock2d, Softmax
 from .nunet import UNet3, UNet3Psi, ResUNet3Psi
 from .convstar import StarRNN
-
-import torch
-from torch_geometric.data import Data
 
 
 class FinalRefinement(torch.nn.Module):

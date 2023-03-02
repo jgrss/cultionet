@@ -2,15 +2,15 @@ import typing as T
 import filelock
 from pathlib import Path
 
-from .data.const import SCALE_FACTOR
-from .utils.reshape import ModelOutputs
-
 import geowombat as gw
 import rasterio as rio
 from rasterio.windows import Window
 import torch
 from pytorch_lightning.callbacks import BasePredictionWriter
 from torch_geometric.data import Data
+
+from .data.const import SCALE_FACTOR
+from .utils.reshape import ModelOutputs
 
 
 class LightningGTiffWriter(BasePredictionWriter):

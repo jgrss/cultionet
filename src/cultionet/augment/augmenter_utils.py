@@ -1,11 +1,11 @@
 import typing as T
 
-from ..data.utils import LabeledData
-
 import numpy as np
 from scipy.ndimage.measurements import label as nd_label
 from tsaug import AddNoise, Drift, TimeWarp
 import torch
+
+from ..data.utils import LabeledData
 
 
 def feature_stack_to_tsaug(

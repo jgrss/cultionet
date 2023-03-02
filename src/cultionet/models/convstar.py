@@ -2,10 +2,10 @@
 """
 import typing as T
 
-from .base_layers import Softmax, ResidualConv
-
 import torch
 from torch.autograd import Variable
+
+from .base_layers import Softmax, ResidualConv
 
 
 class ConvSTARCell(torch.nn.Module):
