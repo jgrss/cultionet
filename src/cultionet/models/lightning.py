@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim import lr_scheduler
 from torch_geometric.data import Data
-import pytorch_lightning as pl
+from pytorch_lightning import LightningModule
 from torchvision.ops import box_iou
 from torchvision import transforms
 import torchmetrics
@@ -27,7 +27,7 @@ logging.getLogger('lightning').propagate = False
 logging.getLogger('lightning').setLevel(logging.ERROR)
 
 
-class MaskRCNNLitModel(pl.LightningModule):
+class MaskRCNNLitModel(LightningModule):
     def __init__(
         self,
         cultionet_model_file: Path,
@@ -312,7 +312,7 @@ def scale_logits(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
     return x / t
 
 
-class TemperatureScaling(pl.LightningModule):
+class TemperatureScaling(LightningModule):
     def __init__(
         self,
         cultionet_model: CultioNet = None,
@@ -516,7 +516,7 @@ class TemperatureScaling(pl.LightningModule):
         )
 
 
-class CultioLitModel(pl.LightningModule):
+class CultioLitModel(LightningModule):
     def __init__(
         self,
         num_features: int = None,
@@ -539,7 +539,7 @@ class CultioLitModel(pl.LightningModule):
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         crop_temperature: T.Optional[float] = None,
-        temperature_lit_model: T.Optional[pl.LightningModule] = None,
+        temperature_lit_model: T.Optional[LightningModule] = None,
         scale_pos_weight: T.Optional[bool] = True,
         save_batch_val_metrics: T.Optional[bool] = False
     ):

@@ -253,6 +253,7 @@ train_predict:
     help: The dilations to use
     kwargs:
       default: [1, 2]
+      nargs: '+'
       type: '&int'
   attention_weights:
     short: ''
