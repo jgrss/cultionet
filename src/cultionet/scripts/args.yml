@@ -261,7 +261,7 @@ train_predict:
     help: The attention weights
     kwargs:
       default: 'spatial_channel'
-      choices: ['spatial_channel', 'fractal']
+      choices: ['spatial_channel', 'fractal', 'none']
   filters:
     short: ''
     long: filters
