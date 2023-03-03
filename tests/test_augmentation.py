@@ -1,4 +1,5 @@
-from cultionet.augment.augmentation import (
+from cultionet.augment.augmenters import Augmenters
+from cultionet.augment.augmenter_utils import (
     feature_stack_to_tsaug,
     tsaug_to_feature_stack
 )
@@ -23,8 +24,19 @@ def test_feature_stack_to_tsaug():
         x, NTIME, NBANDS, NROWS, NCOLS
     )
     assert x_t.shape == (NROWS*NCOLS, NTIME, NBANDS), \
-        'The feature stack was not correctly reshaped.'
+        'The feature stack was incorrectly reshaped.'
     # Reshape from (H*W x T X C) -> (T*C x H x W)
     x_tr = tsaug_to_feature_stack(x_t, nfeas, NROWS, NCOLS)
     assert np.allclose(x, x_tr), \
-        'The re-transformed data to not match the original.'
+        'The re-transformed data do not match the original.'
+
+
+def test_augmenter_loading():
+    aug = Augmenters(
+        augmentations=['ts-warp'],
+        ntime=13,
+        nbands=5,
+        max_crop_class=1
+    )
+    for method in aug:
+        assert method.name_ == 'ts-warp'

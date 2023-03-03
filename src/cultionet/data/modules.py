@@ -1,12 +1,12 @@
 import typing as T
 
-import pytorch_lightning as pl
+from pytorch_lightning import LightningDataModule
 from torch_geometric.loader import DataLoader
 
 from .datasets import EdgeDataset
 
 
-class EdgeDataModule(pl.LightningDataModule):
+class EdgeDataModule(LightningDataModule):
     """A Lightning data module
     """
     def __init__(
