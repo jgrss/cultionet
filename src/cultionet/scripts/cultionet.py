@@ -797,6 +797,7 @@ def create_datasets(args):
                 )
 
                 if not vi_path.is_dir():
+                    pbar.update(1)
                     pbar.set_description('No directory')
                     continue
 
@@ -822,6 +823,7 @@ def create_datasets(args):
                     date_format=args.date_format
                 )
                 if len(ts_list) <= 1:
+                    pbar.update(1)
                     pbar.set_description('TS too short')
                     continue
 
