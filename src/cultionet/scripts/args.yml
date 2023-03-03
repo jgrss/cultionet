@@ -144,13 +144,6 @@ create:
         - salt-pepper
         - speckle
       nargs: '+'
-  n_ts:
-    short: n-ta
-    long: num-temporal-aug
-    help: The number of temporal augmentations
-    kwargs:
-      default: 1
-      type: '&int'
   grid_size:
     short: gs
     long: grid-size
@@ -245,14 +238,14 @@ train_predict:
     long: res-block-type
     help: The residual block type (only relevant when --model-type=ResUNet3Psi)
     kwargs:
-      default: 'resa'
+      default: 'res'
       choices: ['res', 'resa']
   dilations:
     short: ''
     long: dilations
     help: The dilations to use
     kwargs:
-      default: [1, 2]
+      default: [2]
       nargs: '+'
       type: '&int'
   attention_weights:
@@ -295,7 +288,7 @@ train_predict:
     long: batch-size
     help: The batch size
     kwargs:
-      default: 4
+      default: 8
       type: '&int'
   load_batch_workers:
     short: ''
