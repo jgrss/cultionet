@@ -527,7 +527,7 @@ class TemperatureScaling(LightningModule):
             max_iter=self.max_iter,
             line_search_fn=None
         )
-        lr_scheduler = lr_scheduler.CosineAnnealingLR(
+        model_lr_scheduler = lr_scheduler.CosineAnnealingLR(
             optimizer_adamw,
             T_max=20,
             eta_min=1e-5,
@@ -538,7 +538,7 @@ class TemperatureScaling(LightningModule):
             {
                 'optimizer': optimizer_adamw,
                 'lr_scheduler': {
-                    'scheduler': lr_scheduler,
+                    'scheduler': model_lr_scheduler,
                     'monitor': 'loss',
                     'interval': 'epoch',
                     'frequency': 1
