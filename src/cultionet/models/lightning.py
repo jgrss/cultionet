@@ -364,17 +364,17 @@ class TemperatureScaling(LightningModule):
     ) -> T.Dict[str, torch.Tensor]:
         self.geo_refine_model.eval()
         self.geo_refine_model.freeze()
+
         with torch.no_grad():
             # Cultionet predictions
             predictions = self.cultionet_model(batch)
-            predictions['crop'] = self.geo_refine_model(
-                predictions,
-                data=batch
+            predictions = self.predict_crop_probas(
+                predictions=predictions,
+                batch=batch,
+                with_no_grad=False,
+                scale_predict_logits=True,
+                crop_temperature=crop_temperature
             )
-        predictions['crop'] = scale_logits(
-            predictions['crop'], crop_temperature
-        )
-        predictions['crop'] = self.softmax(predictions['crop'])
 
         return predictions
 
@@ -409,6 +409,37 @@ class TemperatureScaling(LightningModule):
 
         return loss
 
+    def predict_crop_probas(
+        self, predictions: T.Dict[str, torch.Tensor],
+        batch: Data,
+        with_no_grad: bool,
+        scale_predict_logits: bool,
+        crop_temperature: T.Optional[torch.Tensor] = None
+    ) -> T.Dict[str, torch.Tensor]:
+        if with_no_grad:
+            with torch.no_grad():
+                # The inputs from cultionet are probabilities
+                # The output crop predictions are logits
+                predictions['crop'] = self.geo_refine_model(
+                    predictions,
+                    data=batch
+                )
+        else:
+            predictions['crop'] = self.geo_refine_model(
+                predictions,
+                data=batch
+            )
+        if scale_predict_logits:
+            if crop_temperature is None:
+                crop_temperature = self.crop_temperature
+
+            predictions['crop'] = scale_logits(
+                predictions['crop'], crop_temperature
+            )
+        predictions['crop'] = self.softmax(predictions['crop'])
+
+        return predictions
+
     def training_step(
         self,
         batch: Data,
@@ -424,13 +455,13 @@ class TemperatureScaling(LightningModule):
         if optimizer_idx == 0:
             # The first optimizer is used for the refinement model
             self.geo_refine_model.train()
-            # The inputs from cultionet are probabilities
-            # The output crop predictions are logits
-            predictions['crop'] = self.geo_refine_model(
-                predictions,
-                data=batch
+            predictions = self.predict_crop_probas(
+                predictions=predictions,
+                batch=batch,
+                with_no_grad=False,
+                scale_predict_logits=False
             )
-            predictions['crop'] = self.softmax(predictions['crop'])
+
             loss = self.calc_refined_loss(
                 batch,
                 predictions
@@ -438,17 +469,12 @@ class TemperatureScaling(LightningModule):
         else:
             # The second optimizer is used for the probability calibration
             self.geo_refine_model.eval()
-            with torch.no_grad():
-                # The inputs from cultionet are probabilities
-                # The output crop predictions are logits
-                predictions['crop'] = self.geo_refine_model(
-                    predictions,
-                    data=batch
-                )
-            predictions['crop'] = scale_logits(
-                predictions['crop'], self.crop_temperature
+            predictions = self.predict_crop_probas(
+                predictions=predictions,
+                batch=batch,
+                with_no_grad=True,
+                scale_predict_logits=True
             )
-            predictions['crop'] = self.softmax(predictions['crop'])
 
             loss = self.calc_loss(
                 batch,
