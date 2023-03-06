@@ -321,13 +321,14 @@ class TemperatureScaling(LightningModule):
         eps: float = 1e-4,
         max_iter: float = 25,
         edge_class: int = 2,
-        class_counts: T.Optional[torch.Tensor] = None
+        class_counts: T.Optional[torch.Tensor] = None,
+        cultionet_model: T.Optional["CultioLitModel"] = None
     ):
         super(TemperatureScaling, self).__init__()
 
         self.crop_temperature = torch.nn.Parameter(torch.ones(1))
 
-        self._cultionet_model = None
+        self._cultionet_model = cultionet_model
         self.learning_rate_refine = learning_rate_refine
         self.learning_rate_lbfgs = learning_rate_lbfgs
         self.weight_decay = weight_decay
