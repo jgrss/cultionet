@@ -15,7 +15,7 @@ from torchvision import transforms
 import torchmetrics
 
 from . import model_utils
-from .cultio import CultioNet, FinalRefinement
+from .cultio import CultioNet, GeoRefinement
 from .maskcrnn import BFasterRCNN
 from .base_layers import Softmax
 from ..losses import TanimotoDistLoss
@@ -316,7 +316,7 @@ class TemperatureScaling(LightningModule):
     def __init__(
         self,
         cultionet_model: CultioNet = None,
-        learning_rate: float = 1e-4,
+        learning_rate_refine: float = 1e-3,
         learning_rate_lbfgs: float = 0.01,
         weight_decay: float = 0.01,
         eps: float = 1e-4,
@@ -329,7 +329,7 @@ class TemperatureScaling(LightningModule):
         self.crop_temperature = torch.nn.Parameter(torch.ones(1))
 
         self.cultionet_model = cultionet_model
-        self.learning_rate = learning_rate
+        self.learning_rate_refine = learning_rate_refine
         self.learning_rate_lbfgs = learning_rate_lbfgs
         self.weight_decay = weight_decay
         self.eps = eps
@@ -338,7 +338,7 @@ class TemperatureScaling(LightningModule):
         self.class_counts = class_counts
         self.softmax = Softmax(dim=1)
 
-        self.final_model = FinalRefinement(
+        self.geo_refine_model = GeoRefinement(
             # StarRNN 3 + 2
             # Distance transform x4
             # Edge sigmoid x4
@@ -362,12 +362,12 @@ class TemperatureScaling(LightningModule):
         crop_temperature: torch.Tensor,
         batch_idx: int = None
     ) -> T.Dict[str, torch.Tensor]:
-        self.final_model.eval()
-        self.final_model.freeze()
+        self.geo_refine_model.eval()
+        self.geo_refine_model.freeze()
         with torch.no_grad():
             # Cultionet predictions
             predictions = self.cultionet_model(batch)
-            predictions['crop'] = self.final_model(
+            predictions['crop'] = self.geo_refine_model(
                 predictions,
                 data=batch
             )
@@ -423,10 +423,10 @@ class TemperatureScaling(LightningModule):
 
         if optimizer_idx == 0:
             # The first optimizer is used for the refinement model
-            self.final_model.train()
+            self.geo_refine_model.train()
             # The inputs from cultionet are probabilities
             # The output crop predictions are logits
-            predictions['crop'] = self.final_model(
+            predictions['crop'] = self.geo_refine_model(
                 predictions,
                 data=batch
             )
@@ -437,11 +437,11 @@ class TemperatureScaling(LightningModule):
             )
         else:
             # The second optimizer is used for the probability calibration
-            self.final_model.eval()
+            self.geo_refine_model.eval()
             with torch.no_grad():
                 # The inputs from cultionet are probabilities
                 # The output crop predictions are logits
-                predictions['crop'] = self.final_model(
+                predictions['crop'] = self.geo_refine_model(
                     predictions,
                     data=batch
                 )
@@ -483,8 +483,8 @@ class TemperatureScaling(LightningModule):
 
     def configure_optimizers(self):
         optimizer_adamw = torch.optim.AdamW(
-            list(self.final_model.parameters()),
-            lr=self.learning_rate,
+            list(self.geo_refine_model.parameters()),
+            lr=self.learning_rate_refine,
             weight_decay=self.weight_decay,
             eps=self.eps
         )
@@ -494,10 +494,11 @@ class TemperatureScaling(LightningModule):
             max_iter=self.max_iter,
             line_search_fn=None
         )
-        lr_scheduler_lbfgs = lr_scheduler.ReduceLROnPlateau(
+        lr_scheduler_lbfgs = lr_scheduler.CosineAnnealingLR(
             optimizer_lbfgs,
-            factor=0.1,
-            patience=5
+            T_max=20,
+            eta_min=1e-5,
+            last_epoch=-1
         )
 
         return (
