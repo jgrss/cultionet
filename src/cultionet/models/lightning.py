@@ -520,8 +520,8 @@ class TemperatureScaling(LightningModule):
             max_iter=self.max_iter,
             line_search_fn=None
         )
-        lr_scheduler_lbfgs = lr_scheduler.CosineAnnealingLR(
-            optimizer_lbfgs,
+        lr_scheduler = lr_scheduler.CosineAnnealingLR(
+            optimizer_adamw,
             T_max=20,
             eta_min=1e-5,
             last_epoch=-1
@@ -529,16 +529,16 @@ class TemperatureScaling(LightningModule):
 
         return (
             {
-                'optimizer': optimizer_adamw
-            },
-            {
-                'optimizer': optimizer_lbfgs,
+                'optimizer': optimizer_adamw,
                 'lr_scheduler': {
-                    'scheduler': lr_scheduler_lbfgs,
+                    'scheduler': lr_scheduler,
                     'monitor': 'loss',
                     'interval': 'epoch',
                     'frequency': 1
                 },
+            },
+            {
+                'optimizer': optimizer_lbfgs
             }
         )
 
@@ -661,6 +661,7 @@ class CultioLitModel(LightningModule):
         """A prediction step for Lightning
         """
         if self.temperature_lit_model is not None:
+            import ipdb; ipdb.set_trace()
             predictions = self.temperature_lit_model(
                 batch,
                 self.crop_temperature,
