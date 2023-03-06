@@ -257,7 +257,9 @@ def fit(
     stochastic_weight_averaging_lr: T.Optional[float] = 0.05,
     stochastic_weight_averaging_start: T.Optional[float] = 0.8,
     model_pruning: T.Optional[bool] = False,
-    save_batch_val_metrics: T.Optional[bool] = False
+    save_batch_val_metrics: T.Optional[bool] = False,
+    skip_train: T.Optional[bool] = False,
+    refine_and_calibrate: T.Optional[bool] = False
 ):
     """Fits a model
 
@@ -308,6 +310,8 @@ def fit(
             Default is 0.8.
         model_pruning (Optional[bool]): Whether to prune the model. Default is False.
         save_batch_val_metrics (Optional[bool]): Whether to save batch validation metrics to a parquet file.
+        skip_train (Optional[bool]): Whether to skip training.
+        refine_and_calibrate (Optional[bool]): Whether to refine and calibrate a trained model.
     """
     ckpt_file = Path(ckpt_file)
 
@@ -470,8 +474,9 @@ def fit(
         enable_checkpointing=True,
         auto_lr_find=auto_lr_find,
         auto_scale_batch_size=False,
+        accumulate_grad_batches=accumulate_grad_batches,
         gradient_clip_val=gradient_clip_val,
-        gradient_clip_algorithm='value',
+        gradient_clip_algorithm=gradient_clip_algorithm,
         check_val_every_n_epoch=1,
         min_epochs=5 if epochs >= 5 else epochs,
         max_epochs=10,
@@ -488,24 +493,26 @@ def fit(
     if auto_lr_find:
         trainer.tune(model=lit_model, datamodule=data_module)
     else:
-        trainer.fit(
-            model=lit_model,
-            datamodule=data_module,
-            ckpt_path=ckpt_file if ckpt_file.is_file() else None
-        )
-        # Calibrate the logits
-        temperature_model = TemperatureScaling(
-            cultionet_model=CultioLitModel.load_from_checkpoint(
-                checkpoint_path=str(ckpt_file)
-            ),
-            edge_class=edge_class,
-            class_counts=class_counts
-        )
-        temperature_trainer.fit(
-            model=temperature_model,
-            datamodule=temperature_data_module,
-            ckpt_path=temperature_ckpt_file if temperature_ckpt_file.is_file() else None
-        )
+        if not skip_train:
+            trainer.fit(
+                model=lit_model,
+                datamodule=data_module,
+                ckpt_path=ckpt_file if ckpt_file.is_file() else None
+            )
+        if refine_and_calibrate:
+            # Calibrate the logits
+            temperature_model = TemperatureScaling(
+                cultionet_model=CultioLitModel.load_from_checkpoint(
+                    checkpoint_path=str(ckpt_file)
+                ),
+                edge_class=edge_class,
+                class_counts=class_counts
+            )
+            temperature_trainer.fit(
+                model=temperature_model,
+                datamodule=temperature_data_module,
+                ckpt_path=temperature_ckpt_file if temperature_ckpt_file.is_file() else None
+            )
         if test_dataset is not None:
             trainer.test(
                 model=lit_model,
