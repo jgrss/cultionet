@@ -646,22 +646,21 @@ def predict_lightning(
     )
 
     trainer = pl.Trainer(**trainer_kwargs)
-    lit_model = CultioLitModel.load_from_checkpoint(
+    cultionet_model = CultioLitModel.load_from_checkpoint(
         checkpoint_path=str(ckpt_file)
     )
 
     temperature_lit_model = None
     if crop_temperature is not None:
-        import ipdb; ipdb.set_trace()
         temperature_lit_model = TemperatureScaling.load_from_checkpoint(
             checkpoint_path=str(temperature_ckpt)
         )
-    setattr(lit_model, 'crop_temperature', crop_temperature)
-    setattr(lit_model, 'temperature_lit_model', temperature_lit_model)
+    setattr(cultionet_model, 'crop_temperature', crop_temperature)
+    setattr(cultionet_model, 'temperature_lit_model', temperature_lit_model)
 
     # Make predictions
     trainer.predict(
-        model=lit_model,
+        model=cultionet_model,
         datamodule=data_module,
         return_predictions=False
     )

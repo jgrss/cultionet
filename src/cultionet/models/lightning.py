@@ -337,6 +337,7 @@ class TemperatureScaling(LightningModule):
         self.edge_class = edge_class
         self.class_counts = class_counts
         self.softmax = Softmax(dim=1)
+        self.frozen_ = False
 
         self.geo_refine_model = GeoRefinement(
             # StarRNN 3 + 2
@@ -349,25 +350,31 @@ class TemperatureScaling(LightningModule):
             double_dilation=2
         )
 
-        self.cultionet_model.eval()
-        self.cultionet_model.freeze()
+        if self.cultionet_model is not None:
+            self.cultionet_model.eval()
+            self.cultionet_model.freeze()
         self.configure_loss()
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
+    def freeze_params(self):
+        self.geo_refine_model.eval()
+        self.geo_refine_model.freeze()
+
+        self.frozen_ = True
+
     def forward(
         self,
+        predictions: T.Dict[str, torch.Tensor],
         batch: Data,
         crop_temperature: torch.Tensor,
         batch_idx: int = None
     ) -> T.Dict[str, torch.Tensor]:
-        self.geo_refine_model.eval()
-        self.geo_refine_model.freeze()
+        if not self.frozen_:
+            self.freeze_params()
 
         with torch.no_grad():
-            # Cultionet predictions
-            predictions = self.cultionet_model(batch)
             predictions = self.predict_crop_probas(
                 predictions=predictions,
                 batch=batch,
@@ -660,15 +667,15 @@ class CultioLitModel(LightningModule):
     ) -> T.Dict[str, torch.Tensor]:
         """A prediction step for Lightning
         """
+        predictions = self.forward(batch, batch_idx)
         if self.temperature_lit_model is not None:
             import ipdb; ipdb.set_trace()
             predictions = self.temperature_lit_model(
+                predictions,
                 batch,
                 self.crop_temperature,
                 batch_idx
             )
-        else:
-            predictions = self.forward(batch, batch_idx)
 
         return predictions
 
