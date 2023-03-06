@@ -32,11 +32,18 @@ def test_feature_stack_to_tsaug():
 
 
 def test_augmenter_loading():
+    augmentations = [
+        'ts-warp',
+        'ts-noise',
+        'ts-drift',
+        'ts-peaks',
+        
+    ]
     aug = Augmenters(
-        augmentations=['ts-warp'],
+        augmentations=augmentations,
         ntime=13,
         nbands=5,
         max_crop_class=1
     )
-    for method in aug:
-        assert method.name_ == 'ts-warp'
+    for i, method in enumerate(aug):
+        assert method.name_ == augmentations[i]

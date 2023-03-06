@@ -68,8 +68,8 @@ def zscores(
 
     Args:
         batch (Data): A `torch_geometric` data object.
-        data_means (Tensor)
-        data_stds (TEnsor)
+        data_means (Tensor): The data feature-wise means.
+        data_stds (Tensor): The data feature-wise standard deviations.
 
     z = (x - μ) / σ
     """
