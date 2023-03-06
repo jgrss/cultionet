@@ -107,11 +107,10 @@ class GeoRefinement(torch.nn.Module):
         x = self.gc(
             x, batch_size, height, width
         )
-        import ipdb; ipdb.set_trace()
-        h = self.model(x)
-        h = h * geo_attention
+        out = self.model(x)
+        out = self.cg(out * geo_attention)
 
-        return self.cg(h)
+        return out
 
 
 class CropTypeFinal(torch.nn.Module):
