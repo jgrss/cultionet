@@ -109,6 +109,7 @@ class GeoRefinement(torch.nn.Module):
         )
         h = self.model(x)
         h = h * geo_attention
+        import ipdb; ipdb.set_trace()
 
         return self.cg(h)
 
