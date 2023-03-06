@@ -651,7 +651,6 @@ def predict_lightning(
 
     temperature_lit_model = None
     if crop_temperature is not None:
-        import ipdb; ipdb.set_trace()
         temperature_lit_model = TemperatureScaling.load_from_checkpoint(
             checkpoint_path=str(temperature_ckpt)
         )

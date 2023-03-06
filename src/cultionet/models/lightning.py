@@ -349,7 +349,7 @@ class TemperatureScaling(LightningModule):
             out_channels=2,
             double_dilation=2
         )
-
+        import ipdb; ipdb.set_trace()
         if self.cultionet_model is not None:
             self.cultionet_model.eval()
             self.cultionet_model.freeze()
@@ -669,7 +669,6 @@ class CultioLitModel(LightningModule):
         """
         predictions = self.forward(batch, batch_idx)
         if self.temperature_lit_model is not None:
-            import ipdb; ipdb.set_trace()
             predictions = self.temperature_lit_model(
                 predictions,
                 batch,
