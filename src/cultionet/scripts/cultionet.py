@@ -431,6 +431,7 @@ class SerialWriter(WriterModule):
         data_values: torch.Tensor,
         ppaths: ProjectPaths,
         device: str,
+        devices: int,
         scale_factor: float,
         include_maskrcnn: bool
     ) -> None:
@@ -446,6 +447,7 @@ class SerialWriter(WriterModule):
             data_values=data_values,
             ppaths=ppaths,
             device=device,
+            devices=devices,
             scale_factor=scale_factor,
             include_maskrcnn=include_maskrcnn
         )
