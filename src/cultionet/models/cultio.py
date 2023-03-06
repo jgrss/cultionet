@@ -10,7 +10,17 @@ from .nunet import UNet3, UNet3Psi, ResUNet3Psi
 from .convstar import StarRNN
 
 
-class FinalRefinement(torch.nn.Module):
+def scale_min_max(
+    x: torch.Tensor,
+    min_in: float,
+    max_in: float,
+    min_out: float,
+    max_out: float
+) -> torch.Tensor:
+    return (((max_out - min_out) * (x - min_in)) / (max_in - min_in)) + min_out
+
+
+class GeoRefinement(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -18,10 +28,22 @@ class FinalRefinement(torch.nn.Module):
         out_channels: int,
         double_dilation: int = 1
     ):
-        super(FinalRefinement, self).__init__()
+        super(GeoRefinement, self).__init__()
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
+
+        self.gamma = torch.nn.Parameter(torch.ones((1, out_channels, 1, 1)))
+        self.geo_attention = torch.nn.Sequential(
+            ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding=0,
+                add_activation=False
+            ),
+            torch.nn.Sigmoid()
+        )
 
         self.model = UNet3(
             in_channels=in_channels,
@@ -45,6 +67,21 @@ class FinalRefinement(torch.nn.Module):
         height = int(data.height) if data.batch is None else int(data.height[0])
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
+
+        latitude_norm = scale_min_max(
+            data.top - ((data.top - data.bottom) * 0.5), -90.0, 90.0, 0.0, 1.0
+        )
+        longitude_norm = scale_min_max(
+            data.left + ((data.right - data.left) * 0.5), -180.0, 180.0, 0.0, 1.0
+        )
+        lat_lon = torch.cat(
+            [
+                latitude_norm.reshape(*latitude_norm.shape, 1, 1, 1),
+                longitude_norm.reshape(*longitude_norm.shape, 1, 1, 1)
+            ], dim=1
+        )
+        geo_attention = self.geo_attention(lat_lon)
+        geo_attention = 1.0 + self.gamma * geo_attention
 
         x = torch.cat(
             [
@@ -71,6 +108,7 @@ class FinalRefinement(torch.nn.Module):
             x, batch_size, height, width
         )
         h = self.model(x)
+        h = h * geo_attention
 
         return self.cg(h)
 
