@@ -652,7 +652,11 @@ def predict_lightning(
     temperature_lit_model = None
     if crop_temperature is not None:
         import ipdb; ipdb.set_trace()
-        temperature_lit_model = TemperatureScaling(cultionet_model=cultionet_lit_model).load_from_checkpoint(
+        # temperature_model = TemperatureScaling(
+        #     cultionet_model=cultionet_lit_model
+        # )
+        # temperature_model.load_from_checkpoint(checkpoint_path=str(temperature_ckpt))
+        temperature_lit_model = TemperatureScaling.load_from_checkpoint(
             checkpoint_path=str(temperature_ckpt)
         )
     setattr(cultionet_lit_model, 'crop_temperature', crop_temperature)

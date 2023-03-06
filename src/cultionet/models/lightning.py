@@ -350,9 +350,9 @@ class TemperatureScaling(LightningModule):
             double_dilation=2
         )
 
-        if self.cultionet_model is not None:
-            self.cultionet_model.eval()
-            self.cultionet_model.freeze()
+        # if self.cultionet_model is not None:
+        #     self.cultionet_model.eval()
+        #     self.cultionet_model.freeze()
         self.configure_loss()
 
     def __call__(self, *args, **kwargs):
