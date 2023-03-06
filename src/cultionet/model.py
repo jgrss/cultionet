@@ -611,7 +611,7 @@ def predict_lightning(
     ref_res: float,
     compression: str,
     crop_temperature: T.Optional[torch.Tensor] = None,
-    temperature_ckpt: Path = None
+    temperature_ckpt: T.Optional[Path] = None
 ):
     reference_image = Path(reference_image)
     out_path = Path(out_path)
@@ -651,6 +651,7 @@ def predict_lightning(
 
     temperature_lit_model = None
     if crop_temperature is not None:
+        import ipdb; ipdb.set_trace()
         temperature_lit_model = TemperatureScaling.load_from_checkpoint(
             checkpoint_path=str(temperature_ckpt)
         )
