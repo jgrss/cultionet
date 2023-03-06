@@ -477,8 +477,8 @@ def fit(
         gradient_clip_val=gradient_clip_val,
         gradient_clip_algorithm='value',
         check_val_every_n_epoch=1,
-        min_epochs=5 if epochs >= 5 else epochs,
-        max_epochs=10,
+        min_epochs=2 if epochs >= 2 else epochs,
+        max_epochs=2,
         precision=32,
         devices=None if device == 'cpu' else devices,
         num_processes=0,
@@ -501,11 +501,11 @@ def fit(
         if refine_and_calibrate:
             # Calibrate the logits
             temperature_model = TemperatureScaling(
-                cultionet_model=CultioLitModel.load_from_checkpoint(
-                    checkpoint_path=str(ckpt_file)
-                ),
                 edge_class=edge_class,
                 class_counts=class_counts
+            )
+            temperature_model.cultionet_model = CultioLitModel.load_from_checkpoint(
+                checkpoint_path=str(ckpt_file)
             )
             temperature_trainer.fit(
                 model=temperature_model,
@@ -651,14 +651,10 @@ def predict_lightning(
 
     temperature_lit_model = None
     if crop_temperature is not None:
-        import ipdb; ipdb.set_trace()
-        # temperature_model = TemperatureScaling(
-        #     cultionet_model=cultionet_lit_model
-        # )
-        # temperature_model.load_from_checkpoint(checkpoint_path=str(temperature_ckpt))
-        temperature_lit_model = TemperatureScaling.load_from_checkpoint(
+        temperature_model = TemperatureScaling.load_from_checkpoint(
             checkpoint_path=str(temperature_ckpt)
         )
+        temperature_model.cultionet_model = cultionet_lit_model
     setattr(cultionet_lit_model, 'crop_temperature', crop_temperature)
     setattr(cultionet_lit_model, 'temperature_lit_model', temperature_lit_model)
 

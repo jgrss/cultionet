@@ -315,7 +315,6 @@ def scale_logits(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
 class TemperatureScaling(LightningModule):
     def __init__(
         self,
-        cultionet_model: CultioNet = None,
         learning_rate_refine: float = 1e-3,
         learning_rate_lbfgs: float = 0.01,
         weight_decay: float = 0.01,
@@ -328,7 +327,7 @@ class TemperatureScaling(LightningModule):
 
         self.crop_temperature = torch.nn.Parameter(torch.ones(1))
 
-        self.cultionet_model = cultionet_model
+        self._cultionet_model = None
         self.learning_rate_refine = learning_rate_refine
         self.learning_rate_lbfgs = learning_rate_lbfgs
         self.weight_decay = weight_decay
@@ -350,15 +349,22 @@ class TemperatureScaling(LightningModule):
             double_dilation=2
         )
 
-        # if self.cultionet_model is not None:
-        #     self.cultionet_model.eval()
-        #     self.cultionet_model.freeze()
         self.configure_loss()
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
-    def freeze_params(self):
+    @property
+    def cultionet_model(self) -> "CultioLitModel":
+        return self._cultionet_model
+
+    @cultionet_model.setter
+    def cultionet_model(self, new: "CultioLitModel") -> "CultioLitModel":
+        new.eval()
+        new.freeze()
+        self._cultionet_model = new
+
+    def _freeze_params(self):
         self.geo_refine_model.eval()
         self.geo_refine_model.freeze()
 
@@ -372,7 +378,7 @@ class TemperatureScaling(LightningModule):
         batch_idx: int = None
     ) -> T.Dict[str, torch.Tensor]:
         if not self.frozen_:
-            self.freeze_params()
+            self._freeze_params()
 
         with torch.no_grad():
             predictions = self.predict_crop_probas(
