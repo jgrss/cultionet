@@ -36,7 +36,7 @@ class GeoRefinement(torch.nn.Module):
         self.gamma = torch.nn.Parameter(torch.ones((1, out_channels, 1, 1)))
         self.geo_attention = torch.nn.Sequential(
             ConvBlock2d(
-                in_channels=in_channels,
+                in_channels=2,
                 out_channels=out_channels,
                 kernel_size=1,
                 padding=0,
