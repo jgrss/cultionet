@@ -360,6 +360,7 @@ class TemperatureScaling(LightningModule):
 
     @cultionet_model.setter
     def cultionet_model(self, new: "CultioLitModel") -> "CultioLitModel":
+        import ipdb; ipdb.set_trace()
         new.eval()
         new.freeze()
         self._cultionet_model = new
