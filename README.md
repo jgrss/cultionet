@@ -2,16 +2,24 @@
 [![GitHub version](https://badge.fury.io/gh/jgrss%2Fcultionet.svg)](https://badge.fury.io/gh/jgrss%2Fcultionet)
 [![](https://github.com/jgrss/cultionet/actions/workflows/ci.yml/badge.svg)](https://github.com/jgrss/cultionet/actions?query=workflow%3ACI)
 
-**cultionet** is a library for semantic segmentation of cultivated land using a neural network.
+**cultionet** is a library for semantic segmentation of cultivated land using a neural network. There are various model configurations that can
+be used in `cultionet`, but the base architecture is [UNet 3+](https://arxiv.org/abs/2004.08790) with [multi-stream decoders](https://arxiv.org/abs/1902.04099).
 
-The library is built on **[PyTorch Lightning](https://www.pytorchlightning.ai/)**. The segmentation objectives (class targets and losses) were designed following the work by [Waldner _et al._](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301115). However, this library differs from the paper above:
+The library is built on **[PyTorch Lightning](https://www.pytorchlightning.ai/)**. The segmentation objectives (class targets and losses) were designed following the work by [Waldner _et al._](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301115).
 
-1. **cultionet** uses time series instead of individual dates for training and inference.
-2. **cultionet** uses a different CNN architecture.
+Below are highlights of Cultionet:
+
+1. satellite image time series instead of individual dates for training and inference
+2. UNet 3+ Psi architecture
+3. Optional residual convolution blocks
+4. [Spatial-channel attention](https://www.mdpi.com/2072-4292/14/9/2253)
+5. [Tanimoto loss](https://www.mdpi.com/2072-4292/13/18/3707)
+6. Deep, multi-output supervision
 
 ## The cultionet input data
 
-The model inputs are satellite time series--they can be either bands or spectral indices. Data are stored in a [PyTorch Geometric Data object](https://pytorch-geometric.readthedocs.io/en/latest/modules/data.html#torch_geometric.data.Data). For example,
+The model inputs are satellite time series (e.g., bands or spectral indices). Data are stored in a [PyTorch Geometric Data object](https://pytorch-geometric.readthedocs.io/en/latest/modules/data.html#torch_geometric.data.Data). For example, `cultionet` datasets will have data
+that look something like the following.
 
 ```python
 from torch_geometric.data import Data
@@ -44,7 +52,8 @@ res = image spatial resolution = float
 train_id = image id = str
 ```
 
-As an example, for a time series of red, green, blue, and NIR with 25 time steps (bi-weekly + 1 additional end point), the data would be shaped like:
+As an example, for a time series of red, green, blue, and NIR with 25 time steps (bi-weekly + 1 additional end point),
+the data would be shaped like:
 
 ```
 x = [[r_w1, ..., r_w25, g_w1, ..., g_wN, b_w1, ..., b_wN, n_w1, ..., n_wN]]
@@ -54,8 +63,8 @@ x = [[r_w1, ..., r_w25, g_w1, ..., g_wN, b_w1, ..., b_wN, n_w1, ..., n_wN]]
 
 ### Create the training data
 
-Training data should consist of two files per grid/year. One file is a polygon vector file (stored as a GeoPandas-compatible
-format like GeoPackage) of the training grid for a region. The other is a polygon vector file (stored in the same format)
+Training data pairs should consist of two files per grid/year. One file is a polygon vector file (stored as a GeoPandas-compatible
+format like GeoPackage) of the training grid for a region. The other file is a polygon vector file (stored in the same format)
 of the training labels for a grid.
 
 **What is a grid?**
@@ -66,7 +75,7 @@ of the training labels for a grid.
 > **Note:** grids across a study area should all be of equal dimensions
 
 **What is a training label?**
-> Training labels are __polygons__ of delineated crop (i.e., crop fields). The training labels will be clipped to the
+> Training labels are __polygons__ of delineated cropland (i.e., crop fields). The training labels will be clipped to the
 > training grid (described above). Thus, it is important to exhaustively digitize all crop fields within a grid.
 
 **Configuration file**
@@ -78,18 +87,21 @@ of the training labels for a grid.
 * regions
   * The start and end range of the training regions to use in the dataset.
 * years
-  * A list of years to use in the training dataset. Image years correspond to the _end_ period of the time series. Thus, 2021 would align with a time 2020-2021 series.
+  * A list of years to use in the training dataset. Image years correspond to the _end_ period of the time series.
+  Thus, 2021 would align with a time 2020-2021 series.
 
 **Training data requirements**
-> The polygon vector file should have a field named 'class', with values for crop fields set equal to 1. For grids with
-> all null data (i.e., non-crop), simply create an empty polygon or a polygon matching the grid extent with 'class'
-> value equal to 0.
+> The polygon vector file should have a field with values for crop fields set equal to 1. Other crop classes are allowed and
+> can be recoded during the data creation step. However, the current version of cultionet expects the final data to be binary
+> (i.e., 0=non-cropland; 1=cropland). For grids with all null data (i.e., non-crop), simply create an empty grid file.
 
 **Training name requirements**
-> The polygon/grid pairs should be named **{region}_{poly}_{year}.gpkg**. The region name should be an integer of
-> six character length (e.g., the region might correspond to grid 1 and be named '000001_poly_2020.gpkg'.
+> The polygon/grid pairs should be named with the format **{region}_{poly}_{year}.gpkg**. The region name can be any string
+> or integer. However, integers should have six character length (e.g., the region might correspond to grid 1 and be
+> named '000001_poly_2020.gpkg'.
 
-Example directory structure for training data.
+Example directory structure and format for training data. For a single AOI, there is a grid file and a polygon file. The
+number of grid/polygon pairs is unlimited.
 
 ```yaml
 project_dir:
@@ -98,6 +110,36 @@ project_dir:
     '{region}_poly_{time_series_end_year}.gpkg'
 ```
 
+Using the format above, a train directory might look like:
+
+```yaml
+project_dir:
+  user_train:
+    'site1_grid_2021.gpkg'
+    'site1_poly_2021.gpkg'
+    'site1_grid_2022.gpkg'
+    'site1_poly_2022.gpkg'
+    'site2_grid_2020.gpkg'
+    'site2_poly_2020.gpkg'
+    ...
+```
+
+or
+
+```yaml
+project_dir:
+  user_train:
+    '000001_grid_2021.gpkg'
+    '000001_poly_2021.gpkg'
+    '000001_grid_2022.gpkg'
+    '000001_poly_2022.gpkg'
+    '000002_grid_2020.gpkg'
+    '000002_poly_2020.gpkg'
+    ...
+```
+
+> **Note:** a site can have multiple grid/polygon pairs if collected across different timeframes
+
 ### Create the image time series
 
 This must be done outside of `cultionet`. Essentially, a directory with band or VI time series must be generated before
@@ -105,9 +147,10 @@ using `cultionet`.
 
 > **Note:** it is expected that the time series have length greater than 1
 
-- The raster files should be stored as GeoTiffs with names that follow the `yyyyddd.tif` format.
+- The raster files should be stored as GeoTiffs with names that follow a date format (e.g., `yyyyddd.tif` or `yyymmdd.tif`).
+  - The date format can be specified at the CLI.
 - There is no maximum requirement on the temporal frequency (i.e., daily, weekly, bi-weekly, monthly, etc.).
-  - Just note that a higher frequency will result in larger memory footprints for the GPU plus slower training and inference.
+  - Just note that a higher frequency will result in larger memory footprints for the GPU, plus slower training and inference.
 - While there is no requirement for the time series frequency, time series _must_ have different start and end years.
   - For example, a northern hemisphere time series might consist of (1 Jan 2020 to 1 Jan 2021) whereas a southern hemisphere time series might range from (1 July 2020 to 1 July 2021). In either case, note that something like (1 Jan 2020 to 1 Dec 2020) will not work.
 - The years in the directories must align with the training data files. More specifically, the training data year (year in the polygon/grid pairs) should correspond to the time series end year.
@@ -115,6 +158,7 @@ using `cultionet`.
 - The image time series footprints (bounding box) can be of any size, but should encompass the training data bounds. During data creation (next step below), only the relevant bounds of the image are extracted and matched with the training data using the training grid bounds.
 
 **Example time series directory with bi-weekly cadence for three VIs (i.e., evi2, gcvi, kndvi)**
+
 ```yaml
 project_dir:
    time_series_vars:
@@ -153,7 +197,7 @@ all the information needed to train the segmentation model.
 
 ## Training a model
 
-To train the model, you will need to create the train dataset object and pass it to `cultionet` fit method. A script
+To train the model, you will need to create the train dataset object and pass it to the `cultionet` fit method. A script
 is provided to help ease this process. To train a model on a dataset, use (as an example):
 
 ```commandline
@@ -164,58 +208,6 @@ For more CLI options, see:
 
 ```commandline
 (venv.cultionet) cultionet train -h
-```
-
-### Example usage of the cultionet API
-
-In the examples below, we use the project path of the setup examples above to train a model using cultionet. Note that
-this is similar to using the CLI example above. The point here is simply to demonstrate the use of the Python API.
-
-#### Fit a model using cultionet
-
-The example below illustrates what `cultionet train` does.
-
-```python
-import cultionet
-from cultionet.data.datasets import EdgeDataset
-from cultionet.utils.project_paths import setup_paths
-from cultionet.utils.normalize import get_norm_values
-
-# Fraction of data to use for model validation
-# The remainder will be used for training
-val_frac = 0.2
-# The random seed|state used to split the data
-random_seed = 42
-
-# This is a helper function to manage paths
-ppaths = setup_paths('project_dir')
-
-# Get the normalization means and std. deviations
-ds = EdgeDataset(ppaths.train_path)
-cultionet.model.seed_everything(random_seed)
-train_ds, val_ds = ds.split_train_val(val_frac=val_frac)
-# Calculate the values needed to transform to z-scores, using
-# the training data
-data_values = get_norm_values(dataset=train_ds, batch_size=16)
-
-# Create the train data object again, this time passing
-# the means and standard deviation tensors
-ds = EdgeDataset(
-    ppaths.train_path,
-    data_means=data_values.mean,
-    data_stds=data_values.std
-)
-
-# Fit the model
-cultionet.fit(
-   dataset=ds,
-   ckpt_file=ppaths.ckpt_file,
-   val_frac=val_frac,
-   epochs=30,
-   learning_rate=0.001,
-   filters=32,
-   random_seed=random_seed
-)
 ```
 
 After a model has been fit, the last checkpoint file can be found at `/project_dir/ckpt/last.ckpt`.

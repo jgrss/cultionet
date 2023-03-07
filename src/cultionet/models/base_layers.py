@@ -229,6 +229,7 @@ class SigmoidCrisp(torch.nn.Module):
             }
 
         Reference:
+            https://www.mdpi.com/2072-4292/13/18/3707
             https://arxiv.org/pdf/2009.02062.pdf
             https://github.com/waldnerf/decode/blob/main/FracTAL_ResUNet/nn/activations/sigmoid_crisp.py
     """
@@ -611,6 +612,7 @@ class TanimotoDist(torch.nn.Module):
             }
 
         References:
+            https://www.mdpi.com/2072-4292/13/18/3707
             https://arxiv.org/abs/2009.02062
             https://arxiv.org/pdf/2009.02062.pdf
             https://github.com/waldnerf/decode/blob/9e922a2082e570e248eaee10f7a1f2f0bd852b42/FracTAL_ResUNet/nn/layers/ftnmt.py
@@ -693,6 +695,7 @@ class FractalAttention(torch.nn.Module):
         USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
         Reference:
+            https://www.mdpi.com/2072-4292/13/18/3707
             https://arxiv.org/pdf/2009.02062.pdf
             https://github.com/waldnerf/decode/blob/9e922a2082e570e248eaee10f7a1f2f0bd852b42/FracTAL_ResUNet/nn/units/fractal_resnet.py
             https://github.com/waldnerf/decode/blob/9e922a2082e570e248eaee10f7a1f2f0bd852b42/FracTAL_ResUNet/nn/layers/attention.py
