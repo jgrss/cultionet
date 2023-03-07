@@ -385,7 +385,8 @@ class UNet3P_3_1(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         init_point_conv: bool = False,
-        double_dilation: int = 1
+        double_dilation: int = 1,
+        activation_type: str = 'LeakyReLU'
     ):
         super(UNet3P_3_1, self).__init__()
 
@@ -397,7 +398,9 @@ class UNet3P_3_1(torch.nn.Module):
             prev_backbone_channel_index=3,
             n_pools=3,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation
+            dilations=[double_dilation],
+            model_type=ModelTypes.UNET,
+            activation_type=activation_type
         )
 
     def forward(
@@ -425,7 +428,8 @@ class UNet3P_2_2(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         init_point_conv: bool = False,
-        double_dilation: int = 1
+        double_dilation: int = 1,
+        activation_type: str = 'LeakyReLU'
     ):
         super(UNet3P_2_2, self).__init__()
 
@@ -438,7 +442,9 @@ class UNet3P_2_2(torch.nn.Module):
             n_pools=2,
             n_stream_down=1,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation
+            dilations=[double_dilation],
+            model_type=ModelTypes.UNET,
+            activation_type=activation_type
         )
 
     def forward(
@@ -467,7 +473,8 @@ class UNet3P_1_3(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         init_point_conv: bool = False,
-        double_dilation: int = 1
+        double_dilation: int = 1,
+        activation_type: str = 'LeakyReLU'
     ):
         super(UNet3P_1_3, self).__init__()
 
@@ -480,7 +487,9 @@ class UNet3P_1_3(torch.nn.Module):
             n_pools=1,
             n_stream_down=2,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation
+            dilations=[double_dilation],
+            model_type=ModelTypes.UNET,
+            activation_type=activation_type
         )
 
     def forward(
@@ -509,7 +518,8 @@ class UNet3P_0_4(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         init_point_conv: bool = False,
-        double_dilation: int = 1
+        double_dilation: int = 1,
+        activation_type: str = 'LeakyReLU'
     ):
         super(UNet3P_0_4, self).__init__()
 
@@ -523,7 +533,9 @@ class UNet3P_0_4(torch.nn.Module):
             prev_backbone_channel_index=0,
             n_stream_down=3,
             init_point_conv=init_point_conv,
-            double_dilation=double_dilation
+            dilations=[double_dilation],
+            model_type=ModelTypes.UNET,
+            activation_type=activation_type
         )
 
     def forward(

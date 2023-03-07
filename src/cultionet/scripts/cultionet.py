@@ -1276,7 +1276,9 @@ def train_model(args):
         stochastic_weight_averaging_lr=args.stochastic_weight_averaging_lr,
         stochastic_weight_averaging_start=args.stochastic_weight_averaging_start,
         model_pruning=args.model_pruning,
-        save_batch_val_metrics=args.save_batch_val_metrics
+        save_batch_val_metrics=args.save_batch_val_metrics,
+        skip_train=args.skip_train,
+        refine_and_calibrate=args.refine_and_calibrate
     )
 
 

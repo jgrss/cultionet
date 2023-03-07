@@ -17,6 +17,7 @@ from tqdm.auto import tqdm
 from torch_geometric.data import Data
 import joblib
 from joblib import delayed, parallel_backend
+from threadpoolctl import threadpool_limits
 
 from .utils import LabeledData, get_image_list_dims
 from ..augment.augmenters import Augmenters, AugmenterMapping
@@ -451,14 +452,14 @@ def save_and_update(
     )
 
 
-def read_slice(darray: xr.DataArray, w_pad: Window):
+def read_slice(darray: xr.DataArray, w_pad: Window) -> xr.DataArray:
     slicer = (
         slice(0, None),
         slice(w_pad.row_off, w_pad.row_off+w_pad.height),
         slice(w_pad.col_off, w_pad.col_off+w_pad.width)
     )
 
-    return darray[slicer].gw.compute()
+    return darray[slicer]
 
 
 def get_window_chunk(
@@ -481,10 +482,12 @@ def create_and_save_window(
     year: int,
     window_size: int,
     padding: int,
-    x: np.ndarray,
+    darray: xr.DataArray,
     w: Window,
-    w_pad: Window,
+    w_pad: Window
 ) -> None:
+    x = darray.data.compute(num_workers=1)
+
     size = window_size + padding*2
     x_height = x.shape[1]
     x_width = x.shape[2]
@@ -547,7 +550,11 @@ def create_and_save_window(
         col_pad_before=col_pad_before,
         col_pad_after=col_pad_after,
         res=res,
-        resampling=resampling
+        resampling=resampling,
+        left=darray.gw.left,
+        bottom=darray.gw.bottom,
+        right=darray.gw.right,
+        top=darray.gw.top
     )
     for aug_method in augmenters:
         aug_kwargs = augmenters.aug_args.kwargs
@@ -575,69 +582,76 @@ def create_predict_dataset(
     num_workers: int = 1,
     chunksize: int = 100
 ):
-    with gw.config.update(ref_res=ref_res):
-        with gw.open(
-            image_list,
-            stack_dim='band',
-            band_names=list(range(1, len(image_list) + 1)),
-            resampling=resampling,
-            chunks=512
-        ) as src_ts:
-            windows = get_window_offsets(
-                src_ts.gw.nrows,
-                src_ts.gw.ncols,
-                window_size,
-                window_size,
-                padding=(
-                    padding, padding, padding, padding
+    with threadpool_limits(limits=1, user_api='blas'):
+        with gw.config.update(ref_res=ref_res):
+            with gw.open(
+                image_list,
+                stack_dim='band',
+                band_names=list(range(1, len(image_list) + 1)),
+                resampling=resampling,
+                chunks=512
+            ) as src_ts:
+                windows = get_window_offsets(
+                    src_ts.gw.nrows,
+                    src_ts.gw.ncols,
+                    window_size,
+                    window_size,
+                    padding=(
+                        padding, padding, padding, padding
+                    )
                 )
-            )
-            time_series = (
-                (src_ts.astype('float64') * gain + offset)
-                .clip(0, 1)
-            )
+                time_series = (
+                    (src_ts.astype('float64') * gain + offset)
+                    .clip(0, 1)
+                    .chunk({'band': -1, 'y': window_size, 'x': window_size})
+                    .transpose('band', 'y', 'x')
+                    .assign_attrs(**src_ts.attrs)
+                )
 
-            ntime, nbands = get_image_list_dims(image_list, src_ts)
-            partial_create = partial(
-                create_and_save_window,
-                process_path,
-                ntime,
-                nbands,
-                src_ts.gw.nrows,
-                src_ts.gw.ncols,
-                ref_res,
-                resampling,
-                region,
-                year,
-                window_size,
-                padding
-            )
+                ntime, nbands = get_image_list_dims(image_list, src_ts)
 
-            with tqdm(
-                total=len(windows),
-                desc='Creating prediction windows',
-                position=1
-            ) as pbar_total:
-                with parallel_backend(
-                    backend='loky',
-                    n_jobs=num_workers
-                ):
-                    for window_chunk in get_window_chunk(windows, chunksize):
-                        with TqdmParallel(
-                            tqdm_kwargs={
-                                'total': len(window_chunk),
-                                'desc': 'Window chunks',
-                                'position': 2,
-                                'leave': False
-                            },
-                            temp_folder='/tmp'
-                        ) as pool:
-                            __ = pool(
-                                delayed(partial_create)(
-                                    read_slice(time_series, window_pad), window, window_pad
-                                ) for window, window_pad in window_chunk
-                            )
-                        pbar_total.update(len(window_chunk))
+                partial_create = partial(
+                    create_and_save_window,
+                    process_path,
+                    ntime,
+                    nbands,
+                    src_ts.gw.nrows,
+                    src_ts.gw.ncols,
+                    ref_res,
+                    resampling,
+                    region,
+                    year,
+                    window_size,
+                    padding
+                )
+
+                with tqdm(
+                    total=len(windows),
+                    desc='Creating prediction windows',
+                    position=1
+                ) as pbar_total:
+                    with parallel_backend(
+                        backend='loky',
+                        n_jobs=num_workers
+                    ):
+                        for window_chunk in get_window_chunk(windows, chunksize):
+                            with TqdmParallel(
+                                tqdm_kwargs={
+                                    'total': len(window_chunk),
+                                    'desc': 'Window chunks',
+                                    'position': 2,
+                                    'leave': False
+                                },
+                                temp_folder='/tmp'
+                            ) as pool:
+                                __ = pool(
+                                    delayed(partial_create)(
+                                        read_slice(time_series, window_pad),
+                                        window,
+                                        window_pad
+                                    ) for window, window_pad in window_chunk
+                                )
+                            pbar_total.update(len(window_chunk))
 
 
 def create_dataset(

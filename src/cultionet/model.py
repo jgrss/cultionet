@@ -22,6 +22,7 @@ from .callbacks import LightningGTiffWriter
 from .data.const import SCALE_FACTOR
 from .data.datasets import EdgeDataset, zscores
 from .data.modules import EdgeDataModule
+from .models.cultio import GeoRefinement
 from .models.lightning import (
     CultioLitModel,
     MaskRCNNLitModel,
@@ -257,7 +258,9 @@ def fit(
     stochastic_weight_averaging_lr: T.Optional[float] = 0.05,
     stochastic_weight_averaging_start: T.Optional[float] = 0.8,
     model_pruning: T.Optional[bool] = False,
-    save_batch_val_metrics: T.Optional[bool] = False
+    save_batch_val_metrics: T.Optional[bool] = False,
+    skip_train: T.Optional[bool] = False,
+    refine_and_calibrate: T.Optional[bool] = False
 ):
     """Fits a model
 
@@ -308,6 +311,8 @@ def fit(
             Default is 0.8.
         model_pruning (Optional[bool]): Whether to prune the model. Default is False.
         save_batch_val_metrics (Optional[bool]): Whether to save batch validation metrics to a parquet file.
+        skip_train (Optional[bool]): Whether to refine and calibrate a trained model.
+        refine_and_calibrate (Optional[bool]): Whether to skip training.
     """
     ckpt_file = Path(ckpt_file)
 
@@ -473,7 +478,7 @@ def fit(
         gradient_clip_val=gradient_clip_val,
         gradient_clip_algorithm='value',
         check_val_every_n_epoch=1,
-        min_epochs=5 if epochs >= 5 else epochs,
+        min_epochs=1 if epochs >= 1 else epochs,
         max_epochs=10,
         precision=32,
         devices=None if device == 'cpu' else devices,
@@ -488,24 +493,25 @@ def fit(
     if auto_lr_find:
         trainer.tune(model=lit_model, datamodule=data_module)
     else:
-        trainer.fit(
-            model=lit_model,
-            datamodule=data_module,
-            ckpt_path=ckpt_file if ckpt_file.is_file() else None
-        )
-        # Calibrate the logits
-        temperature_model = TemperatureScaling(
-            cultionet_model=CultioLitModel.load_from_checkpoint(
-                checkpoint_path=str(ckpt_file)
-            ),
-            edge_class=edge_class,
-            class_counts=class_counts
-        )
-        temperature_trainer.fit(
-            model=temperature_model,
-            datamodule=temperature_data_module,
-            ckpt_path=temperature_ckpt_file if temperature_ckpt_file.is_file() else None
-        )
+        if not skip_train:
+            trainer.fit(
+                model=lit_model,
+                datamodule=data_module,
+                ckpt_path=ckpt_file if ckpt_file.is_file() else None
+            )
+        if refine_and_calibrate:
+            # Calibrate the logits
+            temperature_model = TemperatureScaling(
+                num_classes=num_classes,
+                edge_class=edge_class,
+                class_counts=class_counts,
+                cultionet_ckpt=ckpt_file
+            )
+            temperature_trainer.fit(
+                model=temperature_model,
+                datamodule=temperature_data_module,
+                ckpt_path=temperature_ckpt_file if temperature_ckpt_file.is_file() else None
+            )
         if test_dataset is not None:
             trainer.test(
                 model=lit_model,
@@ -605,7 +611,7 @@ def predict_lightning(
     ref_res: float,
     compression: str,
     crop_temperature: T.Optional[torch.Tensor] = None,
-    temperature_ckpt: Path = None
+    temperature_ckpt: T.Optional[Path] = None
 ):
     reference_image = Path(reference_image)
     out_path = Path(out_path)
@@ -639,21 +645,23 @@ def predict_lightning(
     )
 
     trainer = pl.Trainer(**trainer_kwargs)
-    lit_model = CultioLitModel.load_from_checkpoint(
+    cultionet_lit_model = CultioLitModel.load_from_checkpoint(
         checkpoint_path=str(ckpt_file)
     )
 
-    temperature_lit_model = None
+    geo_refine_model = None
     if crop_temperature is not None:
-        temperature_lit_model = TemperatureScaling.load_from_checkpoint(
-            checkpoint_path=str(temperature_ckpt)
+        geo_refine_model = GeoRefinement(out_channels=num_classes)
+        geo_refine_model.load_state_dict(
+            torch.load(temperature_ckpt.parent / 'temperature.pt')
         )
-    setattr(lit_model, 'crop_temperature', crop_temperature)
-    setattr(lit_model, 'temperature_lit_model', temperature_lit_model)
+        geo_refine_model.eval()
+    setattr(cultionet_lit_model, 'crop_temperature', crop_temperature)
+    setattr(cultionet_lit_model, 'temperature_lit_model', geo_refine_model)
 
     # Make predictions
     trainer.predict(
-        model=lit_model,
+        model=cultionet_lit_model,
         datamodule=data_module,
         return_predictions=False
     )

@@ -612,6 +612,18 @@ train:
     help: Whether to save batch validation metrics
     kwargs:
       action: store_true
+  refine_and_calibrate:
+    short: ''
+    long: refine-calibrate
+    help: Whether to refine and calibrate a trained model
+    kwargs:
+      action: store_true
+  skip_train:
+    short: ''
+    long: skip-train
+    help: Whether to skip training
+    kwargs:
+      action: store_true
 
 predict:
   predict_year:
