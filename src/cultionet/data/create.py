@@ -484,6 +484,10 @@ def create_and_save_window(
     x: np.ndarray,
     w: Window,
     w_pad: Window,
+    left: float,
+    bottom: float,
+    right: float,
+    top: float
 ) -> None:
     size = window_size + padding*2
     x_height = x.shape[1]
@@ -547,7 +551,11 @@ def create_and_save_window(
         col_pad_before=col_pad_before,
         col_pad_after=col_pad_after,
         res=res,
-        resampling=resampling
+        resampling=resampling,
+        left=left,
+        bottom=bottom,
+        right=right,
+        top=top
     )
     for aug_method in augmenters:
         aug_kwargs = augmenters.aug_args.kwargs
@@ -610,7 +618,11 @@ def create_predict_dataset(
                 region,
                 year,
                 window_size,
-                padding
+                padding,
+                src_ts.gw.left,
+                src_ts.gw.bottom,
+                src_ts.gw.right,
+                src_ts.gw.top
             )
 
             with tqdm(
