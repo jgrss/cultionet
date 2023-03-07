@@ -571,7 +571,7 @@ class CultioLitModel(LightningModule):
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         crop_temperature: T.Optional[float] = None,
-        temperature_lit_model: T.Optional[TemperatureScaling] = None,
+        temperature_lit_model: T.Optional[GeoRefinement] = None,
         scale_pos_weight: T.Optional[bool] = True,
         save_batch_val_metrics: T.Optional[bool] = False
     ):
