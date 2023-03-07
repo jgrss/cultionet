@@ -555,10 +555,6 @@ class PtStore(object):
         pass
 
 
-def overlap_func(x: np.ndarray) -> np.ndarray:
-    return x
-
-
 def create_and_save_window(
     write_path: Path,
     ntime: int,
@@ -700,61 +696,58 @@ def create_predict_dataset(
 
                 ntime, nbands = get_image_list_dims(image_list, src_ts)
 
-                res = (
-                    time_series.data
-                    .map_overlap(
-                        overlap_func,
-                        depth=(0, padding, padding),
-                        boundary=0,
-                        trim=False
-                    )
+                res = da.overlap.overlap(
+                    time_series.data,
+                    depth={0: 0, 1: padding, 2: padding},
+                    boundary=0
                 )
-                print(res)
-                with PtStore(out_path=process_path) as pt_store:
-                    da.store(res, pt_store, lock=True)
+    import ipdb; ipdb.set_trace()
 
-                partial_create = partial(
-                    create_and_save_window,
-                    process_path,
-                    ntime,
-                    nbands,
-                    src_ts.gw.nrows,
-                    src_ts.gw.ncols,
-                    ref_res,
-                    resampling,
-                    region,
-                    year,
-                    window_size,
-                    padding
-                )
+                # with PtStore(out_path=process_path) as pt_store:
+                #     da.store(res, pt_store, lock=True)
 
-                with tqdm(
-                    total=len(windows),
-                    desc='Creating prediction windows',
-                    position=1
-                ) as pbar_total:
-                    with parallel_backend(
-                        backend='loky',
-                        n_jobs=num_workers
-                    ):
-                        for window_chunk in get_window_chunk(windows, chunksize):
-                            with TqdmParallel(
-                                tqdm_kwargs={
-                                    'total': len(window_chunk),
-                                    'desc': 'Window chunks',
-                                    'position': 2,
-                                    'leave': False
-                                },
-                                temp_folder='/tmp'
-                            ) as pool:
-                                __ = pool(
-                                    delayed(partial_create)(
-                                        read_slice(time_series, window_pad),
-                                        window,
-                                        window_pad
-                                    ) for window, window_pad in window_chunk
-                                )
-                            pbar_total.update(len(window_chunk))
+                # partial_create = partial(
+                #     create_and_save_window,
+                #     process_path,
+                #     ntime,
+                #     nbands,
+                #     src_ts.gw.nrows,
+                #     src_ts.gw.ncols,
+                #     ref_res,
+                #     resampling,
+                #     region,
+                #     year,
+                #     window_size,
+                #     padding
+                # )
+
+                # with tqdm(
+                #     total=len(windows),
+                #     desc='Creating prediction windows',
+                #     position=1
+                # ) as pbar_total:
+                #     with parallel_backend(
+                #         backend='loky',
+                #         n_jobs=num_workers
+                #     ):
+                #         for window_chunk in get_window_chunk(windows, chunksize):
+                #             with TqdmParallel(
+                #                 tqdm_kwargs={
+                #                     'total': len(window_chunk),
+                #                     'desc': 'Window chunks',
+                #                     'position': 2,
+                #                     'leave': False
+                #                 },
+                #                 temp_folder='/tmp'
+                #             ) as pool:
+                #                 __ = pool(
+                #                     delayed(partial_create)(
+                #                         read_slice(time_series, window_pad),
+                #                         window,
+                #                         window_pad
+                #                     ) for window, window_pad in window_chunk
+                #                 )
+                #             pbar_total.update(len(window_chunk))
 
 
 def create_dataset(
