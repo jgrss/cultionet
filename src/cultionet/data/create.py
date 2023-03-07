@@ -692,9 +692,11 @@ def create_predict_dataset(
                 time_series = (
                     (src_ts.astype('float64') * gain + offset)
                     .clip(0, 1)
+                    .chunk({'band': -1, 'y': window_size, 'x': window_size})
                     .transpose('band', 'y', 'x')
                     .assign_attrs(**src_ts.attrs)
                 )
+                print(time_series)
 
                 ntime, nbands = get_image_list_dims(image_list, src_ts)
 
@@ -707,6 +709,7 @@ def create_predict_dataset(
                         trim=False
                     )
                 )
+                print(res)
                 with PtStore(out_path=process_path) as pt_store:
                     da.store(res, pt_store, lock=True)
 
