@@ -2,7 +2,6 @@ import typing as T
 from pathlib import Path
 from functools import partial
 import warnings
-import threading
 
 import geowombat as gw
 from geowombat.core import polygon_to_array
@@ -12,6 +11,7 @@ from scipy.ndimage.measurements import label as nd_label
 import cv2
 from rasterio.windows import Window
 import xarray as xr
+import dask.array as da
 import geopandas as gpd
 from skimage.measure import regionprops
 from tqdm.auto import tqdm
@@ -487,8 +487,7 @@ def create_and_save_window(
     w: Window,
     w_pad: Window
 ) -> None:
-    with threading.Lock():
-        x = darray.data.compute(num_workers=1)
+    x = darray.data.compute(num_workers=1)
 
     size = window_size + padding*2
     x_height = x.shape[1]
