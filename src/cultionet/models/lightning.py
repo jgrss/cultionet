@@ -315,6 +315,7 @@ def scale_logits(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
 class TemperatureScaling(LightningModule):
     def __init__(
         self,
+        num_classes: int = 2,
         learning_rate_refine: float = 1e-3,
         learning_rate_lbfgs: float = 0.01,
         weight_decay: float = 0.01,
@@ -340,16 +341,7 @@ class TemperatureScaling(LightningModule):
 
         self.cultionet_model = None
         self.crop_temperature = torch.nn.Parameter(torch.ones(1))
-        self.geo_refine_model = GeoRefinement(
-            # StarRNN 3 + 2
-            # Distance transform x4
-            # Edge sigmoid x4
-            # Crop softmax x4
-            in_channels=3+2+4+4+(4*2),
-            n_features=16,
-            out_channels=2,
-            double_dilation=2
-        )
+        self.geo_refine_model = GeoRefinement(out_channels=num_classes)
 
         self.configure_loss()
 

@@ -23,12 +23,18 @@ def scale_min_max(
 class GeoRefinement(torch.nn.Module):
     def __init__(
         self,
-        in_channels: int,
-        n_features: int,
-        out_channels: int,
-        double_dilation: int = 1
+        in_channels: int = 21,
+        n_features: int = 16,
+        out_channels: int = 2,
+        double_dilation: int = 2
     ):
         super(GeoRefinement, self).__init__()
+
+        # in_channels =
+        # StarRNN 3 + 2
+        # Distance transform x4
+        # Edge sigmoid x4
+        # Crop softmax x4
 
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()

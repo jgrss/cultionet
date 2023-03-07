@@ -502,6 +502,7 @@ def fit(
         if refine_and_calibrate:
             # Calibrate the logits
             temperature_model = TemperatureScaling(
+                num_classes=num_classes,
                 edge_class=edge_class,
                 class_counts=class_counts,
                 cultionet_ckpt=ckpt_file
@@ -650,16 +651,7 @@ def predict_lightning(
 
     geo_refine_model = None
     if crop_temperature is not None:
-        geo_refine_model = GeoRefinement(
-            # StarRNN 3 + 2
-            # Distance transform x4
-            # Edge sigmoid x4
-            # Crop softmax x4
-            in_channels=3+2+4+4+(4*2),
-            n_features=16,
-            out_channels=2,
-            double_dilation=2
-        )
+        geo_refine_model = GeoRefinement(out_channels=num_classes)
         geo_refine_model.load_state_dict(
             torch.load(temperature_ckpt.parent / 'temperature.pt')
         )
