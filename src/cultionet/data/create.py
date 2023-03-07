@@ -692,7 +692,6 @@ def create_predict_dataset(
                     .transpose('band', 'y', 'x')
                     .assign_attrs(**src_ts.attrs)
                 )
-                print(time_series)
 
                 ntime, nbands = get_image_list_dims(image_list, src_ts)
 
@@ -701,10 +700,9 @@ def create_predict_dataset(
                     depth={0: 0, 1: padding, 2: padding},
                     boundary=0
                 )
-    import ipdb; ipdb.set_trace()
 
-                # with PtStore(out_path=process_path) as pt_store:
-                #     da.store(res, pt_store, lock=True)
+                with PtStore(out_path=process_path) as pt_store:
+                    da.store(res, pt_store, lock=True)
 
                 # partial_create = partial(
                 #     create_and_save_window,
