@@ -503,9 +503,7 @@ def fit(
             temperature_model = TemperatureScaling(
                 edge_class=edge_class,
                 class_counts=class_counts,
-                cultionet_model=CultioLitModel.load_from_checkpoint(
-                    checkpoint_path=str(ckpt_file)
-                )
+                cultionet_ckpt=ckpt_file
             )
             temperature_trainer.fit(
                 model=temperature_model,
@@ -651,10 +649,11 @@ def predict_lightning(
 
     temperature_lit_model = None
     if crop_temperature is not None:
-        temperature_model = TemperatureScaling.load_from_checkpoint(
+        temperature_lit_model = TemperatureScaling.load_from_checkpoint(
             checkpoint_path=str(temperature_ckpt)
         )
-        temperature_model.cultionet_model = cultionet_lit_model
+        temperature_lit_model.eval()
+        temperature_lit_model.freeze()
     setattr(cultionet_lit_model, 'crop_temperature', crop_temperature)
     setattr(cultionet_lit_model, 'temperature_lit_model', temperature_lit_model)
 
