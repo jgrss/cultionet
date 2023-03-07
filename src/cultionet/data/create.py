@@ -481,13 +481,13 @@ def create_and_save_window(
     year: int,
     window_size: int,
     padding: int,
-    x: np.ndarray,
-    w: Window,
-    w_pad: Window,
     left: float,
     bottom: float,
     right: float,
-    top: float
+    top: float,
+    x: np.ndarray,
+    w: Window,
+    w_pad: Window
 ) -> None:
     size = window_size + padding*2
     x_height = x.shape[1]
