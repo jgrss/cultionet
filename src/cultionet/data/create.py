@@ -471,6 +471,96 @@ def get_window_chunk(
         yield windows[i:i+chunksize]
 
 
+class PtStore(object):
+    """
+    Example:
+        >>> res = data.data.map_overlap(overlap_func, depth=(0, padding, padding), boundary=0, trim=False)
+        >>> with PtStore(out_path='data/predict/processed') as pt_store:
+        >>>     da.store(data.data, pt_store, lock=True)
+    """
+    def __init__(
+        self,
+        data: xr.DataArray,
+        out_path: T.Union[str, Path],
+        ntime: int,
+        nbands: int
+    ):
+        self.data = data
+        self.out_path = Path(out_path)
+        self.out_path.mkdir(parents=True, exist_ok=True)
+        self.ntime = ntime
+        self.nbands = nbands
+
+    def __setitem__(self, key, item):
+        index_range, y, x = key
+
+        import ipdb; ipdb.set_trace()
+
+        w = Window(
+            col_off=x.start,
+            row_off=y.start,
+            width=x.stop - x.start,
+            height=y.stop - y.start,
+        )
+
+        # augmenters = Augmenters(
+        #     augmentations=['none'],
+        #     ntime=self.ntime,
+        #     nbands=self.nbands,
+        #     max_crop_class=0,
+        #     k=3,
+        #     instance_seg=False,
+        #     zero_padding=0,
+        #     window_row_off=w.row_off,
+        #     window_col_off=w.col_off,
+        #     window_height=w.height,
+        #     window_width=w.width,
+        #     window_pad_row_off=w_pad.row_off,
+        #     window_pad_col_off=w_pad.col_off,
+        #     window_pad_height=w_pad.height,
+        #     window_pad_width=w_pad.width,
+        #     row_pad_before=row_pad_before,
+        #     row_pad_after=row_pad_after,
+        #     col_pad_before=col_pad_before,
+        #     col_pad_after=col_pad_after,
+        #     res=res,
+        #     resampling=resampling,
+        #     left=darray.gw.left,
+        #     bottom=darray.gw.bottom,
+        #     right=darray.gw.right,
+        #     top=darray.gw.top
+        # )
+        # for aug_method in augmenters:
+        #     aug_kwargs = augmenters.aug_args.kwargs
+        #     aug_kwargs['train_id'] = f'{region}_{year}_{w.row_off}_{w.col_off}'
+        #     augmenters.update_aug_args(kwargs=aug_kwargs)
+        #     predict_data = aug_method(item, aug_args=augmenters.aug_args)
+        #     aug_method.save(
+        #         out_directory=write_path,
+        #         data=predict_data,
+        #         compress=5
+        #     )
+
+    def __enter__(self) -> 'PtStore':
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
+
+
+def overlap_func(x: np.ndarray) -> np.ndarray:
+    ldata = LabeledData(
+        x=x,
+        y=None,
+        bdist=None,
+        ori=None,
+        segments=None,
+        props=None
+    )
+
+    return ldata
+
+
 def create_and_save_window(
     write_path: Path,
     ntime: int,
@@ -609,6 +699,19 @@ def create_predict_dataset(
                 )
 
                 ntime, nbands = get_image_list_dims(image_list, src_ts)
+
+                res = (
+                    time_series.data
+                    .map_overlap(
+                        overlap_func,
+                        depth=(0, padding, padding),
+                        boundary=0,
+                        trim=False
+                    )
+                )
+                with PtStore(out_path=process_path) as pt_store:
+                    da.store(res, pt_store, lock=True)
+
                 partial_create = partial(
                     create_and_save_window,
                     process_path,
