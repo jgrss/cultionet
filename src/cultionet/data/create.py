@@ -480,16 +480,14 @@ class PtStore(object):
     """
     def __init__(
         self,
-        data: xr.DataArray,
         out_path: T.Union[str, Path],
-        ntime: int,
-        nbands: int
+        # ntime: int,
+        # nbands: int
     ):
-        self.data = data
         self.out_path = Path(out_path)
         self.out_path.mkdir(parents=True, exist_ok=True)
-        self.ntime = ntime
-        self.nbands = nbands
+        # self.ntime = ntime
+        # self.nbands = nbands
 
     def __setitem__(self, key, item):
         index_range, y, x = key
