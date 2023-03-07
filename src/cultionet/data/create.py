@@ -605,6 +605,8 @@ def create_predict_dataset(
                 time_series = (
                     (src_ts.astype('float64') * gain + offset)
                     .clip(0, 1)
+                    .transpose('band', 'y', 'x')
+                    .assign_attrs(**src_ts.attrs)
                 )
 
                 ntime, nbands = get_image_list_dims(image_list, src_ts)
@@ -644,7 +646,9 @@ def create_predict_dataset(
                             ) as pool:
                                 __ = pool(
                                     delayed(partial_create)(
-                                        read_slice(time_series, window_pad), window, window_pad
+                                        read_slice(time_series, window_pad),
+                                        window,
+                                        window_pad
                                     ) for window, window_pad in window_chunk
                                 )
                             pbar_total.update(len(window_chunk))
