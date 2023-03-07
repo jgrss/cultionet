@@ -672,7 +672,6 @@ class CultioLitModel(LightningModule):
         """
         predictions = self.forward(batch, batch_idx)
         if self.temperature_lit_model is not None:
-            import ipdb; ipdb.set_trace()
             predictions['crop'] = self.temperature_lit_model(
                 predictions,
                 data=batch
