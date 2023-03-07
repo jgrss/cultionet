@@ -1,4 +1,6 @@
-"""Source: https://github.com/0zgur0/ms-convSTAR
+"""Sources:
+    https://www.sciencedirect.com/science/article/pii/S0034425721003230
+    https://github.com/0zgur0/ms-convSTAR
 """
 import typing as T
 
