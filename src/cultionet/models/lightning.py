@@ -504,6 +504,13 @@ class TemperatureScaling(LightningModule):
             with open(scale_file, mode='w') as f:
                 f.write(json.dumps(temperature_scales))
 
+            model_file = Path(self.logger.save_dir) / 'temperature.pt'
+            if model_file.is_file():
+                model_file.unlink()
+            torch.save(
+                self.geo_refine_model.state_dict(), model_file
+            )
+
     def configure_loss(self):
         self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
         self.crop_loss_refine = TanimotoDistLoss(

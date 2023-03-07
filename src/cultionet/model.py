@@ -22,6 +22,7 @@ from .callbacks import LightningGTiffWriter
 from .data.const import SCALE_FACTOR
 from .data.datasets import EdgeDataset, zscores
 from .data.modules import EdgeDataModule
+from .models.cultio import GeoRefinement
 from .models.lightning import (
     CultioLitModel,
     MaskRCNNLitModel,
@@ -647,16 +648,25 @@ def predict_lightning(
         checkpoint_path=str(ckpt_file)
     )
 
-    temperature_lit_model = None
+    geo_refine_model = None
     if crop_temperature is not None:
-        import ipdb; ipdb.set_trace()
-        temperature_lit_model = TemperatureScaling.load_from_checkpoint(
-            checkpoint_path=str(temperature_ckpt)
+        geo_refine_model = GeoRefinement(
+            # StarRNN 3 + 2
+            # Distance transform x4
+            # Edge sigmoid x4
+            # Crop softmax x4
+            in_channels=3+2+4+4+(4*2),
+            n_features=16,
+            out_channels=2,
+            double_dilation=2
         )
-        temperature_lit_model.eval()
-        temperature_lit_model.freeze()
+        geo_refine_model.load_state_dict(
+            torch.load(temperature_ckpt / 'temperature.pt')
+        )
+        geo_refine_model.eval()
+        geo_refine_model.freeze()
     setattr(cultionet_lit_model, 'crop_temperature', crop_temperature)
-    setattr(cultionet_lit_model, 'temperature_lit_model', temperature_lit_model)
+    setattr(cultionet_lit_model, 'temperature_lit_model', geo_refine_model)
 
     # Make predictions
     trainer.predict(
