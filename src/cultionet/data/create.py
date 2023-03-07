@@ -496,6 +496,15 @@ class PtStore(object):
 
         import ipdb; ipdb.set_trace()
 
+        ldata = LabeledData(
+            x=item,
+            y=None,
+            bdist=None,
+            ori=None,
+            segments=None,
+            props=None
+        )
+
         w = Window(
             col_off=x.start,
             row_off=y.start,
@@ -549,16 +558,7 @@ class PtStore(object):
 
 
 def overlap_func(x: np.ndarray) -> np.ndarray:
-    ldata = LabeledData(
-        x=x,
-        y=None,
-        bdist=None,
-        ori=None,
-        segments=None,
-        props=None
-    )
-
-    return ldata
+    return x
 
 
 def create_and_save_window(
