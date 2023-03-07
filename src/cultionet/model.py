@@ -664,7 +664,6 @@ def predict_lightning(
             torch.load(temperature_ckpt.parent / 'temperature.pt')
         )
         geo_refine_model.eval()
-        geo_refine_model.freeze()
     setattr(cultionet_lit_model, 'crop_temperature', crop_temperature)
     setattr(cultionet_lit_model, 'temperature_lit_model', geo_refine_model)
 
