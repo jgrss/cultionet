@@ -7,7 +7,7 @@ be used in `cultionet`, but the base architecture is [UNet 3+](https://arxiv.org
 
 The library is built on **[PyTorch Lightning](https://www.pytorchlightning.ai/)**. The segmentation objectives (class targets and losses) were designed following the work by [Waldner _et al._](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301115).
 
-Below highlights of Cultionet:
+Below are highlights of Cultionet:
 
 1. satellite image time series instead of individual dates for training and inference
 2. UNet 3+ Psi architecture
