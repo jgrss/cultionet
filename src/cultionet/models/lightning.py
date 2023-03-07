@@ -449,6 +449,7 @@ class TemperatureScaling(LightningModule):
             self.cultionet_model = CultioLitModel.load_from_checkpoint(
                 checkpoint_path=str(self.cultionet_ckpt)
             )
+            self.cultionet_model.to(self.device)
             self.cultionet_model.eval()
             self.cultionet_model.freeze()
         with torch.no_grad():
