@@ -702,7 +702,7 @@ def create_predict_dataset(
                 )
 
                 with PtStore(out_path=process_path) as pt_store:
-                    da.store([time_series.data, res], pt_store, lock=True)
+                    da.store([time_series.data, res], [pt_store], lock=True)
 
                 # partial_create = partial(
                 #     create_and_save_window,
