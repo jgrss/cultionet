@@ -661,7 +661,7 @@ def predict_lightning(
             double_dilation=2
         )
         geo_refine_model.load_state_dict(
-            torch.load(temperature_ckpt / 'temperature.pt')
+            torch.load(temperature_ckpt.parent / 'temperature.pt')
         )
         geo_refine_model.eval()
         geo_refine_model.freeze()
