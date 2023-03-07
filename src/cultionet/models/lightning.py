@@ -7,7 +7,7 @@ import logging
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from torch.optim import lr_scheduler
+from torch.optim import lr_scheduler as optim_lr_scheduler
 from torch_geometric.data import Data
 from pytorch_lightning import LightningModule
 from torchvision.ops import box_iou
@@ -295,7 +295,7 @@ class MaskRCNNLitModel(LightningModule):
             weight_decay=self.weight_decay,
             eps=1e-4
         )
-        lr_scheduler = lr_scheduler.ReduceLROnPlateau(
+        lr_scheduler = optim_lr_scheduler.ReduceLROnPlateau(
             optimizer,
             factor=0.1,
             patience=5
@@ -522,7 +522,7 @@ class TemperatureScaling(LightningModule):
             max_iter=self.max_iter,
             line_search_fn=None
         )
-        model_lr_scheduler = lr_scheduler.CosineAnnealingLR(
+        lr_scheduler = optim_lr_scheduler.CosineAnnealingLR(
             optimizer_adamw,
             T_max=20,
             eta_min=1e-5,
@@ -533,7 +533,7 @@ class TemperatureScaling(LightningModule):
             {
                 'optimizer': optimizer_adamw,
                 'lr_scheduler': {
-                    'scheduler': model_lr_scheduler,
+                    'scheduler': lr_scheduler,
                     'monitor': 'loss',
                     'interval': 'epoch',
                     'frequency': 1
@@ -1077,19 +1077,19 @@ class CultioLitModel(LightningModule):
             raise NameError("Choose either 'AdamW' or 'SGD'.")
 
         if self.lr_scheduler == 'ExponentialLR':
-            model_lr_scheduler = lr_scheduler.ExponentialLR(
+            model_lr_scheduler = optim_lr_scheduler.ExponentialLR(
                 optimizer,
                 gamma=0.5
             )
         elif self.lr_scheduler == 'CosineAnnealingLR':
-            model_lr_scheduler = lr_scheduler.CosineAnnealingLR(
+            model_lr_scheduler = optim_lr_scheduler.CosineAnnealingLR(
                 optimizer,
                 T_max=20,
                 eta_min=1e-5,
                 last_epoch=-1
             )
         elif self.lr_scheduler == 'StepLR':
-            model_lr_scheduler = lr_scheduler.StepLR(
+            model_lr_scheduler = optim_lr_scheduler.StepLR(
                 optimizer,
                 step_size=self.steplr_step_size,
                 gamma=0.5
