@@ -672,12 +672,14 @@ class CultioLitModel(LightningModule):
         """
         predictions = self.forward(batch, batch_idx)
         if self.temperature_lit_model is not None:
-            predictions = self.temperature_lit_model(
+            predictions['crop'] = self.temperature_lit_model(
                 predictions,
-                batch,
-                self.crop_temperature,
-                batch_idx
+                data=batch
             )
+            predictions['crop'] = scale_logits(
+                predictions['crop'], self.crop_temperature
+            )
+            predictions['crop'] = self.softmax(predictions['crop'])
 
         return predictions
 
