@@ -10,10 +10,10 @@ The library is built on **[PyTorch Lightning](https://www.pytorchlightning.ai/)*
 Below are highlights of Cultionet:
 
 1. satellite image time series instead of individual dates for training and inference
-2. UNet 3+ Psi architecture
-3. Optional residual convolution blocks
-4. [Spatial-channel attention](https://www.mdpi.com/2072-4292/14/9/2253)
-5. [Tanimoto loss](https://www.mdpi.com/2072-4292/13/18/3707)
+2. [UNet 3+](https://arxiv.org/abs/2004.08790) [Psi](https://arxiv.org/abs/1902.04099) residual convolution (`ResUNet3Psi`) architecture
+3. [Spatial-channel attention](https://www.mdpi.com/2072-4292/14/9/2253)
+4. [Tanimoto loss](https://www.mdpi.com/2072-4292/13/18/3707)
+5. Deep supervision and temporal features with [RNN STAR](https://www.sciencedirect.com/science/article/pii/S0034425721003230)
 6. Deep, multi-output supervision
 
 ## The cultionet input data
