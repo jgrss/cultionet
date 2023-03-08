@@ -331,7 +331,6 @@ class TemperatureScaling(LightningModule):
         self.max_iter = max_iter
         self.edge_class = edge_class
         self.class_counts = class_counts
-        self.sigmoid = torch.nn.Sigmoid()
         self.softmax = Softmax(dim=1)
         self.cultionet_ckpt = cultionet_ckpt
 
