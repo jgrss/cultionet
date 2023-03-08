@@ -35,13 +35,15 @@ def add_dims(d: torch.Tensor) -> torch.Tensor:
 def update_data(
     batch: Data,
     idx: T.Optional[int] = None,
-    x: T.Optional[torch.Tensor] = None
+    x: T.Optional[torch.Tensor] = None,
 ) -> Data:
     image_id = None
     if idx is not None:
         if hasattr(batch, 'boxes'):
             if batch.boxes is not None:
-                image_id = torch.zeros_like(batch.box_labels, dtype=torch.int64) + idx
+                image_id = (
+                    torch.zeros_like(batch.box_labels, dtype=torch.int64) + idx
+                )
 
     if x is not None:
         exclusion = ('x',)
@@ -49,12 +51,11 @@ def update_data(
         return Data(
             x=x,
             image_id=image_id,
-            **{k: getattr(batch, k) for k in batch.keys if k not in exclusion}
+            **{k: getattr(batch, k) for k in batch.keys if k not in exclusion},
         )
     else:
         return Data(
-            image_id=image_id,
-            **{k: getattr(batch, k) for k in batch.keys}
+            image_id=image_id, **{k: getattr(batch, k) for k in batch.keys}
         )
 
 
@@ -62,9 +63,9 @@ def zscores(
     batch: Data,
     data_means: torch.Tensor,
     data_stds: torch.Tensor,
-    idx: T.Optional[int] = None
+    idx: T.Optional[int] = None,
 ) -> Data:
-    """Normalizes data to z-scores
+    """Normalizes data to z-scores.
 
     Args:
         batch (Data): A `torch_geometric` data object.
@@ -73,24 +74,13 @@ def zscores(
 
     z = (x - μ) / σ
     """
-    x = ((batch.x - add_dims(data_means)) / add_dims(data_stds))
+    x = (batch.x - add_dims(data_means)) / add_dims(data_stds)
 
-    return update_data(
-        batch=batch,
-        idx=idx,
-        x=x
-    )
+    return update_data(batch=batch, idx=idx, x=x)
 
 
 def _check_shape(
-    d1: int,
-    h1: int,
-    w1: int,
-    d2: int,
-    h2: int,
-    w2: int,
-    index: int,
-    uid: str
+    d1: int, h1: int, w1: int, d2: int, h2: int, w2: int, index: int, uid: str
 ) -> T.Tuple[bool, int, str]:
     if (d1 != d2) or (h1 != h2) or (w1 != w2):
         return False, index, uid
@@ -99,8 +89,8 @@ def _check_shape(
 
 @attr.s
 class EdgeDataset(Dataset):
-    """An edge dataset
-    """
+    """An edge dataset."""
+
     root: T.Union[str, Path, bytes] = attr.ib(default='.')
     transform: T.Any = attr.ib(default=None)
     pre_transform: T.Any = attr.ib(default=None)
@@ -116,34 +106,46 @@ class EdgeDataset(Dataset):
     edge_counts: T.Optional[torch.Tensor] = attr.ib(
         validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
     )
-    pattern: T.Optional[str] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(str)), default='data*.pt')
-    processes: T.Optional[int] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=psutil.cpu_count())
-    threads_per_worker: T.Optional[int] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=1)
-    random_seed: T.Optional[int] = attr.ib(validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=42)
+    pattern: T.Optional[str] = attr.ib(
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(str)), default='data*.pt'
+    )
+    processes: T.Optional[int] = attr.ib(
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=psutil.cpu_count()
+    )
+    threads_per_worker: T.Optional[int] = attr.ib(
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=1
+    )
+    random_seed: T.Optional[int] = attr.ib(
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=42
+    )
 
     data_list_ = None
     grid_id_column = 'grid_id'
 
     def __attrs_post_init__(self):
         super(EdgeDataset, self).__init__(
-            str(self.root), transform=self.transform, pre_transform=self.pre_transform
+            str(self.root),
+            transform=self.transform,
+            pre_transform=self.pre_transform,
         )
         seed_everything(self.random_seed, workers=True)
         self.rng = np.random.default_rng(self.random_seed)
 
     def get_data_list(self):
-        """Gets the list of data files"""
+        """Gets the list of data files."""
         self.data_list_ = list(Path(self.processed_dir).glob(self.pattern))
 
         if not self.data_list_:
-            logger.exception(f"No .pt files were found with pattern {self.pattern}.")
+            logger.exception(
+                f"No .pt files were found with pattern {self.pattern}."
+            )
 
     def cleanup(self):
         for fn in self.data_list_:
             fn.unlink()
 
     def shuffle_items(self, data: T.Optional[list] = None):
-        """Applies a random in-place shuffle to the data list"""
+        """Applies a random in-place shuffle to the data list."""
         if data is not None:
             self.rng.shuffle(data)
         else:
@@ -151,34 +153,29 @@ class EdgeDataset(Dataset):
 
     @property
     def num_time_features(self):
-        """Get the number of time features
-        """
+        """Get the number of time features."""
         data = self[0]
         return int(data.ntime)
 
     @property
     def raw_file_names(self):
-        """Get the raw file names
-        """
+        """Get the raw file names."""
         if not self.data_list_:
             self.get_data_list()
 
         return self.data_list_
 
     def to_frame(self) -> gpd.GeoDataFrame:
-        """Converts the Dataset to a GeoDataFrame
-        """
+        """Converts the Dataset to a GeoDataFrame."""
+
         def get_box_id(data_id: str, *bounds):
             return data_id, box(*bounds).centroid
 
-        with parallel_backend(
-            backend='loky',
-            n_jobs=self.processes
-        ):
+        with parallel_backend(backend='loky', n_jobs=self.processes):
             with TqdmParallel(
                 tqdm_kwargs={
                     'total': len(self),
-                    'desc': 'Building GeoDataFrame'
+                    'desc': 'Building GeoDataFrame',
                 }
             ) as pool:
                 results = pool(
@@ -187,8 +184,9 @@ class EdgeDataset(Dataset):
                         data.left,
                         data.bottom,
                         data.right,
-                        data.top
-                    ) for data in self
+                        data.top,
+                    )
+                    for data in self
                 )
 
         ids, geometry = list(map(list, zip(*results)))
@@ -196,7 +194,7 @@ class EdgeDataset(Dataset):
             data=ids,
             columns=[self.grid_id_column],
             geometry=geometry,
-            crs='epsg:4326'
+            crs='epsg:4326',
         )
 
         return df
@@ -204,10 +202,9 @@ class EdgeDataset(Dataset):
     def get_spatial_partitions(
         self,
         spatial_partitions: T.Union[str, Path, gpd.GeoDataFrame],
-        splits: int = 0
+        splits: int = 0,
     ) -> None:
-        """Gets the spatial partitions
-        """
+        """Gets the spatial partitions."""
         self.create_spatial_index()
         if isinstance(spatial_partitions, (str, Path)):
             spatial_partitions = gpd.read_file(spatial_partitions)
@@ -226,15 +223,18 @@ class EdgeDataset(Dataset):
         self,
         partition_column: str,
         partition_name: str,
-        val_frac: float = None
+        val_frac: float = None,
     ) -> list:
-        """Queries grid centroids that are within the partition
-        """
+        """Queries grid centroids that are within the partition."""
         # Get the partition
-        df = self.spatial_partitions.query(f"{partition_column} == '{partition_name}'")
+        df = self.spatial_partitions.query(
+            f"{partition_column} == '{partition_name}'"
+        )
         df_points = self.dataset_df.overlay(df, how='intersection')
         if df_points.empty:
-            logger.warning(f"Partition {partition_name} does not have any data.")
+            logger.warning(
+                f"Partition {partition_name} does not have any data."
+            )
             return None
 
         # TODO: currently doesn't work with overlapping augmentated points
@@ -247,8 +247,11 @@ class EdgeDataset(Dataset):
         grid_names = df_points[self.grid_id_column].values.tolist()
         indices = np.intersect1d(
             grid_names,
-            [data_path.stem.replace('data_', '') for data_path in self.data_list_],
-            return_indices=True
+            [
+                data_path.stem.replace('data_', '')
+                for data_path in self.data_list_
+            ],
+            return_indices=True,
         )[2].tolist()
 
         return indices
@@ -257,10 +260,9 @@ class EdgeDataset(Dataset):
         self,
         indices: list,
         return_all: bool = True,
-        return_indices: bool = False
+        return_indices: bool = False,
     ) -> T.Tuple['EdgeDataset', 'EdgeDataset']:
-        """Splits a list of indices into train and validation datasets
-        """
+        """Splits a list of indices into train and validation datasets."""
         train_idx = list(set(range(len(self))).difference(indices))
 
         if return_all:
@@ -275,16 +277,13 @@ class EdgeDataset(Dataset):
                 return self[indices]
 
     def spatial_kfoldcv_iter(
-        self,
-        partition_column: str
+        self, partition_column: str
     ) -> T.Tuple[str, 'EdgeDataset', 'EdgeDataset']:
-        """Yield generator to iterate over spatial partitions
-        """
+        """Yield generator to iterate over spatial partitions."""
         for kfold in self.spatial_partitions.itertuples():
             # Bounding box and indices of the kth fold
             kfold_indices = self.query_partition_by_name(
-                partition_column,
-                str(getattr(kfold, partition_column))
+                partition_column, str(getattr(kfold, partition_column))
             )
             if not kfold_indices:
                 continue
@@ -294,9 +293,10 @@ class EdgeDataset(Dataset):
             yield str(getattr(kfold, partition_column)), train_ds, test_ds
 
     def create_spatial_index(self):
-        """Creates the spatial index
-        """
-        dataset_grid_path = Path(self.processed_dir).parent.parent / 'dataset_grids.gpkg'
+        """Creates the spatial index."""
+        dataset_grid_path = (
+            Path(self.processed_dir).parent.parent / 'dataset_grids.gpkg'
+        )
         if dataset_grid_path.is_file():
             self.dataset_df = gpd.read_file(dataset_grid_path)
         else:
@@ -311,7 +311,7 @@ class EdgeDataset(Dataset):
 
     @property
     def processed_file_names(self):
-        """Get a list of processed files"""
+        """Get a list of processed files."""
         return self.data_list_
 
     def check_dims(
@@ -320,27 +320,23 @@ class EdgeDataset(Dataset):
         expected_height: int,
         expected_width: int,
         delete_mismatches: bool = False,
-        tqdm_color: str = 'ffffff'
+        tqdm_color: str = 'ffffff',
     ):
-        """Checks if all tensors in the dataset match in shape dimensions
-        """
+        """Checks if all tensors in the dataset match in shape dimensions."""
         check_partial = partial(
-            _check_shape,
-            expected_dim,
-            expected_height,
-            expected_width
+            _check_shape, expected_dim, expected_height, expected_width
         )
 
         with parallel_backend(
             backend='loky',
             n_jobs=self.processes,
-            inner_max_num_threads=self.threads_per_worker
+            inner_max_num_threads=self.threads_per_worker,
         ):
             with TqdmParallel(
                 tqdm_kwargs={
                     'total': len(self),
                     'desc': 'Checking dimensions',
-                    'colour': tqdm_color
+                    'colour': tqdm_color,
                 }
             ) as pool:
                 results = pool(
@@ -349,8 +345,9 @@ class EdgeDataset(Dataset):
                         self[i].height,
                         self[i].width,
                         i,
-                        self[i].train_id
-                    ) for i in range(0, len(self))
+                        self[i].train_id,
+                    )
+                    for i in range(0, len(self))
                 )
         matches, indices, ids = list(map(list, zip(*results)))
         if not all(matches):
@@ -358,17 +355,21 @@ class EdgeDataset(Dataset):
             null_indices = indices[~np.array(matches)]
             null_ids = np.array(ids)[null_indices].tolist()
             logger.warning(','.join(null_ids))
-            logger.warning(f'{null_indices.shape[0]:,d} ids did not match the reference dimensions.')
+            logger.warning(
+                f'{null_indices.shape[0]:,d} ids did not match the reference dimensions.'
+            )
 
             if delete_mismatches:
-                logger.warning(f'Removing {null_indices.shape[0]:,d} .pt files.')
+                logger.warning(
+                    f'Removing {null_indices.shape[0]:,d} .pt files.'
+                )
                 for i in null_indices:
                     self.data_list_[i].unlink()
             else:
                 raise TensorShapeError
 
     def len(self):
-        """Returns the dataset length"""
+        """Returns the dataset length."""
         return len(self.processed_file_names)
 
     def split_train_val_by_partition(
@@ -386,15 +387,14 @@ class EdgeDataset(Dataset):
         for row in tqdm(
             self.spatial_partitions.itertuples(),
             total=len(self.spatial_partitions.index),
-            desc='Sampling partitions'
+            desc='Sampling partitions',
         ):
             if partition_name is not None:
                 if str(getattr(row, partition_column)) != partition_name:
                     continue
             # Query grid centroids within the partition
             indices = self.query_partition_by_name(
-                partition_column,
-                str(getattr(row, partition_column))
+                partition_column, str(getattr(row, partition_column))
             )
             if indices is None:
                 continue
@@ -414,9 +414,9 @@ class EdgeDataset(Dataset):
         self,
         val_frac: float,
         spatial_overlap_allowed: bool = True,
-        spatial_balance: bool = True
+        spatial_balance: bool = True,
     ) -> T.Tuple['EdgeDataset', 'EdgeDataset']:
-        """Splits the dataset into train and validation
+        """Splits the dataset into train and validation.
 
         Args:
             val_frac (float): The validation fraction.
@@ -431,13 +431,22 @@ class EdgeDataset(Dataset):
             train_ds = self[:n_train]
             val_ds = self[n_train:]
         else:
+            # Create a GeoDataFrame of every .pt file in
+            # the dataset.
             self.create_spatial_index()
-            self.dataset_df[id_column] = (
-                self.dataset_df.grid_id
-                .str.split('_', expand=True).loc[:, 0]
-            )
+            # Create column of each site's common id
+            # (i.e., without the year and augmentation).
+            self.dataset_df[id_column] = self.dataset_df.grid_id.str.split(
+                '_', expand=True
+            ).loc[:, 0]
             unique_ids = self.dataset_df.common_id.unique()
             if spatial_balance:
+                # Separate train and validation by spatial location
+
+                # Get unique site coordinates
+                # NOTE: We do this becuase augmentations are stacked at
+                # the same site, thus creating multiple files with the
+                # same centroid.
                 df_unique_locations = gpd.GeoDataFrame(
                     pd.Series(unique_ids)
                     .to_frame(name=id_column)
@@ -445,17 +454,30 @@ class EdgeDataset(Dataset):
                     .drop_duplicates(id_column)
                     .drop(columns=['grid_id'])
                 ).to_crs('EPSG:8858')
-
+                # Setup a quad-tree using the GRTS method
+                # (see https://github.com/jgrss/geosample for details)
                 qt = QuadTree(df_unique_locations, force_square=False)
+                # Recursively split the quad-tree until each grid has
+                # only one sample.
                 qt.split_recursive(max_samples=1)
                 n_val = int(val_frac * len(df_unique_locations.index))
+                # `qt.sample` random samples from the quad-tree in a
+                # spatially balanced manner. Thus, `df_val_sample` is
+                # a GeoDataFrame with `n_val` sites spatially balanced.
                 df_val_sample = qt.sample(n=n_val)
-                val_mask = self.dataset_df.common_id.isin(df_val_sample.common_id)
+                # Since we only took one sample from each coordinate,
+                # we need to find all of the .pt files that share
+                # coordinates with the sampled sites.
+                val_mask = self.dataset_df.common_id.isin(
+                    df_val_sample.common_id
+                )
             else:
                 # Randomly sample a percentage for validation
-                df_val_ids = pd.Series(unique_ids).sample(
-                    frac=val_frac, random_state=self.random_seed
-                ).to_frame(name=id_column)
+                df_val_ids = (
+                    pd.Series(unique_ids)
+                    .sample(frac=val_frac, random_state=self.random_seed)
+                    .to_frame(name=id_column)
+                )
                 # Get all ids for validation samples
                 val_mask = self.dataset_df.common_id.isin(df_val_ids.common_id)
             # Get train/val indices
@@ -471,7 +493,7 @@ class EdgeDataset(Dataset):
         return joblib.load(filename)
 
     def get(self, idx):
-        """Gets an individual data object from the dataset
+        """Gets an individual data object from the dataset.
 
         Args:
             idx (int): The dataset index position.
@@ -483,9 +505,6 @@ class EdgeDataset(Dataset):
         if isinstance(self.data_means, torch.Tensor):
             batch = zscores(batch, self.data_means, self.data_stds, idx=idx)
         else:
-            batch = update_data(
-                batch=batch,
-                idx=idx
-            )
+            batch = update_data(batch=batch, idx=idx)
 
         return batch
