@@ -15,7 +15,7 @@ def scale_min_max(
     min_in: float,
     max_in: float,
     min_out: float,
-    max_out: float
+    max_out: float,
 ) -> torch.Tensor:
     return (((max_out - min_out) * (x - min_in)) / (max_in - min_in)) + min_out
 
@@ -26,7 +26,7 @@ class GeoRefinement(torch.nn.Module):
         in_channels: int = 21,
         n_features: int = 16,
         out_channels: int = 2,
-        double_dilation: int = 2
+        double_dilation: int = 2,
     ):
         super(GeoRefinement, self).__init__()
 
@@ -46,31 +46,31 @@ class GeoRefinement(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=1,
                 padding=0,
-                add_activation=False
+                add_activation=False,
             ),
-            torch.nn.Sigmoid()
+            torch.nn.Sigmoid(),
         )
 
         self.model = UNet3(
             in_channels=in_channels,
             out_channels=out_channels,
             init_filter=n_features,
-            double_dilation=double_dilation
+            double_dilation=double_dilation,
         )
 
     def proba_to_logit(self, x: torch.Tensor) -> torch.Tensor:
         return torch.log(x / (1.0 - x))
 
     def forward(
-        self,
-        predictions: T.Dict[str, torch.Tensor],
-        data: Data
+        self, predictions: T.Dict[str, torch.Tensor], data: Data
     ) -> torch.Tensor:
-        """A single forward pass
+        """A single forward pass.
 
         Edge and crop inputs should be probabilities
         """
-        height = int(data.height) if data.batch is None else int(data.height[0])
+        height = (
+            int(data.height) if data.batch is None else int(data.height[0])
+        )
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
@@ -78,41 +78,44 @@ class GeoRefinement(torch.nn.Module):
             data.top - ((data.top - data.bottom) * 0.5), -90.0, 90.0, 0.0, 1.0
         )
         longitude_norm = scale_min_max(
-            data.left + ((data.right - data.left) * 0.5), -180.0, 180.0, 0.0, 1.0
+            data.left + ((data.right - data.left) * 0.5),
+            -180.0,
+            180.0,
+            0.0,
+            1.0,
         )
         lat_lon = torch.cat(
             [
                 latitude_norm.reshape(*latitude_norm.shape, 1, 1, 1),
-                longitude_norm.reshape(*longitude_norm.shape, 1, 1, 1)
-            ], dim=1
+                longitude_norm.reshape(*longitude_norm.shape, 1, 1, 1),
+            ],
+            dim=1,
         )
         geo_attention = self.geo_attention(lat_lon)
         geo_attention = 1.0 + self.gamma * geo_attention
 
         x = torch.cat(
             [
-                predictions['crop_star_l2'],
-                predictions['crop_star'],
-                predictions['dist'],
-                predictions['dist_3_1'],
-                predictions['dist_2_2'],
-                predictions['dist_1_3'],
-                predictions['edge'],
-                predictions['edge_3_1'],
-                predictions['edge_2_2'],
-                predictions['edge_1_3'],
-                predictions['crop'],
-                predictions['crop_3_1'],
-                predictions['crop_2_2'],
-                predictions['crop_1_3']
+                predictions["crop_star_l2"],
+                predictions["crop_star"],
+                predictions["dist"],
+                predictions["dist_3_1"],
+                predictions["dist_2_2"],
+                predictions["dist_1_3"],
+                predictions["edge"],
+                predictions["edge_3_1"],
+                predictions["edge_2_2"],
+                predictions["edge_1_3"],
+                predictions["crop"],
+                predictions["crop_3_1"],
+                predictions["crop_2_2"],
+                predictions["crop_1_3"],
             ],
-            dim=1
+            dim=1,
         )
 
         # Reshape
-        x = self.gc(
-            x, batch_size, height, width
-        )
+        x = self.gc(x, batch_size, height, width)
         out = self.model(x)
         out = self.cg(out * geo_attention)
 
@@ -120,12 +123,7 @@ class GeoRefinement(torch.nn.Module):
 
 
 class CropTypeFinal(torch.nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        out_classes: int
-    ):
+    def __init__(self, in_channels: int, out_channels: int, out_classes: int):
         super(CropTypeFinal, self).__init__()
 
         self.in_channels = in_channels
@@ -137,7 +135,7 @@ class CropTypeFinal(torch.nn.Module):
             out_channels=out_channels,
             kernel_size=1,
             padding=0,
-            activation_type='ReLU'
+            activation_type="ReLU",
         )
         layers1 = [
             ConvBlock2d(
@@ -145,27 +143,24 @@ class CropTypeFinal(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1,
-                activation_type='ReLU'
+                activation_type="ReLU",
             ),
             torch.nn.Conv2d(
                 out_channels,
                 out_channels,
                 kernel_size=3,
                 padding=1,
-                bias=False
+                bias=False,
             ),
-            torch.nn.BatchNorm2d(out_channels)
+            torch.nn.BatchNorm2d(out_channels),
         ]
         self.seq = torch.nn.Sequential(*layers1)
 
         layers_final = [
             torch.nn.ReLU(inplace=False),
             torch.nn.Conv2d(
-                out_channels,
-                out_classes,
-                kernel_size=1,
-                padding=0
-            )
+                out_channels, out_classes, kernel_size=1, padding=0
+            ),
         ]
         self.final = torch.nn.Sequential(*layers_final)
 
@@ -185,13 +180,13 @@ def check_batch_dims(batch: Data, attribute: str):
     batch_var = getattr(batch, attribute)
     if not (batch_var == batch_var[0]).all():
         invalid = batch.train_id[batch_var != torch.mode(batch_var)[0]]
-        warnings.warn('The following ids do not match the batch mode.')
+        warnings.warn("The following ids do not match the batch mode.")
         warnings.warn(invalid)
-        raise ValueError(f'The {attribute} dimensions do not align.')
+        raise ValueError(f"The {attribute} dimensions do not align.")
 
 
 class CultioNet(torch.nn.Module):
-    """The cultionet model framework
+    """The cultionet model framework.
 
     Args:
         ds_features (int): The total number of dataset features (bands x time).
@@ -201,20 +196,21 @@ class CultioNet(torch.nn.Module):
         star_rnn_n_layers (int): The number of ConvSTAR layers.
         num_classes (int): The number of output classes.
     """
+
     def __init__(
         self,
         ds_features: int,
         ds_time_features: int,
         filters: int = 32,
         num_classes: int = 2,
-        model_type: str = 'ResUNet3Psi',
-        activation_type: str = 'SiLU',
+        model_type: str = "ResUNet3Psi",
+        activation_type: str = "SiLU",
         dilations: T.Union[int, T.Sequence[int]] = None,
-        res_block_type: str = 'resa',
-        attention_weights: str = 'spatial_channel',
+        res_block_type: str = "resa",
+        attention_weights: str = "spatial_channel",
         deep_sup_dist: bool = False,
         deep_sup_edge: bool = False,
-        deep_sup_mask: bool = False
+        deep_sup_mask: bool = False,
     ):
         super(CultioNet, self).__init__()
 
@@ -239,55 +235,64 @@ class CultioNet(torch.nn.Module):
             num_classes_last=self.num_classes + 1,
             crop_type_layer=True if self.num_classes > 2 else False,
             activation_type=activation_type,
-            final_activation=Softmax(dim=1)
+            final_activation=Softmax(dim=1),
         )
         unet3_kwargs = {
-            'in_channels': self.ds_num_bands,
-            'in_time': self.ds_num_time,
-            'in_rnn_channels': int(self.filters * 3),
-            'init_filter': self.filters,
-            'num_classes': self.num_classes,
-            'activation_type': activation_type,
-            'deep_sup_dist': deep_sup_dist,
-            'deep_sup_edge': deep_sup_edge,
-            'deep_sup_mask': deep_sup_mask,
-            'mask_activation': Softmax(dim=1)
+            "in_channels": self.ds_num_bands,
+            "in_time": self.ds_num_time,
+            "in_rnn_channels": int(self.filters * 3),
+            "init_filter": self.filters,
+            "num_classes": self.num_classes,
+            "activation_type": activation_type,
+            "deep_sup_dist": deep_sup_dist,
+            "deep_sup_edge": deep_sup_edge,
+            "deep_sup_mask": deep_sup_mask,
+            "mask_activation": Softmax(dim=1),
         }
-        assert model_type in ('UNet3Psi', 'ResUNet3Psi'), \
-            'The model type is not supported.'
-        if model_type == 'UNet3Psi':
-            unet3_kwargs['dilation'] = 2 if dilations is None else dilations
-            assert isinstance(unet3_kwargs['dilation'], int), \
-                'The dilation for UNet3Psi must be an integer.'
+        assert model_type in (
+            "UNet3Psi",
+            "ResUNet3Psi",
+        ), "The model type is not supported."
+        if model_type == "UNet3Psi":
+            unet3_kwargs["dilation"] = 2 if dilations is None else dilations
+            assert isinstance(
+                unet3_kwargs["dilation"], int
+            ), "The dilation for UNet3Psi must be an integer."
             self.mask_model = UNet3Psi(**unet3_kwargs)
-        elif model_type == 'ResUNet3Psi':
+        elif model_type == "ResUNet3Psi":
             # ResUNet3Psi
-            unet3_kwargs['attention_weights'] = None if attention_weights == 'none' else attention_weights
-            unet3_kwargs['res_block_type'] = res_block_type
-            if res_block_type == 'res':
-                unet3_kwargs['dilations'] = [2] if dilations is None else dilations
-                assert len(unet3_kwargs['dilations']) == 1, \
-                    'The dilations for ResUNet3Psi must be a length-1 integer sequence.'
-            elif res_block_type == 'resa':
-                unet3_kwargs['dilations'] = [1, 2] if dilations is None else dilations
-            assert isinstance(unet3_kwargs['dilations'], list), \
-                'The dilations for ResUNet3Psi must be a sequence of integers.'
+            unet3_kwargs["attention_weights"] = (
+                None if attention_weights == "none" else attention_weights
+            )
+            unet3_kwargs["res_block_type"] = res_block_type
+            if res_block_type == "res":
+                unet3_kwargs["dilations"] = (
+                    [2] if dilations is None else dilations
+                )
+                assert (
+                    len(unet3_kwargs["dilations"]) == 1
+                ), "The dilations for ResUNet3Psi must be a length-1 integer sequence."
+            elif res_block_type == "resa":
+                unet3_kwargs["dilations"] = (
+                    [1, 2] if dilations is None else dilations
+                )
+            assert isinstance(
+                unet3_kwargs["dilations"], list
+            ), "The dilations for ResUNet3Psi must be a sequence of integers."
             self.mask_model = ResUNet3Psi(**unet3_kwargs)
 
-    def forward(
-        self, data: Data
-    ) -> T.Dict[str, torch.Tensor]:
-        height = int(data.height) if data.batch is None else int(data.height[0])
+    def forward(self, data: Data) -> T.Dict[str, torch.Tensor]:
+        height = (
+            int(data.height) if data.batch is None else int(data.height[0])
+        )
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
-        for attribute in ('ntime', 'nbands', 'height', 'width'):
+        for attribute in ("ntime", "nbands", "height", "width"):
             check_batch_dims(data, attribute)
 
         # Reshape from ((H*W) x (C*T)) -> (B x C x H x W)
-        x = self.gc(
-            data.x, batch_size, height, width
-        )
+        x = self.gc(data.x, batch_size, height, width)
         # Reshape from (B x C x H x W) -> (B x C x T|D x H x W)
         x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
         # StarRNN
@@ -296,30 +301,30 @@ class CultioNet(torch.nn.Module):
         logits_star_last = self.cg(logits_star_last)
         # Main stream
         logits = self.mask_model(x, logits_star_hidden)
-        logits_distance = self.cg(logits['dist'])
-        logits_edges = self.cg(logits['edge'])
-        logits_crop = self.cg(logits['mask'])
+        logits_distance = self.cg(logits["dist"])
+        logits_edges = self.cg(logits["edge"])
+        logits_crop = self.cg(logits["mask"])
 
         out = {
-            'dist': logits_distance,
-            'edge': logits_edges,
-            'crop': logits_crop,
-            'crop_type': None,
-            'crop_star_l2': logits_star_l2,
-            'crop_star': logits_star_last
+            "dist": logits_distance,
+            "edge": logits_edges,
+            "crop": logits_crop,
+            "crop_type": None,
+            "crop_star_l2": logits_star_l2,
+            "crop_star": logits_star_last,
         }
 
-        if logits['dist_3_1'] is not None:
-            out['dist_3_1'] = self.cg(logits['dist_3_1'])
-            out['dist_2_2'] = self.cg(logits['dist_2_2'])
-            out['dist_1_3'] = self.cg(logits['dist_1_3'])
-        if logits['mask_3_1'] is not None:
-            out['crop_3_1'] = self.cg(logits['mask_3_1'])
-            out['crop_2_2'] = self.cg(logits['mask_2_2'])
-            out['crop_1_3'] = self.cg(logits['mask_1_3'])
-        if logits['edge_3_1'] is not None:
-            out['edge_3_1'] = self.cg(logits['edge_3_1'])
-            out['edge_2_2'] = self.cg(logits['edge_2_2'])
-            out['edge_1_3'] = self.cg(logits['edge_1_3'])
+        if logits["dist_3_1"] is not None:
+            out["dist_3_1"] = self.cg(logits["dist_3_1"])
+            out["dist_2_2"] = self.cg(logits["dist_2_2"])
+            out["dist_1_3"] = self.cg(logits["dist_1_3"])
+        if logits["mask_3_1"] is not None:
+            out["crop_3_1"] = self.cg(logits["mask_3_1"])
+            out["crop_2_2"] = self.cg(logits["mask_2_2"])
+            out["crop_1_3"] = self.cg(logits["mask_1_3"])
+        if logits["edge_3_1"] is not None:
+            out["edge_3_1"] = self.cg(logits["edge_3_1"])
+            out["edge_2_2"] = self.cg(logits["edge_2_2"])
+            out["edge_1_3"] = self.cg(logits["edge_1_3"])
 
         return out
