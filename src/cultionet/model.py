@@ -13,7 +13,7 @@ from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
     StochasticWeightAveraging,
-    ModelPruning
+    ModelPruning,
 )
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from torchvision import transforms
@@ -26,7 +26,7 @@ from .models.cultio import GeoRefinement
 from .models.lightning import (
     CultioLitModel,
     MaskRCNNLitModel,
-    TemperatureScaling
+    TemperatureScaling,
 )
 from .utils.reshape import ModelOutputs
 from .utils.logging import set_color_logger
@@ -67,9 +67,9 @@ def fit_maskrcnn(
     resize_width: T.Optional[int] = 201,
     min_image_size: T.Optional[int] = 100,
     max_image_size: T.Optional[int] = 600,
-    trainable_backbone_layers: T.Optional[int] = 3
+    trainable_backbone_layers: T.Optional[int] = 3,
 ):
-    """Fits a Mask R-CNN instance model
+    """Fits a Mask R-CNN instance model.
 
     Args:
         dataset (EdgeDataset): The dataset to fit on.
@@ -112,7 +112,7 @@ def fit_maskrcnn(
         test_ds=test_dataset,
         batch_size=batch_size,
         num_workers=0,
-        shuffle=True
+        shuffle=True,
     )
     lit_model = MaskRCNNLitModel(
         cultionet_model_file=ckpt_file.parent / 'cultionet.pt',
@@ -126,7 +126,7 @@ def fit_maskrcnn(
         resize_width=resize_width,
         min_image_size=min_image_size,
         max_image_size=max_image_size,
-        trainable_backbone_layers=trainable_backbone_layers
+        trainable_backbone_layers=trainable_backbone_layers,
     )
 
     if reset_model:
@@ -145,7 +145,7 @@ def fit_maskrcnn(
         mode='min',
         monitor='loss',
         every_n_train_steps=0,
-        every_n_epochs=1
+        every_n_epochs=1,
     )
     # Validation and test loss
     cb_val_loss = ModelCheckpoint(monitor='val_loss')
@@ -155,25 +155,20 @@ def fit_maskrcnn(
         min_delta=early_stopping_min_delta,
         patience=early_stopping_patience,
         mode='min',
-        check_on_train_epoch_end=False
+        check_on_train_epoch_end=False,
     )
     # Learning rate
     lr_monitor = LearningRateMonitor(logging_interval='step')
-    callbacks = [
-        lr_monitor,
-        cb_train_loss,
-        cb_val_loss,
-        early_stop_callback
-    ]
+    callbacks = [lr_monitor, cb_train_loss, cb_val_loss, early_stop_callback]
     if stochastic_weight_averaging:
-        callbacks.append(StochasticWeightAveraging(
-            swa_lrs=stochastic_weight_averaging_lr,
-            swa_epoch_start=stochastic_weight_averaging_start
-        ))
-    if 0 < model_pruning <= 1:
         callbacks.append(
-            ModelPruning('l1_unstructured', amount=model_pruning)
+            StochasticWeightAveraging(
+                swa_lrs=stochastic_weight_averaging_lr,
+                swa_epoch_start=stochastic_weight_averaging_start,
+            )
         )
+    if 0 < model_pruning <= 1:
+        callbacks.append(ModelPruning('l1_unstructured', amount=model_pruning))
 
     trainer = pl.Trainer(
         default_root_dir=str(ckpt_file.parent),
@@ -194,7 +189,7 @@ def fit_maskrcnn(
         log_every_n_steps=50,
         profiler=None,
         deterministic=False,
-        benchmark=False
+        benchmark=False,
     )
 
     if auto_lr_find:
@@ -203,13 +198,13 @@ def fit_maskrcnn(
         trainer.fit(
             model=lit_model,
             datamodule=data_module,
-            ckpt_path=ckpt_file if ckpt_file.is_file() else None
+            ckpt_path=ckpt_file if ckpt_file.is_file() else None,
         )
         if test_dataset is not None:
             trainer.test(
                 model=lit_model,
                 dataloaders=data_module.test_dataloader(),
-                ckpt_path='last'
+                ckpt_path='last',
             )
 
 
@@ -260,9 +255,9 @@ def fit(
     model_pruning: T.Optional[bool] = False,
     save_batch_val_metrics: T.Optional[bool] = False,
     skip_train: T.Optional[bool] = False,
-    refine_and_calibrate: T.Optional[bool] = False
+    refine_and_calibrate: T.Optional[bool] = False,
 ):
-    """Fits a model
+    """Fits a model.
 
     Args:
         dataset (EdgeDataset): The dataset to fit on.
@@ -318,15 +313,10 @@ def fit(
 
     # Split the dataset into train/validation
     if spatial_partitions is not None:
-        # train_ds, val_ds = dataset.split_train_val_by_partition(
-        #     spatial_partitions=spatial_partitions,
-        #     partition_column=partition_column,
-        #     val_frac=val_frac,
-        #     partition_name=partition_name
-        # )
+        # TODO: We removed `dataset.split_train_val_by_partition` but
+        # could make it an option in future versions.
         train_ds, val_ds = dataset.split_train_val(
-            val_frac=val_frac,
-            spatial_overlap_allowed=False
+            val_frac=val_frac, spatial_overlap_allowed=False
         )
     else:
         train_ds, val_ds = dataset.split_train_val(val_frac=val_frac)
@@ -338,13 +328,13 @@ def fit(
         test_ds=test_dataset,
         batch_size=batch_size,
         num_workers=load_batch_workers,
-        shuffle=True
+        shuffle=True,
     )
     temperature_data_module = EdgeDataModule(
         train_ds=val_ds,
         batch_size=batch_size,
         num_workers=load_batch_workers,
-        shuffle=True
+        shuffle=True,
     )
 
     # Setup the Lightning model
@@ -369,7 +359,7 @@ def fit(
         class_counts=class_counts,
         edge_class=edge_class,
         scale_pos_weight=scale_pos_weight,
-        save_batch_val_metrics=save_batch_val_metrics
+        save_batch_val_metrics=save_batch_val_metrics,
     )
 
     if reset_model:
@@ -380,9 +370,7 @@ def fit(
             model_file.unlink()
 
     # Checkpoint
-    cb_train_loss = ModelCheckpoint(
-        monitor='loss'
-    )
+    cb_train_loss = ModelCheckpoint(monitor='loss')
     # Validation and test loss
     cb_val_loss = ModelCheckpoint(
         dirpath=ckpt_file.parent,
@@ -392,7 +380,7 @@ def fit(
         mode='min',
         monitor='val_score',
         every_n_train_steps=0,
-        every_n_epochs=1
+        every_n_epochs=1,
     )
     # Early stopping
     early_stop_callback = EarlyStopping(
@@ -400,27 +388,20 @@ def fit(
         min_delta=early_stopping_min_delta,
         patience=early_stopping_patience,
         mode='min',
-        check_on_train_epoch_end=False
+        check_on_train_epoch_end=False,
     )
     # Learning rate
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
-    callbacks = [
-        lr_monitor,
-        cb_train_loss,
-        cb_val_loss,
-        early_stop_callback
-    ]
+    callbacks = [lr_monitor, cb_train_loss, cb_val_loss, early_stop_callback]
     if stochastic_weight_averaging:
         callbacks.append(
             StochasticWeightAveraging(
                 swa_lrs=stochastic_weight_averaging_lr,
-                swa_epoch_start=stochastic_weight_averaging_start
+                swa_epoch_start=stochastic_weight_averaging_start,
             )
         )
     if 0 < model_pruning <= 1:
-        callbacks.append(
-            ModelPruning('l1_unstructured', amount=model_pruning)
-        )
+        callbacks.append(ModelPruning('l1_unstructured', amount=model_pruning))
 
     trainer = pl.Trainer(
         default_root_dir=str(ckpt_file.parent),
@@ -441,7 +422,7 @@ def fit(
         log_every_n_steps=50,
         profiler=profiler,
         deterministic=False,
-        benchmark=False
+        benchmark=False,
     )
     temperature_ckpt_file = ckpt_file.parent / 'temperature' / ckpt_file.name
     temperature_ckpt_file.parent.mkdir(parents=True, exist_ok=True)
@@ -454,7 +435,7 @@ def fit(
         mode='min',
         monitor='loss',
         every_n_train_steps=0,
-        every_n_epochs=1
+        every_n_epochs=1,
     )
     # Early stopping
     temperature_early_stop_callback = EarlyStopping(
@@ -462,12 +443,12 @@ def fit(
         min_delta=early_stopping_min_delta,
         patience=5,
         mode='min',
-        check_on_train_epoch_end=False
+        check_on_train_epoch_end=False,
     )
     temperature_callbacks = [
         lr_monitor,
         temperature_cb_train_loss,
-        temperature_early_stop_callback
+        temperature_early_stop_callback,
     ]
     temperature_trainer = pl.Trainer(
         default_root_dir=str(temperature_ckpt_file.parent),
@@ -487,7 +468,7 @@ def fit(
         log_every_n_steps=50,
         profiler=profiler,
         deterministic=False,
-        benchmark=False
+        benchmark=False,
     )
 
     if auto_lr_find:
@@ -497,7 +478,7 @@ def fit(
             trainer.fit(
                 model=lit_model,
                 datamodule=data_module,
-                ckpt_path=ckpt_file if ckpt_file.is_file() else None
+                ckpt_path=ckpt_file if ckpt_file.is_file() else None,
             )
         if refine_and_calibrate:
             # Calibrate the logits
@@ -505,23 +486,27 @@ def fit(
                 num_classes=num_classes,
                 edge_class=edge_class,
                 class_counts=class_counts,
-                cultionet_ckpt=ckpt_file
+                cultionet_ckpt=ckpt_file,
             )
             temperature_trainer.fit(
                 model=temperature_model,
                 datamodule=temperature_data_module,
-                ckpt_path=temperature_ckpt_file if temperature_ckpt_file.is_file() else None
+                ckpt_path=temperature_ckpt_file
+                if temperature_ckpt_file.is_file()
+                else None,
             )
         if test_dataset is not None:
             trainer.test(
                 model=lit_model,
                 dataloaders=data_module.test_dataloader(),
-                ckpt_path='best'
+                ckpt_path='best',
             )
             logged_metrics = trainer.logged_metrics
             for k, v in logged_metrics.items():
                 logged_metrics[k] = float(v)
-            with open(Path(trainer.logger.save_dir) / 'test.metrics', mode='w') as f:
+            with open(
+                Path(trainer.logger.save_dir) / 'test.metrics', mode='w'
+            ) as f:
                 f.write(json.dumps(logged_metrics))
 
 
@@ -536,9 +521,9 @@ def load_model(
     devices: T.Optional[int] = 1,
     lit_model: T.Optional[CultioLitModel] = None,
     enable_progress_bar: T.Optional[bool] = True,
-    return_trainer: T.Optional[bool] = False
+    return_trainer: T.Optional[bool] = False,
 ) -> T.Tuple[T.Union[None, pl.Trainer], CultioLitModel]:
-    """Loads a model from file
+    """Loads a model from file.
 
     Args:
         ckpt_file (str | Path): The model checkpoint file.
@@ -565,7 +550,7 @@ def load_model(
             num_processes=0,
             log_every_n_steps=0,
             logger=False,
-            enable_progress_bar=enable_progress_bar
+            enable_progress_bar=enable_progress_bar,
         )
         if trainer_kwargs['accelerator'] == 'cpu':
             del trainer_kwargs['devices']
@@ -576,13 +561,17 @@ def load_model(
     if lit_model is None:
         if model_file is not None:
             assert model_file.is_file(), 'The model file does not exist.'
-            if not isinstance(num_features, int) or not isinstance(num_time_features, int):
-                raise TypeError('The features must be given to load the model file.')
+            if not isinstance(num_features, int) or not isinstance(
+                num_time_features, int
+            ):
+                raise TypeError(
+                    'The features must be given to load the model file.'
+                )
             lit_model = CultioLitModel(
                 num_features=num_features,
                 num_time_features=num_time_features,
                 filters=filters,
-                num_classes=num_classes
+                num_classes=num_classes,
             )
             lit_model.load_state_dict(state_dict=torch.load(model_file))
         else:
@@ -611,7 +600,7 @@ def predict_lightning(
     ref_res: float,
     compression: str,
     crop_temperature: T.Optional[torch.Tensor] = None,
-    temperature_ckpt: T.Optional[Path] = None
+    temperature_ckpt: T.Optional[Path] = None,
 ):
     reference_image = Path(reference_image)
     out_path = Path(out_path)
@@ -622,7 +611,7 @@ def predict_lightning(
         predict_ds=dataset,
         batch_size=batch_size,
         num_workers=load_batch_workers,
-        shuffle=False
+        shuffle=False,
     )
     pred_writer = LightningGTiffWriter(
         reference_image=reference_image,
@@ -630,7 +619,7 @@ def predict_lightning(
         num_classes=num_classes,
         ref_res=ref_res,
         resampling=resampling,
-        compression=compression
+        compression=compression,
     )
     trainer_kwargs = dict(
         default_root_dir=str(ckpt_file.parent),
@@ -641,7 +630,7 @@ def predict_lightning(
         accelerator=device,
         num_processes=0,
         log_every_n_steps=0,
-        logger=False
+        logger=False,
     )
 
     trainer = pl.Trainer(**trainer_kwargs)
@@ -663,7 +652,7 @@ def predict_lightning(
     trainer.predict(
         model=cultionet_lit_model,
         datamodule=data_module,
-        return_predictions=False
+        return_predictions=False,
     )
 
 
@@ -675,9 +664,9 @@ def predict(
     w: Window = None,
     w_pad: Window = None,
     device: str = 'cpu',
-    include_maskrcnn: bool = False
+    include_maskrcnn: bool = False,
 ) -> np.ndarray:
-    """Applies a model to predict image labels|values
+    """Applies a model to predict image labels|values.
 
     Args:
         lit_model (CultioLitModel): A model to predict with.
@@ -693,7 +682,9 @@ def predict(
         norm_batch = norm_batch.to('cuda')
         lit_model = lit_model.to('cuda')
     with torch.no_grad():
-        distance, dist_1, dist_2, dist_3, dist_4, edge, crop = lit_model(norm_batch)
+        distance, dist_1, dist_2, dist_3, dist_4, edge, crop = lit_model(
+            norm_batch
+        )
         crop_type = torch.zeros((crop.size(0), 2), dtype=crop.dtype)
 
         if include_maskrcnn:
@@ -703,11 +694,13 @@ def predict(
                 edge=edge,
                 height=norm_batch.height,
                 width=norm_batch.width,
-                batch=None
+                batch=None,
             )
     instances = None
     if include_maskrcnn:
-        instances = np.zeros((norm_batch.height, norm_batch.width), dtype='float64')
+        instances = np.zeros(
+            (norm_batch.height, norm_batch.width), dtype='float64'
+        )
         if include_maskrcnn:
             scores = predictions[0]['scores'].squeeze()
             masks = predictions[0]['masks'].squeeze()
@@ -721,8 +714,7 @@ def predict(
             masks = masks.detach().cpu().numpy()
             if masks.shape[0] > 0:
                 distance_mask = (
-                    distance
-                    .detach()
+                    distance.detach()
                     .cpu()
                     .numpy()
                     .reshape(norm_batch.height, norm_batch.width)
@@ -741,9 +733,12 @@ def predict(
                     .numpy()
                     .reshape(norm_batch.height, norm_batch.width)
                 )
-                instances = np.zeros((norm_batch.height, norm_batch.width), dtype='float64')
+                instances = np.zeros(
+                    (norm_batch.height, norm_batch.width), dtype='float64'
+                )
 
                 uid = 1 if written.max() == 0 else written.max() + 1
+
                 def iou(reference, targets):
                     tp = ((reference > 0.5) & (targets > 0.5)).sum()
                     fp = ((reference <= 0.5) & (targets > 0.5)).sum()
@@ -756,7 +751,12 @@ def predict(
                     for lyr_idx_targ, lyr_targ in enumerate(masks):
                         if lyr_idx_targ != lyr_idx_ref:
                             if iou(lyr_ref, lyr_targ) > 0.5:
-                                lyr = lyr_ref if scores[lyr_idx_ref] > scores[lyr_idx_targ] else lyr_targ
+                                lyr = (
+                                    lyr_ref
+                                    if scores[lyr_idx_ref]
+                                    > scores[lyr_idx_targ]
+                                    else lyr_targ
+                                )
                     if lyr is None:
                         lyr = lyr_ref
                     conditional = (
@@ -768,9 +768,7 @@ def predict(
                     if written[conditional].max() > 0:
                         uid = int(sci_mode(written[conditional]).mode)
                     instances = np.where(
-                        ((instances == 0) & conditional),
-                        uid,
-                        instances
+                        ((instances == 0) & conditional), uid, instances
                     )
                     uid = instances.max() + 1
                 instances /= SCALE_FACTOR
@@ -783,7 +781,7 @@ def predict(
         crop=crop,
         crop_type=crop_type,
         instances=instances,
-        apply_softmax=False
+        apply_softmax=False,
     )
     stack = mo.stack_outputs(w, w_pad)
     if include_maskrcnn:
