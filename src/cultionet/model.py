@@ -32,8 +32,8 @@ from .utils.reshape import ModelOutputs
 from .utils.logging import set_color_logger
 
 
-logging.getLogger('lightning').addHandler(logging.NullHandler())
-logging.getLogger('lightning').propagate = False
+logging.getLogger("lightning").addHandler(logging.NullHandler())
+logging.getLogger("lightning").propagate = False
 
 logger = set_color_logger(__name__)
 
@@ -55,7 +55,7 @@ def fit_maskrcnn(
     gradient_clip_val: T.Optional[float] = 1.0,
     reset_model: T.Optional[bool] = False,
     auto_lr_find: T.Optional[bool] = False,
-    device: T.Optional[str] = 'gpu',
+    device: T.Optional[str] = "gpu",
     devices: T.Optional[int] = 1,
     weight_decay: T.Optional[float] = 1e-5,
     precision: T.Optional[int] = 32,
@@ -115,7 +115,7 @@ def fit_maskrcnn(
         shuffle=True,
     )
     lit_model = MaskRCNNLitModel(
-        cultionet_model_file=ckpt_file.parent / 'cultionet.pt',
+        cultionet_model_file=ckpt_file.parent / "cultionet.pt",
         cultionet_num_features=train_ds.num_features,
         cultionet_num_time_features=train_ds.num_time_features,
         cultionet_filters=filters,
@@ -132,7 +132,7 @@ def fit_maskrcnn(
     if reset_model:
         if ckpt_file.is_file():
             ckpt_file.unlink()
-        model_file = ckpt_file.parent / 'maskrcnn.pt'
+        model_file = ckpt_file.parent / "maskrcnn.pt"
         if model_file.is_file():
             model_file.unlink()
 
@@ -142,23 +142,23 @@ def fit_maskrcnn(
         filename=ckpt_file.stem,
         save_last=True,
         save_top_k=save_top_k,
-        mode='min',
-        monitor='loss',
+        mode="min",
+        monitor="loss",
         every_n_train_steps=0,
         every_n_epochs=1,
     )
     # Validation and test loss
-    cb_val_loss = ModelCheckpoint(monitor='val_loss')
+    cb_val_loss = ModelCheckpoint(monitor="val_loss")
     # Early stopping
     early_stop_callback = EarlyStopping(
-        monitor='val_loss',
+        monitor="val_loss",
         min_delta=early_stopping_min_delta,
         patience=early_stopping_patience,
-        mode='min',
+        mode="min",
         check_on_train_epoch_end=False,
     )
     # Learning rate
-    lr_monitor = LearningRateMonitor(logging_interval='step')
+    lr_monitor = LearningRateMonitor(logging_interval="step")
     callbacks = [lr_monitor, cb_train_loss, cb_val_loss, early_stop_callback]
     if stochastic_weight_averaging:
         callbacks.append(
@@ -168,7 +168,7 @@ def fit_maskrcnn(
             )
         )
     if 0 < model_pruning <= 1:
-        callbacks.append(ModelPruning('l1_unstructured', amount=model_pruning))
+        callbacks.append(ModelPruning("l1_unstructured", amount=model_pruning))
 
     trainer = pl.Trainer(
         default_root_dir=str(ckpt_file.parent),
@@ -178,12 +178,12 @@ def fit_maskrcnn(
         auto_scale_batch_size=False,
         accumulate_grad_batches=accumulate_grad_batches,
         gradient_clip_val=gradient_clip_val,
-        gradient_clip_algorithm='value',
+        gradient_clip_algorithm="value",
         check_val_every_n_epoch=1,
         min_epochs=5 if epochs >= 5 else epochs,
         max_epochs=epochs,
         precision=precision,
-        devices=None if device == 'cpu' else devices,
+        devices=None if device == "cpu" else devices,
         num_processes=0,
         accelerator=device,
         log_every_n_steps=50,
@@ -204,7 +204,7 @@ def fit_maskrcnn(
             trainer.test(
                 model=lit_model,
                 dataloaders=data_module.test_dataloader(),
-                ckpt_path='last',
+                ckpt_path="last",
             )
 
 
@@ -223,17 +223,17 @@ def fit(
     num_classes: T.Optional[int] = 2,
     edge_class: T.Optional[int] = None,
     class_counts: T.Sequence[float] = None,
-    model_type: str = 'ResUNet3Psi',
-    activation_type: str = 'SiLU',
+    model_type: str = "ResUNet3Psi",
+    activation_type: str = "SiLU",
     dilations: T.Union[int, T.Sequence[int]] = None,
-    res_block_type: str = 'resa',
-    attention_weights: str = 'spatial_channel',
+    res_block_type: str = "resa",
+    attention_weights: str = "spatial_channel",
     deep_sup_dist: bool = False,
     deep_sup_edge: bool = False,
     deep_sup_mask: bool = False,
-    optimizer: str = 'AdamW',
+    optimizer: str = "AdamW",
     learning_rate: T.Optional[float] = 1e-3,
-    lr_scheduler: str = 'CosineAnnealingLR',
+    lr_scheduler: str = "CosineAnnealingLR",
     steplr_step_size: T.Optional[T.Sequence[int]] = None,
     scale_pos_weight: T.Optional[bool] = True,
     epochs: T.Optional[int] = 30,
@@ -241,10 +241,10 @@ def fit(
     early_stopping_patience: T.Optional[int] = 7,
     early_stopping_min_delta: T.Optional[float] = 0.01,
     gradient_clip_val: T.Optional[float] = 1.0,
-    gradient_clip_algorithm: T.Optional[float] = 'norm',
+    gradient_clip_algorithm: T.Optional[float] = "norm",
     reset_model: T.Optional[bool] = False,
     auto_lr_find: T.Optional[bool] = False,
-    device: T.Optional[str] = 'gpu',
+    device: T.Optional[str] = "gpu",
     devices: T.Optional[int] = 1,
     profiler: T.Optional[str] = None,
     weight_decay: T.Optional[float] = 1e-5,
@@ -365,33 +365,33 @@ def fit(
     if reset_model:
         if ckpt_file.is_file():
             ckpt_file.unlink()
-        model_file = ckpt_file.parent / 'cultionet.pt'
+        model_file = ckpt_file.parent / "cultionet.pt"
         if model_file.is_file():
             model_file.unlink()
 
     # Checkpoint
-    cb_train_loss = ModelCheckpoint(monitor='loss')
+    cb_train_loss = ModelCheckpoint(monitor="loss")
     # Validation and test loss
     cb_val_loss = ModelCheckpoint(
         dirpath=ckpt_file.parent,
         filename=ckpt_file.stem,
         save_last=True,
         save_top_k=save_top_k,
-        mode='min',
-        monitor='val_score',
+        mode="min",
+        monitor="val_score",
         every_n_train_steps=0,
         every_n_epochs=1,
     )
     # Early stopping
     early_stop_callback = EarlyStopping(
-        monitor='val_score',
+        monitor="val_score",
         min_delta=early_stopping_min_delta,
         patience=early_stopping_patience,
-        mode='min',
+        mode="min",
         check_on_train_epoch_end=False,
     )
     # Learning rate
-    lr_monitor = LearningRateMonitor(logging_interval='epoch')
+    lr_monitor = LearningRateMonitor(logging_interval="epoch")
     callbacks = [lr_monitor, cb_train_loss, cb_val_loss, early_stop_callback]
     if stochastic_weight_averaging:
         callbacks.append(
@@ -401,7 +401,7 @@ def fit(
             )
         )
     if 0 < model_pruning <= 1:
-        callbacks.append(ModelPruning('l1_unstructured', amount=model_pruning))
+        callbacks.append(ModelPruning("l1_unstructured", amount=model_pruning))
 
     trainer = pl.Trainer(
         default_root_dir=str(ckpt_file.parent),
@@ -416,7 +416,7 @@ def fit(
         min_epochs=5 if epochs >= 5 else epochs,
         max_epochs=epochs,
         precision=precision,
-        devices=None if device == 'cpu' else devices,
+        devices=None if device == "cpu" else devices,
         num_processes=0,
         accelerator=device,
         log_every_n_steps=50,
@@ -424,7 +424,7 @@ def fit(
         deterministic=False,
         benchmark=False,
     )
-    temperature_ckpt_file = ckpt_file.parent / 'temperature' / ckpt_file.name
+    temperature_ckpt_file = ckpt_file.parent / "temperature" / ckpt_file.name
     temperature_ckpt_file.parent.mkdir(parents=True, exist_ok=True)
     # Temperature checkpoints
     temperature_cb_train_loss = ModelCheckpoint(
@@ -432,17 +432,17 @@ def fit(
         filename=temperature_ckpt_file.stem,
         save_last=True,
         save_top_k=save_top_k,
-        mode='min',
-        monitor='loss',
+        mode="min",
+        monitor="loss",
         every_n_train_steps=0,
         every_n_epochs=1,
     )
     # Early stopping
     temperature_early_stop_callback = EarlyStopping(
-        monitor='loss',
+        monitor="loss",
         min_delta=early_stopping_min_delta,
         patience=5,
-        mode='min',
+        mode="min",
         check_on_train_epoch_end=False,
     )
     temperature_callbacks = [
@@ -457,12 +457,12 @@ def fit(
         auto_lr_find=auto_lr_find,
         auto_scale_batch_size=False,
         gradient_clip_val=gradient_clip_val,
-        gradient_clip_algorithm='value',
+        gradient_clip_algorithm="value",
         check_val_every_n_epoch=1,
         min_epochs=1 if epochs >= 1 else epochs,
         max_epochs=10,
         precision=32,
-        devices=None if device == 'cpu' else devices,
+        devices=None if device == "cpu" else devices,
         num_processes=0,
         accelerator=device,
         log_every_n_steps=50,
@@ -499,13 +499,13 @@ def fit(
             trainer.test(
                 model=lit_model,
                 dataloaders=data_module.test_dataloader(),
-                ckpt_path='best',
+                ckpt_path="best",
             )
             logged_metrics = trainer.logged_metrics
             for k, v in logged_metrics.items():
                 logged_metrics[k] = float(v)
             with open(
-                Path(trainer.logger.save_dir) / 'test.metrics', mode='w'
+                Path(trainer.logger.save_dir) / "test.metrics", mode="w"
             ) as f:
                 f.write(json.dumps(logged_metrics))
 
@@ -517,7 +517,7 @@ def load_model(
     num_time_features: T.Optional[int] = None,
     num_classes: T.Optional[int] = None,
     filters: T.Optional[int] = None,
-    device: T.Union[str, bytes] = 'gpu',
+    device: T.Union[str, bytes] = "gpu",
     devices: T.Optional[int] = 1,
     lit_model: T.Optional[CultioLitModel] = None,
     enable_progress_bar: T.Optional[bool] = True,
@@ -544,28 +544,28 @@ def load_model(
         trainer_kwargs = dict(
             default_root_dir=str(ckpt_file.parent),
             precision=32,
-            devices=None if device == 'cpu' else devices,
-            gpus=1 if device == 'gpu' else None,
+            devices=None if device == "cpu" else devices,
+            gpus=1 if device == "gpu" else None,
             accelerator=device,
             num_processes=0,
             log_every_n_steps=0,
             logger=False,
             enable_progress_bar=enable_progress_bar,
         )
-        if trainer_kwargs['accelerator'] == 'cpu':
-            del trainer_kwargs['devices']
-            del trainer_kwargs['gpus']
+        if trainer_kwargs["accelerator"] == "cpu":
+            del trainer_kwargs["devices"]
+            del trainer_kwargs["gpus"]
 
         trainer = pl.Trainer(**trainer_kwargs)
 
     if lit_model is None:
         if model_file is not None:
-            assert model_file.is_file(), 'The model file does not exist.'
+            assert model_file.is_file(), "The model file does not exist."
             if not isinstance(num_features, int) or not isinstance(
                 num_time_features, int
             ):
                 raise TypeError(
-                    'The features must be given to load the model file.'
+                    "The features must be given to load the model file."
                 )
             lit_model = CultioLitModel(
                 num_features=num_features,
@@ -575,7 +575,7 @@ def load_model(
             )
             lit_model.load_state_dict(state_dict=torch.load(model_file))
         else:
-            assert ckpt_file.is_file(), 'The checkpoint file does not exist.'
+            assert ckpt_file.is_file(), "The checkpoint file does not exist."
             lit_model = CultioLitModel.load_from_checkpoint(
                 checkpoint_path=str(ckpt_file)
             )
@@ -605,7 +605,7 @@ def predict_lightning(
     reference_image = Path(reference_image)
     out_path = Path(out_path)
     ckpt_file = Path(ckpt)
-    assert ckpt_file.is_file(), 'The checkpoint file does not exist.'
+    assert ckpt_file.is_file(), "The checkpoint file does not exist."
 
     data_module = EdgeDataModule(
         predict_ds=dataset,
@@ -625,8 +625,8 @@ def predict_lightning(
         default_root_dir=str(ckpt_file.parent),
         callbacks=[pred_writer],
         precision=precision,
-        devices=None if device == 'cpu' else devices,
-        gpus=1 if device == 'gpu' else None,
+        devices=None if device == "cpu" else devices,
+        gpus=1 if device == "gpu" else None,
         accelerator=device,
         num_processes=0,
         log_every_n_steps=0,
@@ -642,11 +642,11 @@ def predict_lightning(
     if crop_temperature is not None:
         geo_refine_model = GeoRefinement(out_channels=num_classes)
         geo_refine_model.load_state_dict(
-            torch.load(temperature_ckpt.parent / 'temperature.pt')
+            torch.load(temperature_ckpt.parent / "temperature.pt")
         )
         geo_refine_model.eval()
-    setattr(cultionet_lit_model, 'crop_temperature', crop_temperature)
-    setattr(cultionet_lit_model, 'temperature_lit_model', geo_refine_model)
+    setattr(cultionet_lit_model, "crop_temperature", crop_temperature)
+    setattr(cultionet_lit_model, "temperature_lit_model", geo_refine_model)
 
     # Make predictions
     trainer.predict(
@@ -663,7 +663,7 @@ def predict(
     data_values: torch.Tensor,
     w: Window = None,
     w_pad: Window = None,
-    device: str = 'cpu',
+    device: str = "cpu",
     include_maskrcnn: bool = False,
 ) -> np.ndarray:
     """Applies a model to predict image labels|values.
@@ -678,9 +678,9 @@ def predict(
         device (Optional[str])
     """
     norm_batch = zscores(data, data_values.mean, data_values.std)
-    if device == 'gpu':
-        norm_batch = norm_batch.to('cuda')
-        lit_model = lit_model.to('cuda')
+    if device == "gpu":
+        norm_batch = norm_batch.to("cuda")
+        lit_model = lit_model.to("cuda")
     with torch.no_grad():
         distance, dist_1, dist_2, dist_3, dist_4, edge, crop = lit_model(
             norm_batch
@@ -699,11 +699,11 @@ def predict(
     instances = None
     if include_maskrcnn:
         instances = np.zeros(
-            (norm_batch.height, norm_batch.width), dtype='float64'
+            (norm_batch.height, norm_batch.width), dtype="float64"
         )
         if include_maskrcnn:
-            scores = predictions[0]['scores'].squeeze()
-            masks = predictions[0]['masks'].squeeze()
+            scores = predictions[0]["scores"].squeeze()
+            masks = predictions[0]["masks"].squeeze()
             resizer = transforms.Resize((norm_batch.height, norm_batch.width))
             masks = resizer(masks)
             # Filter by box scores
@@ -734,7 +734,7 @@ def predict(
                     .reshape(norm_batch.height, norm_batch.width)
                 )
                 instances = np.zeros(
-                    (norm_batch.height, norm_batch.width), dtype='float64'
+                    (norm_batch.height, norm_batch.width), dtype="float64"
                 )
 
                 uid = 1 if written.max() == 0 else written.max() + 1
@@ -773,7 +773,7 @@ def predict(
                     uid = instances.max() + 1
                 instances /= SCALE_FACTOR
             else:
-                logger.warning('No fields were identified.')
+                logger.warning("No fields were identified.")
 
     mo = ModelOutputs(
         distance=distance,
