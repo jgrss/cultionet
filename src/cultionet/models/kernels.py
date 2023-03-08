@@ -23,22 +23,20 @@ import torch.nn.functional as F
 
 
 class Trend(torch.nn.Module):
-    def __init__(
-        self,
-        kernel_size: int,
-        direction: str = 'positive'
-    ):
+    def __init__(self, kernel_size: int, direction: str = "positive"):
         super(Trend, self).__init__()
 
-        assert direction in ('positive', 'negative'), \
-            "The trend direction must be one of 'positive' or 'negative'."
+        assert direction in (
+            "positive",
+            "negative",
+        ), "The trend direction must be one of 'positive' or 'negative'."
 
         self.padding = int(kernel_size / 2)
         self.weights = torch.ones(kernel_size)
         indices_ = torch.arange(kernel_size)
-        if direction == 'positive':
+        if direction == "positive":
             self.weights[indices_ % 2 == 0] *= -1
-        elif direction == 'negative':
+        elif direction == "negative":
             self.weights[indices_ % 2 > 0] *= -1
 
         self.weights = self.weights[(None,) * 2]
@@ -53,7 +51,7 @@ class Trend(torch.nn.Module):
             stride=1,
             padding=self.padding,
             dilation=1,
-            groups=1
+            groups=1,
         )
         x = self.relu(x)
 
@@ -65,11 +63,12 @@ class Peaks(torch.nn.Module):
         super(Peaks, self).__init__()
 
         self.padding = int(kernel_size / 2)
-        x = torch.linspace(-radius, radius+1, kernel_size)
+        x = torch.linspace(-radius, radius + 1, kernel_size)
         mu = 0.0
         gaussian = (
-            1.0 / (torch.sqrt(torch.tensor([2.0 * torch.pi])) * sigma)
-            * torch.exp(-1.0 * (x - mu)**2 / (2.0 * sigma**2))
+            1.0
+            / (torch.sqrt(torch.tensor([2.0 * torch.pi])) * sigma)
+            * torch.exp(-1.0 * (x - mu) ** 2 / (2.0 * sigma**2))
         )
         self.weights = gaussian * (x**2 / sigma**4 - 1.0) / sigma**2
         self.weights -= self.weights.mean()
@@ -88,7 +87,7 @@ class Peaks(torch.nn.Module):
             stride=1,
             padding=self.padding,
             dilation=1,
-            groups=1
+            groups=1,
         )
         x = self.relu(x)
 
