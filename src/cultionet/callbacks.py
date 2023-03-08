@@ -28,7 +28,7 @@ class LightningGTiffWriter(BasePredictionWriter):
         ref_res: float,
         resampling,
         compression: str,
-        write_interval: str = 'batch',
+        write_interval: str = "batch",
     ):
         super().__init__(write_interval)
 
@@ -39,26 +39,26 @@ class LightningGTiffWriter(BasePredictionWriter):
         with gw.config.update(ref_res=ref_res):
             with gw.open(reference_image, resampling=resampling) as src:
                 profile = {
-                    'crs': src.crs,
-                    'transform': src.gw.transform,
-                    'height': src.gw.nrows,
-                    'width': src.gw.ncols,
+                    "crs": src.crs,
+                    "transform": src.gw.transform,
+                    "height": src.gw.nrows,
+                    "width": src.gw.ncols,
                     # distance (+1) + edge (+1) + crop (+1) crop types (+N)
                     # `num_classes` includes background
-                    'count': 3 + num_classes - 1,
-                    'dtype': 'uint16',
-                    'blockxsize': max(64, src.gw.col_chunks),
-                    'blockysize': max(64, src.gw.row_chunks),
-                    'driver': 'GTiff',
-                    'sharing': False,
-                    'compress': compression,
+                    "count": 3 + num_classes - 1,
+                    "dtype": "uint16",
+                    "blockxsize": max(64, src.gw.col_chunks),
+                    "blockysize": max(64, src.gw.row_chunks),
+                    "driver": "GTiff",
+                    "sharing": False,
+                    "compress": compression,
                 }
-        profile['tiled'] = tile_size_is_correct(
-            profile['blockxsize'], profile['blockysize']
+        profile["tiled"] = tile_size_is_correct(
+            profile["blockxsize"], profile["blockysize"]
         )
-        with rio.open(out_path, mode='w', **profile):
+        with rio.open(out_path, mode="w", **profile):
             pass
-        self.dst = rio.open(out_path, mode='r+')
+        self.dst = rio.open(out_path, mode="r+")
 
     def write_on_epoch_end(
         self, trainer, pl_module, predictions, batch_indices
@@ -147,10 +147,10 @@ class LightningGTiffWriter(BasePredictionWriter):
         batch_idx,
         dataloader_idx,
     ):
-        distance = prediction['dist']
-        edge = prediction['edge']
-        crop = prediction['crop']
-        crop_type = prediction['crop_type']
+        distance = prediction["dist"]
+        edge = prediction["edge"]
+        crop = prediction["crop"]
+        crop_type = prediction["crop_type"]
         for batch_index in batch.batch.unique():
             mask = batch.batch == batch_index
             w = Window(
@@ -195,9 +195,9 @@ class LightningGTiffWriter(BasePredictionWriter):
             stack = mo.stack_outputs(w, w_pad)
             stack = (stack * SCALE_FACTOR).clip(0, SCALE_FACTOR)
 
-            with filelock.FileLock('./dst.lock'):
+            with filelock.FileLock("./dst.lock"):
                 self.dst.write(
                     stack,
-                    indexes=range(1, self.dst.profile['count'] + 1),
+                    indexes=range(1, self.dst.profile["count"] + 1),
                     window=w,
                 )
