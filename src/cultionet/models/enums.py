@@ -1,11 +1,11 @@
 import enum
 
 
-class ModelTypes(enum.StrEnum):
+class ModelTypes(enum.Enum):
     UNET = enum.auto()
     RESUNET = enum.auto()
 
 
-class ResBlockTypes(enum.StrEnum):
+class ResBlockTypes(enum.Enum):
     RES = enum.auto()
     RESA = enum.auto()
