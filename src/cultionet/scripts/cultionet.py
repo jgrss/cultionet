@@ -480,8 +480,10 @@ def predict_image(args):
         if temperature_scales_file.is_file():
             with open(temperature_scales_file, mode="r") as f:
                 temperature_scales = json.load(f)
+            edge_temperature = torch.tensor([temperature_scales["edge"]])
             crop_temperature = torch.tensor([temperature_scales["crop"]])
             if torch.cuda.is_available():
+                edge_temperature = edge_temperature.to("cuda")
                 crop_temperature = crop_temperature.to("cuda")
 
         cultionet.predict_lightning(
@@ -498,6 +500,7 @@ def predict_image(args):
             ref_res=ds[0].res,
             resampling=ds[0].resampling,
             compression=args.compression,
+            edge_temperature=edge_temperature,
             crop_temperature=crop_temperature,
             temperature_ckpt=ckpt_file.parent / "temperature" / "last.ckpt",
         )
