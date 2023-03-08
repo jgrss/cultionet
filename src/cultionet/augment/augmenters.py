@@ -38,11 +38,11 @@ class AugmenterArgs:
 class AugmenterModule(object):
     """Prepares, augments, and finalizes data."""
 
-    prefix: str = 'data_'
-    suffix: str = '.pt'
+    prefix: str = "data_"
+    suffix: str = ".pt"
 
     def __call__(self, ldata: LabeledData, aug_args: AugmenterArgs) -> Data:
-        assert hasattr(self, 'name_')
+        assert hasattr(self, "name_")
         assert isinstance(self.name_, str)
 
         cdata = self.prepare_data(ldata)
@@ -60,7 +60,7 @@ class AugmenterModule(object):
         raise NotImplementedError
 
     def file_name(self, uid: str) -> str:
-        return f'{self.prefix}{uid}{self.suffix}'
+        return f"{self.prefix}{uid}{self.suffix}"
 
     def save(self, out_directory: Path, data: Data, compress: int = 5) -> None:
         out_path = out_directory / self.file_name(data.train_id)
@@ -95,7 +95,7 @@ class AugmenterModule(object):
     ) -> Data:
         # Create the network
         nwk = SingleSensorNetwork(
-            np.ascontiguousarray(x, dtype='float64'), k=aug_args.k
+            np.ascontiguousarray(x, dtype="float64"), k=aug_args.k
         )
 
         (
@@ -193,7 +193,7 @@ class AugmentTimeWarp(AugmentTimeMixin):
 class AugmentAddTimeNoise(AugmentTimeMixin):
     def __init__(self, scale_lim: T.Tuple[int, int] = None):
         self.scale_lim = scale_lim
-        self.name_ = 'tsnoise'
+        self.name_ = "tsnoise"
         self.add_noise_ = False
 
         if self.scale_lim is None:
@@ -214,7 +214,7 @@ class AugmentTimeDrift(AugmentTimeMixin):
     ):
         self.max_drift_lim = max_drift_lim
         self.n_drift_points_lim = n_drift_points_lim
-        self.name_ = 'tsdrift'
+        self.name_ = "tsdrift"
         self.add_noise_ = True
 
         if self.max_drift_lim is None:
@@ -235,7 +235,7 @@ class AugmentTimeDrift(AugmentTimeMixin):
 
 class Rotate(AugmenterModule):
     def __init__(self, deg: int):
-        self.name_ = f'rotate-{deg}'
+        self.name_ = f"rotate-{deg}"
 
         deg_dict = {
             90: cv2.ROTATE_90_CLOCKWISE,
@@ -262,8 +262,8 @@ class Rotate(AugmenterModule):
             x[i] = cv2.rotate(np.float32(cdata.x[i]), self.deg_func)
 
         # Rotate labels
-        label_dtype = 'float' if 'float' in cdata.y.dtype.name else 'int'
-        if label_dtype == 'float':
+        label_dtype = "float" if "float" in cdata.y.dtype.name else "int"
+        if label_dtype == "float":
             y = cv2.rotate(np.float32(cdata.y), self.deg_func)
         else:
             y = cv2.rotate(np.uint8(cdata.y), self.deg_func)
@@ -278,7 +278,7 @@ class Rotate(AugmenterModule):
 
 class Roll(AugmenterModule):
     def __init__(self):
-        self.name_ = 'roll'
+        self.name_ = "roll"
 
     def forward(
         self,
@@ -306,7 +306,7 @@ class Flip(AugmenterModule):
         aug_args: AugmenterArgs = None,
     ) -> DataCopies:
         x = cdata.x.copy()
-        if self.direction == 'flipfb':
+        if self.direction == "flipfb":
             # Reverse the channels
             for b in range(0, cdata.x.shape[0], aug_args.ntime):
                 # Get the slice for the current band, n time steps
@@ -349,13 +349,13 @@ class SKLearnMixin(AugmenterModule):
 class GaussianNoise(SKLearnMixin):
     def __init__(self, **kwargs):
         self.kwargs = kwargs
-        self.name_ = 'gaussian'
+        self.name_ = "gaussian"
 
 
 class SaltAndPepperNoise(SKLearnMixin):
     def __init__(self, **kwargs):
         self.kwargs = kwargs
-        self.name_ = 's&p'
+        self.name_ = "s&p"
 
 
 class SpeckleNoise(SKLearnMixin):
@@ -367,12 +367,12 @@ class SpeckleNoise(SKLearnMixin):
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
-        self.name_ = 'speckle'
+        self.name_ = "speckle"
 
 
 class NoAugmentation(AugmenterModule):
     def __init__(self):
-        self.name_ = 'none'
+        self.name_ = "none"
 
     def forward(
         self,
@@ -386,16 +386,16 @@ class NoAugmentation(AugmenterModule):
 class AugmenterMapping(enum.Enum):
     """Key: Augmenter mappings"""
 
-    tswarp = AugmentTimeWarp(name='tswarp')
+    tswarp = AugmentTimeWarp(name="tswarp")
     tsnoise = AugmentAddTimeNoise()
     tsdrift = AugmentTimeDrift()
-    tspeaks = AugmentTimeWarp('tspeaks')
+    tspeaks = AugmentTimeWarp("tspeaks")
     rot90 = Rotate(deg=90)
     rot180 = Rotate(deg=180)
     rot270 = Rotate(deg=270)
     roll = Roll()
-    fliplr = Flip(direction='fliplr')
-    flipud = Flip(direction='flipud')
+    fliplr = Flip(direction="fliplr")
+    flipud = Flip(direction="flipud")
     gaussian = GaussianNoise(mean=0.0, var=0.005)
     saltpepper = SaltAndPepperNoise(amount=0.01)
     speckle = SpeckleNoise(mean=0.0, var=0.05)

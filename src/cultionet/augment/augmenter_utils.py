@@ -101,12 +101,12 @@ def augment_time(
     nfeas, nrows, ncols = xseg.shape
     assert nfeas == int(
         ntime * nbands
-    ), 'The array feature dimensions do not match the expected shape.'
+    ), "The array feature dimensions do not match the expected shape."
 
     # (H*W x T X C)
     xseg = feature_stack_to_tsaug(xseg, ntime, nbands, nrows, ncols)
 
-    if aug == 'tspeaks':
+    if aug == "tspeaks":
         new_indices = np.sort(
             np.random.choice(
                 range(0, ntime * 2 - 8), replace=False, size=ntime
@@ -215,8 +215,8 @@ def create_parcel_masks(
 
     assert (
         boxes.size(0) == labels.size(0) == masks.size(0)
-    ), 'The tensor sizes do not match.'
+    ), "The tensor sizes do not match."
 
-    target = {'boxes': boxes, 'labels': labels, 'masks': masks}
+    target = {"boxes": boxes, "labels": labels, "masks": masks}
 
     return target
