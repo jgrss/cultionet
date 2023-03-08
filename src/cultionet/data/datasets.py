@@ -39,14 +39,14 @@ def update_data(
 ) -> Data:
     image_id = None
     if idx is not None:
-        if hasattr(batch, 'boxes'):
+        if hasattr(batch, "boxes"):
             if batch.boxes is not None:
                 image_id = (
                     torch.zeros_like(batch.box_labels, dtype=torch.int64) + idx
                 )
 
     if x is not None:
-        exclusion = ('x',)
+        exclusion = ("x",)
 
         return Data(
             x=x,
@@ -91,7 +91,7 @@ def _check_shape(
 class EdgeDataset(Dataset):
     """An edge dataset."""
 
-    root: T.Union[str, Path, bytes] = attr.ib(default='.')
+    root: T.Union[str, Path, bytes] = attr.ib(default=".")
     transform: T.Any = attr.ib(default=None)
     pre_transform: T.Any = attr.ib(default=None)
     data_means: T.Optional[torch.Tensor] = attr.ib(
@@ -107,7 +107,7 @@ class EdgeDataset(Dataset):
         validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
     )
     pattern: T.Optional[str] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(str)), default='data*.pt'
+        validator=ATTRVOPTIONAL(ATTRVINSTANCE(str)), default="data*.pt"
     )
     processes: T.Optional[int] = attr.ib(
         validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=psutil.cpu_count()
@@ -120,7 +120,7 @@ class EdgeDataset(Dataset):
     )
 
     data_list_ = None
-    grid_id_column = 'grid_id'
+    grid_id_column = "grid_id"
 
     def __attrs_post_init__(self):
         super(EdgeDataset, self).__init__(
@@ -171,11 +171,11 @@ class EdgeDataset(Dataset):
         def get_box_id(data_id: str, *bounds):
             return data_id, box(*bounds).centroid
 
-        with parallel_backend(backend='loky', n_jobs=self.processes):
+        with parallel_backend(backend="loky", n_jobs=self.processes):
             with TqdmParallel(
                 tqdm_kwargs={
-                    'total': len(self),
-                    'desc': 'Building GeoDataFrame',
+                    "total": len(self),
+                    "desc": "Building GeoDataFrame",
                 }
             ) as pool:
                 results = pool(
@@ -194,7 +194,7 @@ class EdgeDataset(Dataset):
             data=ids,
             columns=[self.grid_id_column],
             geometry=geometry,
-            crs='epsg:4326',
+            crs="epsg:4326",
         )
 
         return df
@@ -217,7 +217,7 @@ class EdgeDataset(Dataset):
                 qt.split()
             spatial_partitions = qt.to_frame()
 
-        self.spatial_partitions = spatial_partitions.to_crs('epsg:4326')
+        self.spatial_partitions = spatial_partitions.to_crs("epsg:4326")
 
     def query_partition_by_name(
         self,
@@ -230,7 +230,7 @@ class EdgeDataset(Dataset):
         df = self.spatial_partitions.query(
             f"{partition_column} == '{partition_name}'"
         )
-        df_points = self.dataset_df.overlay(df, how='intersection')
+        df_points = self.dataset_df.overlay(df, how="intersection")
         if df_points.empty:
             logger.warning(
                 f"Partition {partition_name} does not have any data."
@@ -248,7 +248,7 @@ class EdgeDataset(Dataset):
         indices = np.intersect1d(
             grid_names,
             [
-                data_path.stem.replace('data_', '')
+                data_path.stem.replace("data_", "")
                 for data_path in self.data_list_
             ],
             return_indices=True,
@@ -261,7 +261,7 @@ class EdgeDataset(Dataset):
         indices: list,
         return_all: bool = True,
         return_indices: bool = False,
-    ) -> T.Tuple['EdgeDataset', 'EdgeDataset']:
+    ) -> T.Tuple["EdgeDataset", "EdgeDataset"]:
         """Splits a list of indices into train and validation datasets."""
         train_idx = list(set(range(len(self))).difference(indices))
 
@@ -278,7 +278,7 @@ class EdgeDataset(Dataset):
 
     def spatial_kfoldcv_iter(
         self, partition_column: str
-    ) -> T.Tuple[str, 'EdgeDataset', 'EdgeDataset']:
+    ) -> T.Tuple[str, "EdgeDataset", "EdgeDataset"]:
         """Yield generator to iterate over spatial partitions."""
         for kfold in self.spatial_partitions.itertuples():
             # Bounding box and indices of the kth fold
@@ -295,13 +295,13 @@ class EdgeDataset(Dataset):
     def create_spatial_index(self):
         """Creates the spatial index."""
         dataset_grid_path = (
-            Path(self.processed_dir).parent.parent / 'dataset_grids.gpkg'
+            Path(self.processed_dir).parent.parent / "dataset_grids.gpkg"
         )
         if dataset_grid_path.is_file():
             self.dataset_df = gpd.read_file(dataset_grid_path)
         else:
             self.dataset_df = self.to_frame()
-            self.dataset_df.to_file(dataset_grid_path, driver='GPKG')
+            self.dataset_df.to_file(dataset_grid_path, driver="GPKG")
 
     def download(self):
         pass
@@ -320,7 +320,7 @@ class EdgeDataset(Dataset):
         expected_height: int,
         expected_width: int,
         delete_mismatches: bool = False,
-        tqdm_color: str = 'ffffff',
+        tqdm_color: str = "ffffff",
     ):
         """Checks if all tensors in the dataset match in shape dimensions."""
         check_partial = partial(
@@ -328,15 +328,15 @@ class EdgeDataset(Dataset):
         )
 
         with parallel_backend(
-            backend='loky',
+            backend="loky",
             n_jobs=self.processes,
             inner_max_num_threads=self.threads_per_worker,
         ):
             with TqdmParallel(
                 tqdm_kwargs={
-                    'total': len(self),
-                    'desc': 'Checking dimensions',
-                    'colour': tqdm_color,
+                    "total": len(self),
+                    "desc": "Checking dimensions",
+                    "colour": tqdm_color,
                 }
             ) as pool:
                 results = pool(
@@ -354,14 +354,14 @@ class EdgeDataset(Dataset):
             indices = np.array(indices)
             null_indices = indices[~np.array(matches)]
             null_ids = np.array(ids)[null_indices].tolist()
-            logger.warning(','.join(null_ids))
+            logger.warning(",".join(null_ids))
             logger.warning(
-                f'{null_indices.shape[0]:,d} ids did not match the reference dimensions.'
+                f"{null_indices.shape[0]:,d} ids did not match the reference dimensions."
             )
 
             if delete_mismatches:
                 logger.warning(
-                    f'Removing {null_indices.shape[0]:,d} .pt files.'
+                    f"Removing {null_indices.shape[0]:,d} .pt files."
                 )
                 for i in null_indices:
                     self.data_list_[i].unlink()
@@ -378,7 +378,7 @@ class EdgeDataset(Dataset):
         partition_column: str,
         val_frac: float,
         partition_name: T.Optional[str] = None,
-    ) -> T.Tuple['EdgeDataset', 'EdgeDataset']:
+    ) -> T.Tuple["EdgeDataset", "EdgeDataset"]:
         self.get_spatial_partitions(spatial_partitions=spatial_partitions)
         train_indices = []
         val_indices = []
@@ -387,7 +387,7 @@ class EdgeDataset(Dataset):
         for row in tqdm(
             self.spatial_partitions.itertuples(),
             total=len(self.spatial_partitions.index),
-            desc='Sampling partitions',
+            desc="Sampling partitions",
         ):
             if partition_name is not None:
                 if str(getattr(row, partition_column)) != partition_name:
@@ -415,7 +415,7 @@ class EdgeDataset(Dataset):
         val_frac: float,
         spatial_overlap_allowed: bool = True,
         spatial_balance: bool = True,
-    ) -> T.Tuple['EdgeDataset', 'EdgeDataset']:
+    ) -> T.Tuple["EdgeDataset", "EdgeDataset"]:
         """Splits the dataset into train and validation.
 
         Args:
@@ -424,7 +424,7 @@ class EdgeDataset(Dataset):
         Returns:
             train dataset, validation dataset
         """
-        id_column = 'common_id'
+        id_column = "common_id"
         self.shuffle_items()
         if spatial_overlap_allowed:
             n_train = int(len(self) * (1.0 - val_frac))
@@ -437,7 +437,7 @@ class EdgeDataset(Dataset):
             # Create column of each site's common id
             # (i.e., without the year and augmentation).
             self.dataset_df[id_column] = self.dataset_df.grid_id.str.split(
-                '_', expand=True
+                "_", expand=True
             ).loc[:, 0]
             unique_ids = self.dataset_df.common_id.unique()
             if spatial_balance:
@@ -452,8 +452,8 @@ class EdgeDataset(Dataset):
                     .to_frame(name=id_column)
                     .merge(self.dataset_df, on=id_column)
                     .drop_duplicates(id_column)
-                    .drop(columns=['grid_id'])
-                ).to_crs('EPSG:8858')
+                    .drop(columns=["grid_id"])
+                ).to_crs("EPSG:8858")
                 # Setup a quad-tree using the GRTS method
                 # (see https://github.com/jgrss/geosample for details)
                 qt = QuadTree(df_unique_locations, force_square=False)
