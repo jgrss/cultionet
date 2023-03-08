@@ -11,11 +11,7 @@ from skimage import util as sk_util
 from torch_geometric.data import Data
 import joblib
 
-from .augmenter_utils import (
-    augment_time,
-    create_parcel_masks,
-    roll_time
-)
+from .augmenter_utils import augment_time, create_parcel_masks, roll_time
 from ..data.utils import create_data_object, LabeledData
 from ..networks import SingleSensorNetwork
 from ..utils.reshape import nd_to_columns
@@ -40,54 +36,35 @@ class AugmenterArgs:
 
 
 class AugmenterModule(object):
-    """Prepares, augments, and finalizes data
-    """
+    """Prepares, augments, and finalizes data."""
+
     prefix: str = 'data_'
     suffix: str = '.pt'
 
-    def __call__(
-        self,
-        ldata: LabeledData,
-        aug_args: AugmenterArgs
-    ) -> Data:
+    def __call__(self, ldata: LabeledData, aug_args: AugmenterArgs) -> Data:
         assert hasattr(self, 'name_')
         assert isinstance(self.name_, str)
 
         cdata = self.prepare_data(ldata)
         cdata = self.forward(cdata, ldata, aug_args)
         data = self.finalize(
-            x=cdata.x,
-            y=cdata.y,
-            bdist=cdata.bdist,
-            aug_args=aug_args
+            x=cdata.x, y=cdata.y, bdist=cdata.bdist, aug_args=aug_args
         )
 
         return data
 
     @abstractmethod
     def forward(
-        self,
-        cdata: DataCopies,
-        ldata: LabeledData,
-        aug_args: AugmenterArgs
+        self, cdata: DataCopies, ldata: LabeledData, aug_args: AugmenterArgs
     ) -> DataCopies:
         raise NotImplementedError
 
     def file_name(self, uid: str) -> str:
         return f'{self.prefix}{uid}{self.suffix}'
 
-    def save(
-        self,
-        out_directory: Path,
-        data: Data,
-        compress: int = 5
-    ) -> None:
+    def save(self, out_directory: Path, data: Data, compress: int = 5) -> None:
         out_path = out_directory / self.file_name(data.train_id)
-        joblib.dump(
-            data,
-            out_path,
-            compress=compress
-        )
+        joblib.dump(data, out_path, compress=compress)
 
     def prepare_data(self, ldata: LabeledData) -> DataCopies:
         x = ldata.x.copy()
@@ -107,25 +84,28 @@ class AugmenterModule(object):
         if bdist is not None:
             bdist = bdist.copy()
 
-        return DataCopies(
-            x=x,
-            y=y,
-            bdist=bdist
-        )
+        return DataCopies(x=x, y=y, bdist=bdist)
 
     def finalize(
         self,
         x: np.ndarray,
         y: T.Union[np.ndarray, None],
         bdist: T.Union[np.ndarray, None],
-        aug_args: AugmenterArgs
+        aug_args: AugmenterArgs,
     ) -> Data:
         # Create the network
         nwk = SingleSensorNetwork(
             np.ascontiguousarray(x, dtype='float64'), k=aug_args.k
         )
 
-        edge_indices_a, edge_indices_b, edge_attrs_diffs, edge_attrs_dists, __, __ = nwk.create_network()
+        (
+            edge_indices_a,
+            edge_indices_b,
+            edge_attrs_diffs,
+            edge_attrs_dists,
+            __,
+            __,
+        ) = nwk.create_network()
         edge_indices = np.c_[edge_indices_a, edge_indices_b]
         edge_attrs = np.c_[edge_attrs_diffs, edge_attrs_dists]
 
@@ -155,16 +135,13 @@ class AugmenterModule(object):
             bdist=bdist,
             # ori=ori_aug,
             zero_padding=aug_args.zero_padding,
-            **aug_args.kwargs
+            **aug_args.kwargs,
         )
 
 
 class AugmentTimeMixin(AugmenterModule):
     def forward(
-        self,
-        cdata: DataCopies,
-        ldata: LabeledData,
-        aug_args: AugmenterArgs
+        self, cdata: DataCopies, ldata: LabeledData, aug_args: AugmenterArgs
     ) -> DataCopies:
         # Warp each segment
         for p in ldata.props:
@@ -176,7 +153,7 @@ class AugmentTimeMixin(AugmenterModule):
                 nbands=aug_args.nbands,
                 add_noise=self.add_noise_,
                 warper=self.warper,
-                aug=self.name_
+                aug=self.name_,
             )
             cdata = replace(cdata, x=x)
 
@@ -189,7 +166,7 @@ class AugmentTimeWarp(AugmentTimeMixin):
         self,
         name: str,
         n_speed_change_lim: T.Tuple[int, int] = None,
-        max_speed_ratio_lim: T.Tuple[float, float] = None
+        max_speed_ratio_lim: T.Tuple[float, float] = None,
     ):
         self.n_speed_change_lim = n_speed_change_lim
         self.max_speed_ratio_lim = max_speed_ratio_lim
@@ -203,21 +180,20 @@ class AugmentTimeWarp(AugmentTimeMixin):
 
         self.warper = TimeWarp(
             n_speed_change=np.random.randint(
-                low=self.n_speed_change_lim[0],
-                high=self.n_speed_change_lim[1]
+                low=self.n_speed_change_lim[0], high=self.n_speed_change_lim[1]
             ),
             max_speed_ratio=np.random.uniform(
                 low=self.max_speed_ratio_lim[0],
-                high=self.max_speed_ratio_lim[1]
+                high=self.max_speed_ratio_lim[1],
             ),
-            static_rand=True
+            static_rand=True,
         )
 
 
 class AugmentAddTimeNoise(AugmentTimeMixin):
     def __init__(self, scale_lim: T.Tuple[int, int] = None):
         self.scale_lim = scale_lim
-        self.name_ = 'ts-noise'
+        self.name_ = 'tsnoise'
         self.add_noise_ = False
 
         if self.scale_lim is None:
@@ -225,8 +201,7 @@ class AugmentAddTimeNoise(AugmentTimeMixin):
 
         self.warper = AddNoise(
             scale=np.random.uniform(
-                low=self.scale_lim[0],
-                high=self.scale_lim[1]
+                low=self.scale_lim[0], high=self.scale_lim[1]
             )
         )
 
@@ -235,11 +210,11 @@ class AugmentTimeDrift(AugmentTimeMixin):
     def __init__(
         self,
         max_drift_lim: T.Tuple[int, int] = None,
-        n_drift_points_lim: T.Tuple[int, int] = None
+        n_drift_points_lim: T.Tuple[int, int] = None,
     ):
         self.max_drift_lim = max_drift_lim
         self.n_drift_points_lim = n_drift_points_lim
-        self.name_ = 'ts-drift'
+        self.name_ = 'tsdrift'
         self.add_noise_ = True
 
         if self.max_drift_lim is None:
@@ -249,14 +224,12 @@ class AugmentTimeDrift(AugmentTimeMixin):
 
         self.warper = Drift(
             max_drift=np.random.uniform(
-                low=self.max_drift_lim[0],
-                high=self.max_drift_lim[1]
+                low=self.max_drift_lim[0], high=self.max_drift_lim[1]
             ),
             n_drift_points=np.random.randint(
-                low=self.n_drift_points_lim[0],
-                high=self.n_drift_points_lim[1]
+                low=self.n_drift_points_lim[0], high=self.n_drift_points_lim[1]
             ),
-            static_rand=True
+            static_rand=True,
         )
 
 
@@ -267,7 +240,7 @@ class Rotate(AugmenterModule):
         deg_dict = {
             90: cv2.ROTATE_90_CLOCKWISE,
             180: cv2.ROTATE_180,
-            270: cv2.ROTATE_90_COUNTERCLOCKWISE
+            270: cv2.ROTATE_90_COUNTERCLOCKWISE,
         }
         self.deg_func = deg_dict[deg]
 
@@ -275,24 +248,18 @@ class Rotate(AugmenterModule):
         self,
         cdata: DataCopies,
         ldata: LabeledData = None,
-        aug_args: AugmenterArgs = None
+        aug_args: AugmenterArgs = None,
     ) -> DataCopies:
         # Create the output array for rotated features
         x = np.zeros(
             (
                 cdata.x.shape[0],
-                *cv2.rotate(
-                    np.float32(cdata.x[0]),
-                    self.deg_func
-                ).shape
+                *cv2.rotate(np.float32(cdata.x[0]), self.deg_func).shape,
             ),
-            dtype=cdata.x.dtype
+            dtype=cdata.x.dtype,
         )
         for i in range(0, cdata.x.shape[0]):
-            x[i] = cv2.rotate(
-                np.float32(cdata.x[i]),
-                self.deg_func
-            )
+            x[i] = cv2.rotate(np.float32(cdata.x[i]), self.deg_func)
 
         # Rotate labels
         label_dtype = 'float' if 'float' in cdata.y.dtype.name else 'int'
@@ -317,12 +284,10 @@ class Roll(AugmenterModule):
         self,
         cdata: DataCopies,
         ldata: LabeledData = None,
-        aug_args: AugmenterArgs = None
+        aug_args: AugmenterArgs = None,
     ) -> DataCopies:
         for p in ldata.props:
-            x = roll_time(
-                ldata, p, cdata.x, aug_args.ntime
-            )
+            x = roll_time(ldata, p, cdata.x, aug_args.ntime)
             cdata = replace(cdata, x=x)
 
         # y and bdist are unaltered
@@ -338,14 +303,14 @@ class Flip(AugmenterModule):
         self,
         cdata: DataCopies,
         ldata: LabeledData = None,
-        aug_args: AugmenterArgs = None
+        aug_args: AugmenterArgs = None,
     ) -> DataCopies:
         x = cdata.x.copy()
         if self.direction == 'flipfb':
             # Reverse the channels
             for b in range(0, cdata.x.shape[0], aug_args.ntime):
                 # Get the slice for the current band, n time steps
-                x[b:b+aug_args.ntime] = x[b:b+aug_args.ntime][::-1]
+                x[b : b + aug_args.ntime] = x[b : b + aug_args.ntime][::-1]
 
             # y and bdist are unaltered
             cdata = replace(cdata)
@@ -367,15 +332,12 @@ class SKLearnMixin(AugmenterModule):
         self,
         cdata: DataCopies,
         ldata: LabeledData = None,
-        aug_args: AugmenterArgs = None
+        aug_args: AugmenterArgs = None,
     ) -> DataCopies:
         x = cdata.x.copy()
         for i in range(0, x.shape[0]):
             x[i] = sk_util.random_noise(
-                x[i],
-                mode=self.name_,
-                clip=True,
-                **self.kwargs
+                x[i], mode=self.name_, clip=True, **self.kwargs
             )
 
         # y and bdist are unaltered
@@ -402,6 +364,7 @@ class SpeckleNoise(SKLearnMixin):
         >>> augmenter = SpeckleNoise()
         >>> data = augmenter(labeled_data, **kwargs)
     """
+
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.name_ = 'speckle'
@@ -415,18 +378,18 @@ class NoAugmentation(AugmenterModule):
         self,
         cdata: DataCopies,
         ldata: LabeledData = None,
-        aug_args: AugmenterArgs = None
+        aug_args: AugmenterArgs = None,
     ) -> DataCopies:
         return cdata
 
 
 class AugmenterMapping(enum.Enum):
-    """Key: Augmenter mappings
-    """
-    ts_warp = AugmentTimeWarp(name='ts-warp')
-    ts_noise = AugmentAddTimeNoise()
-    ts_drift = AugmentTimeDrift()
-    ts_peaks = AugmentTimeWarp(name='ts-peaks')
+    """Key: Augmenter mappings"""
+
+    tswarp = AugmentTimeWarp(name='tswarp')
+    tsnoise = AugmentAddTimeNoise()
+    tsdrift = AugmentTimeDrift()
+    tspeaks = AugmentTimeWarp('tspeaks')
     rot90 = Rotate(deg=90)
     rot180 = Rotate(deg=180)
     rot270 = Rotate(deg=270)
@@ -434,7 +397,7 @@ class AugmenterMapping(enum.Enum):
     fliplr = Flip(direction='fliplr')
     flipud = Flip(direction='flipud')
     gaussian = GaussianNoise(mean=0.0, var=0.005)
-    salt_pepper = SaltAndPepperNoise(amount=0.01)
+    saltpepper = SaltAndPepperNoise(amount=0.01)
     speckle = SpeckleNoise(mean=0.0, var=0.05)
     none = NoAugmentation()
 
@@ -449,7 +412,7 @@ class AugmenterBase(object):
         k: int = 3,
         instance_seg: bool = False,
         zero_padding: int = 0,
-        **kwargs
+        **kwargs,
     ):
         self.augmentations = augmentations
         self.augmenters_ = []
@@ -460,23 +423,21 @@ class AugmenterBase(object):
             k=k,
             instance_seg=instance_seg,
             zero_padding=zero_padding,
-            kwargs=kwargs
+            kwargs=kwargs,
         )
 
         self._init_augmenters()
 
     def _init_augmenters(self):
         for augmentation in self.augmentations:
-            self.augmenters_.append(
-                AugmenterMapping[augmentation.replace('-', '_')].value
-            )
+            self.augmenters_.append(AugmenterMapping[augmentation].value)
 
     def update_aug_args(self, **kwargs):
         self.aug_args = replace(self.aug_args, **kwargs)
 
 
 class Augmenters(AugmenterBase):
-    """Applies augmentations for a sequence of augmentation methods
+    """Applies augmentations for a sequence of augmentation methods.
 
     Inputs to callables:
         augmentation_method(ldata, aug_args=)
@@ -498,7 +459,7 @@ class Augmenters(AugmenterBase):
 
     Example:
         >>> aug = Augmenters(
-        >>>     augmentations=['ts-warp'],
+        >>>     augmentations=['tswarp'],
         >>>     ntime=13,
         >>>     nbands=5,
         >>>     max_crop_class=1
@@ -507,6 +468,7 @@ class Augmenters(AugmenterBase):
         >>> for method in aug:
         >>>     method(ldata, aug_args=aug.aug_args)
     """
+
     def __init__(self, **kwargs):
         super(Augmenters, self).__init__(**kwargs)
 
