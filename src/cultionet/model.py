@@ -330,12 +330,6 @@ def fit(
         num_workers=load_batch_workers,
         shuffle=True,
     )
-    temperature_data_module = EdgeDataModule(
-        train_ds=val_ds,
-        batch_size=batch_size,
-        num_workers=load_batch_workers,
-        shuffle=True,
-    )
 
     # Setup the Lightning model
     lit_model = CultioLitModel(
@@ -424,52 +418,6 @@ def fit(
         deterministic=False,
         benchmark=False,
     )
-    temperature_ckpt_file = ckpt_file.parent / "temperature" / ckpt_file.name
-    temperature_ckpt_file.parent.mkdir(parents=True, exist_ok=True)
-    # Temperature checkpoints
-    temperature_cb_train_loss = ModelCheckpoint(
-        dirpath=temperature_ckpt_file.parent,
-        filename=temperature_ckpt_file.stem,
-        save_last=True,
-        save_top_k=save_top_k,
-        mode="min",
-        monitor="loss",
-        every_n_train_steps=0,
-        every_n_epochs=1,
-    )
-    # Early stopping
-    temperature_early_stop_callback = EarlyStopping(
-        monitor="loss",
-        min_delta=early_stopping_min_delta,
-        patience=5,
-        mode="min",
-        check_on_train_epoch_end=False,
-    )
-    temperature_callbacks = [
-        lr_monitor,
-        temperature_cb_train_loss,
-        temperature_early_stop_callback,
-    ]
-    temperature_trainer = pl.Trainer(
-        default_root_dir=str(temperature_ckpt_file.parent),
-        callbacks=temperature_callbacks,
-        enable_checkpointing=True,
-        auto_lr_find=auto_lr_find,
-        auto_scale_batch_size=False,
-        gradient_clip_val=gradient_clip_val,
-        gradient_clip_algorithm="value",
-        check_val_every_n_epoch=1,
-        min_epochs=1 if epochs >= 1 else epochs,
-        max_epochs=10,
-        precision=32,
-        devices=None if device == "cpu" else devices,
-        num_processes=0,
-        accelerator=device,
-        log_every_n_steps=50,
-        profiler=profiler,
-        deterministic=False,
-        benchmark=False,
-    )
 
     if auto_lr_find:
         trainer.tune(model=lit_model, datamodule=data_module)
@@ -481,8 +429,63 @@ def fit(
                 ckpt_path=ckpt_file if ckpt_file.is_file() else None,
             )
         if refine_and_calibrate:
+            temperature_data_module = EdgeDataModule(
+                train_ds=val_ds,
+                batch_size=batch_size,
+                num_workers=load_batch_workers,
+                shuffle=True,
+            )
+            temperature_ckpt_file = (
+                ckpt_file.parent / "temperature" / ckpt_file.name
+            )
+            temperature_ckpt_file.parent.mkdir(parents=True, exist_ok=True)
+            # Temperature checkpoints
+            temperature_cb_train_loss = ModelCheckpoint(
+                dirpath=temperature_ckpt_file.parent,
+                filename=temperature_ckpt_file.stem,
+                save_last=True,
+                save_top_k=save_top_k,
+                mode="min",
+                monitor="loss",
+                every_n_train_steps=0,
+                every_n_epochs=1,
+            )
+            # Early stopping
+            temperature_early_stop_callback = EarlyStopping(
+                monitor="loss",
+                min_delta=early_stopping_min_delta,
+                patience=5,
+                mode="min",
+                check_on_train_epoch_end=False,
+            )
+            temperature_callbacks = [
+                lr_monitor,
+                temperature_cb_train_loss,
+                temperature_early_stop_callback,
+            ]
+            temperature_trainer = pl.Trainer(
+                default_root_dir=str(temperature_ckpt_file.parent),
+                callbacks=temperature_callbacks,
+                enable_checkpointing=True,
+                auto_lr_find=auto_lr_find,
+                auto_scale_batch_size=False,
+                gradient_clip_val=gradient_clip_val,
+                gradient_clip_algorithm="value",
+                check_val_every_n_epoch=1,
+                min_epochs=1 if epochs >= 1 else epochs,
+                max_epochs=10,
+                precision=32,
+                devices=None if device == "cpu" else devices,
+                num_processes=0,
+                accelerator=device,
+                log_every_n_steps=50,
+                profiler=profiler,
+                deterministic=False,
+                benchmark=False,
+            )
             # Calibrate the logits
             temperature_model = TemperatureScaling(
+                in_features=val_ds.num_features,
                 num_classes=num_classes,
                 edge_class=edge_class,
                 class_counts=class_counts,
@@ -640,7 +643,9 @@ def predict_lightning(
 
     geo_refine_model = None
     if crop_temperature is not None:
-        geo_refine_model = GeoRefinement(out_channels=num_classes)
+        geo_refine_model = GeoRefinement(
+            in_features=dataset.num_features, out_channels=num_classes
+        )
         geo_refine_model.load_state_dict(
             torch.load(temperature_ckpt.parent / "temperature.pt")
         )
