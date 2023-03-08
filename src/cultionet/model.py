@@ -599,7 +599,6 @@ def predict_lightning(
     resampling: str,
     ref_res: float,
     compression: str,
-    edge_temperature: T.Optional[torch.Tensor] = None,
     crop_temperature: T.Optional[torch.Tensor] = None,
     temperature_ckpt: T.Optional[Path] = None,
 ):
@@ -646,7 +645,6 @@ def predict_lightning(
             torch.load(temperature_ckpt.parent / "temperature.pt")
         )
         geo_refine_model.eval()
-    setattr(cultionet_lit_model, "edge_temperature", edge_temperature)
     setattr(cultionet_lit_model, "crop_temperature", crop_temperature)
     setattr(cultionet_lit_model, "temperature_lit_model", geo_refine_model)
 
