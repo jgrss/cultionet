@@ -6,5 +6,5 @@ from .losses import (
     MSELoss,
     TanimotoDistLoss,
     TanimotoComplementLoss,
-    TopologicalLoss
+    TopologicalLoss,
 )
