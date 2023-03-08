@@ -120,12 +120,12 @@ create:
         - rot90
         - rot180
         - rot270
-        - ts-warp
-        - ts-noise
-        - ts-drift
-        - ts-peaks
+        - tswarp
+        - tsnoise
+        - tsdrift
+        - tspeaks
         - gaussian
-        - salt-pepper
+        - saltpepper
         - speckle
       choices:
         - none
@@ -135,13 +135,13 @@ create:
         - rot90
         - rot180
         - rot270
-        - ts-warp
-        - ts-noise
-        - ts-drift
-        - ts-peaks
+        - tswarp
+        - tsnoise
+        - tsdrift
+        - tspeaks
         - roll
         - gaussian
-        - salt-pepper
+        - saltpepper
         - speckle
       nargs: '+'
   grid_size:
