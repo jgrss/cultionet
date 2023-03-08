@@ -51,21 +51,6 @@ class GeoRefinement(torch.nn.Module):
             torch.nn.Sigmoid(),
         )
 
-        self.edge_model = torch.nn.Sequential(
-            ResidualConv(
-                in_channels=in_channels,
-                out_channels=32,
-                dilation=2,
-                activation_type='SiLU',
-            ),
-            torch.nn.Dropout(0.5),
-            torch.nn.Conv2d(
-                in_channels=32,
-                out_channels=1,
-                kernel_size=1,
-                padding=0,
-            ),
-        )
         self.crop_model = torch.nn.Sequential(
             ResidualConv(
                 in_channels=in_channels,
@@ -140,7 +125,6 @@ class GeoRefinement(torch.nn.Module):
 
         # Reshape
         x = self.gc(x, batch_size, height, width)
-        predictions["edge"] = self.cg(self.edge_model(x))
         crop = self.crop_model(x)
         predictions["crop"] = self.cg(crop * geo_attention)
 
