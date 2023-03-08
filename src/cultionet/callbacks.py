@@ -13,6 +13,10 @@ from .data.const import SCALE_FACTOR
 from .utils.reshape import ModelOutputs
 
 
+def is_tiled(blockxsize: int, blockysize: int, tile_limit: int = 16) -> bool:
+    return max(blockxsize, blockysize) >= tile_limit
+
+
 class LightningGTiffWriter(BasePredictionWriter):
     def __init__(
         self,
@@ -41,13 +45,13 @@ class LightningGTiffWriter(BasePredictionWriter):
                     # `num_classes` includes background
                     'count': 3 + num_classes - 1,
                     'dtype': 'uint16',
-                    'blockxsize': 64 if 64 < src.gw.ncols else src.gw.ncols,
-                    'blockysize': 64 if 64 < src.gw.nrows else src.gw.nrows,
+                    'blockxsize': max(64, src.gw.col_chunks),
+                    'blockysize': max(64, src.gw.row_chunks),
                     'driver': 'GTiff',
                     'sharing': False,
                     'compress': compression
                 }
-        profile['tiled'] = True if max(profile['blockxsize'], profile['blockysize']) >= 16 else False
+        profile['tiled'] = is_tiled(profile['blockxsize'], profile['blockysize'])
         with rio.open(out_path, mode='w', **profile):
             pass
         self.dst = rio.open(out_path, mode='r+')
