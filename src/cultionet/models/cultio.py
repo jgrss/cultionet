@@ -5,7 +5,7 @@ import torch
 from torch_geometric.data import Data
 
 from . import model_utils
-from .base_layers import ConvBlock2d, Softmax
+from .base_layers import ConvBlock2d, ResidualConv, Softmax
 from .nunet import UNet3, UNet3Psi, ResUNet3Psi
 from .convstar import StarRNN
 
@@ -23,10 +23,10 @@ def scale_min_max(
 class GeoRefinement(torch.nn.Module):
     def __init__(
         self,
+        in_features: int,
         in_channels: int = 21,
-        n_features: int = 16,
+        n_hidden: int = 32,
         out_channels: int = 2,
-        double_dilation: int = 2,
     ):
         super(GeoRefinement, self).__init__()
 
@@ -51,11 +51,52 @@ class GeoRefinement(torch.nn.Module):
             torch.nn.Sigmoid(),
         )
 
-        self.model = UNet3(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            init_filter=n_features,
-            double_dilation=double_dilation,
+        self.crop_res_modules = torch.nn.ModuleList(
+            [
+                torch.nn.Sequential(
+                    ResidualConv(
+                        in_channels=in_features + in_channels,
+                        out_channels=n_hidden,
+                        dilation=2,
+                        activation_type='SiLU',
+                    ),
+                    torch.nn.Dropout(0.5),
+                ),
+                torch.nn.Sequential(
+                    ResidualConv(
+                        in_channels=in_features + in_channels,
+                        out_channels=n_hidden,
+                        dilation=3,
+                        activation_type='SiLU',
+                    ),
+                    torch.nn.Dropout(0.5),
+                ),
+                torch.nn.Sequential(
+                    ResidualConv(
+                        in_channels=in_features + in_channels,
+                        out_channels=n_hidden,
+                        dilation=4,
+                        activation_type='SiLU',
+                    ),
+                    torch.nn.Dropout(0.5),
+                ),
+            ]
+        )
+
+        self.fc = torch.nn.Sequential(
+            ConvBlock2d(
+                in_channels=int(n_hidden * len(self.crop_res_modules)),
+                out_channels=n_hidden,
+                kernel_size=1,
+                padding=0,
+                activation_type="SiLU",
+            ),
+            torch.nn.Conv2d(
+                in_channels=n_hidden,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding=0,
+            ),
         )
 
     def proba_to_logit(self, x: torch.Tensor) -> torch.Tensor:
@@ -63,7 +104,7 @@ class GeoRefinement(torch.nn.Module):
 
     def forward(
         self, predictions: T.Dict[str, torch.Tensor], data: Data
-    ) -> torch.Tensor:
+    ) -> T.Dict[str, torch.Tensor]:
         """A single forward pass.
 
         Edge and crop inputs should be probabilities
@@ -96,6 +137,7 @@ class GeoRefinement(torch.nn.Module):
 
         x = torch.cat(
             [
+                data.x,
                 predictions["crop_star_l2"],
                 predictions["crop_star"],
                 predictions["dist"],
@@ -116,10 +158,11 @@ class GeoRefinement(torch.nn.Module):
 
         # Reshape
         x = self.gc(x, batch_size, height, width)
-        out = self.model(x)
-        out = self.cg(out * geo_attention)
+        crop = torch.cat([m(x) for m in self.crop_res_modules], dim=1)
+        crop = self.fc(crop) * geo_attention
+        predictions["crop"] = self.cg(crop)
 
-        return out
+        return predictions
 
 
 class CropTypeFinal(torch.nn.Module):

@@ -309,12 +309,13 @@ def scale_logits(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
 class TemperatureScaling(LightningModule):
     def __init__(
         self,
+        in_features: int,
         num_classes: int = 2,
         learning_rate_refine: float = 1e-3,
         learning_rate_lbfgs: float = 0.01,
         weight_decay: float = 0.01,
         eps: float = 1e-4,
-        max_iter: float = 25,
+        max_iter: float = 50,
         edge_class: int = 2,
         class_counts: T.Optional[torch.Tensor] = None,
         cultionet_ckpt: T.Optional[T.Union[Path, str]] = None,
@@ -335,7 +336,9 @@ class TemperatureScaling(LightningModule):
 
         self.cultionet_model = None
         self.crop_temperature = torch.nn.Parameter(torch.ones(1))
-        self.geo_refine_model = GeoRefinement(out_channels=num_classes)
+        self.geo_refine_model = GeoRefinement(
+            in_features=in_features, out_channels=num_classes
+        )
 
         self.configure_loss()
 
@@ -349,7 +352,7 @@ class TemperatureScaling(LightningModule):
         crop_temperature: torch.Tensor,
         batch_idx: int = None,
     ) -> T.Dict[str, torch.Tensor]:
-        predictions = self.predict_crop_probas(
+        predictions = self.predict_probas(
             predictions=predictions,
             batch=batch,
             with_no_grad=False,
@@ -359,14 +362,18 @@ class TemperatureScaling(LightningModule):
 
         return predictions
 
-    def calc_refined_loss(
-        self, batch: T.Union[Data, T.List], predictions: torch.Tensor
-    ):
+    def set_true_labels(self, batch: Data) -> torch.Tensor:
         # in case of multi-class, `true_crop` = 1, 2, etc.
         true_crop = torch.where(
             (batch.y > 0) & (batch.y != self.edge_class), 1, 0
         ).long()
 
+        return true_crop
+
+    def calc_refined_loss(
+        self, batch: T.Union[Data, T.List], predictions: torch.Tensor
+    ):
+        true_crop = self.set_true_labels(batch)
         # Predicted crop values are logits
         loss = self.crop_loss_refine(predictions["crop"], true_crop)
 
@@ -377,42 +384,29 @@ class TemperatureScaling(LightningModule):
         batch: T.Union[Data, T.List],
         predictions: T.Dict[str, torch.Tensor],
     ):
-        # true_edge = batch.y.eq(self.edge_class).long()
-        # in case of multi-class, `true_crop` = 1, 2, etc.
-        true_crop = torch.where(
-            (batch.y > 0) & (batch.y != self.edge_class), 1, 0
-        ).long()
-
+        true_crop = self.set_true_labels(batch)
         # Predicted crop values are probabilities
         loss = self.crop_loss(predictions["crop"], true_crop)
 
         return loss
 
-    def predict_crop_probas(
+    def predict_probas(
         self,
         predictions: T.Dict[str, torch.Tensor],
         batch: Data,
         with_no_grad: bool,
         scale_predict_logits: bool,
-        crop_temperature: T.Optional[torch.Tensor] = None,
     ) -> T.Dict[str, torch.Tensor]:
         if with_no_grad:
             with torch.no_grad():
                 # The inputs from cultionet are probabilities
                 # The output crop predictions are logits
-                predictions["crop"] = self.geo_refine_model(
-                    predictions, data=batch
-                )
+                predictions = self.geo_refine_model(predictions, data=batch)
         else:
-            predictions["crop"] = self.geo_refine_model(
-                predictions, data=batch
-            )
+            predictions = self.geo_refine_model(predictions, data=batch)
         if scale_predict_logits:
-            if crop_temperature is None:
-                crop_temperature = self.crop_temperature
-
             predictions["crop"] = scale_logits(
-                predictions["crop"], crop_temperature
+                predictions["crop"], self.crop_temperature
             )
         predictions["crop"] = self.softmax(predictions["crop"])
 
@@ -438,7 +432,7 @@ class TemperatureScaling(LightningModule):
         if optimizer_idx == 0:
             # The first optimizer is used for the refinement model
             self.geo_refine_model.train()
-            predictions = self.predict_crop_probas(
+            predictions = self.predict_probas(
                 predictions=predictions,
                 batch=batch,
                 with_no_grad=False,
@@ -449,7 +443,7 @@ class TemperatureScaling(LightningModule):
         else:
             # The second optimizer is used for the probability calibration
             self.geo_refine_model.eval()
-            predictions = self.predict_crop_probas(
+            predictions = self.predict_probas(
                 predictions=predictions,
                 batch=batch,
                 with_no_grad=True,
@@ -458,7 +452,10 @@ class TemperatureScaling(LightningModule):
 
             loss = self.calc_loss(batch, predictions)
 
-        metrics = {"loss": loss, "crop_temp": self.crop_temperature}
+        metrics = {
+            "loss": loss,
+            "crop_temp": self.crop_temperature,
+        }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         return metrics
@@ -468,7 +465,9 @@ class TemperatureScaling(LightningModule):
         if self.logger.save_dir is not None:
             scale_file = Path(self.logger.save_dir) / "temperature.scales"
 
-            temperature_scales = {"crop": self.crop_temperature.item()}
+            temperature_scales = {
+                "crop": self.crop_temperature.item(),
+            }
             with open(scale_file, mode="w") as f:
                 f.write(json.dumps(temperature_scales))
 
@@ -625,9 +624,7 @@ class CultioLitModel(LightningModule):
         """A prediction step for Lightning."""
         predictions = self.forward(batch, batch_idx)
         if self.temperature_lit_model is not None:
-            predictions["crop"] = self.temperature_lit_model(
-                predictions, data=batch
-            )
+            predictions = self.temperature_lit_model(predictions, data=batch)
             predictions["crop"] = scale_logits(
                 predictions["crop"], self.crop_temperature
             )
