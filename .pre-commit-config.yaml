@@ -6,7 +6,7 @@ repos:
       language_version: python3
       args: [--skip-string-normalization]
   - repo: https://github.com/myint/docformatter
-    rev: v1.4
+    rev: 1.4
     hooks:
     - id: docformatter
       args: [
@@ -16,7 +16,7 @@ repos:
         --wrap-descriptions,
         '79',
       ]
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v1.2.3
+  - repo: https://github.com/pycqa/flake8
+    rev: 6.0.0
     hooks:
     - id: flake8
