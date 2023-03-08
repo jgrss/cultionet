@@ -5,3 +5,28 @@ requires = [
     'numpy>=1.22.0',
     'Cython>=0.29.0,<3.0.0',
 ]
+
+[tool.black]
+line-length = 79
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | \.vscode
+  | \.idea
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[flake8]
+ignore = E203, E266, E501, W503, F403, F401
+max-line-length = 79
+max-complexity = 18
+select = B,C,E,F,W,T4,B9
