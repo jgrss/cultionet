@@ -8,6 +8,8 @@ git clone https://github.com/jgrss/cultionet.git
 
 ### Create a virtual environment
 
+Modify the Python version (3.8.15) as needed
+
 ```commandline
 pyenv virtualenv 3.8.15 venv.cnet
 ```
