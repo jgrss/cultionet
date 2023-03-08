@@ -378,9 +378,6 @@ class TemperatureScaling(LightningModule):
         self, batch: T.Union[Data, T.List], predictions: torch.Tensor
     ):
         true_edge, true_crop = self.set_true_labels(batch)
-        import ipdb
-
-        ipdb.set_trace()
         # Predicted crop values are logits
         edge_loss = self.edge_loss_refine(predictions["edge"], true_edge)
         crop_loss = self.crop_loss_refine(predictions["crop"], true_crop)

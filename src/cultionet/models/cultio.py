@@ -140,7 +140,7 @@ class GeoRefinement(torch.nn.Module):
 
         # Reshape
         x = self.gc(x, batch_size, height, width)
-        predictions["edge"] = self.edge_model(x)
+        predictions["edge"] = self.cg(self.edge_model(x))
         crop = self.crop_model(x)
         predictions["crop"] = self.cg(crop * geo_attention)
 
