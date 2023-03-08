@@ -396,7 +396,6 @@ class TemperatureScaling(LightningModule):
         batch: Data,
         with_no_grad: bool,
         scale_predict_logits: bool,
-        crop_temperature: T.Optional[torch.Tensor] = None,
     ) -> T.Dict[str, torch.Tensor]:
         if with_no_grad:
             with torch.no_grad():
@@ -406,11 +405,8 @@ class TemperatureScaling(LightningModule):
         else:
             predictions = self.geo_refine_model(predictions, data=batch)
         if scale_predict_logits:
-            if crop_temperature is None:
-                crop_temperature = self.crop_temperature
-
             predictions["crop"] = scale_logits(
-                predictions["crop"], crop_temperature
+                predictions["crop"], self.crop_temperature
             )
         predictions["crop"] = self.softmax(predictions["crop"])
 
