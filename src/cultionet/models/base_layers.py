@@ -43,13 +43,13 @@ class SetActivation(torch.nn.Module):
         """
         super(SetActivation, self).__init__()
 
-        if activation_type == 'Swish':
+        if activation_type == "Swish":
             assert isinstance(
                 channels, int
-            ), 'Swish requires the input channels.'
+            ), "Swish requires the input channels."
             assert isinstance(
                 dims, int
-            ), 'Swish requires the tensor dimension.'
+            ), "Swish requires the tensor dimension."
             self.activation = Swish(channels=channels, dims=dims)
         else:
             self.activation = getattr(torch.nn, activation_type)(inplace=False)
@@ -248,7 +248,7 @@ class ConvBlock2d(torch.nn.Module):
         padding: int = 0,
         dilation: int = 1,
         add_activation: bool = True,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
     ):
         super(ConvBlock2d, self).__init__()
 
@@ -282,7 +282,7 @@ class ResBlock2d(torch.nn.Module):
         kernel_size: int,
         padding: int = 0,
         dilation: int = 1,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
     ):
         super(ResBlock2d, self).__init__()
 
@@ -315,7 +315,7 @@ class ConvBlock3d(torch.nn.Module):
         dilation: int = 1,
         add_activation: bool = True,
         squeeze: bool = False,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
     ):
         super(ConvBlock3d, self).__init__()
 
@@ -356,7 +356,7 @@ class AttentionAdd(torch.nn.Module):
 
     def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
         if x.shape[-2:] != g.shape[-2:]:
-            x = self.up(x, size=g.shape[-2:], mode='bilinear')
+            x = self.up(x, size=g.shape[-2:], mode="bilinear")
 
         return x + g
 
@@ -378,14 +378,14 @@ class AttentionGate3d(torch.nn.Module):
         self.up = model_utils.UpSample()
 
         self.seq = nn.Sequential(
-            'x, g',
+            "x, g",
             [
-                (conv_x, 'x -> x'),
-                (conv_g, 'g -> g'),
-                (AttentionAdd(), 'x, g -> x'),
-                (torch.nn.LeakyReLU(inplace=False), 'x -> x'),
-                (conv1d, 'x -> x'),
-                (torch.nn.Sigmoid(), 'x -> x'),
+                (conv_x, "x -> x"),
+                (conv_g, "g -> g"),
+                (AttentionAdd(), "x, g -> x"),
+                (torch.nn.LeakyReLU(inplace=False), "x -> x"),
+                (conv1d, "x -> x"),
+                (torch.nn.Sigmoid(), "x -> x"),
             ],
         )
         self.final = ConvBlock3d(
@@ -403,7 +403,7 @@ class AttentionGate3d(torch.nn.Module):
         """
         h = self.seq(x, g)
         if h.shape[-2:] != x.shape[-2:]:
-            h = self.up(h, size=x.shape[-2:], mode='bilinear')
+            h = self.up(h, size=x.shape[-2:], mode="bilinear")
 
         return self.final(x * h)
 
@@ -425,14 +425,14 @@ class AttentionGate(torch.nn.Module):
         self.up = model_utils.UpSample()
 
         self.seq = nn.Sequential(
-            'x, g',
+            "x, g",
             [
-                (conv_x, 'x -> x'),
-                (conv_g, 'g -> g'),
-                (AttentionAdd(), 'x, g -> x'),
-                (torch.nn.LeakyReLU(inplace=False), 'x -> x'),
-                (conv1d, 'x -> x'),
-                (torch.nn.Sigmoid(), 'x -> x'),
+                (conv_x, "x -> x"),
+                (conv_g, "g -> g"),
+                (AttentionAdd(), "x, g -> x"),
+                (torch.nn.LeakyReLU(inplace=False), "x -> x"),
+                (conv1d, "x -> x"),
+                (torch.nn.Sigmoid(), "x -> x"),
             ],
         )
         self.final = ConvBlock2d(
@@ -450,7 +450,7 @@ class AttentionGate(torch.nn.Module):
         """
         h = self.seq(x, g)
         if h.shape[-2:] != x.shape[-2:]:
-            h = self.up(h, size=x.shape[-2:], mode='bilinear')
+            h = self.up(h, size=x.shape[-2:], mode="bilinear")
 
         return self.final(x * h)
 
@@ -813,7 +813,7 @@ class ResSpatioTemporalConv3d(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
     ):
         super(ResSpatioTemporalConv3d, self).__init__()
 
@@ -861,7 +861,7 @@ class SpatioTemporalConv3d(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
     ):
         super(SpatioTemporalConv3d, self).__init__()
 
@@ -900,7 +900,7 @@ class DoubleConv(torch.nn.Module):
         out_channels: int,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
     ):
         super(DoubleConv, self).__init__()
 
@@ -1000,10 +1000,10 @@ class AtrousPyramidPooling(torch.nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out_pa = self.up(self.pool_a(x), size=x.shape[-2:], mode='bilinear')
-        out_pb = self.up(self.pool_b(x), size=x.shape[-2:], mode='bilinear')
-        out_pc = self.up(self.pool_c(x), size=x.shape[-2:], mode='bilinear')
-        out_pd = self.up(self.pool_d(x), size=x.shape[-2:], mode='bilinear')
+        out_pa = self.up(self.pool_a(x), size=x.shape[-2:], mode="bilinear")
+        out_pb = self.up(self.pool_b(x), size=x.shape[-2:], mode="bilinear")
+        out_pc = self.up(self.pool_c(x), size=x.shape[-2:], mode="bilinear")
+        out_pd = self.up(self.pool_d(x), size=x.shape[-2:], mode="bilinear")
         out_ca = self.conv_a(x)
         out_cb = self.conv_b(x)
         out_cc = self.conv_c(x)
@@ -1049,7 +1049,7 @@ class PoolConv(torch.nn.Module):
         pool_size: int = 2,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
         dropout: T.Optional[float] = None,
     ):
         super(PoolConv, self).__init__()
@@ -1079,7 +1079,7 @@ class ResidualConvInit(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
     ):
         super(ResidualConvInit, self).__init__()
 
@@ -1129,7 +1129,7 @@ class ResConvLayer(torch.nn.Module):
         in_channels: int,
         out_channels: int,
         dilation: int,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
         num_blocks: int = 2,
     ):
         super(ResConvLayer, self).__init__()
@@ -1198,7 +1198,7 @@ class ResidualConv(torch.nn.Module):
         out_channels: int,
         dilation: int = 2,
         attention_weights: str = None,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
     ):
         super(ResidualConv, self).__init__()
 
@@ -1206,17 +1206,17 @@ class ResidualConv(torch.nn.Module):
 
         if self.attention_weights is not None:
             assert self.attention_weights in [
-                'fractal',
-                'spatial_channel',
-            ], 'The attention method is not supported.'
+                "fractal",
+                "spatial_channel",
+            ], "The attention method is not supported."
 
             self.gamma = torch.nn.Parameter(torch.ones(1))
 
-            if self.attention_weights == 'fractal':
+            if self.attention_weights == "fractal":
                 self.attention_conv = FractalAttention(
                     in_channels=in_channels, out_channels=out_channels
                 )
-            elif self.attention_weights == 'spatial_channel':
+            elif self.attention_weights == "spatial_channel":
                 self.attention_conv = SpatialChannelAttention(
                     out_channels=out_channels, activation_type=activation_type
                 )
@@ -1250,10 +1250,10 @@ class ResidualConv(torch.nn.Module):
 
         if self.attention_weights is not None:
             # Get the attention weights
-            if self.attention_weights == 'spatial_channel':
+            if self.attention_weights == "spatial_channel":
                 # Get weights from the residual
                 attention = self.attention_conv(residual)
-            elif self.attention_weights == 'fractal':
+            elif self.attention_weights == "fractal":
                 # Get weights from the input
                 attention = self.attention_conv(x)
 
@@ -1326,7 +1326,7 @@ class ResidualAConv(torch.nn.Module):
         out_channels: int,
         dilations: T.List[int] = None,
         attention_weights: str = None,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
     ):
         super(ResidualAConv, self).__init__()
 
@@ -1334,17 +1334,17 @@ class ResidualAConv(torch.nn.Module):
 
         if self.attention_weights is not None:
             assert self.attention_weights in [
-                'fractal',
-                'spatial_channel',
-            ], 'The attention method is not supported.'
+                "fractal",
+                "spatial_channel",
+            ], "The attention method is not supported."
 
             self.gamma = torch.nn.Parameter(torch.ones(1))
 
-            if self.attention_weights == 'fractal':
+            if self.attention_weights == "fractal":
                 self.attention_conv = FractalAttention(
                     in_channels=in_channels, out_channels=out_channels
                 )
-            elif self.attention_weights == 'spatial_channel':
+            elif self.attention_weights == "spatial_channel":
                 self.attention_conv = SpatialChannelAttention(
                     out_channels=out_channels, activation_type=activation_type
                 )
@@ -1385,10 +1385,10 @@ class ResidualAConv(torch.nn.Module):
 
         if self.attention_weights is not None:
             # Get the attention weights
-            if self.attention_weights == 'spatial_channel':
+            if self.attention_weights == "spatial_channel":
                 # Get weights from the residual
                 attention = self.attention_conv(residual)
-            elif self.attention_weights == 'fractal':
+            elif self.attention_weights == "fractal":
                 # Get weights from the input
                 attention = self.attention_conv(x)
 
@@ -1412,7 +1412,7 @@ class PoolResidualConv(torch.nn.Module):
         dropout: T.Optional[float] = None,
         dilations: T.List[int] = None,
         attention_weights: str = None,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
         res_block_type: enum = ResBlockTypes.RESA,
     ):
         super(PoolResidualConv, self).__init__()
@@ -1424,7 +1424,7 @@ class PoolResidualConv(torch.nn.Module):
         if dropout is not None:
             assert isinstance(
                 dropout, float
-            ), 'The dropout arg must be a float.'
+            ), "The dropout arg must be a float."
             layers += [torch.nn.Dropout(dropout)]
 
         if res_block_type == ResBlockTypes.RES:
@@ -1478,7 +1478,7 @@ class SingleConv(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        activation_type: str = 'LeakyReLU',
+        activation_type: str = "LeakyReLU",
     ):
         super(SingleConv, self).__init__()
 
