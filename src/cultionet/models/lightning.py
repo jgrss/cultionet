@@ -337,7 +337,7 @@ class TemperatureScaling(LightningModule):
         self.cultionet_model = None
         self.crop_temperature = torch.nn.Parameter(torch.ones(1))
         self.geo_refine_model = GeoRefinement(
-            in_channels=in_features, out_channels=num_classes
+            in_features=in_features, out_channels=num_classes
         )
 
         self.configure_loss()
