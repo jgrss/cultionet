@@ -8,6 +8,7 @@ from scipy.stats import mode as sci_mode
 from rasterio.windows import Window
 import torch
 from torch_geometric.data import Data
+from torch.utils.data.sampler import SubsetRandomSampler
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (
     ModelCheckpoint,
@@ -434,6 +435,11 @@ def fit(
                 batch_size=batch_size,
                 num_workers=load_batch_workers,
                 shuffle=True,
+                # For each epoch, train on a random
+                # subset of 50% of the data.
+                sampler=SubsetRandomSampler(
+                    indices=torch.arange(int(len(dataset) * 0.5))
+                ),
             )
             refine_ckpt_file = ckpt_file.parent / "refine" / ckpt_file.name
             refine_ckpt_file.parent.mkdir(parents=True, exist_ok=True)

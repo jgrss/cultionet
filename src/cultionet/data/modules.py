@@ -1,5 +1,6 @@
 import typing as T
 
+from torch.utils.data import Sampler
 from pytorch_lightning import LightningDataModule
 from torch_geometric.loader import DataLoader
 
@@ -18,6 +19,7 @@ class EdgeDataModule(LightningDataModule):
         batch_size: int = 5,
         num_workers: int = 0,
         shuffle: bool = True,
+        sampler: T.Optional[Sampler] = None,
     ):
         super().__init__()
 
@@ -28,14 +30,16 @@ class EdgeDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.shuffle = shuffle
+        self.sampler = sampler
 
     def train_dataloader(self):
         """Returns a data loader for train data."""
         return DataLoader(
             self.train_ds,
             batch_size=self.batch_size,
-            shuffle=self.shuffle,
+            shuffle=None if self.sampler is not None else self.shuffle,
             num_workers=self.num_workers,
+            sampler=self.sampler,
         )
 
     def val_dataloader(self):
