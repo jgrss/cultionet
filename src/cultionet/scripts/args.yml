@@ -56,7 +56,7 @@ shared_image:
     long: append-ts
     help: Whether to append time_series_vars to the image path
     kwargs:
-      default: y
+      default: 'y'
       choices: ['y', 'n']
   date_format:
     short: ''
@@ -117,13 +117,16 @@ create:
         - none
         - fliplr
         - flipud
-        - flipfb
         - rot90
         - rot180
         - rot270
-        - ts-warp
-        - ts-noise
-        - ts-drift
+        - tswarp
+        - tsnoise
+        - tsdrift
+        - tspeaks
+        - gaussian
+        - saltpepper
+        - speckle
       choices:
         - none
         - fliplr
@@ -132,20 +135,15 @@ create:
         - rot90
         - rot180
         - rot270
-        - ts-warp
-        - ts-noise
-        - ts-drift
+        - tswarp
+        - tsnoise
+        - tsdrift
+        - tspeaks
         - roll
         - gaussian
-        - s&p
+        - saltpepper
+        - speckle
       nargs: '+'
-  n_ts:
-    short: n-ta
-    long: num-temporal-aug
-    help: The number of temporal augmentations
-    kwargs:
-      default: 6
-      type: '&int'
   grid_size:
     short: gs
     long: grid-size
@@ -220,6 +218,43 @@ create_predict:
       type: '&int'
 
 train_predict:
+  model_type:
+    short: ''
+    long: model-type
+    help: The model type
+    kwargs:
+      default: 'ResUNet3Psi'
+      choices:
+        - 'UNet3Psi'
+        - 'ResUNet3Psi'
+  activation_type:
+    short: ''
+    long: activation-type
+    help: The activation to use
+    kwargs:
+      default: 'SiLU'
+  res_block_type:
+    short: ''
+    long: res-block-type
+    help: The residual block type (only relevant when --model-type=ResUNet3Psi)
+    kwargs:
+      default: 'res'
+      choices: ['res', 'resa']
+  dilations:
+    short: ''
+    long: dilations
+    help: The dilations to use
+    kwargs:
+      default: [2]
+      nargs: '+'
+      type: '&int'
+  attention_weights:
+    short: ''
+    long: attention-weights
+    help: The attention weights
+    kwargs:
+      default: 'spatial_channel'
+      choices: ['spatial_channel', 'fractal', 'none']
   filters:
     short: ''
     long: filters
@@ -234,6 +269,13 @@ train_predict:
     kwargs:
       default: gpu
       choices: ['cpu', 'gpu']
+  devices:
+    short: ''
+    long: devices
+    help: The number of GPU devices to use (Note that if --device=cpu then --devices becomes 0)
+    kwargs:
+      type: '&int'
+      default: 1
   processes:
     short: ''
     long: processes
@@ -246,7 +288,7 @@ train_predict:
     long: batch-size
     help: The batch size
     kwargs:
-      default: 4
+      default: 8
       type: '&int'
   load_batch_workers:
     short: ''
@@ -266,13 +308,6 @@ train_predict:
     short: ''
     long: num-classes
     help: The number of classes (overrides file info)
-    kwargs:
-      default: !!null
-      type: '&int'
-  edge_class:
-    short: ''
-    long: edge-class
-    help: The edge class value (overrides file info)
     kwargs:
       default: !!null
       type: '&int'
@@ -359,13 +394,13 @@ train:
     kwargs:
       default: 30
       type: '&int'
-  learning_rate:
-    short: lr
-    long: learning-rate
-    help: The learning rate
+  save_top_k:
+    short: ''
+    long: save-top-k
+    help: The number of model checkpoints to save (in addition to the last/best)
     kwargs:
-      default: 1e-4
-      type: '&float'
+      default: 1
+      type: '&int'
   threads:
     short: t
     long: threads
@@ -417,19 +452,19 @@ train:
     long: dim-color
     help: The progress bar color for dimension checks
     kwargs:
-      default: ffffff
+      default: '#ffffff'
   mean_color:
     short: ''
     long: mean-color
     help: The progress bar color for means
     kwargs:
-      default: ffffff
+      default: '#ffffff'
   sse_color:
     short: ''
     long: sse-color
     help: The progress bar color for sum of squared errors
     kwargs:
-      default: ffffff
+      default: '#ffffff'
   auto_lr_find:
     short: ''
     long: lr-find
@@ -441,15 +476,78 @@ train:
     long: gradient-clip-val
     help: The gradient clip value
     kwargs:
-      default: 5.0
+      default: 1.0
       type: '&float'
+  gradient_clip_algorithm:
+    short: gca
+    long: gradient-clip-algorithm
+    help: The gradient clip algorithm
+    kwargs:
+      default: 'norm'
   patience:
     short: ''
     long: patience
     help: The early stopping patience
     kwargs:
-      default: 7
+      default: 20
       type: '&int'
+  optimizer:
+    short: ''
+    long: optimizer
+    help: The optimizer
+    kwargs:
+      default: 'AdamW'
+      choices:
+        - 'AdamW'
+        - 'SGD'
+  deep_sup_dist:
+    short: ''
+    long: deep-sup-dist
+    help: Whether to use deep supervision for distances
+    kwargs:
+      action: store_true
+  deep_sup_edge:
+    short: ''
+    long: deep-sup-edge
+    help: Whether to use deep supervision for edges
+    kwargs:
+      action: store_true
+  deep_sup_mask:
+    short: ''
+    long: deep-sup-mask
+    help: Whether to use deep supervision for masks
+    kwargs:
+      action: store_true
+  learning_rate:
+    short: lr
+    long: learning-rate
+    help: The learning rate
+    kwargs:
+      default: 1e-3
+      type: '&float'
+  lr_scheduler:
+    short: lrs
+    long: lr-scheduler
+    help: The learning rate scheduler
+    kwargs:
+      default: 'CosineAnnealingLR'
+      choices:
+        - 'ExponentialLR'
+        - 'CosineAnnealingLR'
+        - 'StepLR'
+  steplr_step_size:
+    short: ''
+    long: steplr-step-size
+    help: The multiplicative step size factor (for --lr-scheduler=StepLR)
+    kwargs:
+      default: 5
+      type: '&int'
+  scale_pos_weight:
+    short: ''
+    long: scale-pos-weight
+    help: Whether to balance class weights
+    kwargs:
+      action: store_true
   weight_decay:
     short: ''
     long: weight-decay
@@ -501,6 +599,31 @@ train:
         - !!null
         - simple
         - advanced
+  edge_class:
+    short: ''
+    long: edge-class
+    help: The edge class value (overrides file info)
+    kwargs:
+      default: !!null
+      type: '&int'
+  save_batch_val_metrics:
+    short: ''
+    long: save-batch-val-metrics
+    help: Whether to save batch validation metrics
+    kwargs:
+      action: store_true
+  refine_model:
+    short: ''
+    long: refine-model
+    help: Whether to refine a trained model
+    kwargs:
+      action: store_true
+  skip_train:
+    short: ''
+    long: skip-train
+    help: Whether to skip training
+    kwargs:
+      action: store_true
 
 predict:
   predict_year:

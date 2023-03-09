@@ -1,10 +1,17 @@
 import typing as T
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 
 from ..data.datasets import EdgeDataset
 from ..data.modules import EdgeDataModule
 from ..utils.model_preprocessing import TqdmParallel
+from ..utils.stats import (
+    tally_stats,
+    cache_load_enabled,
+    Quantile,
+    Variance
+)
 
 from tqdm import tqdm
 import torch
@@ -36,8 +43,9 @@ def get_norm_values(
     num_workers: int = 0,
     processes: int = 1,
     threads_per_worker: int = 1,
-    mean_color: str = 'ffffff',
-    sse_color: str = 'ffffff'
+    centering: str = 'mean',
+    mean_color: str = '#ffffff',
+    sse_color: str = '#ffffff'
 ) -> NormValues:
     """Normalizes a dataset to z-scores
     """
@@ -87,70 +95,107 @@ def get_norm_values(
             num_workers=num_workers
         )
 
-        def get_info(
-            x: torch.Tensor, y: torch.Tensor
-        ) -> T.Tuple[torch.Tensor, int, torch.Tensor, torch.Tensor]:
-            crop_counts = torch.zeros(class_info['max_crop_class']+1)
-            edge_counts = torch.zeros(2)
-            crop_counts[0] = ((y == 0) | (y == class_info['edge_class'])).sum()
-            for i in range(1, class_info['edge_class']):
-                crop_counts[i] = (y == i).sum()
-            edge_counts[0] = (y != class_info['edge_class']).sum()
-            edge_counts[1] = (y == class_info['edge_class']).sum()
+        if centering == 'median':
+            stat_var = Variance(method='median')
+            stat_q = Quantile(r=1024*6)
+            tmp_cache_path = Path.home().absolute() / '.cultionet'
+            tmp_cache_path.mkdir(parents=True, exist_ok=True)
+            var_data_cache = tmp_cache_path / '_var.npz'
+            q_data_cache = tmp_cache_path / '_q.npz'
+            crop_counts = torch.zeros(class_info['max_crop_class']+1).long()
+            edge_counts = torch.zeros(2).long()
+            with cache_load_enabled(True):
+                with tqdm(
+                    total=int(len(dataset) / batch_size),
+                    desc='Calculating dataset statistics'
+                ) as pbar:
+                    for batch in tally_stats(
+                        stats=(stat_var, stat_q),
+                        loader=data_module.train_dataloader(),
+                        caches=(var_data_cache, q_data_cache)
+                    ):
+                        stat_var.add(batch.x)
+                        stat_q.add(batch.x)
 
-            return x.sum(dim=0), x.shape[0], crop_counts, edge_counts
+                        crop_counts[0] += ((batch.y == 0) | (batch.y == class_info['edge_class'])).sum()
+                        for i in range(1, class_info['edge_class']):
+                            crop_counts[i] += (batch.y == i).sum()
+                        edge_counts[0] += (batch.y != class_info['edge_class']).sum()
+                        edge_counts[1] += (batch.y == class_info['edge_class']).sum()
 
-        with parallel_backend(
-            backend='loky',
-            n_jobs=processes,
-            inner_max_num_threads=threads_per_worker
-        ):
-            with TqdmParallel(
-                tqdm_kwargs={
-                    'total': int(len(dataset) / batch_size),
-                    'desc': 'Calculating means',
-                    'colour': mean_color
-                }
-            ) as pool:
-                results = pool(
-                    delayed(get_info)(
-                        batch.x, batch.y
-                    ) for batch in data_module.train_dataloader()
-                )
-        data_sums, pix_count, crop_counts, edge_counts = list(map(list, zip(*results)))
+                        pbar.update(1)
 
-        data_sums = torch.stack(data_sums).sum(dim=0)
-        pix_count = torch.tensor(pix_count).sum()
-        crop_counts = torch.stack(crop_counts).sum(dim=0)
-        edge_counts = torch.stack(edge_counts).sum(dim=0)
-        data_means = data_sums / float(pix_count)
+            data_stds = stat_var.std()
+            data_means = stat_q.median()
 
-        def get_sse(x_mu: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-            return ((x - x_mu).pow(2)).sum(dim=0)
+            var_data_cache.unlink()
+            q_data_cache.unlink()
+            tmp_cache_path.rmdir()
+        else:
+            def get_info(
+                x: torch.Tensor, y: torch.Tensor
+            ) -> T.Tuple[torch.Tensor, int, torch.Tensor, torch.Tensor]:
+                crop_counts = torch.zeros(class_info['max_crop_class']+1)
+                edge_counts = torch.zeros(2)
+                crop_counts[0] = ((y == 0) | (y == class_info['edge_class'])).sum()
+                for i in range(1, class_info['edge_class']):
+                    crop_counts[i] = (y == i).sum()
+                edge_counts[0] = (y != class_info['edge_class']).sum()
+                edge_counts[1] = (y == class_info['edge_class']).sum()
 
-        sse_partial = partial(get_sse, add_dim(data_means))
+                return x.sum(dim=0), x.shape[0], crop_counts, edge_counts
 
-        with parallel_backend(
-            backend='loky',
-            n_jobs=processes,
-            inner_max_num_threads=threads_per_worker
-        ):
-            with TqdmParallel(
-                tqdm_kwargs={
-                    'total': int(len(dataset) / batch_size),
-                    'desc': 'Calculating SSEs',
-                    'colour': sse_color
-                }
-            ) as pool:
-                sses = pool(
-                    delayed(sse_partial)(
-                        batch.x
-                    ) for batch in data_module.train_dataloader()
-                )
+            with parallel_backend(
+                backend='loky',
+                n_jobs=processes,
+                inner_max_num_threads=threads_per_worker
+            ):
+                with TqdmParallel(
+                    tqdm_kwargs={
+                        'total': int(len(dataset) / batch_size),
+                        'desc': 'Calculating means',
+                        'colour': mean_color
+                    }
+                ) as pool:
+                    results = pool(
+                        delayed(get_info)(
+                            batch.x, batch.y
+                        ) for batch in data_module.train_dataloader()
+                    )
+            data_sums, pix_count, crop_counts, edge_counts = list(map(list, zip(*results)))
 
-        sses = torch.stack(sses).sum(dim=0)
-        data_stds = torch.sqrt(sses / float(pix_count))
-        data_maxs = torch.zeros_like(data_means)
+            data_sums = torch.stack(data_sums).sum(dim=0)
+            pix_count = torch.tensor(pix_count).sum()
+            crop_counts = torch.stack(crop_counts).sum(dim=0)
+            edge_counts = torch.stack(edge_counts).sum(dim=0)
+            data_means = data_sums / float(pix_count)
+
+            def get_sse(x_mu: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+                return ((x - x_mu).pow(2)).sum(dim=0)
+
+            sse_partial = partial(get_sse, add_dim(data_means))
+
+            with parallel_backend(
+                backend='loky',
+                n_jobs=processes,
+                inner_max_num_threads=threads_per_worker
+            ):
+                with TqdmParallel(
+                    tqdm_kwargs={
+                        'total': int(len(dataset) / batch_size),
+                        'desc': 'Calculating SSEs',
+                        'colour': sse_color
+                    }
+                ) as pool:
+                    sses = pool(
+                        delayed(sse_partial)(
+                            batch.x
+                        ) for batch in data_module.train_dataloader()
+                    )
+
+            sses = torch.stack(sses).sum(dim=0)
+            data_stds = torch.sqrt(sses / float(pix_count))
+            data_maxs = torch.zeros_like(data_means)
 
     norm_values = NormValues(
         mean=data_means,

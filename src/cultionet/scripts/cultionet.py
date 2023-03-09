@@ -11,21 +11,7 @@ import filelock
 import builtins
 import json
 import ast
-
-import cultionet
-from cultionet.data.const import SCALE_FACTOR
-from cultionet.data.datasets import EdgeDataset
-from cultionet.utils.project_paths import (
-    setup_paths, ProjectPaths
-)
-from cultionet.errors import TensorShapeError
-from cultionet.utils.normalize import get_norm_values
-from cultionet.data.create import create_dataset, create_predict_dataset
-from cultionet.data.utils import (
-    get_image_list_dims, create_network_data
-)
-from cultionet.utils import model_preprocessing
-from cultionet.utils.logging import set_color_logger
+import itertools
 
 import geowombat as gw
 from geowombat.core.windows import get_window_offsets
@@ -42,26 +28,35 @@ from tqdm import tqdm
 from tqdm.dask import TqdmCallback
 from pytorch_lightning import seed_everything
 
+import cultionet
+from cultionet.data.const import SCALE_FACTOR
+from cultionet.data.datasets import EdgeDataset
+from cultionet.utils.project_paths import setup_paths, ProjectPaths
+from cultionet.errors import TensorShapeError
+from cultionet.utils.normalize import get_norm_values
+from cultionet.data.create import create_dataset, create_predict_dataset
+from cultionet.data.utils import get_image_list_dims, create_network_data
+from cultionet.utils import model_preprocessing
+from cultionet.utils.logging import set_color_logger
+
 
 logger = set_color_logger(__name__)
 
 
 def open_config(config_file: T.Union[str, Path, bytes]) -> dict:
-    with open(config_file, 'r') as pf:
+    with open(config_file, "r") as pf:
         config = yaml.safe_load(pf)
 
     return config
 
 
 def get_centroid_coords_from_image(
-    vi_path: Path,
-    dst_crs: T.Optional[str] = None
+    vi_path: Path, dst_crs: T.Optional[str] = None
 ) -> T.Tuple[float, float]:
-    """Gets the lon/lat or x/y coordinates of a centroid
-    """
+    """Gets the lon/lat or x/y coordinates of a centroid."""
     import geowombat as gw
 
-    with gw.open(list(vi_path.glob('*.tif'))[0]) as src:
+    with gw.open(list(vi_path.glob("*.tif"))[0]) as src:
         df = src.gw.geodataframe
     centroid = df.to_crs(dst_crs).centroid
 
@@ -73,10 +68,10 @@ def get_start_end_dates(
     start_year: int,
     start_date: str,
     end_date: str,
-    date_format: str = '%Y%j',
-    lat: T.Optional[float] = None
+    date_format: str = "%Y%j",
+    lat: T.Optional[float] = None,
 ) -> T.Tuple[str, str]:
-    """Gets the start and end dates from user args or from the filenames
+    """Gets the start and end dates from user args or from the filenames.
 
     Returns:
         str (mm-dd), str (mm-dd)
@@ -89,13 +84,13 @@ def get_start_end_dates(
     if start_date is not None:
         start_date = start_date
     else:
-        start_date = file_dt.strftime('%m-%d')
+        start_date = file_dt.strftime("%m-%d")
     if end_date is not None:
         end_date = end_date
     else:
-        end_date = file_dt.strftime('%m-%d')
+        end_date = file_dt.strftime("%m-%d")
 
-    month = int(start_date.split('-')[0])
+    month = int(start_date.split("-")[0])
 
     if lat is not None:
         if lat > 0:
@@ -122,38 +117,41 @@ def get_image_list(
     end_date: str,
     config: dict,
     date_format: str,
-    skip_index: int
+    skip_index: int,
 ):
-    """Gets a list of the time series images
-    """
+    """Gets a list of the time series images."""
     image_list = []
     for image_vi in model_preprocessing.VegetationIndices(
-        image_vis=config['image_vis']
+        image_vis=config["image_vis"]
     ).image_vis:
         # Set the full path to the images
-        if str(ppaths.image_path).endswith('time_series_vars'):
+        if str(ppaths.image_path).endswith("time_series_vars"):
             vi_path = ppaths.image_path / region / image_vi
         else:
-            vi_path = ppaths.image_path / region / 'brdf_ts' / 'ms' / image_vi
+            vi_path = ppaths.image_path / region / "brdf_ts" / "ms" / image_vi
 
         if not vi_path.is_dir():
-            logger.warning(f'{str(vi_path)} does not exist')
+            logger.warning(f"{str(vi_path)} does not exist")
             continue
 
         # Get the centroid coordinates of the grid
-        lat = get_centroid_coords_from_image(vi_path, dst_crs='epsg:4326')[1]
+        lat = get_centroid_coords_from_image(vi_path, dst_crs="epsg:4326")[1]
         # Get the start and end dates
         start_date, end_date = get_start_end_dates(
             vi_path,
-            start_year=predict_year-1,
+            start_year=predict_year - 1,
             start_date=start_date,
             end_date=end_date,
             date_format=date_format,
-            lat=lat
+            lat=lat,
         )
         # Get the requested time slice
         ts_list = model_preprocessing.get_time_series_list(
-            vi_path, config['predict_year']-1, start_date, end_date, date_format=date_format
+            vi_path,
+            config["predict_year"] - 1,
+            start_date,
+            end_date,
+            date_format=date_format,
         )
         if len(ts_list) <= 1:
             continue
@@ -172,6 +170,7 @@ class ProgressBarActor:
     Reference:
         https://docs.ray.io/en/releases-1.11.1/ray-core/examples/progress_bar.html
     """
+
     counter: int
     delta: int
     event: asyncio.Event
@@ -182,9 +181,8 @@ class ProgressBarActor:
         self.event = asyncio.Event()
 
     def update(self, num_items_completed: int) -> None:
-        """Updates the ProgressBar with the incremental
-        number of items that were just completed.
-        """
+        """Updates the ProgressBar with the incremental number of items that
+        were just completed."""
         self.counter += num_items_completed
         self.delta += num_items_completed
         self.event.set()
@@ -192,9 +190,9 @@ class ProgressBarActor:
     async def wait_for_update(self) -> T.Tuple[int, int]:
         """Blocking call.
 
-        Waits until somebody calls `update`, then returns a tuple of
-        the number of updates since the last call to
-        `wait_for_update`, and the total number of completed items.
+        Waits until somebody calls `update`, then returns a tuple of the number
+        of updates since the last call to `wait_for_update`, and the total
+        number of completed items.
         """
         await self.event.wait()
         self.event.clear()
@@ -204,8 +202,7 @@ class ProgressBarActor:
         return saved_delta, self.counter
 
     def get_counter(self) -> int:
-        """Returns the total number of complete items.
-        """
+        """Returns the total number of complete items."""
         return self.counter
 
 
@@ -214,6 +211,7 @@ class ProgressBar:
     Reference:
         https://docs.ray.io/en/releases-1.11.1/ray-core/examples/progress_bar.html
     """
+
     progress_actor: ActorHandle
     total: int
     desc: str
@@ -222,11 +220,7 @@ class ProgressBar:
     pbar: tqdm
 
     def __init__(
-        self,
-        total: int,
-        desc: str = "",
-        position: int = 0,
-        leave: bool = True
+        self, total: int, desc: str = "", position: int = 0, leave: bool = True
     ):
         # Ray actors don't seem to play nice with mypy, generating
         # a spurious warning for the following line,
@@ -249,14 +243,14 @@ class ProgressBar:
         """Blocking call.
 
         Do this after starting a series of remote Ray tasks, to which you've
-        passed the actor handle. Each of them calls `update` on the actor.
-        When the progress meter reaches 100%, this method returns.
+        passed the actor handle. Each of them calls `update` on the actor. When
+        the progress meter reaches 100%, this method returns.
         """
         pbar = tqdm(
             desc=self.desc,
             position=self.position,
             total=self.total,
-            leave=self.leave
+            leave=self.leave,
         )
         while True:
             delta, counter = ray.get(self.actor.wait_for_update.remote())
@@ -270,8 +264,8 @@ class BlockWriter(object):
     def _build_slice(self, window: Window) -> tuple:
         return (
             slice(0, None),
-            slice(window.row_off, window.row_off+window.height),
-            slice(window.col_off, window.col_off+window.width)
+            slice(window.row_off, window.row_off + window.height),
+            slice(window.col_off, window.col_off + window.width),
         )
 
     def predict_write_block(self, w: Window, w_pad: Window):
@@ -280,25 +274,25 @@ class BlockWriter(object):
         data = create_network_data(
             self.ts[slc].gw.compute(num_workers=1),
             ntime=self.ntime,
-            nbands=self.nbands
+            nbands=self.nbands,
         )
         # Apply inference on the chunk
         stack = cultionet.predict(
             lit_model=self.lit_model,
             data=data,
-            written=None, #self.dst.read(self.bands[-1], window=w_pad),
+            written=None,  # self.dst.read(self.bands[-1], window=w_pad),
             data_values=self.data_values,
             w=w,
             w_pad=w_pad,
             device=self.device,
-            include_maskrcnn=self.include_maskrcnn
+            include_maskrcnn=self.include_maskrcnn,
         )
         # Write the prediction stack to file
-        with filelock.FileLock('./dst.lock'):
+        with filelock.FileLock("./dst.lock"):
             self.dst.write(
                 stack,
-                indexes=range(1, self.dst.profile['count']+1),
-                window=w
+                indexes=range(1, self.dst.profile["count"] + 1),
+                window=w,
             )
 
 
@@ -317,15 +311,15 @@ class WriterModule(BlockWriter):
         ppaths: ProjectPaths,
         device: str,
         scale_factor: float,
-        include_maskrcnn: bool
+        include_maskrcnn: bool,
     ) -> None:
         self.out_path = out_path
         # Create the output file
-        if mode == 'w':
+        if mode == "w":
             with rio.open(self.out_path, mode=mode, **profile):
                 pass
 
-        self.dst = rio.open(self.out_path, mode='r+')
+        self.dst = rio.open(self.out_path, mode="r+")
 
         self.ntime = ntime
         self.nbands = nbands
@@ -341,18 +335,18 @@ class WriterModule(BlockWriter):
 
         self.lit_model = cultionet.load_model(
             ckpt_file=self.ppaths.ckpt_file,
-            model_file=self.ppaths.ckpt_file.parent / 'cultionet.pt',
-            num_features=ntime*nbands,
+            model_file=self.ppaths.ckpt_file.parent / "cultionet.pt",
+            num_features=ntime * nbands,
             num_time_features=ntime,
             filters=filters,
             num_classes=num_classes,
             device=self.device,
-            enable_progress_bar=False
+            enable_progress_bar=False,
         )[1]
 
     def close_open(self):
         self.close()
-        self.dst = rio.open(self.out_path, mode='r+')
+        self.dst = rio.open(self.out_path, mode="r+")
 
     def close(self):
         self.dst.close()
@@ -362,15 +356,15 @@ class WriterModule(BlockWriter):
         self,
         w: Window,
         w_pad: Window,
-        pba: T.Optional[T.Union[ActorHandle, int]] = None
+        pba: T.Optional[T.Union[ActorHandle, int]] = None,
     ):
         raise NotImplementedError
 
 
 @ray.remote
 class RemoteWriter(WriterModule):
-    """A concurrent writer with Ray
-    """
+    """A concurrent writer with Ray."""
+
     def __init__(
         self,
         out_path: T.Union[str, Path],
@@ -385,7 +379,7 @@ class RemoteWriter(WriterModule):
         ppaths: ProjectPaths,
         device: str,
         scale_factor: float,
-        include_maskrcnn: bool
+        include_maskrcnn: bool,
     ) -> None:
         super().__init__(
             out_path=out_path,
@@ -400,23 +394,18 @@ class RemoteWriter(WriterModule):
             ppaths=ppaths,
             device=device,
             scale_factor=scale_factor,
-            include_maskrcnn=include_maskrcnn
+            include_maskrcnn=include_maskrcnn,
         )
 
-    def write(
-        self,
-        w: Window,
-        w_pad: Window,
-        pba: ActorHandle = None
-    ):
+    def write(self, w: Window, w_pad: Window, pba: ActorHandle = None):
         self.predict_write_block(w, w_pad)
         if pba is not None:
             pba.update.remote(1)
 
 
 class SerialWriter(WriterModule):
-    """A serial writer
-    """
+    """A serial writer."""
+
     def __init__(
         self,
         out_path: T.Union[str, Path],
@@ -431,7 +420,7 @@ class SerialWriter(WriterModule):
         ppaths: ProjectPaths,
         device: str,
         scale_factor: float,
-        include_maskrcnn: bool
+        include_maskrcnn: bool,
     ) -> None:
         super().__init__(
             out_path=out_path,
@@ -446,15 +435,10 @@ class SerialWriter(WriterModule):
             ppaths=ppaths,
             device=device,
             scale_factor=scale_factor,
-            include_maskrcnn=include_maskrcnn
+            include_maskrcnn=include_maskrcnn,
         )
 
-    def write(
-        self,
-        w: Window,
-        w_pad: Window,
-        pba: int = None
-    ):
+    def write(self, w: Window, w_pad: Window, pba: int = None):
         self.predict_write_block(w, w_pad)
         self.close_open()
         if pba is not None:
@@ -462,43 +446,33 @@ class SerialWriter(WriterModule):
 
 
 def predict_image(args):
-    logging.getLogger('pytorch_lightning').setLevel(logging.WARNING)
+    logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
 
     config = open_config(args.config_file)
 
     # This is a helper function to manage paths
     ppaths = setup_paths(
-        args.project_path, append_ts=True if args.append_ts == 'y' else False
+        args.project_path, append_ts=True if args.append_ts == "y" else False
     )
     # Load the z-score norm values
     data_values = torch.load(ppaths.norm_file)
-    with open(ppaths.classes_info_path, mode='r') as f:
+    with open(ppaths.classes_info_path, mode="r") as f:
         class_info = json.load(f)
 
-    num_classes = args.num_classes if args.num_classes is not None else class_info['max_crop_class'] + 1
-    edge_class = args.edge_class if args.edge_class is not None else class_info['edge_class']
+    num_classes = (
+        args.num_classes
+        if args.num_classes is not None
+        else class_info["max_crop_class"] + 1
+    )
 
     if args.data_path is not None:
         ds = EdgeDataset(
             ppaths.predict_path,
             data_means=data_values.mean,
             data_stds=data_values.std,
-            pattern=f'data_{args.region}_{args.predict_year}*.pt'
+            pattern=f"data_{args.region}_{args.predict_year}*.pt",
         )
-        ckpt_file = ppaths.ckpt_path / 'last.ckpt'
-        temperature_scales_file = ckpt_file.parent / 'temperature' / 'temperature.scales'
-        edge_temperature = None
-        crop_temperature = None
-        if temperature_scales_file.is_file():
-            with open(temperature_scales_file, mode='r') as f:
-                temperature_scales = json.load(f)
-            crop_temperature = torch.tensor([temperature_scales['crop']])
-            if 'edge' in temperature_scales:
-                edge_temperature = torch.tensor([temperature_scales['edge']])
-            if torch.cuda.is_available():
-                crop_temperature = crop_temperature.to('cuda')
-                if 'edge' in temperature_scales:
-                    edge_temperature = edge_temperature.to('cuda')
+        ckpt_file = ppaths.ckpt_path / "last.ckpt"
 
         cultionet.predict_lightning(
             reference_image=args.reference_image,
@@ -508,13 +482,13 @@ def predict_image(args):
             batch_size=args.batch_size,
             load_batch_workers=args.load_batch_workers,
             device=args.device,
+            devices=args.devices,
             precision=args.precision,
             num_classes=num_classes,
             ref_res=ds[0].res,
             resampling=ds[0].resampling,
             compression=args.compression,
-            crop_temperature=crop_temperature,
-            edge_temperature=edge_temperature
+            refine_pt=ckpt_file.parent / "refine" / "refine.pt",
         )
 
         if args.delete_dataset:
@@ -522,7 +496,7 @@ def predict_image(args):
     else:
         try:
             tmp = int(args.grid_id)
-            region = f'{tmp:06d}'
+            region = f"{tmp:06d}"
         except ValueError:
             region = args.grid_id
 
@@ -535,24 +509,24 @@ def predict_image(args):
             end_date=args.end_date,
             config=config,
             date_format=args.date_format,
-            skip_index=args.skip_index
+            skip_index=args.skip_index,
         )
 
         with gw.open(
             image_list,
-            stack_dim='band',
-            band_names=list(range(1, len(image_list)+1))
+            stack_dim="band",
+            band_names=list(range(1, len(image_list) + 1)),
         ) as src_ts:
             time_series = (
-                (src_ts * args.gain + args.offset)
-                .astype('float64')
-                .clip(0, 1)
+                (src_ts * args.gain + args.offset).astype("float64").clip(0, 1)
             )
             if args.preload_data:
-                with TqdmCallback(desc='Loading data'):
+                with TqdmCallback(desc="Loading data"):
                     time_series.load(num_workers=args.processes)
             # Get the image dimensions
-            nvars = model_preprocessing.VegetationIndices(image_vis=config['image_vis']).n_vis
+            nvars = model_preprocessing.VegetationIndices(
+                image_vis=config["image_vis"]
+            ).n_vis
             nfeas, height, width = time_series.shape
             ntime = int(nfeas / nvars)
             windows = get_window_offsets(
@@ -561,32 +535,36 @@ def predict_image(args):
                 args.window_size,
                 args.window_size,
                 padding=(
-                    args.padding, args.padding, args.padding, args.padding
-                )
+                    args.padding,
+                    args.padding,
+                    args.padding,
+                    args.padding,
+                ),
             )
 
             profile = {
-                'crs': src_ts.crs,
-                'transform': src_ts.gw.transform,
-                'height': height,
-                'width': width,
+                "crs": src_ts.crs,
+                "transform": src_ts.gw.transform,
+                "height": height,
+                "width": width,
                 # Orientation (+1) + distance (+1) + edge (+1) + crop (+1) crop types (+N)
                 # `num_classes` includes background
-                'count': 3 + num_classes - 1,
-                'dtype': 'uint16',
-                'blockxsize': 64 if 64 < width else width,
-                'blockysize': 64 if 64 < height else height,
-                'driver': 'GTiff',
-                'sharing': False,
-                'compress': args.compression
+                "count": 3 + num_classes - 1,
+                "dtype": "uint16",
+                "blockxsize": 64 if 64 < width else width,
+                "blockysize": 64 if 64 < height else height,
+                "driver": "GTiff",
+                "sharing": False,
+                "compress": args.compression,
             }
-            profile['tiled'] = True if max(profile['blockxsize'], profile['blockysize']) >= 16 else False
+            profile["tiled"] = (
+                True
+                if max(profile["blockxsize"], profile["blockysize"]) >= 16
+                else False
+            )
 
             # Get the time and band count
-            ntime, nbands = get_image_list_dims(
-                image_list,
-                time_series
-            )
+            ntime, nbands = get_image_list_dims(image_list, time_series)
 
             if args.processes == 1:
                 serial_writer = SerialWriter(
@@ -602,12 +580,17 @@ def predict_image(args):
                     ppaths=ppaths,
                     device=args.device,
                     scale_factor=SCALE_FACTOR,
-                    include_maskrcnn=args.include_maskrcnn
+                    include_maskrcnn=args.include_maskrcnn,
                 )
                 try:
-                    with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
+                    with tqdm(
+                        total=len(windows),
+                        desc="Predicting windows",
+                        position=0,
+                    ) as pbar:
                         results = [
-                            serial_writer.write(w, w_pad, pba=pbar) for w, w_pad in windows
+                            serial_writer.write(w, w_pad, pba=pbar)
+                            for w, w_pad in windows
                         ]
                     serial_writer.close()
                 except Exception as e:
@@ -615,17 +598,19 @@ def predict_image(args):
                     logger.exception(f"The predictions failed because {e}.")
             else:
                 if ray.is_initialized():
-                    logger.warning('The Ray cluster is already running.')
+                    logger.warning("The Ray cluster is already running.")
                 else:
-                    if args.device == 'gpu':
+                    if args.device == "gpu":
                         # TODO: support multiple GPUs through CLI
                         try:
                             ray.init(num_cpus=args.processes, num_gpus=1)
                         except KeyError as e:
-                            logger.exception(f"Ray could not be instantiated with a GPU because {e}.")
+                            logger.exception(
+                                f"Ray could not be instantiated with a GPU because {e}."
+                            )
                     else:
                         ray.init(num_cpus=args.processes)
-                assert ray.is_initialized(), 'The Ray cluster is not running.'
+                assert ray.is_initialized(), "The Ray cluster is not running."
                 # Setup the remote ray writer
                 remote_writer = RemoteWriter.options(
                     max_concurrency=args.processes
@@ -641,14 +626,23 @@ def predict_image(args):
                     data_values=data_values,
                     ppaths=ppaths,
                     device=args.device,
+                    devices=args.devices,
                     scale_factor=SCALE_FACTOR,
-                    include_maskrcnn=args.include_maskrcnn
+                    include_maskrcnn=args.include_maskrcnn,
                 )
                 actor_chunksize = args.processes * 8
                 try:
-                    with tqdm(total=len(windows), desc='Predicting windows', position=0) as pbar:
-                        for wchunk in range(0, len(windows)+actor_chunksize, actor_chunksize):
-                            chunk_windows = windows[wchunk:wchunk+actor_chunksize]
+                    with tqdm(
+                        total=len(windows),
+                        desc="Predicting windows",
+                        position=0,
+                    ) as pbar:
+                        for wchunk in range(
+                            0, len(windows) + actor_chunksize, actor_chunksize
+                        ):
+                            chunk_windows = windows[
+                                wchunk : wchunk + actor_chunksize
+                            ]
                             pbar.set_description(
                                 f"Windows {wchunk:,d}--{wchunk+len(chunk_windows):,d}"
                             )
@@ -682,22 +676,20 @@ def cycle_data(
     year_lists: list,
     regions_lists: list,
     project_path_lists: list,
-    ref_res_lists: list
+    ref_res_lists: list,
 ):
     for years, regions, project_path, ref_res in zip(
-        year_lists,
-        regions_lists,
-        project_path_lists,
-        ref_res_lists
+        year_lists, regions_lists, project_path_lists, ref_res_lists
     ):
         for region in regions:
             for image_year in years:
                 yield region, image_year, project_path, ref_res
 
 
-def get_centroid_coords(df: gpd.GeoDataFrame, dst_crs: T.Optional[str] = None) -> T.Tuple[float, float]:
-    """Gets the lon/lat or x/y coordinates of a centroid
-    """
+def get_centroid_coords(
+    df: gpd.GeoDataFrame, dst_crs: T.Optional[str] = None
+) -> T.Tuple[float, float]:
+    """Gets the lon/lat or x/y coordinates of a centroid."""
     centroid = df.to_crs(dst_crs).centroid
 
     return float(centroid.x), float(centroid.y)
@@ -708,167 +700,199 @@ def create_datasets(args):
     project_path_lists = [args.project_path]
     ref_res_lists = [args.ref_res]
 
-    if hasattr(args, 'max_crop_class'):
-        assert isinstance(args.max_crop_class, int), \
-            'The maximum crop class value must be given.'
+    if hasattr(args, "max_crop_class"):
+        assert isinstance(
+            args.max_crop_class, int
+        ), "The maximum crop class value must be given."
 
-        region_as_list = config['regions'] is not None
-        region_as_file = config['region_id_file'] is not None
+        region_as_list = config["regions"] is not None
+        region_as_file = config["region_id_file"] is not None
 
         assert (
             region_as_list or region_as_file
         ), "Only submit region as a list or as a given file"
 
-    if hasattr(args, 'time_series_path') and (args.time_series_path is not None):
+    if hasattr(args, "time_series_path") and (
+        args.time_series_path is not None
+    ):
         inputs = model_preprocessing.TrainInputs(
             regions=[Path(args.time_series_path).name],
-            years=[args.predict_year]
+            years=[args.predict_year],
         )
     else:
         if region_as_file:
-            file_path = config['region_id_file']
+            file_path = config["region_id_file"]
             if not Path(file_path).is_file():
-                raise IOError('The id file does not exist')
+                raise IOError("The id file does not exist")
             id_data = pd.read_csv(file_path)
-            assert "id" in id_data.columns, f"id column not found in {file_path}."
-            regions = id_data['id'].unique().tolist()
+            assert (
+                "id" in id_data.columns
+            ), f"id column not found in {file_path}."
+            regions = id_data["id"].unique().tolist()
         else:
-            regions = list(range(config['regions'][0], config['regions'][1]+1))
+            regions = list(
+                range(config["regions"][0], config["regions"][1] + 1)
+            )
 
         inputs = model_preprocessing.TrainInputs(
-            regions=regions,
-            years=config['years']
+            regions=regions, years=config["years"]
         )
 
-    for region, end_year, project_path, ref_res in cycle_data(
-        inputs.year_lists,
-        inputs.regions_lists,
-        project_path_lists,
-        ref_res_lists
-    ):
-        ppaths = setup_paths(
-            project_path,
-            append_ts=True if args.append_ts == 'y' else False
-        )
+    total_iters = len(
+        list(itertools.product(inputs.year_lists, inputs.regions_lists))
+    )
+    with tqdm(total=total_iters, position=0, leave=True) as pbar:
+        for region, end_year, project_path, ref_res in cycle_data(
+            inputs.year_lists,
+            inputs.regions_lists,
+            project_path_lists,
+            ref_res_lists,
+        ):
+            ppaths = setup_paths(
+                project_path,
+                append_ts=True if args.append_ts == "y" else False,
+            )
 
-        try:
-            tmp = int(region)
-            region = f'{tmp:06d}'
-        except ValueError:
-            pass
+            try:
+                tmp = int(region)
+                region = f"{tmp:06d}"
+            except ValueError:
+                pass
 
-        if args.destination == 'predict':
-            df_grids = None
-            df_edges = None
-        else:
-            # Read the training data
-            grids = ppaths.edge_training_path / f'{region}_grid_{end_year}.gpkg'
-            edges = ppaths.edge_training_path / f'{region}_edges_{end_year}.gpkg'
-            if not grids.is_file():
-                logger.warning(f'{grids} does not exist.')
-                continue
-
-            df_grids = gpd.read_file(grids)
-
-            if not edges.is_file():
-                edges = ppaths.edge_training_path / f'{region}_poly_{end_year}.gpkg'
-            if not edges.is_file():
-                # No training polygons
-                df_edges = gpd.GeoDataFrame(data=[], geometry=[], crs=df_grids.crs)
+            if args.destination == "predict":
+                df_grids = None
+                df_edges = None
             else:
-                df_edges = gpd.read_file(edges)
-
-        image_list = []
-        for image_vi in model_preprocessing.VegetationIndices(
-            image_vis=config['image_vis']
-        ).image_vis:
-            # Set the full path to the images
-            vi_path = ppaths.image_path / args.feature_pattern.format(
-                region=region,
-                image_vi=image_vi
-            )
-
-            if not vi_path.is_dir():
-                logger.warning(f'{str(vi_path)} does not exist')
-                continue
-
-            # Get the centroid coordinates of the grid
-            lat = None
-            if args.destination != 'predict':
-                lat = get_centroid_coords(df_grids.centroid, dst_crs='epsg:4326')[1]
-            # Get the start and end dates
-            start_date, end_date = get_start_end_dates(
-                vi_path,
-                start_year=end_year-1,
-                start_date=args.start_date,
-                end_date=args.end_date,
-                date_format=args.date_format,
-                lat=lat,
-            )
-            # Get the requested time slice
-            ts_list = model_preprocessing.get_time_series_list(
-                vi_path, end_year-1, start_date, end_date, date_format=args.date_format
-            )
-            if len(ts_list) <= 1:
-                continue
-
-            if args.skip_index > 0:
-                ts_list = ts_list[::args.skip_index]
-            image_list += ts_list
-
-        if args.destination != 'predict':
-            class_info = {
-                'max_crop_class': args.max_crop_class,
-                'edge_class': args.max_crop_class + 1
-            }
-            with open(ppaths.classes_info_path, mode='w') as f:
-                f.write(json.dumps(class_info))
-
-        if image_list:
-            if args.destination == 'predict':
-                create_predict_dataset(
-                    image_list=image_list,
-                    region=region,
-                    year=end_year,
-                    process_path=ppaths.get_process_path(args.destination),
-                    gain=args.gain,
-                    offset=args.offset,
-                    ref_res=ref_res,
-                    resampling=args.resampling,
-                    window_size=args.window_size,
-                    padding=args.padding,
-                    num_workers=args.num_workers,
-                    chunksize=args.chunksize
+                # Read the training data
+                grids = (
+                    ppaths.edge_training_path
+                    / f"{region}_grid_{end_year}.gpkg"
                 )
-            else:
-                create_dataset(
-                    image_list=image_list,
-                    df_grids=df_grids,
-                    df_edges=df_edges,
-                    max_crop_class=args.max_crop_class,
-                    group_id=f'{region}_{end_year}',
-                    process_path=ppaths.get_process_path(args.destination),
-                    transforms=args.transforms,
-                    gain=args.gain,
-                    offset=args.offset,
-                    ref_res=ref_res,
-                    resampling=args.resampling,
-                    num_workers=args.num_workers,
-                    grid_size=args.grid_size,
-                    n_ts=args.n_ts,
-                    instance_seg=args.instance_seg,
-                    zero_padding=args.zero_padding,
-                    crop_column=args.crop_column,
-                    keep_crop_classes=args.keep_crop_classes,
-                    replace_dict=args.replace_dict
+                edges = (
+                    ppaths.edge_training_path
+                    / f"{region}_edges_{end_year}.gpkg"
                 )
+                if not grids.is_file():
+                    pbar.update(1)
+                    pbar.set_description("File not exist")
+                    continue
+
+                df_grids = gpd.read_file(grids)
+
+                if not edges.is_file():
+                    edges = (
+                        ppaths.edge_training_path
+                        / f"{region}_poly_{end_year}.gpkg"
+                    )
+                if not edges.is_file():
+                    # No training polygons
+                    df_edges = gpd.GeoDataFrame(
+                        data=[], geometry=[], crs=df_grids.crs
+                    )
+                else:
+                    df_edges = gpd.read_file(edges)
+
+            image_list = []
+            for image_vi in model_preprocessing.VegetationIndices(
+                image_vis=config["image_vis"]
+            ).image_vis:
+                # Set the full path to the images
+                vi_path = ppaths.image_path / args.feature_pattern.format(
+                    region=region, image_vi=image_vi
+                )
+
+                if not vi_path.is_dir():
+                    pbar.update(1)
+                    pbar.set_description("No directory")
+                    continue
+
+                # Get the centroid coordinates of the grid
+                lat = None
+                if args.destination != "predict":
+                    lat = get_centroid_coords(
+                        df_grids.centroid, dst_crs="epsg:4326"
+                    )[1]
+                # Get the start and end dates
+                start_date, end_date = get_start_end_dates(
+                    vi_path,
+                    start_year=end_year - 1,
+                    start_date=args.start_date,
+                    end_date=args.end_date,
+                    date_format=args.date_format,
+                    lat=lat,
+                )
+                # Get the requested time slice
+                ts_list = model_preprocessing.get_time_series_list(
+                    vi_path,
+                    end_year - 1,
+                    start_date,
+                    end_date,
+                    date_format=args.date_format,
+                )
+                if len(ts_list) <= 1:
+                    pbar.update(1)
+                    pbar.set_description("TS too short")
+                    continue
+
+                if args.skip_index > 0:
+                    ts_list = ts_list[:: args.skip_index]
+                image_list += ts_list
+
+            if args.destination != "predict":
+                class_info = {
+                    "max_crop_class": args.max_crop_class,
+                    "edge_class": args.max_crop_class + 1,
+                }
+                with open(ppaths.classes_info_path, mode="w") as f:
+                    f.write(json.dumps(class_info))
+
+            if image_list:
+                if args.destination == "predict":
+                    create_predict_dataset(
+                        image_list=image_list,
+                        region=region,
+                        year=end_year,
+                        process_path=ppaths.get_process_path(args.destination),
+                        gain=args.gain,
+                        offset=args.offset,
+                        ref_res=ref_res,
+                        resampling=args.resampling,
+                        window_size=args.window_size,
+                        padding=args.padding,
+                        num_workers=args.num_workers,
+                        chunksize=args.chunksize,
+                    )
+                else:
+                    pbar = create_dataset(
+                        image_list=image_list,
+                        df_grids=df_grids,
+                        df_edges=df_edges,
+                        max_crop_class=args.max_crop_class,
+                        group_id=f"{region}_{end_year}",
+                        process_path=ppaths.get_process_path(args.destination),
+                        transforms=args.transforms,
+                        gain=args.gain,
+                        offset=args.offset,
+                        ref_res=ref_res,
+                        resampling=args.resampling,
+                        num_workers=args.num_workers,
+                        grid_size=args.grid_size,
+                        instance_seg=args.instance_seg,
+                        zero_padding=args.zero_padding,
+                        crop_column=args.crop_column,
+                        keep_crop_classes=args.keep_crop_classes,
+                        replace_dict=args.replace_dict,
+                        pbar=pbar,
+                    )
+
+            pbar.update(1)
 
 
 def train_maskrcnn(args):
     seed_everything(args.random_seed, workers=True)
 
     # This is a helper function to manage paths
-    ppaths = setup_paths(args.project_path, ckpt_name='maskrcnn.ckpt')
+    ppaths = setup_paths(args.project_path, ckpt_name="maskrcnn.ckpt")
 
     if (
         (args.expected_dim is not None)
@@ -879,15 +903,13 @@ def train_maskrcnn(args):
             ppaths.train_path,
             processes=args.processes,
             threads_per_worker=args.threads,
-            random_seed=args.random_seed
+            random_seed=args.random_seed,
         )
     # Check dimensions
     if args.expected_dim is not None:
         try:
             ds.check_dims(
-                args.expected_dim,
-                args.delete_mismatches,
-                args.dim_color
+                args.expected_dim, args.delete_mismatches, args.dim_color
             )
         except TensorShapeError as e:
             raise ValueError(e)
@@ -903,7 +925,7 @@ def train_maskrcnn(args):
             dataset=train_ds,
             batch_size=args.batch_size,
             mean_color=args.mean_color,
-            sse_color=args.sse_color
+            sse_color=args.sse_color,
         )
         torch.save(data_values, str(ppaths.norm_file))
     else:
@@ -915,23 +937,21 @@ def train_maskrcnn(args):
         ppaths.train_path,
         data_means=data_values.mean,
         data_stds=data_values.std,
-        random_seed=args.random_seed
+        random_seed=args.random_seed,
     )
     # Check for a test dataset
     test_ds = None
-    if list((ppaths.test_process_path).glob('*.pt')):
+    if list((ppaths.test_process_path).glob("*.pt")):
         test_ds = EdgeDataset(
             ppaths.test_path,
             data_means=data_values.mean,
             data_stds=data_values.std,
-            random_seed=args.random_seed
+            random_seed=args.random_seed,
         )
         if args.expected_dim is not None:
             try:
                 test_ds.check_dims(
-                    args.expected_dim,
-                    args.delete_mismatches,
-                    args.dim_color
+                    args.expected_dim, args.delete_mismatches, args.dim_color
                 )
             except TensorShapeError as e:
                 raise ValueError(e)
@@ -944,6 +964,7 @@ def train_maskrcnn(args):
         val_frac=args.val_frac,
         batch_size=args.batch_size,
         epochs=args.epochs,
+        save_top_k=args.save_top_k,
         accumulate_grad_batches=args.accumulate_grad_batches,
         learning_rate=args.learning_rate,
         filters=args.filters,
@@ -951,9 +972,11 @@ def train_maskrcnn(args):
         reset_model=args.reset_model,
         auto_lr_find=args.auto_lr_find,
         device=args.device,
+        devices=args.devices,
         gradient_clip_val=args.gradient_clip_val,
+        gradient_clip_algorithm=args.gradient_clip_algorithm,
         early_stopping_patience=args.patience,
-        weight_decay = args.weight_decay,
+        weight_decay=args.weight_decay,
         precision=args.precision,
         stochastic_weight_averaging=args.stochastic_weight_averaging,
         stochastic_weight_averaging_lr=args.stochastic_weight_averaging_lr,
@@ -963,31 +986,32 @@ def train_maskrcnn(args):
         resize_width=args.resize_width,
         min_image_size=args.min_image_size,
         max_image_size=args.max_image_size,
-        trainable_backbone_layers=args.trainable_backbone_layers
+        trainable_backbone_layers=args.trainable_backbone_layers,
     )
 
 
 def spatial_kfoldcv(args):
     ppaths = setup_paths(args.project_path)
 
-    with open(ppaths.classes_info_path, mode='r') as f:
+    with open(ppaths.classes_info_path, mode="r") as f:
         class_info = json.load(f)
 
     ds = EdgeDataset(
         ppaths.train_path,
         processes=args.processes,
         threads_per_worker=args.threads,
-        random_seed=args.random_seed
+        random_seed=args.random_seed,
     )
     # Read or create the spatial partitions (folds)
     ds.get_spatial_partitions(
-        spatial_partitions=args.spatial_partitions,
-        splits=args.splits
+        spatial_partitions=args.spatial_partitions, splits=args.splits
     )
     for k, (partition_name, train_ds, test_ds) in enumerate(
         ds.spatial_kfoldcv_iter(args.partition_column)
     ):
-        logger.info(f"Fold {k} of {len(ds.spatial_partitions.index)}, partition {partition_name} ...")
+        logger.info(
+            f"Fold {k} of {len(ds.spatial_partitions.index)}, partition {partition_name} ..."
+        )
         # Normalize the partition
         temp_ds = train_ds.split_train_val(val_frac=args.val_frac)[0]
         data_values = get_norm_values(
@@ -995,7 +1019,7 @@ def spatial_kfoldcv(args):
             class_info=class_info,
             batch_size=args.batch_size,
             mean_color=args.mean_color,
-            sse_color=args.sse_color
+            sse_color=args.sse_color,
         )
         train_ds.data_means = data_values.mean
         train_ds.data_stds = data_values.std
@@ -1004,9 +1028,13 @@ def spatial_kfoldcv(args):
 
         # Get balanced class weights
         # Reference: https://github.com/scikit-learn/scikit-learn/blob/f3f51f9b6/sklearn/utils/class_weight.py#L10
-        recip_freq = data_values.crop_counts[1:].sum() / ((len(data_values.crop_counts)-1) * data_values.crop_counts[1:])
-        class_weights = recip_freq[torch.arange(0, len(data_values.crop_counts)-1)]
-        class_weights = torch.tensor([0] + list(class_weights), dtype=torch.float)
+        # recip_freq = data_values.crop_counts[1:].sum() / ((len(data_values.crop_counts)-1) * data_values.crop_counts[1:])
+        # class_weights = recip_freq[torch.arange(0, len(data_values.crop_counts)-1)]
+        # class_weights = torch.tensor([0] + list(class_weights), dtype=torch.float)
+        if torch.cuda.is_available():
+            class_counts = data_values.crop_counts.to("cuda")
+        else:
+            class_counts = data_values.crop_counts
 
         # Fit the model
         cultionet.fit(
@@ -1017,28 +1045,73 @@ def spatial_kfoldcv(args):
             batch_size=args.batch_size,
             load_batch_workers=args.load_batch_workers,
             epochs=args.epochs,
+            save_top_k=args.save_top_k,
             accumulate_grad_batches=args.accumulate_grad_batches,
+            optimizer=args.optimizer,
             learning_rate=args.learning_rate,
             filters=args.filters,
-            num_classes=args.num_classes if args.num_classes is not None else class_info['max_crop_class'] + 1,
-            edge_class=args.edge_class if args.edge_class is not None else class_info['edge_class'],
-            class_weights=class_weights,
+            num_classes=args.num_classes
+            if args.num_classes is not None
+            else class_info["max_crop_class"] + 1,
+            edge_class=args.edge_class
+            if args.edge_class is not None
+            else class_info["edge_class"],
+            class_counts=class_counts,
             reset_model=True,
             auto_lr_find=False,
             device=args.device,
+            devices=args.devices,
             gradient_clip_val=args.gradient_clip_val,
+            gradient_clip_algorithm=args.gradient_clip_algorithm,
             early_stopping_patience=args.patience,
             weight_decay=args.weight_decay,
             precision=args.precision,
             stochastic_weight_averaging=args.stochastic_weight_averaging,
-            model_pruning=args.model_pruning
+            model_pruning=args.model_pruning,
         )
         # Rename the test metric JSON file
-        (
-            ppaths.ckpt_path / 'test.metrics'
-        ).rename(
-            ppaths.ckpt_path / f"fold-{k}-{partition_name.replace(' ', '_')}.metrics"
+        (ppaths.ckpt_path / "test.metrics").rename(
+            ppaths.ckpt_path
+            / f"fold-{k}-{partition_name.replace(' ', '_')}.metrics"
         )
+
+
+def generate_model_graph(args):
+    from cultionet.models.convstar import StarRNN
+    from cultionet.models.nunet import ResUNet3Psi
+
+    ppaths = setup_paths(args.project_path)
+    data_values = torch.load(str(ppaths.norm_file))
+    ds = EdgeDataset(
+        ppaths.train_path,
+        data_means=data_values.mean,
+        data_stds=data_values.std,
+        crop_counts=data_values.crop_counts,
+        edge_counts=data_values.edge_counts,
+    )
+
+    data = ds[0]
+    xrnn = data.x.reshape(1, data.nbands, data.ntime, data.height, data.width)
+    filters = 32
+    star_rnn_model = StarRNN(
+        input_dim=data.nbands,
+        hidden_dim=filters,
+        n_layers=6,
+        num_classes_last=2,
+    )
+    x, __ = star_rnn_model(xrnn)
+    torch.onnx.export(
+        star_rnn_model, xrnn, ppaths.ckpt_path / "cultionet_starrnn.onnx"
+    )
+    resunet_model = ResUNet3Psi(
+        in_channels=int(filters * 3),
+        init_filter=filters,
+        num_classes=2,
+        double_dilation=2,
+    )
+    torch.onnx.export(
+        resunet_model, x, ppaths.ckpt_path / "cultionet_resunet.onnx"
+    )
 
 
 def train_model(args):
@@ -1047,7 +1120,7 @@ def train_model(args):
     # This is a helper function to manage paths
     ppaths = setup_paths(args.project_path)
 
-    with open(ppaths.classes_info_path, mode='r') as f:
+    with open(ppaths.classes_info_path, mode="r") as f:
         class_info = json.load(f)
 
     if (
@@ -1059,7 +1132,7 @@ def train_model(args):
             ppaths.train_path,
             processes=args.processes,
             threads_per_worker=args.threads,
-            random_seed=args.random_seed
+            random_seed=args.random_seed,
         )
     # Check dimensions
     if args.expected_dim is not None:
@@ -1069,7 +1142,7 @@ def train_model(args):
                 args.expected_height,
                 args.expected_width,
                 args.delete_mismatches,
-                args.dim_color
+                args.dim_color,
             )
         except TensorShapeError as e:
             raise ValueError(e)
@@ -1077,7 +1150,7 @@ def train_model(args):
             ppaths.train_path,
             processes=args.processes,
             threads_per_worker=args.threads,
-            random_seed=args.random_seed
+            random_seed=args.random_seed,
         )
     # Get the normalization means and std. deviations on the train data
     # Calculate the values needed to transform to z-scores, using
@@ -1087,20 +1160,24 @@ def train_model(args):
             ppaths.norm_file.unlink()
     if not ppaths.norm_file.is_file():
         if args.spatial_partitions is not None:
-            train_ds = ds.split_train_val_by_partition(
-                spatial_partitions=args.spatial_partitions,
-                partition_column=args.partition_column,
-                val_frac=args.val_frac,
-                partition_name=args.partition_name
+            # train_ds = ds.split_train_val_by_partition(
+            #     spatial_partitions=args.spatial_partitions,
+            #     partition_column=args.partition_column,
+            #     val_frac=args.val_frac,
+            #     partition_name=args.partition_name
+            # )[0]
+            train_ds = ds.split_train_val(
+                val_frac=args.val_frac, spatial_overlap_allowed=False
             )[0]
         else:
             train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
+        # Get means and standard deviations from the training dataset
         data_values = get_norm_values(
             dataset=train_ds,
             class_info=class_info,
             batch_size=args.batch_size,
             mean_color=args.mean_color,
-            sse_color=args.sse_color
+            sse_color=args.sse_color,
         )
         torch.save(data_values, str(ppaths.norm_file))
     else:
@@ -1114,26 +1191,24 @@ def train_model(args):
         data_stds=data_values.std,
         crop_counts=data_values.crop_counts,
         edge_counts=data_values.edge_counts,
-        random_seed=args.random_seed
+        random_seed=args.random_seed,
     )
 
     # Check for a test dataset
     test_ds = None
-    if list((ppaths.test_process_path).glob('*.pt')):
+    if list((ppaths.test_process_path).glob("*.pt")):
         test_ds = EdgeDataset(
             ppaths.test_path,
             data_means=data_values.mean,
             data_stds=data_values.std,
             crop_counts=data_values.crop_counts,
             edge_counts=data_values.edge_counts,
-            random_seed=args.random_seed
+            random_seed=args.random_seed,
         )
         if args.expected_dim is not None:
             try:
                 test_ds.check_dims(
-                    args.expected_dim,
-                    args.delete_mismatches,
-                    args.dim_color
+                    args.expected_dim, args.delete_mismatches, args.dim_color
                 )
             except TensorShapeError as e:
                 raise ValueError(e)
@@ -1143,22 +1218,26 @@ def train_model(args):
                 data_stds=data_values.std,
                 crop_counts=data_values.crop_counts,
                 edge_counts=data_values.edge_counts,
-                random_seed=args.random_seed
+                random_seed=args.random_seed,
             )
 
     # Get balanced class weights
     # Reference: https://github.com/scikit-learn/scikit-learn/blob/f3f51f9b6/sklearn/utils/class_weight.py#L10
-    def get_class_weights(counts: torch.Tensor) -> torch.Tensor:
-        recip_freq = counts.sum() / (len(counts) * counts)
-        weights = recip_freq[torch.arange(0, len(counts))]
+    # def get_class_weights(counts: torch.Tensor) -> torch.Tensor:
+    #     recip_freq = counts.sum() / (len(counts) * counts)
+    #     weights = recip_freq[torch.arange(0, len(counts))]
 
-        if torch.cuda.is_available():
-            return weights.to('cuda')
-        else:
-            return weights
+    #     if torch.cuda.is_available():
+    #         return weights.to('cuda')
+    #     else:
+    #         return weights
 
-    class_weights = get_class_weights(data_values.crop_counts)
-    edge_weights = get_class_weights(data_values.edge_counts)
+    # class_weights = get_class_weights(data_values.crop_counts)
+    # edge_weights = get_class_weights(data_values.edge_counts)
+    if torch.cuda.is_available():
+        class_counts = data_values.crop_counts.to("cuda")
+    else:
+        class_counts = data_values.crop_counts
 
     # Fit the model
     cultionet.fit(
@@ -1171,117 +1250,159 @@ def train_model(args):
         partition_column=args.partition_column,
         batch_size=args.batch_size,
         epochs=args.epochs,
+        save_top_k=args.save_top_k,
         accumulate_grad_batches=args.accumulate_grad_batches,
+        model_type=args.model_type,
+        dilations=args.dilations,
+        res_block_type=args.res_block_type,
+        attention_weights=args.attention_weights,
+        activation_type=args.activation_type,
+        deep_sup_dist=args.deep_sup_dist,
+        deep_sup_edge=args.deep_sup_edge,
+        deep_sup_mask=args.deep_sup_mask,
+        optimizer=args.optimizer,
         learning_rate=args.learning_rate,
+        lr_scheduler=args.lr_scheduler,
+        steplr_step_size=args.steplr_step_size,
+        scale_pos_weight=args.scale_pos_weight,
         filters=args.filters,
-        num_classes=args.num_classes if args.num_classes is not None else class_info['max_crop_class'] + 1,
-        edge_class=args.edge_class if args.edge_class is not None else class_info['edge_class'],
-        class_weights=class_weights,
-        edge_weights=edge_weights,
+        num_classes=args.num_classes
+        if args.num_classes is not None
+        else class_info["max_crop_class"] + 1,
+        edge_class=args.edge_class
+        if args.edge_class is not None
+        else class_info["edge_class"],
+        class_counts=class_counts,
         reset_model=args.reset_model,
         auto_lr_find=args.auto_lr_find,
         device=args.device,
+        devices=args.devices,
         profiler=args.profiler,
         gradient_clip_val=args.gradient_clip_val,
+        gradient_clip_algorithm=args.gradient_clip_algorithm,
         early_stopping_patience=args.patience,
         weight_decay=args.weight_decay,
         precision=args.precision,
         stochastic_weight_averaging=args.stochastic_weight_averaging,
         stochastic_weight_averaging_lr=args.stochastic_weight_averaging_lr,
         stochastic_weight_averaging_start=args.stochastic_weight_averaging_start,
-        model_pruning=args.model_pruning
+        model_pruning=args.model_pruning,
+        save_batch_val_metrics=args.save_batch_val_metrics,
+        skip_train=args.skip_train,
+        refine_model=args.refine_model,
     )
 
 
 def main():
-    args_config = open_config((Path(__file__).parent / 'args.yml').absolute())
+    args_config = open_config((Path(__file__).parent / "args.yml").absolute())
 
     parser = argparse.ArgumentParser(
-        description='Cultionet models',
+        description="Cultionet models",
         formatter_class=argparse.RawTextHelpFormatter,
-        epilog=args_config['epilog']
+        epilog=args_config["epilog"],
     )
 
-    subparsers = parser.add_subparsers(dest='process')
+    subparsers = parser.add_subparsers(dest="process")
     available_processes = [
-        'create', 'create-predict', 'skfoldcv', 'train', 'maskrcnn', 'predict', 'version'
+        "create",
+        "create-predict",
+        "skfoldcv",
+        "train",
+        "maskrcnn",
+        "predict",
+        "graph",
+        "version",
     ]
     for process in available_processes:
         subparser = subparsers.add_parser(process)
 
-        if process == 'version':
+        if process == "version":
             continue
 
         subparser.add_argument(
-            '-p',
-            '--project-path',
-            dest='project_path',
-            help='The project path (the directory that contains the grid ids)'
+            "-p",
+            "--project-path",
+            dest="project_path",
+            help="The project path (the directory that contains the grid ids)",
         )
+        if process == "graph":
+            break
 
-        process_dict = args_config[process.replace('-', '_')]
-        if process in ('skfoldcv', 'maskrcnn'):
-            process_dict.update(args_config['train'])
-        if process in ('train', 'maskrcnn', 'predict', 'skfoldcv'):
-            process_dict.update(args_config['train_predict'])
-            process_dict.update(args_config['shared_partitions'])
-        if process in ('create', 'create-predict'):
-            process_dict.update(args_config['shared_create'])
-        if process in ('create', 'create-predict', 'predict'):
-            process_dict.update(args_config['shared_image'])
-        process_dict.update(args_config['dates'])
+        process_dict = args_config[process.replace("-", "_")]
+        if process in ("skfoldcv", "maskrcnn"):
+            process_dict.update(args_config["train"])
+        if process in ("train", "maskrcnn", "predict", "skfoldcv"):
+            process_dict.update(args_config["train_predict"])
+            process_dict.update(args_config["shared_partitions"])
+        if process in ("create", "create-predict"):
+            process_dict.update(args_config["shared_create"])
+        if process in ("create", "create-predict", "predict"):
+            process_dict.update(args_config["shared_image"])
+        process_dict.update(args_config["dates"])
         for process_key, process_values in process_dict.items():
-            if 'kwargs' in process_values:
-                kwargs = process_values['kwargs']
+            if "kwargs" in process_values:
+                kwargs = process_values["kwargs"]
                 for key, value in kwargs.items():
-                    if isinstance(value, str) and value.startswith('&'):
-                        kwargs[key] = getattr(builtins, value.replace('&', ''))
+                    if isinstance(value, str) and value.startswith("&"):
+                        kwargs[key] = getattr(builtins, value.replace("&", ""))
 
             else:
-                process_values['kwargs'] = {}
+                process_values["kwargs"] = {}
             key_args = ()
-            if len(process_values['short']) > 0:
+            if len(process_values["short"]) > 0:
                 key_args += (f"-{process_values['short']}",)
-            if len(process_values['long']) > 0:
+            if len(process_values["long"]) > 0:
                 key_args += (f"--{process_values['long']}",)
             subparser.add_argument(
                 *key_args,
                 dest=process_key,
                 help=f"{process_values['help']} (default: %(default)s)",
-                **process_values['kwargs']
+                **process_values["kwargs"],
             )
 
-        if process in ('create', 'create-predict', 'predict'):
+        if process in ("create", "create-predict", "predict"):
             subparser.add_argument(
-                '--config-file',
-                dest='config_file',
-                help='The configuration YAML file (default: %(default)s)',
-                default=(Path(__file__).parent / 'config.yml').absolute()
+                "--config-file",
+                dest="config_file",
+                help="The configuration YAML file (default: %(default)s)",
+                default=(Path(__file__).parent / "config.yml").absolute(),
             )
 
     args = parser.parse_args()
-    if args.process == 'create-predict':
-        setattr(args, 'destination', 'predict')
+    if args.process == "create-predict":
+        setattr(args, "destination", "predict")
 
-    if args.process == 'version':
+    if args.process == "version":
         print(cultionet.__version__)
         return
 
-    if hasattr(args, 'replace_dict'):
+    if hasattr(args, "replace_dict"):
         if args.replace_dict is not None:
-            setattr(args, 'replace_dict', ast.literal_eval(args.replace_dict))
+            setattr(args, "replace_dict", ast.literal_eval(args.replace_dict))
 
-    if args.process in ('create', 'create-predict'):
+    project_path = Path(args.project_path) / "ckpt"
+    project_path.mkdir(parents=True, exist_ok=True)
+    now = datetime.now()
+    with open(
+        project_path
+        / f"{args.process}_command_{now.strftime('%Y%m%d-%H%M')}.json",
+        mode="w",
+    ) as f:
+        f.write(json.dumps(vars(args), indent=4))
+
+    if args.process in ("create", "create-predict"):
         create_datasets(args)
-    elif args.process == 'skfoldcv':
+    elif args.process == "skfoldcv":
         spatial_kfoldcv(args)
-    elif args.process == 'train':
+    elif args.process == "train":
         train_model(args)
-    elif args.process == 'maskrcnn':
+    elif args.process == "maskrcnn":
         train_maskrcnn(args)
-    elif args.process == 'predict':
+    elif args.process == "predict":
         predict_image(args)
+    elif args.process == "graph":
+        generate_model_graph(args)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
