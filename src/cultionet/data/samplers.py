@@ -27,7 +27,7 @@ class EpochRandomSampler(Sampler[int]):
 
     def __iter__(self) -> Iterator[int]:
         return iter(
-            np.random.choice(
+            self.data_source.rng.choice(
                 range(len(self)), replace=False, size=self.num_samples
             )
         )
