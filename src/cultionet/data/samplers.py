@@ -11,29 +11,29 @@ class EpochRandomSampler(Sampler):
         Adapted from: https://discuss.pytorch.org/t/new-subset-every-epoch/85018
     """
 
-    def __init__(self, dataset: EdgeDataset, num_samples: int):
+    def __init__(self, data_source: EdgeDataset, num_samples: int):
         super().__init__()
 
-        self.dataset = dataset
-        self.num_samples = num_samples
+        self.data_source = data_source
+        self._num_samples = num_samples
 
     @property
     def n(self) -> int:
-        return len(self.dataset)
+        return len(self.data_source)
 
     @property
-    def samples(self) -> int:
-        if self.num_samples > self.n:
-            samples_ = self.n
-        else:
-            samples_ = self.num_samples
-
-        return samples_
+    def num_samples(self) -> int:
+        # dataset size might change at runtime
+        if self._num_samples is None:
+            return len(self.data_source)
+        return self._num_samples
 
     def __iter__(self):
         return iter(
-            np.random.choice(range(self.n), replace=False, size=self.samples)
+            np.random.choice(
+                range(self.n), replace=False, size=self.num_samples
+            )
         )
 
     def __len__(self):
-        return self.samples
+        return self.num_samples
