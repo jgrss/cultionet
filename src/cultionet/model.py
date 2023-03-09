@@ -646,12 +646,12 @@ def predict_lightning(
 
     geo_refine_model = None
     if refine_pt is not None:
-        assert refine_pt.is_file()
-        geo_refine_model = GeoRefinement(
-            in_features=dataset.num_features, out_channels=num_classes
-        )
-        geo_refine_model.load_state_dict(torch.load(refine_pt))
-        geo_refine_model.eval()
+        if refine_pt.is_file():
+            geo_refine_model = GeoRefinement(
+                in_features=dataset.num_features, out_channels=num_classes
+            )
+            geo_refine_model.load_state_dict(torch.load(refine_pt))
+            geo_refine_model.eval()
     setattr(cultionet_lit_model, "temperature_lit_model", geo_refine_model)
 
     # Make predictions
