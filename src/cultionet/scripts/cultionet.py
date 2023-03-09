@@ -1289,7 +1289,7 @@ def train_model(args):
         model_pruning=args.model_pruning,
         save_batch_val_metrics=args.save_batch_val_metrics,
         skip_train=args.skip_train,
-        refine_and_calibrate=args.refine_and_calibrate,
+        refine_model=args.refine_model,
     )
 
 

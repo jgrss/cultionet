@@ -11,4 +11,4 @@ cultionet train -p $PROJECT_PATH --val-frac 0.1 --epochs 10 \
 	--learning-rate 1e-3 --scale-pos-weight --model-type $MODEL_TYPE \
 	--res-block-type $RES_BLOCK_TYPE --dilations 2 \
 	--attention-weights spatial_channel --batch-size 8 \
-	--refine-calibrate --skip-train
+	--refine-model --skip-train
