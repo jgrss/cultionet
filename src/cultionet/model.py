@@ -8,7 +8,6 @@ from scipy.stats import mode as sci_mode
 from rasterio.windows import Window
 import torch
 from torch_geometric.data import Data
-from torch.utils.data.sampler import SubsetRandomSampler
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (
     ModelCheckpoint,
@@ -23,6 +22,7 @@ from .callbacks import LightningGTiffWriter
 from .data.const import SCALE_FACTOR
 from .data.datasets import EdgeDataset, zscores
 from .data.modules import EdgeDataModule
+from .data.samplers import EpochRandomSampler
 from .models.cultio import GeoRefinement
 from .models.lightning import (
     CultioLitModel,
@@ -437,8 +437,8 @@ def fit(
                 shuffle=True,
                 # For each epoch, train on a random
                 # subset of 50% of the data.
-                sampler=SubsetRandomSampler(
-                    indices=torch.arange(int(len(dataset) * 0.5))
+                sampler=EpochRandomSampler(
+                    dataset=dataset, num_samples=int(len(dataset) * 0.5)
                 ),
             )
             refine_ckpt_file = ckpt_file.parent / "refine" / ckpt_file.name
