@@ -5,7 +5,7 @@
 **cultionet** is a library for semantic segmentation of cultivated land using a neural network. There are various model configurations that can
 be used in `cultionet`, but the base architecture is [UNet 3+](https://arxiv.org/abs/2004.08790) with [multi-stream decoders](https://arxiv.org/abs/1902.04099).
 
-The library is built on **[PyTorch Lightning](https://www.pytorchlightning.ai/)**. The segmentation objectives (class targets and losses) were designed following the work by [Waldner _et al._](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301115).
+The library is built on **[PyTorch Lightning](https://www.pytorchlightning.ai/)**. The segmentation objectives (class targets and losses) were designed following [previous work](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301115).
 
 Below are highlights of Cultionet:
 
