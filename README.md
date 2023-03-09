@@ -3,11 +3,11 @@
 [![](https://github.com/jgrss/cultionet/actions/workflows/ci.yml/badge.svg)](https://github.com/jgrss/cultionet/actions?query=workflow%3ACI)
 
 **cultionet** is a library for semantic segmentation of cultivated land using a neural network. There are various model configurations that can
-be used in `cultionet`, but the base architecture is [UNet 3+](https://arxiv.org/abs/2004.08790) with [multi-stream decoders](https://arxiv.org/abs/1902.04099).
+be used in **cultionet**, but the base architecture is [UNet 3+](https://arxiv.org/abs/2004.08790) with [multi-stream decoders](https://arxiv.org/abs/1902.04099).
 
 The library is built on **[PyTorch Lightning](https://www.pytorchlightning.ai/)**. The segmentation objectives (class targets and losses) were designed following [previous work](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301115).
 
-Below are highlights of Cultionet:
+Below are highlights of **cultionet**:
 
 1. satellite image time series instead of individual dates for training and inference
 2. [UNet 3+](https://arxiv.org/abs/2004.08790) [Psi](https://arxiv.org/abs/1902.04099) residual convolution (`ResUNet3Psi`) architecture
@@ -18,7 +18,7 @@ Below are highlights of Cultionet:
 
 ## The cultionet input data
 
-The model inputs are satellite time series (e.g., bands or spectral indices). Data are stored in a [PyTorch Geometric Data object](https://pytorch-geometric.readthedocs.io/en/latest/modules/data.html#torch_geometric.data.Data). For example, `cultionet` datasets will have data
+The model inputs are satellite time series (e.g., bands or spectral indices). Data are stored in a [PyTorch Geometric Data object](https://pytorch-geometric.readthedocs.io/en/latest/modules/data.html#torch_geometric.data.Data). For example, **cultionet** datasets will have data
 that look something like the following.
 
 ```python
@@ -142,8 +142,8 @@ project_dir:
 
 ### Create the image time series
 
-This must be done outside of `cultionet`. Essentially, a directory with band or VI time series must be generated before
-using `cultionet`.
+This must be done outside of **cultionet**. Essentially, a directory with band or VI time series must be generated before
+using **cultionet**.
 
 > **Note:** it is expected that the time series have length greater than 1
 
@@ -197,7 +197,7 @@ all the information needed to train the segmentation model.
 
 ## Training a model
 
-To train the model, you will need to create the train dataset object and pass it to the `cultionet` fit method. A script
+To train the model, you will need to create the train dataset object and pass it to the **cultionet** fit method. A script
 is provided to help ease this process. To train a model on a dataset, use (as an example):
 
 ```commandline
@@ -231,7 +231,7 @@ After a model has been fit, the last checkpoint file can be found at `/project_d
 
 ### (Option 1) Build Docker images
 
-If using a GPU with CUDA 11.3, see the `cultionet` [Dockerfile](https://github.com/jgrss/cultionet/blob/main/Dockerfile)
+If using a GPU with CUDA 11.3, see the **cultionet** [Dockerfile](https://github.com/jgrss/cultionet/blob/main/Dockerfile)
 and [dockerfiles/README.md](https://github.com/jgrss/cultionet/blob/main/dockerfiles/README.md) to build a Docker image.
 
 If installing from scratch locally, see the instructions below.
@@ -375,7 +375,7 @@ export C_INCLUDE_PATH=/usr/include/gdal
 
 ### Package
 
-Install `cultionet`
+Install **cultionet**
 
 ```commandline
 git clone git@github.com:jgrss/cultionet.git
