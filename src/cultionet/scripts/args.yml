@@ -612,10 +612,10 @@ train:
     help: Whether to save batch validation metrics
     kwargs:
       action: store_true
-  refine_and_calibrate:
+  refine_model:
     short: ''
-    long: refine-calibrate
-    help: Whether to refine and calibrate a trained model
+    long: refine-model
+    help: Whether to refine a trained model
     kwargs:
       action: store_true
   skip_train:

@@ -306,36 +306,30 @@ def scale_logits(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
     return x / t
 
 
-class TemperatureScaling(LightningModule):
+class RefineLitModel(LightningModule):
     def __init__(
         self,
         in_features: int,
         num_classes: int = 2,
-        learning_rate_refine: float = 1e-3,
-        learning_rate_lbfgs: float = 0.01,
+        learning_rate: float = 1e-3,
         weight_decay: float = 0.01,
         eps: float = 1e-4,
-        max_iter: float = 50,
         edge_class: int = 2,
         class_counts: T.Optional[torch.Tensor] = None,
         cultionet_ckpt: T.Optional[T.Union[Path, str]] = None,
     ):
-        super(TemperatureScaling, self).__init__()
+        super(RefineLitModel, self).__init__()
 
         self.save_hyperparameters()
 
-        self.learning_rate_refine = learning_rate_refine
-        self.learning_rate_lbfgs = learning_rate_lbfgs
+        self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.eps = eps
-        self.max_iter = max_iter
         self.edge_class = edge_class
         self.class_counts = class_counts
-        self.softmax = Softmax(dim=1)
         self.cultionet_ckpt = cultionet_ckpt
 
         self.cultionet_model = None
-        self.crop_temperature = torch.nn.Parameter(torch.ones(1))
         self.geo_refine_model = GeoRefinement(
             in_features=in_features, out_channels=num_classes
         )
@@ -349,18 +343,9 @@ class TemperatureScaling(LightningModule):
         self,
         predictions: T.Dict[str, torch.Tensor],
         batch: Data,
-        crop_temperature: torch.Tensor,
         batch_idx: int = None,
     ) -> T.Dict[str, torch.Tensor]:
-        predictions = self.predict_probas(
-            predictions=predictions,
-            batch=batch,
-            with_no_grad=False,
-            scale_predict_logits=True,
-            crop_temperature=crop_temperature,
-        )
-
-        return predictions
+        return self.geo_refine_model(predictions, data=batch)
 
     def set_true_labels(self, batch: Data) -> torch.Tensor:
         # in case of multi-class, `true_crop` = 1, 2, etc.
@@ -369,15 +354,6 @@ class TemperatureScaling(LightningModule):
         ).long()
 
         return true_crop
-
-    def calc_refined_loss(
-        self, batch: T.Union[Data, T.List], predictions: torch.Tensor
-    ):
-        true_crop = self.set_true_labels(batch)
-        # Predicted crop values are logits
-        loss = self.crop_loss_refine(predictions["crop"], true_crop)
-
-        return loss
 
     def calc_loss(
         self,
@@ -389,28 +365,6 @@ class TemperatureScaling(LightningModule):
         loss = self.crop_loss(predictions["crop"], true_crop)
 
         return loss
-
-    def predict_probas(
-        self,
-        predictions: T.Dict[str, torch.Tensor],
-        batch: Data,
-        with_no_grad: bool,
-        scale_predict_logits: bool,
-    ) -> T.Dict[str, torch.Tensor]:
-        if with_no_grad:
-            with torch.no_grad():
-                # The inputs from cultionet are probabilities
-                # The output crop predictions are logits
-                predictions = self.geo_refine_model(predictions, data=batch)
-        else:
-            predictions = self.geo_refine_model(predictions, data=batch)
-        if scale_predict_logits:
-            predictions["crop"] = scale_logits(
-                predictions["crop"], self.crop_temperature
-            )
-        predictions["crop"] = self.softmax(predictions["crop"])
-
-        return predictions
 
     def training_step(
         self, batch: Data, batch_idx: int = None, optimizer_idx: int = None
@@ -429,33 +383,10 @@ class TemperatureScaling(LightningModule):
         with torch.no_grad():
             predictions = self.cultionet_model(batch)
 
-        if optimizer_idx == 0:
-            # The first optimizer is used for the refinement model
-            self.geo_refine_model.train()
-            predictions = self.predict_probas(
-                predictions=predictions,
-                batch=batch,
-                with_no_grad=False,
-                scale_predict_logits=False,
-            )
+        predictions = self(predictions, batch)
+        loss = self.calc_loss(batch, predictions)
 
-            loss = self.calc_refined_loss(batch, predictions)
-        else:
-            # The second optimizer is used for the probability calibration
-            self.geo_refine_model.eval()
-            predictions = self.predict_probas(
-                predictions=predictions,
-                batch=batch,
-                with_no_grad=True,
-                scale_predict_logits=True,
-            )
-
-            loss = self.calc_loss(batch, predictions)
-
-        metrics = {
-            "loss": loss,
-            "crop_temp": self.crop_temperature,
-        }
+        metrics = {"loss": loss}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         return metrics
@@ -463,52 +394,34 @@ class TemperatureScaling(LightningModule):
     def on_train_epoch_end(self, *args, **kwargs):
         """Save the scaling parameters on training end."""
         if self.logger.save_dir is not None:
-            scale_file = Path(self.logger.save_dir) / "temperature.scales"
-
-            temperature_scales = {
-                "crop": self.crop_temperature.item(),
-            }
-            with open(scale_file, mode="w") as f:
-                f.write(json.dumps(temperature_scales))
-
-            model_file = Path(self.logger.save_dir) / "temperature.pt"
+            model_file = Path(self.logger.save_dir) / "refine.pt"
             if model_file.is_file():
                 model_file.unlink()
             torch.save(self.geo_refine_model.state_dict(), model_file)
 
     def configure_loss(self):
         self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
-        self.crop_loss_refine = TanimotoDistLoss(scale_pos_weight=True)
 
     def configure_optimizers(self):
-        optimizer_adamw = torch.optim.AdamW(
+        optimizer = torch.optim.AdamW(
             list(self.geo_refine_model.parameters()),
-            lr=self.learning_rate_refine,
+            lr=self.learning_rate,
             weight_decay=self.weight_decay,
             eps=self.eps,
         )
-        optimizer_lbfgs = torch.optim.LBFGS(
-            [self.crop_temperature],
-            lr=self.learning_rate_lbfgs,
-            max_iter=self.max_iter,
-            line_search_fn=None,
-        )
         lr_scheduler = optim_lr_scheduler.CosineAnnealingLR(
-            optimizer_adamw, T_max=20, eta_min=1e-5, last_epoch=-1
+            optimizer, T_max=20, eta_min=1e-5, last_epoch=-1
         )
 
-        return (
-            {
-                "optimizer": optimizer_adamw,
-                "lr_scheduler": {
-                    "scheduler": lr_scheduler,
-                    "monitor": "loss",
-                    "interval": "epoch",
-                    "frequency": 1,
-                },
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": lr_scheduler,
+                "monitor": "loss",
+                "interval": "epoch",
+                "frequency": 1,
             },
-            {"optimizer": optimizer_lbfgs},
-        )
+        }
 
 
 class CultioLitModel(LightningModule):
@@ -536,7 +449,6 @@ class CultioLitModel(LightningModule):
         deep_sup_mask: bool = False,
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
-        crop_temperature: T.Optional[float] = None,
         temperature_lit_model: T.Optional[GeoRefinement] = None,
         scale_pos_weight: T.Optional[bool] = True,
         save_batch_val_metrics: T.Optional[bool] = False,
@@ -557,7 +469,6 @@ class CultioLitModel(LightningModule):
         self.num_classes = num_classes
         self.num_time_features = num_time_features
         self.class_counts = class_counts
-        self.crop_temperature = crop_temperature
         self.temperature_lit_model = temperature_lit_model
         self.scale_pos_weight = scale_pos_weight
         self.save_batch_val_metrics = save_batch_val_metrics
@@ -624,11 +535,7 @@ class CultioLitModel(LightningModule):
         """A prediction step for Lightning."""
         predictions = self.forward(batch, batch_idx)
         if self.temperature_lit_model is not None:
-            predictions = self.temperature_lit_model(predictions, data=batch)
-            predictions["crop"] = scale_logits(
-                predictions["crop"], self.crop_temperature
-            )
-            predictions["crop"] = self.softmax(predictions["crop"])
+            predictions = self.temperature_lit_model(predictions, batch)
 
         return predictions
 

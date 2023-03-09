@@ -26,7 +26,7 @@ from .models.cultio import GeoRefinement
 from .models.lightning import (
     CultioLitModel,
     MaskRCNNLitModel,
-    TemperatureScaling,
+    RefineLitModel,
 )
 from .utils.reshape import ModelOutputs
 from .utils.logging import set_color_logger
@@ -255,7 +255,7 @@ def fit(
     model_pruning: T.Optional[bool] = False,
     save_batch_val_metrics: T.Optional[bool] = False,
     skip_train: T.Optional[bool] = False,
-    refine_and_calibrate: T.Optional[bool] = False,
+    refine_model: T.Optional[bool] = False,
 ):
     """Fits a model.
 
@@ -307,7 +307,7 @@ def fit(
         model_pruning (Optional[bool]): Whether to prune the model. Default is False.
         save_batch_val_metrics (Optional[bool]): Whether to save batch validation metrics to a parquet file.
         skip_train (Optional[bool]): Whether to refine and calibrate a trained model.
-        refine_and_calibrate (Optional[bool]): Whether to skip training.
+        refine_model (Optional[bool]): Whether to skip training.
     """
     ckpt_file = Path(ckpt_file)
 
@@ -428,21 +428,19 @@ def fit(
                 datamodule=data_module,
                 ckpt_path=ckpt_file if ckpt_file.is_file() else None,
             )
-        if refine_and_calibrate:
-            temperature_data_module = EdgeDataModule(
-                train_ds=val_ds,
+        if refine_model:
+            refine_data_module = EdgeDataModule(
+                train_ds=train_ds,
                 batch_size=batch_size,
                 num_workers=load_batch_workers,
                 shuffle=True,
             )
-            temperature_ckpt_file = (
-                ckpt_file.parent / "temperature" / ckpt_file.name
-            )
-            temperature_ckpt_file.parent.mkdir(parents=True, exist_ok=True)
-            # Temperature checkpoints
-            temperature_cb_train_loss = ModelCheckpoint(
-                dirpath=temperature_ckpt_file.parent,
-                filename=temperature_ckpt_file.stem,
+            refine_ckpt_file = ckpt_file.parent / "refine" / ckpt_file.name
+            refine_ckpt_file.parent.mkdir(parents=True, exist_ok=True)
+            # refine checkpoints
+            refine_cb_train_loss = ModelCheckpoint(
+                dirpath=refine_ckpt_file.parent,
+                filename=refine_ckpt_file.stem,
                 save_last=True,
                 save_top_k=save_top_k,
                 mode="min",
@@ -451,21 +449,21 @@ def fit(
                 every_n_epochs=1,
             )
             # Early stopping
-            temperature_early_stop_callback = EarlyStopping(
+            refine_early_stop_callback = EarlyStopping(
                 monitor="loss",
                 min_delta=early_stopping_min_delta,
                 patience=5,
                 mode="min",
                 check_on_train_epoch_end=False,
             )
-            temperature_callbacks = [
+            refine_callbacks = [
                 lr_monitor,
-                temperature_cb_train_loss,
-                temperature_early_stop_callback,
+                refine_cb_train_loss,
+                refine_early_stop_callback,
             ]
-            temperature_trainer = pl.Trainer(
-                default_root_dir=str(temperature_ckpt_file.parent),
-                callbacks=temperature_callbacks,
+            refine_trainer = pl.Trainer(
+                default_root_dir=str(refine_ckpt_file.parent),
+                callbacks=refine_callbacks,
                 enable_checkpointing=True,
                 auto_lr_find=auto_lr_find,
                 auto_scale_batch_size=False,
@@ -484,18 +482,18 @@ def fit(
                 benchmark=False,
             )
             # Calibrate the logits
-            temperature_model = TemperatureScaling(
-                in_features=val_ds.num_features,
+            refine_model = RefineLitModel(
+                in_features=train_ds.num_features,
                 num_classes=num_classes,
                 edge_class=edge_class,
                 class_counts=class_counts,
                 cultionet_ckpt=ckpt_file,
             )
-            temperature_trainer.fit(
-                model=temperature_model,
-                datamodule=temperature_data_module,
-                ckpt_path=temperature_ckpt_file
-                if temperature_ckpt_file.is_file()
+            refine_trainer.fit(
+                model=refine_model,
+                datamodule=refine_data_module,
+                ckpt_path=refine_ckpt_file
+                if refine_ckpt_file.is_file()
                 else None,
             )
         if test_dataset is not None:
@@ -602,8 +600,7 @@ def predict_lightning(
     resampling: str,
     ref_res: float,
     compression: str,
-    crop_temperature: T.Optional[torch.Tensor] = None,
-    temperature_ckpt: T.Optional[Path] = None,
+    refine_pt: T.Optional[Path] = None,
 ):
     reference_image = Path(reference_image)
     out_path = Path(out_path)
@@ -642,15 +639,13 @@ def predict_lightning(
     )
 
     geo_refine_model = None
-    if crop_temperature is not None:
+    if refine_pt is not None:
+        assert refine_pt.is_file()
         geo_refine_model = GeoRefinement(
             in_features=dataset.num_features, out_channels=num_classes
         )
-        geo_refine_model.load_state_dict(
-            torch.load(temperature_ckpt.parent / "temperature.pt")
-        )
+        geo_refine_model.load_state_dict(torch.load(refine_pt))
         geo_refine_model.eval()
-    setattr(cultionet_lit_model, "crop_temperature", crop_temperature)
     setattr(cultionet_lit_model, "temperature_lit_model", geo_refine_model)
 
     # Make predictions
