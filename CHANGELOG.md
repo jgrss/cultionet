@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v1.7.0 (2023-03-09)
+* ([#49](https://github.com/jgrss/cultionet/pull/49))
+* Improved and fixed issues in ResUNet 3+ Psi architecture, introduced in v1.6.5
+
 ## v1.6.5 (2023-02-28)
 * Upgraded `geowombat` version following bug fix ([#48](https://github.com/jgrss/cultionet/pull/48))
 
