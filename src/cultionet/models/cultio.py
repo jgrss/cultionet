@@ -131,8 +131,8 @@ class GeoRefinement(torch.nn.Module):
                 kernel_size=1,
                 padding=0,
             ),
-            Softmax(dim=1),
         )
+        self.softmax = Softmax(dim=1)
 
     def proba_to_logit(self, x: torch.Tensor) -> torch.Tensor:
         return torch.log(x / (1.0 - x))
@@ -196,7 +196,7 @@ class GeoRefinement(torch.nn.Module):
         crop_x = torch.cat([m(crop_x) for m in self.crop_res_modules], dim=1)
 
         x = torch.cat([x, crop_x], dim=1)
-        x = self.fc(x) * geo_attention
+        x = self.softmax(self.fc(x) * geo_attention)
         predictions["crop"] = self.cg(x)
 
         return predictions
