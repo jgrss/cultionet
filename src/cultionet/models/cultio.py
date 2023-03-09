@@ -235,9 +235,15 @@ class CultioNet(torch.nn.Module):
         ds_features (int): The total number of dataset features (bands x time).
         ds_time_features (int): The number of dataset time features in each band/channel.
         filters (int): The number of output filters for each stream.
-        star_rnn_hidden_dim (int): The number of hidden features for the ConvSTAR layer.
-        star_rnn_n_layers (int): The number of ConvSTAR layers.
-        num_classes (int): The number of output classes.
+        num_classes (int): The number of output mask/crop classes.
+        model_type (str): The model architecture type.
+        activation_type (str): The nonlinear activation.
+        dilations (int | list): The convolution dilation or dilations.
+        res_block_type (str): The residual convolution block type.
+        attention_weights (str): The attention weight type.
+        deep_sup_dist (bool): Whether to use deep supervision on the distance layer.
+        deep_sup_edge (bool): Whether to use deep supervision on the edge layer.
+        deep_sup_mask (bool): Whether to use deep supervision on the mask layer.
     """
 
     def __init__(
