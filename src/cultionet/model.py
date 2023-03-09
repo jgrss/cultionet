@@ -438,7 +438,7 @@ def fit(
                 # For each epoch, train on a random
                 # subset of 50% of the data.
                 sampler=EpochRandomSampler(
-                    dataset=dataset, num_samples=int(len(dataset) * 0.5)
+                    dataset, num_samples=int(len(dataset) * 0.5)
                 ),
             )
             refine_ckpt_file = ckpt_file.parent / "refine" / ckpt_file.name
