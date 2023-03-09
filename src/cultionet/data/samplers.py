@@ -1,6 +1,5 @@
 from typing import Iterator, Sized
 
-import numpy as np
 from torch.utils.data import Sampler
 
 
