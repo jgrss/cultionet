@@ -430,7 +430,7 @@ def fit(
             )
         if refine_model:
             refine_data_module = EdgeDataModule(
-                train_ds=train_ds,
+                train_ds=dataset,
                 batch_size=batch_size,
                 num_workers=load_batch_workers,
                 shuffle=True,
