@@ -1,5 +1,6 @@
 import typing as T
 
+from torch.utils.data import Sampler
 from pytorch_lightning import LightningDataModule
 from torch_geometric.loader import DataLoader
 
@@ -7,8 +8,8 @@ from .datasets import EdgeDataset
 
 
 class EdgeDataModule(LightningDataModule):
-    """A Lightning data module
-    """
+    """A Lightning data module."""
+
     def __init__(
         self,
         train_ds: T.Optional[EdgeDataset] = None,
@@ -17,7 +18,8 @@ class EdgeDataModule(LightningDataModule):
         predict_ds: T.Optional[EdgeDataset] = None,
         batch_size: int = 5,
         num_workers: int = 0,
-        shuffle: bool = True
+        shuffle: bool = True,
+        sampler: T.Optional[Sampler] = None,
     ):
         super().__init__()
 
@@ -28,43 +30,41 @@ class EdgeDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.shuffle = shuffle
+        self.sampler = sampler
 
     def train_dataloader(self):
-        """Returns a data loader for train data
-        """
+        """Returns a data loader for train data."""
         return DataLoader(
             self.train_ds,
             batch_size=self.batch_size,
-            shuffle=self.shuffle,
-            num_workers=self.num_workers
+            shuffle=None if self.sampler is not None else self.shuffle,
+            num_workers=self.num_workers,
+            sampler=self.sampler,
         )
 
     def val_dataloader(self):
-        """Returns a data loader for validation data
-        """
+        """Returns a data loader for validation data."""
         return DataLoader(
             self.val_ds,
             batch_size=self.batch_size,
             shuffle=self.shuffle,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
         )
 
     def test_dataloader(self):
-        """Returns a data loader for test data
-        """
+        """Returns a data loader for test data."""
         return DataLoader(
             self.test_ds,
             batch_size=self.batch_size,
             shuffle=self.shuffle,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
         )
 
     def predict_dataloader(self):
-        """Returns a data loader for predict data
-        """
+        """Returns a data loader for predict data."""
         return DataLoader(
             self.predict_ds,
             batch_size=self.batch_size,
             shuffle=self.shuffle,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
         )

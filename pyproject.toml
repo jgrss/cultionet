@@ -1,7 +1,26 @@
 [build-system]
 requires = [
-    'setuptools>=65.5.1',
-    'wheel',
-    'numpy>=1.22.0',
-    'Cython>=0.29.0,<3.0.0',
+  'setuptools>=65.5.1',
+  'wheel',
+  'numpy>=1.22.0',
+  'Cython>=0.29.0,<3.0.0',
 ]
+
+[tool.black]
+line-length = 79
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | \.vscode
+  | \.idea
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''

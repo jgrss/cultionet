@@ -11,14 +11,14 @@ from .base_layers import (
     PoolConv,
     PoolResidualConv,
     ResidualAConv,
-    ResidualConv
+    ResidualConv,
 )
 from .enums import ModelTypes, ResBlockTypes
 
 
 class UNet3Connector(torch.nn.Module):
-    """Connects layers in a UNet 3+ architecture
-    """
+    """Connects layers in a UNet 3+ architecture."""
+
     def __init__(
         self,
         channels: T.List[int],
@@ -29,17 +29,20 @@ class UNet3Connector(torch.nn.Module):
         n_pools: int = 0,
         n_prev_down: int = 0,
         n_stream_down: int = 0,
-        attention_weights: str = 'spatial_channel',
+        attention_weights: str = "spatial_channel",
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
         model_type: enum = ModelTypes.UNET,
         res_block_type: enum = ResBlockTypes.RESA,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(UNet3Connector, self).__init__()
 
-        assert attention_weights in ['gate', 'fractal', 'spatial_channel'], \
-            "Choose from 'gate', 'fractal', or 'spatial_channel' attention weights."
+        assert attention_weights in [
+            "gate",
+            "fractal",
+            "spatial_channel",
+        ], "Choose from 'gate', 'fractal', or 'spatial_channel' attention weights."
 
         assert model_type in (ModelTypes.UNET, ModelTypes.RESUNET)
         assert res_block_type in (ResBlockTypes.RES, ResBlockTypes.RESA)
@@ -71,19 +74,19 @@ class UNet3Connector(torch.nn.Module):
                 if model_type == ModelTypes.UNET:
                     setattr(
                         self,
-                        f'pool_{n}',
+                        f"pool_{n}",
                         PoolConv(
                             in_channels=channels[n],
                             out_channels=channels[0],
                             pool_size=pool_size,
                             double_dilation=dilations[0],
-                            activation_type=activation_type
-                        )
+                            activation_type=activation_type,
+                        ),
                     )
                 else:
                     setattr(
                         self,
-                        f'pool_{n}',
+                        f"pool_{n}",
                         PoolResidualConv(
                             in_channels=channels[n],
                             out_channels=channels[0],
@@ -91,8 +94,8 @@ class UNet3Connector(torch.nn.Module):
                             dilations=dilations,
                             attention_weights=attention_weights,
                             activation_type=activation_type,
-                            res_block_type=res_block_type
-                        )
+                            res_block_type=res_block_type,
+                        ),
                     )
                 pool_size = int(pool_size / 2)
                 self.cat_channels += channels[0]
@@ -103,7 +106,7 @@ class UNet3Connector(torch.nn.Module):
                     out_channels=up_channels,
                     init_point_conv=init_point_conv,
                     double_dilation=dilations[0],
-                    activation_type=activation_type
+                    activation_type=activation_type,
                 )
             else:
                 if res_block_type == ResBlockTypes.RES:
@@ -112,7 +115,7 @@ class UNet3Connector(torch.nn.Module):
                         out_channels=up_channels,
                         dilation=dilations[0],
                         attention_weights=attention_weights,
-                        activation_type=activation_type
+                        activation_type=activation_type,
                     )
                 else:
                     self.prev_backbone = ResidualAConv(
@@ -120,7 +123,7 @@ class UNet3Connector(torch.nn.Module):
                         out_channels=up_channels,
                         dilations=dilations,
                         attention_weights=attention_weights,
-                        activation_type=activation_type
+                        activation_type=activation_type,
                     )
             self.cat_channels += up_channels
         if self.is_side_stream:
@@ -131,7 +134,7 @@ class UNet3Connector(torch.nn.Module):
                     out_channels=up_channels,
                     init_point_conv=init_point_conv,
                     double_dilation=dilations[0],
-                    activation_type=activation_type
+                    activation_type=activation_type,
                 )
             else:
                 if res_block_type == ResBlockTypes.RES:
@@ -140,7 +143,7 @@ class UNet3Connector(torch.nn.Module):
                         out_channels=up_channels,
                         dilation=dilations[0],
                         attention_weights=attention_weights,
-                        activation_type=activation_type
+                        activation_type=activation_type,
                     )
                 else:
                     self.prev = ResidualAConv(
@@ -148,7 +151,7 @@ class UNet3Connector(torch.nn.Module):
                         out_channels=up_channels,
                         dilations=dilations,
                         attention_weights=attention_weights,
-                        activation_type=activation_type
+                        activation_type=activation_type,
                     )
             self.cat_channels += up_channels
         # Previous output, downstream
@@ -157,89 +160,87 @@ class UNet3Connector(torch.nn.Module):
                 if model_type == ModelTypes.UNET:
                     setattr(
                         self,
-                        f'prev_{n}',
+                        f"prev_{n}",
                         DoubleConv(
                             in_channels=up_channels,
                             out_channels=up_channels,
                             init_point_conv=init_point_conv,
                             double_dilation=dilations[0],
-                            activation_type=activation_type
-                        )
+                            activation_type=activation_type,
+                        ),
                     )
                 else:
                     if res_block_type == ResBlockTypes.RES:
                         setattr(
                             self,
-                            f'prev_{n}',
+                            f"prev_{n}",
                             ResidualConv(
                                 in_channels=up_channels,
                                 out_channels=up_channels,
                                 dilation=dilations[0],
                                 attention_weights=attention_weights,
-                                activation_type=activation_type
-                            )
+                                activation_type=activation_type,
+                            ),
                         )
                     else:
                         setattr(
                             self,
-                            f'prev_{n}',
+                            f"prev_{n}",
                             ResidualAConv(
                                 in_channels=up_channels,
                                 out_channels=up_channels,
                                 dilations=dilations,
                                 attention_weights=attention_weights,
-                                activation_type=activation_type
-                            )
+                                activation_type=activation_type,
+                            ),
                         )
                 self.cat_channels += up_channels
         # Previous output, (same) downstream
         if self.n_stream_down > 0:
             for n in range(0, self.n_stream_down):
                 in_stream_channels = up_channels
-                if self.attention_weights is not None and (self.attention_weights == 'gate'):
+                if self.attention_weights is not None and (
+                    self.attention_weights == "gate"
+                ):
                     attention_module = AttentionGate(up_channels, up_channels)
-                    setattr(
-                        self,
-                        f'attn_stream_{n}',
-                        attention_module
-                    )
+                    setattr(self, f"attn_stream_{n}", attention_module)
                     in_stream_channels = up_channels * 2
                 if model_type == ModelTypes.UNET:
                     setattr(
                         self,
-                        f'stream_{n}',
+                        f"stream_{n}",
                         DoubleConv(
                             in_channels=in_stream_channels,
                             out_channels=up_channels,
                             init_point_conv=init_point_conv,
                             double_dilation=dilations[0],
-                            activation_type=activation_type
-                        )
+                            activation_type=activation_type,
+                        ),
                     )
                 else:
                     if res_block_type == ResBlockTypes.RES:
                         setattr(
                             self,
-                            f'stream_{n}',
+                            f"stream_{n}",
                             ResidualConv(
                                 in_channels=in_stream_channels,
                                 out_channels=up_channels,
                                 dilation=dilations[0],
                                 attention_weights=attention_weights,
-                                activation_type=activation_type
-                            )
+                                activation_type=activation_type,
+                            ),
                         )
                     else:
                         setattr(
                             self,
-                            f'stream_{n}',
+                            f"stream_{n}",
                             ResidualAConv(
                                 in_channels=in_stream_channels,
                                 out_channels=up_channels,
                                 dilations=dilations,
                                 attention_weights=attention_weights,
-                                activation_type=activation_type
-                            )
+                                activation_type=activation_type,
+                            ),
                         )
                 self.cat_channels += up_channels
 
@@ -249,14 +250,14 @@ class UNet3Connector(torch.nn.Module):
                 in_channels=channels[4],
                 out_channels=channels[0],
                 init_point_conv=init_point_conv,
-                activation_type=activation_type
+                activation_type=activation_type,
             )
             self.final = DoubleConv(
                 in_channels=self.cat_channels,
                 out_channels=up_channels,
                 init_point_conv=init_point_conv,
                 double_dilation=dilations[0],
-                activation_type=activation_type
+                activation_type=activation_type,
             )
         else:
             if res_block_type == ResBlockTypes.RES:
@@ -265,14 +266,14 @@ class UNet3Connector(torch.nn.Module):
                     out_channels=channels[0],
                     dilation=dilations[0],
                     attention_weights=attention_weights,
-                    activation_type=activation_type
+                    activation_type=activation_type,
                 )
                 self.final = ResidualConv(
                     in_channels=self.cat_channels,
                     out_channels=up_channels,
                     dilation=dilations[0],
                     attention_weights=attention_weights,
-                    activation_type=activation_type
+                    activation_type=activation_type,
                 )
             else:
                 self.conv4_0 = ResidualAConv(
@@ -280,14 +281,14 @@ class UNet3Connector(torch.nn.Module):
                     out_channels=channels[0],
                     dilations=dilations,
                     attention_weights=attention_weights,
-                    activation_type=activation_type
+                    activation_type=activation_type,
                 )
                 self.final = ResidualAConv(
                     in_channels=self.cat_channels,
                     out_channels=up_channels,
                     dilations=dilations,
                     attention_weights=attention_weights,
-                    activation_type=activation_type
+                    activation_type=activation_type,
                 )
             # self.pool4_0 = AtrousPyramidPooling(
             #     in_channels=channels[0],
@@ -300,72 +301,76 @@ class UNet3Connector(torch.nn.Module):
         x4_0: torch.Tensor,
         pools: T.List[torch.Tensor] = None,
         prev_down: T.List[torch.Tensor] = None,
-        stream_down: T.List[torch.Tensor] = None
+        stream_down: T.List[torch.Tensor] = None,
     ):
         h = []
         # Pooling layer of the backbone
         if pools is not None:
-            assert self.n_pools == len(pools), \
-                'There are no convolutions available for the pool layers.'
+            assert self.n_pools == len(
+                pools
+            ), "There are no convolutions available for the pool layers."
             for n, x in zip(range(self.n_pools), pools):
-                c = getattr(self, f'pool_{n}')
+                c = getattr(self, f"pool_{n}")
                 h += [c(x)]
         # Up down layers from the previous head
         if prev_down is not None:
-            assert self.n_prev_down == len(prev_down), \
-                'There are no convolutions available for the previous downstream layers.'
+            assert self.n_prev_down == len(
+                prev_down
+            ), "There are no convolutions available for the previous downstream layers."
             for n, x in zip(range(self.n_prev_down), prev_down):
-                c = getattr(self, f'prev_{n}')
+                c = getattr(self, f"prev_{n}")
                 h += [
                     c(
                         self.up(
-                            x,
-                            size=prev_same[0][1].shape[-2:],
-                            mode='bilinear'
+                            x, size=prev_same[0][1].shape[-2:], mode="bilinear"
                         )
                     )
                 ]
-        assert len(prev_same) == sum([self.use_backbone, self.is_side_stream]), \
-            'The previous same layers do not match the setup.'
+        assert len(prev_same) == sum(
+            [self.use_backbone, self.is_side_stream]
+        ), "The previous same layers do not match the setup."
         # Previous same layers from the previous head
         for conv_name, prev_inputs in prev_same:
             c = getattr(self, conv_name)
             h += [c(prev_inputs)]
-        if self.attention_weights is not None and (self.attention_weights == 'gate'):
+        if self.attention_weights is not None and (
+            self.attention_weights == "gate"
+        ):
             prev_same_hidden = h[-1].clone()
         # Previous down layers from the same head
         if stream_down is not None:
-            assert self.n_stream_down == len(stream_down), \
-                'There are no convolutions available for the downstream layers.'
+            assert self.n_stream_down == len(
+                stream_down
+            ), "There are no convolutions available for the downstream layers."
             for n, x in zip(range(self.n_stream_down), stream_down):
-                if self.attention_weights is not None and (self.attention_weights == 'gate'):
+                if self.attention_weights is not None and (
+                    self.attention_weights == "gate"
+                ):
                     # Gate
-                    g = self.up(x, size=prev_same[0][1].shape[-2:], mode='bilinear')
-                    c_attn = getattr(self, f'attn_stream_{n}')
+                    g = self.up(
+                        x, size=prev_same[0][1].shape[-2:], mode="bilinear"
+                    )
+                    c_attn = getattr(self, f"attn_stream_{n}")
                     # Attention gate
                     attn_out = c_attn(g, prev_same_hidden)
-                    c = getattr(self, f'stream_{n}')
+                    c = getattr(self, f"stream_{n}")
                     # Concatenate attention weights
                     h += [c(torch.cat([attn_out, g], dim=1))]
                 else:
-                    c = getattr(self, f'stream_{n}')
+                    c = getattr(self, f"stream_{n}")
                     h += [
                         c(
                             self.up(
                                 x,
                                 size=prev_same[0][1].shape[-2:],
-                                mode='bilinear'
+                                mode="bilinear",
                             )
                         )
                     ]
 
         # Lowest level
         x4_0_up = self.conv4_0(
-            self.up(
-                x4_0,
-                size=prev_same[0][1].shape[-2:],
-                mode='bilinear'
-            )
+            self.up(x4_0, size=prev_same[0][1].shape[-2:], mode="bilinear")
         )
         if self.pool4_0 is not None:
             h += [self.pool4_0(x4_0_up)]
@@ -378,15 +383,15 @@ class UNet3Connector(torch.nn.Module):
 
 
 class UNet3P_3_1(torch.nn.Module):
-    """UNet 3+ connection from backbone to upstream 3,1
-    """
+    """UNet 3+ connection from backbone to upstream 3,1."""
+
     def __init__(
         self,
         channels: T.Sequence[int],
         up_channels: int,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(UNet3P_3_1, self).__init__()
 
@@ -400,7 +405,7 @@ class UNet3P_3_1(torch.nn.Module):
             init_point_conv=init_point_conv,
             dilations=[double_dilation],
             model_type=ModelTypes.UNET,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(
@@ -412,24 +417,24 @@ class UNet3P_3_1(torch.nn.Module):
         x4_0: torch.Tensor,
     ) -> torch.Tensor:
         h = self.conv(
-            prev_same=[('prev_backbone', x3_0)],
+            prev_same=[("prev_backbone", x3_0)],
             pools=[x0_0, x1_0, x2_0],
-            x4_0=x4_0
+            x4_0=x4_0,
         )
 
         return h
 
 
 class UNet3P_2_2(torch.nn.Module):
-    """UNet 3+ connection from backbone to upstream 2,2
-    """
+    """UNet 3+ connection from backbone to upstream 2,2."""
+
     def __init__(
         self,
         channels: T.Sequence[int],
         up_channels: int,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(UNet3P_2_2, self).__init__()
 
@@ -444,7 +449,7 @@ class UNet3P_2_2(torch.nn.Module):
             init_point_conv=init_point_conv,
             dilations=[double_dilation],
             model_type=ModelTypes.UNET,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(
@@ -456,25 +461,25 @@ class UNet3P_2_2(torch.nn.Module):
         x4_0: torch.Tensor,
     ) -> torch.Tensor:
         h = self.conv(
-            prev_same=[('prev_backbone', x2_0)],
+            prev_same=[("prev_backbone", x2_0)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
-            stream_down=[h3_1]
+            stream_down=[h3_1],
         )
 
         return h
 
 
 class UNet3P_1_3(torch.nn.Module):
-    """UNet 3+ connection from backbone to upstream 1,3
-    """
+    """UNet 3+ connection from backbone to upstream 1,3."""
+
     def __init__(
         self,
         channels: T.Sequence[int],
         up_channels: int,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(UNet3P_1_3, self).__init__()
 
@@ -489,7 +494,7 @@ class UNet3P_1_3(torch.nn.Module):
             init_point_conv=init_point_conv,
             dilations=[double_dilation],
             model_type=ModelTypes.UNET,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(
@@ -501,25 +506,25 @@ class UNet3P_1_3(torch.nn.Module):
         x4_0: torch.Tensor,
     ) -> torch.Tensor:
         h = self.conv(
-            prev_same=[('prev_backbone', x1_0)],
+            prev_same=[("prev_backbone", x1_0)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h3_1, h2_2]
+            stream_down=[h3_1, h2_2],
         )
 
         return h
 
 
 class UNet3P_0_4(torch.nn.Module):
-    """UNet 3+ connection from backbone to upstream 0,4
-    """
+    """UNet 3+ connection from backbone to upstream 0,4."""
+
     def __init__(
         self,
         channels: T.Sequence[int],
         up_channels: int,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(UNet3P_0_4, self).__init__()
 
@@ -535,7 +540,7 @@ class UNet3P_0_4(torch.nn.Module):
             init_point_conv=init_point_conv,
             dilations=[double_dilation],
             model_type=ModelTypes.UNET,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(
@@ -547,24 +552,24 @@ class UNet3P_0_4(torch.nn.Module):
         x4_0: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
         h = self.conv(
-            prev_same=[('prev_backbone', x0_0)],
+            prev_same=[("prev_backbone", x0_0)],
             x4_0=x4_0,
-            stream_down=[h3_1, h2_2, h1_3]
+            stream_down=[h3_1, h2_2, h1_3],
         )
 
         return h
 
 
 class UNet3_3_1(torch.nn.Module):
-    """UNet 3+ connection from backbone to upstream 3,1
-    """
+    """UNet 3+ connection from backbone to upstream 3,1."""
+
     def __init__(
         self,
         channels: T.Sequence[int],
         up_channels: int,
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(UNet3_3_1, self).__init__()
 
@@ -579,7 +584,7 @@ class UNet3_3_1(torch.nn.Module):
             n_pools=3,
             init_point_conv=init_point_conv,
             dilations=dilations,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         # Edge stream connection
         self.conv_edge = UNet3Connector(
@@ -589,7 +594,7 @@ class UNet3_3_1(torch.nn.Module):
             n_pools=3,
             init_point_conv=init_point_conv,
             dilations=dilations,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         # Mask stream connection
         self.conv_mask = UNet3Connector(
@@ -599,7 +604,7 @@ class UNet3_3_1(torch.nn.Module):
             n_pools=3,
             init_point_conv=init_point_conv,
             dilations=dilations,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(
@@ -612,40 +617,40 @@ class UNet3_3_1(torch.nn.Module):
     ) -> T.Dict[str, torch.Tensor]:
         # Distance logits
         h_dist = self.conv_dist(
-            prev_same=[('prev_backbone', x3_0)],
+            prev_same=[("prev_backbone", x3_0)],
             pools=[x0_0, x1_0, x2_0],
-            x4_0=x4_0
+            x4_0=x4_0,
         )
         # Output distance logits pass to edge layer
         h_edge = self.conv_edge(
-            prev_same=[('prev_backbone', x3_0), ('prev', h_dist)],
+            prev_same=[("prev_backbone", x3_0), ("prev", h_dist)],
             pools=[x0_0, x1_0, x2_0],
-            x4_0=x4_0
+            x4_0=x4_0,
         )
         # Output edge logits pass to mask layer
         h_mask = self.conv_mask(
-            prev_same=[('prev_backbone', x3_0), ('prev', h_edge)],
+            prev_same=[("prev_backbone", x3_0), ("prev", h_edge)],
             pools=[x0_0, x1_0, x2_0],
-            x4_0=x4_0
+            x4_0=x4_0,
         )
 
         return {
-            'dist': h_dist,
-            'edge': h_edge,
-            'mask': h_mask,
+            "dist": h_dist,
+            "edge": h_edge,
+            "mask": h_mask,
         }
 
 
 class UNet3_2_2(torch.nn.Module):
-    """UNet 3+ connection from backbone to upstream 2,2
-    """
+    """UNet 3+ connection from backbone to upstream 2,2."""
+
     def __init__(
         self,
         channels: T.Sequence[int],
         up_channels: int,
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(UNet3_2_2, self).__init__()
 
@@ -660,7 +665,7 @@ class UNet3_2_2(torch.nn.Module):
             n_stream_down=1,
             init_point_conv=init_point_conv,
             dilations=dilations,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
@@ -670,7 +675,7 @@ class UNet3_2_2(torch.nn.Module):
             n_stream_down=1,
             init_point_conv=init_point_conv,
             dilations=dilations,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -680,7 +685,7 @@ class UNet3_2_2(torch.nn.Module):
             n_stream_down=1,
             init_point_conv=init_point_conv,
             dilations=dilations,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(
@@ -694,41 +699,41 @@ class UNet3_2_2(torch.nn.Module):
         x4_0: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
         h_dist = self.conv_dist(
-            prev_same=[('prev_backbone', x2_0)],
+            prev_same=[("prev_backbone", x2_0)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
-            stream_down=[h3_1_dist]
+            stream_down=[h3_1_dist],
         )
         h_edge = self.conv_edge(
-            prev_same=[('prev_backbone', x2_0), ('prev', h_dist)],
+            prev_same=[("prev_backbone", x2_0), ("prev", h_dist)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
-            stream_down=[h3_1_edge]
+            stream_down=[h3_1_edge],
         )
         h_mask = self.conv_mask(
-            prev_same=[('prev_backbone', x2_0), ('prev', h_edge)],
+            prev_same=[("prev_backbone", x2_0), ("prev", h_edge)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
-            stream_down=[h3_1_mask]
+            stream_down=[h3_1_mask],
         )
 
         return {
-            'dist': h_dist,
-            'edge': h_edge,
-            'mask': h_mask,
+            "dist": h_dist,
+            "edge": h_edge,
+            "mask": h_mask,
         }
 
 
 class UNet3_1_3(torch.nn.Module):
-    """UNet 3+ connection from backbone to upstream 1,3
-    """
+    """UNet 3+ connection from backbone to upstream 1,3."""
+
     def __init__(
         self,
         channels: T.Sequence[int],
         up_channels: int,
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(UNet3_1_3, self).__init__()
 
@@ -743,7 +748,7 @@ class UNet3_1_3(torch.nn.Module):
             n_stream_down=2,
             init_point_conv=init_point_conv,
             dilations=dilations,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
@@ -753,7 +758,7 @@ class UNet3_1_3(torch.nn.Module):
             n_stream_down=2,
             init_point_conv=init_point_conv,
             dilations=dilations,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -763,7 +768,7 @@ class UNet3_1_3(torch.nn.Module):
             n_stream_down=2,
             init_point_conv=init_point_conv,
             dilations=dilations,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(
@@ -779,41 +784,41 @@ class UNet3_1_3(torch.nn.Module):
         x4_0: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
         h_dist = self.conv_dist(
-            prev_same=[('prev_backbone', x1_0)],
+            prev_same=[("prev_backbone", x1_0)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h3_1_dist, h2_2_dist]
+            stream_down=[h3_1_dist, h2_2_dist],
         )
         h_edge = self.conv_edge(
-            prev_same=[('prev_backbone', x1_0), ('prev', h_dist)],
+            prev_same=[("prev_backbone", x1_0), ("prev", h_dist)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h3_1_edge, h2_2_edge]
+            stream_down=[h3_1_edge, h2_2_edge],
         )
         h_mask = self.conv_mask(
-            prev_same=[('prev_backbone', x1_0), ('prev', h_edge)],
+            prev_same=[("prev_backbone", x1_0), ("prev", h_edge)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h3_1_mask, h2_2_mask]
+            stream_down=[h3_1_mask, h2_2_mask],
         )
 
         return {
-            'dist': h_dist,
-            'edge': h_edge,
-            'mask': h_mask,
+            "dist": h_dist,
+            "edge": h_edge,
+            "mask": h_mask,
         }
 
 
 class UNet3_0_4(torch.nn.Module):
-    """UNet 3+ connection from backbone to upstream 0,4
-    """
+    """UNet 3+ connection from backbone to upstream 0,4."""
+
     def __init__(
         self,
         channels: T.Sequence[int],
         up_channels: int,
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(UNet3_0_4, self).__init__()
 
@@ -827,7 +832,7 @@ class UNet3_0_4(torch.nn.Module):
             n_stream_down=3,
             init_point_conv=init_point_conv,
             dilations=dilations,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
@@ -836,7 +841,7 @@ class UNet3_0_4(torch.nn.Module):
             n_stream_down=3,
             init_point_conv=init_point_conv,
             dilations=dilations,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -845,7 +850,7 @@ class UNet3_0_4(torch.nn.Module):
             n_stream_down=3,
             init_point_conv=init_point_conv,
             dilations=dilations,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(
@@ -863,39 +868,39 @@ class UNet3_0_4(torch.nn.Module):
         x4_0: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
         h_dist = self.conv_dist(
-            prev_same=[('prev_backbone', x0_0)],
+            prev_same=[("prev_backbone", x0_0)],
             x4_0=x4_0,
-            stream_down=[h3_1_dist, h2_2_dist, h1_3_dist]
+            stream_down=[h3_1_dist, h2_2_dist, h1_3_dist],
         )
         h_edge = self.conv_edge(
-            prev_same=[('prev_backbone', x0_0), ('prev', h_dist)],
+            prev_same=[("prev_backbone", x0_0), ("prev", h_dist)],
             x4_0=x4_0,
-            stream_down=[h3_1_edge, h2_2_edge, h1_3_edge]
+            stream_down=[h3_1_edge, h2_2_edge, h1_3_edge],
         )
         h_mask = self.conv_mask(
-            prev_same=[('prev_backbone', x0_0), ('prev', h_edge)],
+            prev_same=[("prev_backbone", x0_0), ("prev", h_edge)],
             x4_0=x4_0,
-            stream_down=[h3_1_mask, h2_2_mask, h1_3_mask]
+            stream_down=[h3_1_mask, h2_2_mask, h1_3_mask],
         )
 
         return {
-            'dist': h_dist,
-            'edge': h_edge,
-            'mask': h_mask,
+            "dist": h_dist,
+            "edge": h_edge,
+            "mask": h_mask,
         }
 
 
 class ResUNet3_3_1(torch.nn.Module):
-    """Residual UNet 3+ connection from backbone to upstream 3,1
-    """
+    """Residual UNet 3+ connection from backbone to upstream 3,1."""
+
     def __init__(
         self,
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.Sequence[int] = None,
-        attention_weights: str = 'spatial_channel',
-        activation_type: str = 'LeakyReLU',
-        res_block_type: enum = ResBlockTypes.RESA
+        attention_weights: str = "spatial_channel",
+        activation_type: str = "LeakyReLU",
+        res_block_type: enum = ResBlockTypes.RESA,
     ):
         super(ResUNet3_3_1, self).__init__()
 
@@ -913,7 +918,7 @@ class ResUNet3_3_1(torch.nn.Module):
             attention_weights=attention_weights,
             model_type=ModelTypes.RESUNET,
             res_block_type=res_block_type,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         # Edge stream connection
         self.conv_edge = UNet3Connector(
@@ -927,7 +932,7 @@ class ResUNet3_3_1(torch.nn.Module):
             attention_weights=attention_weights,
             model_type=ModelTypes.RESUNET,
             res_block_type=res_block_type,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         # Mask stream connection
         self.conv_mask = UNet3Connector(
@@ -941,7 +946,7 @@ class ResUNet3_3_1(torch.nn.Module):
             attention_weights=attention_weights,
             model_type=ModelTypes.RESUNET,
             res_block_type=res_block_type,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(
@@ -954,41 +959,41 @@ class ResUNet3_3_1(torch.nn.Module):
     ) -> T.Dict[str, torch.Tensor]:
         # Distance logits
         h_dist = self.conv_dist(
-            prev_same=[('prev_backbone', x3_0)],
+            prev_same=[("prev_backbone", x3_0)],
             pools=[x0_0, x1_0, x2_0],
-            x4_0=x4_0
+            x4_0=x4_0,
         )
         # Output distance logits pass to edge layer
         h_edge = self.conv_edge(
-            prev_same=[('prev_backbone', x3_0), ('prev', h_dist)],
+            prev_same=[("prev_backbone", x3_0), ("prev", h_dist)],
             pools=[x0_0, x1_0, x2_0],
-            x4_0=x4_0
+            x4_0=x4_0,
         )
         # Output edge logits pass to mask layer
         h_mask = self.conv_mask(
-            prev_same=[('prev_backbone', x3_0), ('prev', h_edge)],
+            prev_same=[("prev_backbone", x3_0), ("prev", h_edge)],
             pools=[x0_0, x1_0, x2_0],
-            x4_0=x4_0
+            x4_0=x4_0,
         )
 
         return {
-            'dist': h_dist,
-            'edge': h_edge,
-            'mask': h_mask,
+            "dist": h_dist,
+            "edge": h_edge,
+            "mask": h_mask,
         }
 
 
 class ResUNet3_2_2(torch.nn.Module):
-    """Residual UNet 3+ connection from backbone to upstream 2,2
-    """
+    """Residual UNet 3+ connection from backbone to upstream 2,2."""
+
     def __init__(
         self,
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.Sequence[int] = None,
-        attention_weights: str = 'spatial_channel',
-        activation_type: str = 'LeakyReLU',
-        res_block_type: enum = ResBlockTypes.RESA
+        attention_weights: str = "spatial_channel",
+        activation_type: str = "LeakyReLU",
+        res_block_type: enum = ResBlockTypes.RESA,
     ):
         super(ResUNet3_2_2, self).__init__()
 
@@ -1006,7 +1011,7 @@ class ResUNet3_2_2(torch.nn.Module):
             attention_weights=attention_weights,
             model_type=ModelTypes.RESUNET,
             res_block_type=res_block_type,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
@@ -1020,7 +1025,7 @@ class ResUNet3_2_2(torch.nn.Module):
             attention_weights=attention_weights,
             model_type=ModelTypes.RESUNET,
             res_block_type=res_block_type,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -1034,7 +1039,7 @@ class ResUNet3_2_2(torch.nn.Module):
             attention_weights=attention_weights,
             model_type=ModelTypes.RESUNET,
             res_block_type=res_block_type,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(
@@ -1048,42 +1053,42 @@ class ResUNet3_2_2(torch.nn.Module):
         x4_0: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
         h_dist = self.conv_dist(
-            prev_same=[('prev_backbone', x2_0)],
+            prev_same=[("prev_backbone", x2_0)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
-            stream_down=[h3_1_dist]
+            stream_down=[h3_1_dist],
         )
         h_edge = self.conv_edge(
-            prev_same=[('prev_backbone', x2_0), ('prev', h_dist)],
+            prev_same=[("prev_backbone", x2_0), ("prev", h_dist)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
-            stream_down=[h3_1_edge]
+            stream_down=[h3_1_edge],
         )
         h_mask = self.conv_mask(
-            prev_same=[('prev_backbone', x2_0), ('prev', h_edge)],
+            prev_same=[("prev_backbone", x2_0), ("prev", h_edge)],
             pools=[x0_0, x1_0],
             x4_0=x4_0,
-            stream_down=[h3_1_mask]
+            stream_down=[h3_1_mask],
         )
 
         return {
-            'dist': h_dist,
-            'edge': h_edge,
-            'mask': h_mask,
+            "dist": h_dist,
+            "edge": h_edge,
+            "mask": h_mask,
         }
 
 
 class ResUNet3_1_3(torch.nn.Module):
-    """Residual UNet 3+ connection from backbone to upstream 1,3
-    """
+    """Residual UNet 3+ connection from backbone to upstream 1,3."""
+
     def __init__(
         self,
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.Sequence[int] = None,
-        attention_weights: str = 'spatial_channel',
-        activation_type: str = 'LeakyReLU',
-        res_block_type: enum = ResBlockTypes.RESA
+        attention_weights: str = "spatial_channel",
+        activation_type: str = "LeakyReLU",
+        res_block_type: enum = ResBlockTypes.RESA,
     ):
         super(ResUNet3_1_3, self).__init__()
 
@@ -1101,7 +1106,7 @@ class ResUNet3_1_3(torch.nn.Module):
             attention_weights=attention_weights,
             model_type=ModelTypes.RESUNET,
             res_block_type=res_block_type,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
@@ -1115,7 +1120,7 @@ class ResUNet3_1_3(torch.nn.Module):
             attention_weights=attention_weights,
             model_type=ModelTypes.RESUNET,
             res_block_type=res_block_type,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -1129,7 +1134,7 @@ class ResUNet3_1_3(torch.nn.Module):
             attention_weights=attention_weights,
             model_type=ModelTypes.RESUNET,
             res_block_type=res_block_type,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(
@@ -1145,42 +1150,42 @@ class ResUNet3_1_3(torch.nn.Module):
         x4_0: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
         h_dist = self.conv_dist(
-            prev_same=[('prev_backbone', x1_0)],
+            prev_same=[("prev_backbone", x1_0)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h3_1_dist, h2_2_dist]
+            stream_down=[h3_1_dist, h2_2_dist],
         )
         h_edge = self.conv_edge(
-            prev_same=[('prev_backbone', x1_0), ('prev', h_dist)],
+            prev_same=[("prev_backbone", x1_0), ("prev", h_dist)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h3_1_edge, h2_2_edge]
+            stream_down=[h3_1_edge, h2_2_edge],
         )
         h_mask = self.conv_mask(
-            prev_same=[('prev_backbone', x1_0), ('prev', h_edge)],
+            prev_same=[("prev_backbone", x1_0), ("prev", h_edge)],
             pools=[x0_0],
             x4_0=x4_0,
-            stream_down=[h3_1_mask, h2_2_mask]
+            stream_down=[h3_1_mask, h2_2_mask],
         )
 
         return {
-            'dist': h_dist,
-            'edge': h_edge,
-            'mask': h_mask,
+            "dist": h_dist,
+            "edge": h_edge,
+            "mask": h_mask,
         }
 
 
 class ResUNet3_0_4(torch.nn.Module):
-    """Residual UNet 3+ connection from backbone to upstream 0,4
-    """
+    """Residual UNet 3+ connection from backbone to upstream 0,4."""
+
     def __init__(
         self,
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.Sequence[int] = None,
-        attention_weights: str = 'spatial_channel',
-        activation_type: str = 'LeakyReLU',
-        res_block_type: enum = ResBlockTypes.RESA
+        attention_weights: str = "spatial_channel",
+        activation_type: str = "LeakyReLU",
+        res_block_type: enum = ResBlockTypes.RESA,
     ):
         super(ResUNet3_0_4, self).__init__()
 
@@ -1197,7 +1202,7 @@ class ResUNet3_0_4(torch.nn.Module):
             attention_weights=attention_weights,
             model_type=ModelTypes.RESUNET,
             res_block_type=res_block_type,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
@@ -1210,7 +1215,7 @@ class ResUNet3_0_4(torch.nn.Module):
             attention_weights=attention_weights,
             model_type=ModelTypes.RESUNET,
             res_block_type=res_block_type,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
@@ -1223,7 +1228,7 @@ class ResUNet3_0_4(torch.nn.Module):
             attention_weights=attention_weights,
             model_type=ModelTypes.RESUNET,
             res_block_type=res_block_type,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(
@@ -1241,23 +1246,23 @@ class ResUNet3_0_4(torch.nn.Module):
         x4_0: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
         h_dist = self.conv_dist(
-            prev_same=[('prev_backbone', x0_0)],
+            prev_same=[("prev_backbone", x0_0)],
             x4_0=x4_0,
-            stream_down=[h3_1_dist, h2_2_dist, h1_3_dist]
+            stream_down=[h3_1_dist, h2_2_dist, h1_3_dist],
         )
         h_edge = self.conv_edge(
-            prev_same=[('prev_backbone', x0_0), ('prev', h_dist)],
+            prev_same=[("prev_backbone", x0_0), ("prev", h_dist)],
             x4_0=x4_0,
-            stream_down=[h3_1_edge, h2_2_edge, h1_3_edge]
+            stream_down=[h3_1_edge, h2_2_edge, h1_3_edge],
         )
         h_mask = self.conv_mask(
-            prev_same=[('prev_backbone', x0_0), ('prev', h_edge)],
+            prev_same=[("prev_backbone", x0_0), ("prev", h_edge)],
             x4_0=x4_0,
-            stream_down=[h3_1_mask, h2_2_mask, h1_3_mask]
+            stream_down=[h3_1_mask, h2_2_mask, h1_3_mask],
         )
 
         return {
-            'dist': h_dist,
-            'edge': h_edge,
-            'mask': h_mask,
+            "dist": h_dist,
+            "edge": h_edge,
+            "mask": h_mask,
         }

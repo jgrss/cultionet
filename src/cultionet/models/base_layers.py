@@ -14,11 +14,6 @@ class Swish(torch.nn.Module):
         super(Swish, self).__init__()
 
         self.sigmoid = torch.nn.Sigmoid()
-        # assert dims in (2, 3)
-        # if dims == 2:
-        #     ones = torch.ones((1, channels, 1, 1))
-        # else:
-        #     ones = torch.ones((1, channels, 1, 1, 1))
         self.beta = torch.nn.Parameter(torch.ones(1))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -33,7 +28,7 @@ class SetActivation(torch.nn.Module):
         self,
         activation_type: str,
         channels: T.Optional[int] = None,
-        dims: T.Optional[int] = None
+        dims: T.Optional[int] = None,
     ):
         """
         Examples:
@@ -48,9 +43,13 @@ class SetActivation(torch.nn.Module):
         """
         super(SetActivation, self).__init__()
 
-        if activation_type == 'Swish':
-            assert isinstance(channels, int), 'Swish requires the input channels.'
-            assert isinstance(dims, int), 'Swish requires the tensor dimension.'
+        if activation_type == "Swish":
+            assert isinstance(
+                channels, int
+            ), "Swish requires the input channels."
+            assert isinstance(
+                dims, int
+            ), "Swish requires the tensor dimension."
             self.activation = Swish(channels=channels, dims=dims)
         else:
             self.activation = getattr(torch.nn, activation_type)(inplace=False)
@@ -131,10 +130,7 @@ class Mean(torch.nn.Module):
 
 class Var(torch.nn.Module):
     def __init__(
-        self,
-        dim: int,
-        keepdim: bool = False,
-        unbiased: bool = False
+        self, dim: int, keepdim: bool = False, unbiased: bool = False
     ):
         super(Var, self).__init__()
 
@@ -144,18 +140,13 @@ class Var(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x.var(
-            dim=self.dim,
-            keepdim=self.keepdim,
-            unbiased=self.unbiased
+            dim=self.dim, keepdim=self.keepdim, unbiased=self.unbiased
         )
 
 
 class Std(torch.nn.Module):
     def __init__(
-        self,
-        dim: int,
-        keepdim: bool = False,
-        unbiased: bool = False
+        self, dim: int, keepdim: bool = False, unbiased: bool = False
     ):
         super(Std, self).__init__()
 
@@ -165,9 +156,7 @@ class Std(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x.std(
-            dim=self.dim,
-            keepdim=self.keepdim,
-            unbiased=self.unbiased
+            dim=self.dim, keepdim=self.keepdim, unbiased=self.unbiased
         )
 
 
@@ -192,7 +181,7 @@ class Unsqueeze(torch.nn.Module):
 
 
 class SigmoidCrisp(torch.nn.Module):
-    """Sigmoid crisp
+    r"""Sigmoid crisp.
 
     Adapted from publication and source code below:
 
@@ -233,6 +222,7 @@ class SigmoidCrisp(torch.nn.Module):
             https://arxiv.org/pdf/2009.02062.pdf
             https://github.com/waldnerf/decode/blob/main/FracTAL_ResUNet/nn/activations/sigmoid_crisp.py
     """
+
     def __init__(self, smooth: float = 1e-2):
         super(SigmoidCrisp, self).__init__()
 
@@ -258,7 +248,7 @@ class ConvBlock2d(torch.nn.Module):
         padding: int = 0,
         dilation: int = 1,
         add_activation: bool = True,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(ConvBlock2d, self).__init__()
 
@@ -269,15 +259,13 @@ class ConvBlock2d(torch.nn.Module):
                 kernel_size=kernel_size,
                 padding=padding,
                 dilation=dilation,
-                bias=False
+                bias=False,
             ),
-            torch.nn.BatchNorm2d(out_channels)
+            torch.nn.BatchNorm2d(out_channels),
         ]
         if add_activation:
             layers += [
-                SetActivation(
-                    activation_type, channels=out_channels, dims=2
-                )
+                SetActivation(activation_type, channels=out_channels, dims=2)
             ]
 
         self.seq = torch.nn.Sequential(*layers)
@@ -294,7 +282,7 @@ class ResBlock2d(torch.nn.Module):
         kernel_size: int,
         padding: int = 0,
         dilation: int = 1,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(ResBlock2d, self).__init__()
 
@@ -306,8 +294,8 @@ class ResBlock2d(torch.nn.Module):
                 out_channels,
                 kernel_size=kernel_size,
                 padding=padding,
-                dilation=dilation
-            )
+                dilation=dilation,
+            ),
         ]
 
         self.seq = torch.nn.Sequential(*layers)
@@ -327,7 +315,7 @@ class ConvBlock3d(torch.nn.Module):
         dilation: int = 1,
         add_activation: bool = True,
         squeeze: bool = False,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(ConvBlock3d, self).__init__()
 
@@ -338,20 +326,21 @@ class ConvBlock3d(torch.nn.Module):
                 kernel_size=kernel_size,
                 padding=padding,
                 dilation=dilation,
-                bias=False
+                bias=False,
             )
         ]
         if squeeze:
-            layers += [
-                Squeeze(),
-                torch.nn.BatchNorm2d(in_time)
-            ]
+            layers += [Squeeze(), torch.nn.BatchNorm2d(in_time)]
             dims = 2
         else:
             layers += [torch.nn.BatchNorm3d(out_channels)]
             dims = 3
         if add_activation:
-            layers += [SetActivation(activation_type, channels=out_channels, dims=dims)]
+            layers += [
+                SetActivation(
+                    activation_type, channels=out_channels, dims=dims
+                )
+            ]
 
         self.seq = torch.nn.Sequential(*layers)
 
@@ -367,24 +356,17 @@ class AttentionAdd(torch.nn.Module):
 
     def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
         if x.shape[-2:] != g.shape[-2:]:
-            x = self.up(x, size=g.shape[-2:], mode='bilinear')
+            x = self.up(x, size=g.shape[-2:], mode="bilinear")
 
         return x + g
 
 
 class AttentionGate3d(torch.nn.Module):
-    def __init__(
-        self,
-        high_channels: int,
-        low_channels: int
-    ):
+    def __init__(self, high_channels: int, low_channels: int):
         super(AttentionGate3d, self).__init__()
 
         conv_x = torch.nn.Conv3d(
-            high_channels,
-            high_channels,
-            kernel_size=1,
-            padding=0
+            high_channels, high_channels, kernel_size=1, padding=0
         )
         conv_g = torch.nn.Conv3d(
             low_channels,
@@ -392,30 +374,25 @@ class AttentionGate3d(torch.nn.Module):
             kernel_size=1,
             padding=0,
         )
-        conv1d = torch.nn.Conv3d(
-            high_channels,
-            1,
-            kernel_size=1,
-            padding=0
-        )
+        conv1d = torch.nn.Conv3d(high_channels, 1, kernel_size=1, padding=0)
         self.up = model_utils.UpSample()
 
         self.seq = nn.Sequential(
-            'x, g',
+            "x, g",
             [
-                (conv_x, 'x -> x'),
-                (conv_g, 'g -> g'),
-                (AttentionAdd(), 'x, g -> x'),
-                (torch.nn.LeakyReLU(inplace=False), 'x -> x'),
-                (conv1d, 'x -> x'),
-                (torch.nn.Sigmoid(), 'x -> x')
-            ]
+                (conv_x, "x -> x"),
+                (conv_g, "g -> g"),
+                (AttentionAdd(), "x, g -> x"),
+                (torch.nn.LeakyReLU(inplace=False), "x -> x"),
+                (conv1d, "x -> x"),
+                (torch.nn.Sigmoid(), "x -> x"),
+            ],
         )
         self.final = ConvBlock3d(
             in_channels=high_channels,
             out_channels=high_channels,
             kernel_size=1,
-            add_activation=False
+            add_activation=False,
         )
 
     def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
@@ -426,24 +403,17 @@ class AttentionGate3d(torch.nn.Module):
         """
         h = self.seq(x, g)
         if h.shape[-2:] != x.shape[-2:]:
-            h = self.up(h, size=x.shape[-2:], mode='bilinear')
+            h = self.up(h, size=x.shape[-2:], mode="bilinear")
 
         return self.final(x * h)
 
 
 class AttentionGate(torch.nn.Module):
-    def __init__(
-        self,
-        high_channels: int,
-        low_channels: int
-    ):
+    def __init__(self, high_channels: int, low_channels: int):
         super(AttentionGate, self).__init__()
 
         conv_x = torch.nn.Conv2d(
-            high_channels,
-            high_channels,
-            kernel_size=1,
-            padding=0
+            high_channels, high_channels, kernel_size=1, padding=0
         )
         conv_g = torch.nn.Conv2d(
             low_channels,
@@ -451,30 +421,25 @@ class AttentionGate(torch.nn.Module):
             kernel_size=1,
             padding=0,
         )
-        conv1d = torch.nn.Conv2d(
-            high_channels,
-            1,
-            kernel_size=1,
-            padding=0
-        )
+        conv1d = torch.nn.Conv2d(high_channels, 1, kernel_size=1, padding=0)
         self.up = model_utils.UpSample()
 
         self.seq = nn.Sequential(
-            'x, g',
+            "x, g",
             [
-                (conv_x, 'x -> x'),
-                (conv_g, 'g -> g'),
-                (AttentionAdd(), 'x, g -> x'),
-                (torch.nn.LeakyReLU(inplace=False), 'x -> x'),
-                (conv1d, 'x -> x'),
-                (torch.nn.Sigmoid(), 'x -> x')
-            ]
+                (conv_x, "x -> x"),
+                (conv_g, "g -> g"),
+                (AttentionAdd(), "x, g -> x"),
+                (torch.nn.LeakyReLU(inplace=False), "x -> x"),
+                (conv1d, "x -> x"),
+                (torch.nn.Sigmoid(), "x -> x"),
+            ],
         )
         self.final = ConvBlock2d(
             in_channels=high_channels,
             out_channels=high_channels,
             kernel_size=1,
-            add_activation=False
+            add_activation=False,
         )
 
     def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
@@ -485,13 +450,13 @@ class AttentionGate(torch.nn.Module):
         """
         h = self.seq(x, g)
         if h.shape[-2:] != x.shape[-2:]:
-            h = self.up(h, size=x.shape[-2:], mode='bilinear')
+            h = self.up(h, size=x.shape[-2:], mode="bilinear")
 
         return self.final(x * h)
 
 
 class TanimotoComplement(torch.nn.Module):
-    """Tanimoto distance with complement
+    """Tanimoto distance with complement.
 
     THIS IS NOT CURRENTLY USED ANYWHERE IN THIS REPOSITORY
 
@@ -522,12 +487,13 @@ class TanimotoComplement(torch.nn.Module):
             https://arxiv.org/abs/2009.02062
             https://github.com/waldnerf/decode/blob/main/FracTAL_ResUNet/nn/layers/ftnmt.py
     """
+
     def __init__(
         self,
         smooth: float = 1e-5,
         depth: int = 5,
         dim: T.Union[int, T.Sequence[int]] = 0,
-        targets_are_labels: bool = True
+        targets_are_labels: bool = True,
     ):
         super(TanimotoComplement, self).__init__()
 
@@ -537,11 +503,9 @@ class TanimotoComplement(torch.nn.Module):
         self.targets_are_labels = targets_are_labels
 
     def forward(
-        self,
-        inputs: torch.Tensor,
-        targets: torch.Tensor
+        self, inputs: torch.Tensor, targets: torch.Tensor
     ) -> torch.Tensor:
-        """Performs a single forward pass
+        """Performs a single forward pass.
 
         Args:
             inputs: Predictions from model (probabilities or labels).
@@ -559,11 +523,15 @@ class TanimotoComplement(torch.nn.Module):
             tpl = torch.sum(y * yhat, dim=self.dim, keepdim=True)
             numerator = tpl + self.smooth
             sq_sum = torch.sum(y**2 + yhat**2, dim=self.dim, keepdim=True)
-            denominator = torch.zeros(1, dtype=inputs.dtype).to(device=inputs.device)
+            denominator = torch.zeros(1, dtype=inputs.dtype).to(
+                device=inputs.device
+            )
             for d in range(0, self.depth):
                 a = 2**d
                 b = -(2.0 * a - 1.0)
-                denominator = denominator + torch.reciprocal((a * sq_sum) + (b * tpl) + self.smooth)
+                denominator = denominator + torch.reciprocal(
+                    (a * sq_sum) + (b * tpl) + self.smooth
+                )
 
             return numerator * denominator * scale
 
@@ -575,7 +543,7 @@ class TanimotoComplement(torch.nn.Module):
 
 
 class TanimotoDist(torch.nn.Module):
-    """Tanimoto distance
+    r"""Tanimoto distance.
 
     Adapted from publication and source code below:
 
@@ -627,11 +595,12 @@ class TanimotoDist(torch.nn.Module):
         Reference:
             https://github.com/sentinel-hub/eo-flow/blob/master/eoflow/models/losses.py
     """
+
     def __init__(
         self,
         smooth: float = 1e-5,
         weight: T.Optional[torch.Tensor] = None,
-        dim: T.Union[int, T.Sequence[int]] = 0
+        dim: T.Union[int, T.Sequence[int]] = 0,
     ):
         super(TanimotoDist, self).__init__()
 
@@ -640,11 +609,9 @@ class TanimotoDist(torch.nn.Module):
         self.dim = dim
 
     def forward(
-        self,
-        inputs: torch.Tensor,
-        targets: torch.Tensor
+        self, inputs: torch.Tensor, targets: torch.Tensor
     ) -> torch.Tensor:
-        """Performs a single forward pass
+        """Performs a single forward pass.
 
         Args:
             inputs: Predictions from model (probabilities, logits or labels).
@@ -653,6 +620,7 @@ class TanimotoDist(torch.nn.Module):
         Returns:
             Tanimoto distance loss (float)
         """
+
         def _tanimoto(yhat: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             tpl = torch.sum(yhat * y, dim=self.dim, keepdim=True)
             sq_sum = torch.sum(yhat**2 + y**2, dim=self.dim, keepdim=True)
@@ -700,11 +668,8 @@ class FractalAttention(torch.nn.Module):
             https://github.com/waldnerf/decode/blob/9e922a2082e570e248eaee10f7a1f2f0bd852b42/FracTAL_ResUNet/nn/units/fractal_resnet.py
             https://github.com/waldnerf/decode/blob/9e922a2082e570e248eaee10f7a1f2f0bd852b42/FracTAL_ResUNet/nn/layers/attention.py
     """
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int
-    ):
+
+    def __init__(self, in_channels: int, out_channels: int):
         super(FractalAttention, self).__init__()
 
         self.query = torch.nn.Sequential(
@@ -713,9 +678,9 @@ class FractalAttention(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1,
-                add_activation=False
+                add_activation=False,
             ),
-            torch.nn.Sigmoid()
+            torch.nn.Sigmoid(),
         )
         self.key = torch.nn.Sequential(
             ConvBlock2d(
@@ -723,9 +688,9 @@ class FractalAttention(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1,
-                add_activation=False
+                add_activation=False,
             ),
-            torch.nn.Sigmoid()
+            torch.nn.Sigmoid(),
         )
         self.value = torch.nn.Sequential(
             ConvBlock2d(
@@ -733,9 +698,9 @@ class FractalAttention(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1,
-                add_activation=False
+                add_activation=False,
             ),
-            torch.nn.Sigmoid()
+            torch.nn.Sigmoid(),
         )
 
         self.spatial_sim = TanimotoDist(dim=1)
@@ -773,7 +738,7 @@ class ChannelAttention(torch.nn.Module):
                 out_channels=int(out_channels / 2),
                 kernel_size=1,
                 padding=0,
-                bias=False
+                bias=False,
             ),
             SetActivation(activation_type=activation_type),
             torch.nn.Conv2d(
@@ -781,8 +746,8 @@ class ChannelAttention(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=1,
                 padding=0,
-                bias=False
-            )
+                bias=False,
+            ),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -799,11 +764,7 @@ class SpatialAttention(torch.nn.Module):
         super(SpatialAttention, self).__init__()
 
         self.conv = torch.nn.Conv2d(
-            in_channels=2,
-            out_channels=1,
-            kernel_size=3,
-            padding=1,
-            bias=False
+            in_channels=2, out_channels=1, kernel_size=3, padding=1, bias=False
         )
         self.channel_mean = Mean(dim=1, keepdim=True)
         self.channel_max = Max(dim=1, keepdim=True)
@@ -820,7 +781,7 @@ class SpatialAttention(torch.nn.Module):
 
 
 class SpatialChannelAttention(torch.nn.Module):
-    """Spatial-Channel Attention Block
+    """Spatial-Channel Attention Block.
 
     References:
         https://arxiv.org/abs/1807.02758
@@ -828,12 +789,12 @@ class SpatialChannelAttention(torch.nn.Module):
         https://www.mdpi.com/2072-4292/14/9/2253
         https://github.com/luuuyi/CBAM.PyTorch/blob/master/model/resnet_cbam.py
     """
+
     def __init__(self, out_channels: int, activation_type: str):
         super(SpatialChannelAttention, self).__init__()
 
         self.channel_attention = ChannelAttention(
-            out_channels=out_channels,
-            activation_type=activation_type
+            out_channels=out_channels, activation_type=activation_type
         )
         self.spatial_attention = SpatialAttention()
 
@@ -846,13 +807,13 @@ class SpatialChannelAttention(torch.nn.Module):
 
 
 class ResSpatioTemporalConv3d(torch.nn.Module):
-    """A spatio-temporal convolution layer
-    """
+    """A spatio-temporal convolution layer."""
+
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(ResSpatioTemporalConv3d, self).__init__()
 
@@ -863,7 +824,7 @@ class ResSpatioTemporalConv3d(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1,
-                activation_type=activation_type
+                activation_type=activation_type,
             ),
             # Conv -> Batchnorm
             ConvBlock3d(
@@ -872,8 +833,8 @@ class ResSpatioTemporalConv3d(torch.nn.Module):
                 kernel_size=3,
                 padding=2,
                 dilation=2,
-                add_activation=False
-            )
+                add_activation=False,
+            ),
         ]
 
         self.seq = torch.nn.Sequential(*layers)
@@ -883,7 +844,7 @@ class ResSpatioTemporalConv3d(torch.nn.Module):
             out_channels=out_channels,
             kernel_size=1,
             padding=0,
-            add_activation=False
+            add_activation=False,
         )
         self.final_act = SetActivation(activation_type=activation_type)
 
@@ -894,13 +855,13 @@ class ResSpatioTemporalConv3d(torch.nn.Module):
 
 
 class SpatioTemporalConv3d(torch.nn.Module):
-    """A spatio-temporal convolution layer
-    """
+    """A spatio-temporal convolution layer."""
+
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(SpatioTemporalConv3d, self).__init__()
 
@@ -911,7 +872,7 @@ class SpatioTemporalConv3d(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1,
-                activation_type=activation_type
+                activation_type=activation_type,
             ),
             # Conv -> Batchnorm
             ConvBlock3d(
@@ -920,8 +881,8 @@ class SpatioTemporalConv3d(torch.nn.Module):
                 kernel_size=3,
                 padding=2,
                 dilation=2,
-                activation_type=activation_type
-            )
+                activation_type=activation_type,
+            ),
         ]
 
         self.seq = torch.nn.Sequential(*layers)
@@ -931,15 +892,15 @@ class SpatioTemporalConv3d(torch.nn.Module):
 
 
 class DoubleConv(torch.nn.Module):
-    """A double convolution layer
-    """
+    """A double convolution layer."""
+
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(DoubleConv, self).__init__()
 
@@ -953,7 +914,7 @@ class DoubleConv(torch.nn.Module):
                     out_channels=out_channels,
                     kernel_size=1,
                     padding=0,
-                    activation_type=activation_type
+                    activation_type=activation_type,
                 )
             ]
             init_channels = out_channels
@@ -964,7 +925,7 @@ class DoubleConv(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1,
-                activation_type=activation_type
+                activation_type=activation_type,
             ),
             ConvBlock2d(
                 in_channels=out_channels,
@@ -972,8 +933,8 @@ class DoubleConv(torch.nn.Module):
                 kernel_size=3,
                 padding=double_dilation,
                 dilation=double_dilation,
-                activation_type=activation_type
-            )
+                activation_type=activation_type,
+            ),
         ]
 
         self.seq = torch.nn.Sequential(*layers)
@@ -989,7 +950,7 @@ class AtrousPyramidPooling(torch.nn.Module):
         out_channels: int,
         dilation_b: int = 2,
         dilation_c: int = 3,
-        dilation_d: int = 4
+        dilation_d: int = 4,
     ):
         super(AtrousPyramidPooling, self).__init__()
 
@@ -1005,7 +966,7 @@ class AtrousPyramidPooling(torch.nn.Module):
             out_channels=out_channels,
             kernel_size=1,
             padding=0,
-            add_activation=False
+            add_activation=False,
         )
         self.conv_b = ConvBlock2d(
             in_channels=in_channels,
@@ -1013,7 +974,7 @@ class AtrousPyramidPooling(torch.nn.Module):
             kernel_size=3,
             padding=dilation_b,
             dilation=dilation_b,
-            add_activation=False
+            add_activation=False,
         )
         self.conv_c = ConvBlock2d(
             in_channels=in_channels,
@@ -1021,7 +982,7 @@ class AtrousPyramidPooling(torch.nn.Module):
             kernel_size=3,
             padding=dilation_c,
             dilation=dilation_c,
-            add_activation=False
+            add_activation=False,
         )
         self.conv_d = ConvBlock2d(
             in_channels=in_channels,
@@ -1029,51 +990,27 @@ class AtrousPyramidPooling(torch.nn.Module):
             kernel_size=3,
             padding=dilation_d,
             dilation=dilation_d,
-            add_activation=False
+            add_activation=False,
         )
         self.final = ConvBlock2d(
             in_channels=int(in_channels * 4) + int(out_channels * 4),
             out_channels=out_channels,
             kernel_size=3,
-            padding=1
+            padding=1,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out_pa = self.up(
-            self.pool_a(x),
-            size=x.shape[-2:],
-            mode='bilinear'
-        )
-        out_pb = self.up(
-            self.pool_b(x),
-            size=x.shape[-2:],
-            mode='bilinear'
-        )
-        out_pc = self.up(
-            self.pool_c(x),
-            size=x.shape[-2:],
-            mode='bilinear'
-        )
-        out_pd = self.up(
-            self.pool_d(x),
-            size=x.shape[-2:],
-            mode='bilinear'
-        )
+        out_pa = self.up(self.pool_a(x), size=x.shape[-2:], mode="bilinear")
+        out_pb = self.up(self.pool_b(x), size=x.shape[-2:], mode="bilinear")
+        out_pc = self.up(self.pool_c(x), size=x.shape[-2:], mode="bilinear")
+        out_pd = self.up(self.pool_d(x), size=x.shape[-2:], mode="bilinear")
         out_ca = self.conv_a(x)
         out_cb = self.conv_b(x)
         out_cc = self.conv_c(x)
         out_cd = self.conv_d(x)
         out = torch.cat(
-            [
-                out_pa,
-                out_pb,
-                out_pc,
-                out_pd,
-                out_ca,
-                out_cb,
-                out_cc,
-                out_cd
-            ], dim=1
+            [out_pa, out_pb, out_pc, out_pd, out_ca, out_cb, out_cc, out_cd],
+            dim=1,
         )
         out = self.final(out)
 
@@ -1081,13 +1018,10 @@ class AtrousPyramidPooling(torch.nn.Module):
 
 
 class PoolConvSingle(torch.nn.Module):
-    """Max pooling followed by convolution
-    """
+    """Max pooling followed by convolution."""
+
     def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        pool_size: int = 2
+        self, in_channels: int, out_channels: int, pool_size: int = 2
     ):
         super(PoolConvSingle, self).__init__()
 
@@ -1097,39 +1031,17 @@ class PoolConvSingle(torch.nn.Module):
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=3,
-                padding=1
-            )
+                padding=1,
+            ),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
 
 
-class PoolConv3d(torch.nn.Module):
-    """Max pooling with (optional) dropout
-    """
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        pool_size: int = 2,
-        dropout: T.Optional[float] = None
-    ):
-        super(PoolConv3d, self).__init__()
-
-        layers = [torch.nn.MaxPool3d((1, pool_size, pool_size))]
-        if dropout is not None:
-            layers += [torch.nn.Dropout(dropout)]
-        layers += [DoubleConv3d(in_channels, out_channels)]
-        self.seq = torch.nn.Sequential(*layers)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.seq(x)
-
-
 class PoolConv(torch.nn.Module):
-    """Max pooling with (optional) dropout
-    """
+    """Max pooling with (optional) dropout."""
+
     def __init__(
         self,
         in_channels: int,
@@ -1137,8 +1049,8 @@ class PoolConv(torch.nn.Module):
         pool_size: int = 2,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = 'LeakyReLU',
-        dropout: T.Optional[float] = None
+        activation_type: str = "LeakyReLU",
+        dropout: T.Optional[float] = None,
     ):
         super(PoolConv, self).__init__()
 
@@ -1151,7 +1063,7 @@ class PoolConv(torch.nn.Module):
                 out_channels=out_channels,
                 init_point_conv=init_point_conv,
                 double_dilation=double_dilation,
-                activation_type=activation_type
+                activation_type=activation_type,
             )
         ]
         self.seq = torch.nn.Sequential(*layers)
@@ -1161,13 +1073,13 @@ class PoolConv(torch.nn.Module):
 
 
 class ResidualConvInit(torch.nn.Module):
-    """A residual convolution layer
-    """
+    """A residual convolution layer."""
+
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(ResidualConvInit, self).__init__()
 
@@ -1178,7 +1090,7 @@ class ResidualConvInit(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=3,
                 padding=1,
-                activation_type=activation_type
+                activation_type=activation_type,
             ),
             # Conv -> Batchnorm
             ConvBlock2d(
@@ -1187,8 +1099,8 @@ class ResidualConvInit(torch.nn.Module):
                 kernel_size=3,
                 padding=2,
                 dilation=2,
-                add_activation=False
-            )
+                add_activation=False,
+            ),
         )
         # Conv -> Batchnorm
         self.skip = ConvBlock2d(
@@ -1196,7 +1108,7 @@ class ResidualConvInit(torch.nn.Module):
             out_channels=out_channels,
             kernel_size=1,
             padding=0,
-            add_activation=False
+            add_activation=False,
         )
         self.final_act = SetActivation(activation_type=activation_type)
 
@@ -1207,18 +1119,18 @@ class ResidualConvInit(torch.nn.Module):
 
 
 class ResConvLayer(torch.nn.Module):
-    """Convolution layer designed for a residual activation
+    """Convolution layer designed for a residual activation.
 
-    if num_blocks
-    [Conv2d-BatchNorm-Activation -> Conv2dAtrous-BatchNorm]
+    if num_blocks [Conv2d-BatchNorm-Activation -> Conv2dAtrous-BatchNorm]
     """
+
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
         dilation: int,
-        activation_type: str = 'LeakyReLU',
-        num_blocks: int = 2
+        activation_type: str = "LeakyReLU",
+        num_blocks: int = 2,
     ):
         super(ResConvLayer, self).__init__()
 
@@ -1232,7 +1144,7 @@ class ResConvLayer(torch.nn.Module):
                     kernel_size=3,
                     padding=dilation,
                     dilation=dilation,
-                    add_activation=False
+                    add_activation=False,
                 )
             ]
         else:
@@ -1243,7 +1155,7 @@ class ResConvLayer(torch.nn.Module):
                     out_channels=out_channels,
                     kernel_size=3,
                     padding=1,
-                    activation_type=activation_type
+                    activation_type=activation_type,
                 )
             ]
             if num_blocks > 2:
@@ -1255,8 +1167,9 @@ class ResConvLayer(torch.nn.Module):
                         kernel_size=3,
                         padding=dilation,
                         dilation=dilation,
-                        activation_type=activation_type
-                    ) for __ in range(num_blocks-2)
+                        activation_type=activation_type,
+                    )
+                    for __ in range(num_blocks - 2)
                 ]
             # Block N
             layers += [
@@ -1266,7 +1179,7 @@ class ResConvLayer(torch.nn.Module):
                     kernel_size=3,
                     padding=dilation,
                     dilation=dilation,
-                    add_activation=False
+                    add_activation=False,
                 )
             ]
 
@@ -1277,35 +1190,35 @@ class ResConvLayer(torch.nn.Module):
 
 
 class ResidualConv(torch.nn.Module):
-    """A residual convolution layer with (optional) attention
-    """
+    """A residual convolution layer with (optional) attention."""
+
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
         dilation: int = 2,
         attention_weights: str = None,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(ResidualConv, self).__init__()
 
         self.attention_weights = attention_weights
 
         if self.attention_weights is not None:
-            assert self.attention_weights in  ['fractal', 'spatial_channel'], \
-                'The attention method is not supported.'
+            assert self.attention_weights in [
+                "fractal",
+                "spatial_channel",
+            ], "The attention method is not supported."
 
             self.gamma = torch.nn.Parameter(torch.ones(1))
 
-            if self.attention_weights == 'fractal':
+            if self.attention_weights == "fractal":
                 self.attention_conv = FractalAttention(
-                    in_channels=in_channels,
-                    out_channels=out_channels
+                    in_channels=in_channels, out_channels=out_channels
                 )
-            elif self.attention_weights == 'spatial_channel':
+            elif self.attention_weights == "spatial_channel":
                 self.attention_conv = SpatialChannelAttention(
-                    out_channels=out_channels,
-                    activation_type=activation_type
+                    out_channels=out_channels, activation_type=activation_type
                 )
 
         # Ends with Conv2d -> BatchNorm2d
@@ -1314,7 +1227,7 @@ class ResidualConv(torch.nn.Module):
             out_channels=out_channels,
             dilation=dilation,
             activation_type=activation_type,
-            num_blocks=2
+            num_blocks=2,
         )
         self.skip = None
         if in_channels != out_channels:
@@ -1324,7 +1237,7 @@ class ResidualConv(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=1,
                 padding=0,
-                add_activation=False
+                add_activation=False,
             )
         self.final_act = SetActivation(activation_type=activation_type)
 
@@ -1337,10 +1250,10 @@ class ResidualConv(torch.nn.Module):
 
         if self.attention_weights is not None:
             # Get the attention weights
-            if self.attention_weights == 'spatial_channel':
+            if self.attention_weights == "spatial_channel":
                 # Get weights from the residual
                 attention = self.attention_conv(residual)
-            elif self.attention_weights == 'fractal':
+            elif self.attention_weights == "fractal":
                 # Get weights from the input
                 attention = self.attention_conv(x)
 
@@ -1354,7 +1267,7 @@ class ResidualConv(torch.nn.Module):
 
 
 class ResidualAConv(torch.nn.Module):
-    """Residual convolution with atrous/dilated convolutions
+    r"""Residual convolution with atrous/dilated convolutions.
 
     Adapted from publication below:
 
@@ -1406,33 +1319,34 @@ class ResidualAConv(torch.nn.Module):
     Attention:
         out = out * attention
     """
+
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
         dilations: T.List[int] = None,
         attention_weights: str = None,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(ResidualAConv, self).__init__()
 
         self.attention_weights = attention_weights
 
         if self.attention_weights is not None:
-            assert self.attention_weights in  ['fractal', 'spatial_channel'], \
-                'The attention method is not supported.'
+            assert self.attention_weights in [
+                "fractal",
+                "spatial_channel",
+            ], "The attention method is not supported."
 
             self.gamma = torch.nn.Parameter(torch.ones(1))
 
-            if self.attention_weights == 'fractal':
+            if self.attention_weights == "fractal":
                 self.attention_conv = FractalAttention(
-                    in_channels=in_channels,
-                    out_channels=out_channels
+                    in_channels=in_channels, out_channels=out_channels
                 )
-            elif self.attention_weights == 'spatial_channel':
+            elif self.attention_weights == "spatial_channel":
                 self.attention_conv = SpatialChannelAttention(
-                    out_channels=out_channels,
-                    activation_type=activation_type
+                    out_channels=out_channels, activation_type=activation_type
                 )
 
         self.res_modules = torch.nn.ModuleList(
@@ -1443,8 +1357,9 @@ class ResidualAConv(torch.nn.Module):
                     out_channels=out_channels,
                     dilation=dilation,
                     activation_type=activation_type,
-                    num_blocks=1
-                ) for dilation in dilations
+                    num_blocks=1,
+                )
+                for dilation in dilations
             ]
         )
         self.skip = None
@@ -1455,7 +1370,7 @@ class ResidualAConv(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=1,
                 padding=0,
-                add_activation=False
+                add_activation=False,
             )
         self.final_act = SetActivation(activation_type=activation_type)
 
@@ -1470,10 +1385,10 @@ class ResidualAConv(torch.nn.Module):
 
         if self.attention_weights is not None:
             # Get the attention weights
-            if self.attention_weights == 'spatial_channel':
+            if self.attention_weights == "spatial_channel":
                 # Get weights from the residual
                 attention = self.attention_conv(residual)
-            elif self.attention_weights == 'fractal':
+            elif self.attention_weights == "fractal":
                 # Get weights from the input
                 attention = self.attention_conv(x)
 
@@ -1487,8 +1402,8 @@ class ResidualAConv(torch.nn.Module):
 
 
 class PoolResidualConv(torch.nn.Module):
-    """Max pooling followed by a residual convolution
-    """
+    """Max pooling followed by a residual convolution."""
+
     def __init__(
         self,
         in_channels: int,
@@ -1497,8 +1412,8 @@ class PoolResidualConv(torch.nn.Module):
         dropout: T.Optional[float] = None,
         dilations: T.List[int] = None,
         attention_weights: str = None,
-        activation_type: str = 'LeakyReLU',
-        res_block_type: enum = ResBlockTypes.RESA
+        activation_type: str = "LeakyReLU",
+        res_block_type: enum = ResBlockTypes.RESA,
     ):
         super(PoolResidualConv, self).__init__()
 
@@ -1507,7 +1422,9 @@ class PoolResidualConv(torch.nn.Module):
         layers = [torch.nn.MaxPool2d(pool_size)]
 
         if dropout is not None:
-            assert isinstance(dropout, float), 'The dropout arg must be a float.'
+            assert isinstance(
+                dropout, float
+            ), "The dropout arg must be a float."
             layers += [torch.nn.Dropout(dropout)]
 
         if res_block_type == ResBlockTypes.RES:
@@ -1517,7 +1434,7 @@ class PoolResidualConv(torch.nn.Module):
                     out_channels,
                     attention_weights=attention_weights,
                     dilation=dilations[0],
-                    activation_type=activation_type
+                    activation_type=activation_type,
                 )
             ]
         else:
@@ -1527,7 +1444,7 @@ class PoolResidualConv(torch.nn.Module):
                     out_channels,
                     attention_weights=attention_weights,
                     dilations=dilations,
-                    activation_type=activation_type
+                    activation_type=activation_type,
                 )
             ]
 
@@ -1538,20 +1455,16 @@ class PoolResidualConv(torch.nn.Module):
 
 
 class SingleConv3d(torch.nn.Module):
-    """A single convolution layer
-    """
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int
-    ):
+    """A single convolution layer."""
+
+    def __init__(self, in_channels: int, out_channels: int):
         super(SingleConv3d, self).__init__()
 
         self.seq = ConvBlock3d(
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=3,
-            padding=1
+            padding=1,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1559,13 +1472,13 @@ class SingleConv3d(torch.nn.Module):
 
 
 class SingleConv(torch.nn.Module):
-    """A single convolution layer
-    """
+    """A single convolution layer."""
+
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        activation_type: str = 'LeakyReLU'
+        activation_type: str = "LeakyReLU",
     ):
         super(SingleConv, self).__init__()
 
@@ -1574,7 +1487,7 @@ class SingleConv(torch.nn.Module):
             out_channels=out_channels,
             kernel_size=3,
             padding=1,
-            activation_type=activation_type
+            activation_type=activation_type,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1582,13 +1495,10 @@ class SingleConv(torch.nn.Module):
 
 
 class TemporalConv(torch.nn.Module):
-    """A temporal convolution layer
-    """
+    """A temporal convolution layer."""
+
     def __init__(
-        self,
-        in_channels: int,
-        hidden_channels: int,
-        out_channels: int
+        self, in_channels: int, hidden_channels: int, out_channels: int
     ):
         super(TemporalConv, self).__init__()
 
@@ -1598,7 +1508,7 @@ class TemporalConv(torch.nn.Module):
                 in_time=0,
                 out_channels=hidden_channels,
                 kernel_size=3,
-                padding=1
+                padding=1,
             ),
             ConvBlock3d(
                 in_channels=hidden_channels,
@@ -1606,15 +1516,15 @@ class TemporalConv(torch.nn.Module):
                 out_channels=hidden_channels,
                 kernel_size=3,
                 padding=2,
-                dilation=2
+                dilation=2,
             ),
             ConvBlock3d(
                 in_channels=hidden_channels,
                 in_time=0,
                 out_channels=out_channels,
                 kernel_size=1,
-                padding=0
-            )
+                padding=0,
+            ),
         ]
         self.seq = torch.nn.Sequential(*layers)
 

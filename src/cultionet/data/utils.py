@@ -26,11 +26,9 @@ class LabeledData:
 
 
 def get_image_list_dims(
-    image_list: T.Sequence[T.Union[Path, str]],
-    src: xr.DataArray
+    image_list: T.Sequence[T.Union[Path, str]], src: xr.DataArray
 ) -> T.Tuple[int, int]:
-    """Gets the dimensions of the time series
-    """
+    """Gets the dimensions of the time series."""
     # Get the band count using the unique set of band/variable names
     nbands = len(list(set([Path(fn).parent.name for fn in image_list])))
     # Get the time count (.gw.nbands = number of total features)
@@ -53,10 +51,9 @@ def create_data_object(
     ori: T.Optional[np.ndarray] = None,
     zero_padding: T.Optional[int] = 0,
     other: T.Optional[np.ndarray] = None,
-    **kwargs
+    **kwargs,
 ) -> Data:
-    """Creates a training data object
-    """
+    """Creates a training data object."""
     # edge_indices = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
     # edge_attrs = torch.tensor(edge_attrs, dtype=torch.float)
     edge_indices = None
@@ -67,9 +64,9 @@ def create_data_object(
     box_labels = None
     box_masks = None
     if mask_y is not None:
-        boxes = mask_y['boxes']
-        box_labels = mask_y['labels']
-        box_masks = mask_y['masks']
+        boxes = mask_y["boxes"]
+        box_labels = mask_y["labels"]
+        box_masks = mask_y["masks"]
 
     if y is None:
         train_data = Data(
@@ -84,10 +81,13 @@ def create_data_object(
             box_labels=box_labels,
             box_masks=box_masks,
             zero_padding=zero_padding,
-            **kwargs
+            **kwargs,
         )
     else:
-        y = torch.tensor(y.flatten(), dtype=torch.float if 'float' in y.dtype.name else torch.long)
+        y = torch.tensor(
+            y.flatten(),
+            dtype=torch.float if "float" in y.dtype.name else torch.long,
+        )
         bdist_ = torch.tensor(bdist.flatten(), dtype=torch.float)
         # ori_ = torch.tensor(ori.flatten(), dtype=torch.float)
 
@@ -107,7 +107,7 @@ def create_data_object(
                 box_labels=box_labels,
                 box_masks=box_masks,
                 zero_padding=zero_padding,
-                **kwargs
+                **kwargs,
             )
         else:
             other_ = torch.tensor(other.flatten(), dtype=torch.float)
@@ -128,7 +128,7 @@ def create_data_object(
                 box_labels=box_labels,
                 box_masks=box_masks,
                 zero_padding=zero_padding,
-                **kwargs
+                **kwargs,
             )
 
     # Ensure the correct node count
@@ -138,11 +138,19 @@ def create_data_object(
 
 
 def create_network_data(xvars: np.ndarray, ntime: int, nbands: int) -> Data:
-
     # Create the network
-    nwk = SingleSensorNetwork(np.ascontiguousarray(xvars, dtype='float64'), k=3)
+    nwk = SingleSensorNetwork(
+        np.ascontiguousarray(xvars, dtype="float64"), k=3
+    )
 
-    edge_indices_a, edge_indices_b, edge_attrs_diffs, edge_attrs_dists, xpos, ypos = nwk.create_network()
+    (
+        edge_indices_a,
+        edge_indices_b,
+        edge_attrs_diffs,
+        edge_attrs_dists,
+        xpos,
+        ypos,
+    ) = nwk.create_network()
     edge_indices = np.c_[edge_indices_a, edge_indices_b]
     edge_attrs = np.c_[edge_attrs_diffs, edge_attrs_dists]
     xy = np.c_[xpos, ypos]
@@ -150,7 +158,14 @@ def create_network_data(xvars: np.ndarray, ntime: int, nbands: int) -> Data:
     xvars = nd_to_columns(xvars, nfeas, nrows, ncols)
 
     return create_data_object(
-        xvars, edge_indices, edge_attrs, xy, ntime=ntime, nbands=nbands, height=nrows, width=ncols
+        xvars,
+        edge_indices,
+        edge_attrs,
+        xy,
+        ntime=ntime,
+        nbands=nbands,
+        height=nrows,
+        width=ncols,
     )
 
 
@@ -159,14 +174,14 @@ class NetworkDataset(object):
         self.data_values = data_values
         self.data_path = data_path
 
-        self.processed_path = self.data_path / 'processed'
+        self.processed_path = self.data_path / "processed"
         self.processed_path.mkdir(parents=True, exist_ok=True)
 
         # Create a random filename so that the processed
         # directory can be used by other processes
-        filename = str(uuid.uuid4()).replace('-', '')
-        pt_name = f'{filename}_.pt'
-        self.pattern = f'{filename}*.pt'
+        filename = str(uuid.uuid4()).replace("-", "")
+        pt_name = f"{filename}_.pt"
+        self.pattern = f"{filename}*.pt"
         self.pt_file = self.processed_path / pt_name
 
         self._save(data)
@@ -187,5 +202,5 @@ class NetworkDataset(object):
             self.data_path,
             data_means=self.data_values.mean,
             data_stds=self.data_values.std,
-            pattern=self.pattern
+            pattern=self.pattern,
         )

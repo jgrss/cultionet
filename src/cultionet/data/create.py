@@ -32,33 +32,32 @@ logger = set_color_logger(__name__)
 def roll(
     arr_pad: np.ndarray,
     shift: T.Union[int, T.Tuple[int, int]],
-    axis: T.Union[int, T.Tuple[int, int]]
+    axis: T.Union[int, T.Tuple[int, int]],
 ) -> np.ndarray:
-    """Rolls array elements along a given axis and slices off padded edges"""
+    """Rolls array elements along a given axis and slices off padded edges."""
     return np.roll(arr_pad, shift, axis=axis)[1:-1, 1:-1]
 
 
 def close_edge_ends(array: np.ndarray) -> np.ndarray:
-    """Closes 1 pixel gaps at image edges
-    """
+    """Closes 1 pixel gaps at image edges."""
     # Top
     idx = np.where(array[1] == 1)
-    z = np.zeros(array.shape[1], dtype='uint8')
+    z = np.zeros(array.shape[1], dtype="uint8")
     z[idx] = 1
     array[0] = z
     # Bottom
     idx = np.where(array[-2] == 1)
-    z = np.zeros(array.shape[1], dtype='uint8')
+    z = np.zeros(array.shape[1], dtype="uint8")
     z[idx] = 1
     array[-1] = z
     # Left
     idx = np.where(array[:, 1] == 1)
-    z = np.zeros(array.shape[0], dtype='uint8')
+    z = np.zeros(array.shape[0], dtype="uint8")
     z[idx] = 1
     array[:, 0] = z
     # Right
     idx = np.where(array[:, -2] == 1)
-    z = np.zeros(array.shape[0], dtype='uint8')
+    z = np.zeros(array.shape[0], dtype="uint8")
     z[idx] = 1
     array[:, -1] = z
 
@@ -66,7 +65,7 @@ def close_edge_ends(array: np.ndarray) -> np.ndarray:
 
 
 def get_other_crop_count(array: np.ndarray) -> np.ndarray:
-    array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode='edge')
+    array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode="edge")
 
     rarray = roll(array_pad, 1, axis=0)
     crop_count = np.uint8((rarray > 0) & (rarray != array) & (array > 0))
@@ -81,8 +80,7 @@ def get_other_crop_count(array: np.ndarray) -> np.ndarray:
 
 
 def fill_edge_gaps(labels: np.ndarray, array: np.ndarray) -> np.ndarray:
-    """Fills neighboring 1-pixel edge gaps
-    """
+    """Fills neighboring 1-pixel edge gaps."""
     # array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode='edge')
     # hsum = roll(array_pad, 1, axis=0) + roll(array_pad, -1, axis=0)
     # vsum = roll(array_pad, 1, axis=1) + roll(array_pad, -1, axis=1)
@@ -93,15 +91,13 @@ def fill_edge_gaps(labels: np.ndarray, array: np.ndarray) -> np.ndarray:
     #     (hsum == 0) & (vsum == 2), 1, array
     # )
     other_count = get_other_crop_count(np.where(array == 1, 0, labels))
-    array = np.where(
-        other_count > 0, 1, array
-    )
+    array = np.where(other_count > 0, 1, array)
 
     return array
 
 
 def get_crop_count(array: np.ndarray, edge_class: int) -> np.ndarray:
-    array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode='edge')
+    array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode="edge")
 
     rarray = roll(array_pad, 1, axis=0)
     crop_count = np.uint8((rarray > 0) & (rarray != edge_class))
@@ -116,7 +112,7 @@ def get_crop_count(array: np.ndarray, edge_class: int) -> np.ndarray:
 
 
 def get_edge_count(array: np.ndarray, edge_class: int) -> np.ndarray:
-    array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode='edge')
+    array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode="edge")
 
     edge_count = np.uint8(roll(array_pad, 1, axis=0) == edge_class)
     edge_count += np.uint8(roll(array_pad, -1, axis=0) == edge_class)
@@ -127,7 +123,7 @@ def get_edge_count(array: np.ndarray, edge_class: int) -> np.ndarray:
 
 
 def get_non_count(array: np.ndarray) -> np.ndarray:
-    array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode='edge')
+    array_pad = np.pad(array, pad_width=((1, 1), (1, 1)), mode="edge")
 
     non_count = np.uint8(roll(array_pad, 1, axis=0) == 0)
     non_count += np.uint8(roll(array_pad, -1, axis=0) == 0)
@@ -137,10 +133,11 @@ def get_non_count(array: np.ndarray) -> np.ndarray:
     return non_count
 
 
-def cleanup_edges(array: np.ndarray, original: np.ndarray, edge_class: int) -> np.ndarray:
-    """Removes crop pixels that border non-crop pixels
-    """
-    array_pad = np.pad(original, pad_width=((1, 1), (1, 1)), mode='edge')
+def cleanup_edges(
+    array: np.ndarray, original: np.ndarray, edge_class: int
+) -> np.ndarray:
+    """Removes crop pixels that border non-crop pixels."""
+    array_pad = np.pad(original, pad_width=((1, 1), (1, 1)), mode="edge")
     original_zero = np.uint8(roll(array_pad, 1, axis=0) == 0)
     original_zero += np.uint8(roll(array_pad, -1, axis=0) == 0)
     original_zero += np.uint8(roll(array_pad, 1, axis=1) == 0)
@@ -148,21 +145,30 @@ def cleanup_edges(array: np.ndarray, original: np.ndarray, edge_class: int) -> n
 
     # Fill edges
     array = np.where(
-        (array == 0) & (get_crop_count(array, edge_class) > 0) & (get_edge_count(array, edge_class) > 0),
-        edge_class, array
+        (array == 0)
+        & (get_crop_count(array, edge_class) > 0)
+        & (get_edge_count(array, edge_class) > 0),
+        edge_class,
+        array,
     )
     # Remove crops next to non-crop
     array = np.where(
-        (array > 0) & (array != edge_class) & (get_non_count(array) > 0) & (get_edge_count(array, edge_class) > 0),
-        0, array
+        (array > 0)
+        & (array != edge_class)
+        & (get_non_count(array) > 0)
+        & (get_edge_count(array, edge_class) > 0),
+        0,
+        array,
     )
     # Fill in non-cropland
-    array = np.where(
-        original_zero == 4, 0, array
-    )
+    array = np.where(original_zero == 4, 0, array)
     # Remove isolated crop pixels (i.e., crop clumps with 2 or fewer pixels)
     array = np.where(
-        (array > 0) & (array != edge_class) & (get_crop_count(array, edge_class) <= 1), 0, array
+        (array > 0)
+        & (array != edge_class)
+        & (get_crop_count(array, edge_class) <= 1),
+        0,
+        array,
     )
 
     return array
@@ -173,17 +179,14 @@ def is_grid_processed(
     transforms: T.List[str],
     group_id: str,
     grid_id: T.Union[str, int],
-    uid_format: str
+    uid_format: str,
 ) -> bool:
-    """Checks if a grid is already processed
-    """
+    """Checks if a grid is already processed."""
     batches_stored = []
     for aug in transforms:
-        aug_method = AugmenterMapping[aug.replace('-', '_')].value
+        aug_method = AugmenterMapping[aug].value
         train_id = uid_format.format(
-            GROUP_ID=group_id,
-            ROW_ID=grid_id,
-            AUGMENTER=aug_method.name_
+            GROUP_ID=group_id, ROW_ID=grid_id, AUGMENTER=aug_method.name_
         )
         train_path = process_path / aug_method.file_name(train_id)
 
@@ -200,35 +203,22 @@ def is_grid_processed(
 def create_boundary_distances(
     labels_array: np.ndarray, train_type: str, cell_res: float
 ) -> T.Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Creates distances from boundaries
-    """
-    if train_type.lower() == 'polygon':
+    """Creates distances from boundaries."""
+    if train_type.lower() == "polygon":
         mask = np.uint8(labels_array)
     else:
         mask = np.uint8(1 - labels_array)
     # Get unique segments
     segments = nd_label(mask)[0]
     # Get the distance from edges
-    bdist = cv2.distanceTransform(
-        mask,
-        cv2.DIST_L2,
-        3
-    )
+    bdist = cv2.distanceTransform(mask, cv2.DIST_L2, 3)
     bdist *= cell_res
 
     grad_x = cv2.Sobel(
-        np.pad(bdist, 5, mode='edge'),
-        cv2.CV_32F,
-        dx=1,
-        dy=0,
-        ksize=5
+        np.pad(bdist, 5, mode="edge"), cv2.CV_32F, dx=1, dy=0, ksize=5
     )
     grad_y = cv2.Sobel(
-        np.pad(bdist, 5, mode='edge'),
-        cv2.CV_32F,
-        dx=0,
-        dy=1,
-        ksize=5
+        np.pad(bdist, 5, mode="edge"), cv2.CV_32F, dx=0, dy=1, ksize=5
     )
     ori = cv2.phase(grad_x, grad_y, angleInDegrees=False)
     ori = ori[5:-5, 5:-5] / np.deg2rad(360)
@@ -241,12 +231,13 @@ def normalize_boundary_distances(
     labels_array: np.ndarray,
     train_type: str,
     cell_res: float,
-    normalize: bool = True
+    normalize: bool = True,
 ) -> T.Tuple[np.ndarray, np.ndarray]:
-    """Normalizes boundary distances
-    """
+    """Normalizes boundary distances."""
     # Create the boundary distances
-    __, segments, bdist, ori = create_boundary_distances(labels_array, train_type, cell_res)
+    __, segments, bdist, ori = create_boundary_distances(
+        labels_array, train_type, cell_res
+    )
     dist_max = 1e9
     if normalize:
         dist_max = 1.0
@@ -255,36 +246,22 @@ def normalize_boundary_distances(
         for p in props:
             if p.label > 0:
                 bdist = np.where(
-                    segments == p.label,
-                    bdist / p.max_intensity,
-                    bdist
+                    segments == p.label, bdist / p.max_intensity, bdist
                 )
     bdist = np.nan_to_num(
-        bdist.clip(0, dist_max),
-        nan=1.0,
-        neginf=1.0,
-        posinf=1.0
+        bdist.clip(0, dist_max), nan=1.0, neginf=1.0, posinf=1.0
     )
-    ori = np.nan_to_num(
-        ori.clip(0, 1),
-        nan=1.0,
-        neginf=1.0,
-        posinf=1.0
-    )
+    ori = np.nan_to_num(ori.clip(0, 1), nan=1.0, neginf=1.0, posinf=1.0)
 
     return bdist, ori
 
 
 def edge_gradient(array: np.ndarray) -> np.ndarray:
-    """Calculates the morphological gradient of crop fields
-    """
-    se = np.array(
-        [
-            [1, 1],
-            [1, 1]
-        ], dtype='uint8'
+    """Calculates the morphological gradient of crop fields."""
+    se = np.array([[1, 1], [1, 1]], dtype="uint8")
+    array = np.uint8(
+        cv2.morphologyEx(np.uint8(array), cv2.MORPH_GRADIENT, se) > 0
     )
-    array = np.uint8(cv2.morphologyEx(np.uint8(array), cv2.MORPH_GRADIENT, se) > 0)
 
     return array
 
@@ -298,15 +275,12 @@ def create_image_vars(
     offset: float = 0.0,
     grid_edges: T.Optional[gpd.GeoDataFrame] = None,
     ref_res: T.Optional[float] = 10.0,
-    resampling: T.Optional[str] = 'nearest',
-    crop_column: T.Optional[str] = 'class',
+    resampling: T.Optional[str] = "nearest",
+    crop_column: T.Optional[str] = "class",
     keep_crop_classes: T.Optional[bool] = False,
-    replace_dict: T.Optional[T.Dict[int, int]] = None
-) -> T.Tuple[
-    np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int
-]:
-    """Creates the initial image training data
-    """
+    replace_dict: T.Optional[T.Dict[int, int]] = None,
+) -> T.Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int]:
+    """Creates the initial image training data."""
     edge_class = max_crop_class + 1
 
     if isinstance(image, list):
@@ -316,22 +290,28 @@ def create_image_vars(
     with gw.config.update(ref_bounds=bounds, ref_res=ref_res):
         with gw.open(
             image,
-            stack_dim='band',
+            stack_dim="band",
             band_names=list(range(1, len(image) + 1)),
-            resampling=resampling
+            resampling=resampling,
         ) as src_ts:
             # 65535 'no data' values = nan
             mask = xr.where(src_ts > 10_000, np.nan, 1)
             # X variables
             time_series = (
-                src_ts.gw.set_nodata(
-                    src_ts.gw.nodataval, 0,
-                    out_range=(0, 1),
-                    dtype='float64',
-                    scale_factor=gain,
-                    offset=offset
-                ) * mask
-            ).fillna(0).gw.compute(num_workers=num_workers)
+                (
+                    src_ts.gw.set_nodata(
+                        src_ts.gw.nodataval,
+                        0,
+                        out_range=(0, 1),
+                        dtype="float64",
+                        scale_factor=gain,
+                        offset=offset,
+                    )
+                    * mask
+                )
+                .fillna(0)
+                .gw.compute(num_workers=num_workers)
+            )
 
             # Get the time and band count
             ntime, nbands = get_image_list_dims(image, src_ts)
@@ -339,52 +319,82 @@ def create_image_vars(
                 if replace_dict is not None:
                     for crop_class in grid_edges[crop_column].unique():
                         if crop_class not in list(replace_dict.keys()):
-                            grid_edges[crop_column] = grid_edges[crop_column].replace({crop_class: -999})
+                            grid_edges[crop_column] = grid_edges[
+                                crop_column
+                            ].replace({crop_class: -999})
                     replace_dict[-999] = 1
-                    grid_edges[crop_column] = grid_edges[crop_column].replace(replace_dict)
+                    grid_edges[crop_column] = grid_edges[crop_column].replace(
+                        replace_dict
+                    )
                     # Remove any non-crop polygons
                     grid_edges = grid_edges.query(f"{crop_column} != 0")
                 if grid_edges.empty:
-                    labels_array = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='uint8')
-                    bdist = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='float64')
-                    ori = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='float64')
-                    edges = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='uint8')
+                    labels_array = np.zeros(
+                        (src_ts.gw.nrows, src_ts.gw.ncols), dtype="uint8"
+                    )
+                    bdist = np.zeros(
+                        (src_ts.gw.nrows, src_ts.gw.ncols), dtype="float64"
+                    )
+                    ori = np.zeros(
+                        (src_ts.gw.nrows, src_ts.gw.ncols), dtype="float64"
+                    )
+                    edges = np.zeros(
+                        (src_ts.gw.nrows, src_ts.gw.ncols), dtype="uint8"
+                    )
                 else:
                     # Get the field polygons
-                    labels_array_copy = polygon_to_array(
-                        grid_edges.assign(
-                            **{
-                                crop_column: range(1, len(grid_edges.index)+1)
-                            }
-                        ),
-                        col=crop_column,
-                        data=src_ts,
-                        all_touched=False
-                    ).squeeze().gw.compute(num_workers=num_workers)
-                    labels_array = polygon_to_array(
-                        grid_edges,
-                        col=crop_column,
-                        data=src_ts,
-                        all_touched=False
-                    ).squeeze().gw.compute(num_workers=num_workers)
+                    labels_array_copy = (
+                        polygon_to_array(
+                            grid_edges.assign(
+                                **{
+                                    crop_column: range(
+                                        1, len(grid_edges.index) + 1
+                                    )
+                                }
+                            ),
+                            col=crop_column,
+                            data=src_ts,
+                            all_touched=False,
+                        )
+                        .squeeze()
+                        .gw.compute(num_workers=num_workers)
+                    )
+                    labels_array = (
+                        polygon_to_array(
+                            grid_edges,
+                            col=crop_column,
+                            data=src_ts,
+                            all_touched=False,
+                        )
+                        .squeeze()
+                        .gw.compute(num_workers=num_workers)
+                    )
                     # Get the field edges
-                    edges = polygon_to_array(
-                        (
-                            grid_edges
-                            .boundary
-                            .to_frame(name='geometry')
-                            .reset_index()
-                            .rename(columns={'index': crop_column})
-                            .assign(**{crop_column: range(1, len(grid_edges.index)+1)})
-                        ),
-                        col=crop_column,
-                        data=src_ts,
-                        all_touched=False
-                    ).squeeze().gw.compute(num_workers=num_workers)
-                    if not edges.flags['WRITEABLE']:
+                    edges = (
+                        polygon_to_array(
+                            (
+                                grid_edges.boundary.to_frame(name="geometry")
+                                .reset_index()
+                                .rename(columns={"index": crop_column})
+                                .assign(
+                                    **{
+                                        crop_column: range(
+                                            1, len(grid_edges.index) + 1
+                                        )
+                                    }
+                                )
+                            ),
+                            col=crop_column,
+                            data=src_ts,
+                            all_touched=False,
+                        )
+                        .squeeze()
+                        .gw.compute(num_workers=num_workers)
+                    )
+                    if not edges.flags["WRITEABLE"]:
                         edges = edges.copy()
                     edges[edges > 0] = 1
-                    assert edges.max() <= 1, 'Edges were not created.'
+                    assert edges.max() <= 1, "Edges were not created."
                     if edges.max() == 0:
                         return None, None, None, None, None, None
                     image_grad = edge_gradient(labels_array_copy)
@@ -398,14 +408,19 @@ def create_image_vars(
                     # Set edges
                     labels_array[edges == 1] = edge_class
                     # No crop pixel should border non-crop
-                    labels_array = cleanup_edges(labels_array, labels_array_copy, edge_class)
-                    assert labels_array.max() <= edge_class, \
-                        'The labels array have larger than expected values.'
+                    labels_array = cleanup_edges(
+                        labels_array, labels_array_copy, edge_class
+                    )
+                    assert (
+                        labels_array.max() <= edge_class
+                    ), "The labels array have larger than expected values."
                     # Normalize the boundary distances for each segment
                     bdist, ori = normalize_boundary_distances(
-                        np.uint8((labels_array > 0) & (labels_array != edge_class)),
+                        np.uint8(
+                            (labels_array > 0) & (labels_array != edge_class)
+                        ),
                         grid_edges.geom_type.values[0],
-                        src_ts.gw.celly
+                        src_ts.gw.celly,
                     )
                 # import matplotlib.pyplot as plt
                 # def save_labels(out_fig: Path):
@@ -430,44 +445,44 @@ def create_image_vars(
                 #     out_fig=fig_dir / f'{hash_id}.png'
                 # )
             else:
-                labels_array = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='uint8')
-                bdist = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='float64')
-                ori = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='float64')
-                edges = np.zeros((src_ts.gw.nrows, src_ts.gw.ncols), dtype='uint8')
+                labels_array = np.zeros(
+                    (src_ts.gw.nrows, src_ts.gw.ncols), dtype="uint8"
+                )
+                bdist = np.zeros(
+                    (src_ts.gw.nrows, src_ts.gw.ncols), dtype="float64"
+                )
+                ori = np.zeros(
+                    (src_ts.gw.nrows, src_ts.gw.ncols), dtype="float64"
+                )
+                edges = np.zeros(
+                    (src_ts.gw.nrows, src_ts.gw.ncols), dtype="uint8"
+                )
 
     return time_series, labels_array, bdist, ori, ntime, nbands
 
 
 def save_and_update(
-    write_path: Path,
-    predict_data: Data,
-    name: str,
-    compress: int = 5
+    write_path: Path, predict_data: Data, name: str, compress: int = 5
 ) -> None:
-    predict_path = write_path / f'data_{name}.pt'
-    joblib.dump(
-        predict_data,
-        predict_path,
-        compress=compress
-    )
+    predict_path = write_path / f"data_{name}.pt"
+    joblib.dump(predict_data, predict_path, compress=compress)
 
 
 def read_slice(darray: xr.DataArray, w_pad: Window) -> xr.DataArray:
     slicer = (
         slice(0, None),
-        slice(w_pad.row_off, w_pad.row_off+w_pad.height),
-        slice(w_pad.col_off, w_pad.col_off+w_pad.width)
+        slice(w_pad.row_off, w_pad.row_off + w_pad.height),
+        slice(w_pad.col_off, w_pad.col_off + w_pad.width),
     )
 
     return darray[slicer]
 
 
 def get_window_chunk(
-    windows: T.List[T.Tuple[Window, Window]],
-    chunksize: int
+    windows: T.List[T.Tuple[Window, Window]], chunksize: int
 ) -> T.List[T.Tuple[Window, Window]]:
     for i in range(0, len(windows), chunksize):
-        yield windows[i:i+chunksize]
+        yield windows[i : i + chunksize]
 
 
 def create_and_save_window(
@@ -484,11 +499,11 @@ def create_and_save_window(
     padding: int,
     darray: xr.DataArray,
     w: Window,
-    w_pad: Window
+    w_pad: Window,
 ) -> None:
     x = darray.data.compute(num_workers=1)
 
-    size = window_size + padding*2
+    size = window_size + padding * 2
     x_height = x.shape[1]
     x_width = x.shape[2]
 
@@ -513,24 +528,19 @@ def create_and_save_window(
             pad_width=(
                 (0, 0),
                 (row_pad_before, row_pad_after),
-                (col_pad_before, col_pad_after)
+                (col_pad_before, col_pad_after),
             ),
-            mode='constant',
+            mode="constant",
         )
     if x.shape[1:] != (size, size):
-        logger.exception('The array does not match the expected size.')
+        logger.exception("The array does not match the expected size.")
 
     ldata = LabeledData(
-        x=x,
-        y=None,
-        bdist=None,
-        ori=None,
-        segments=None,
-        props=None
+        x=x, y=None, bdist=None, ori=None, segments=None, props=None
     )
 
     augmenters = Augmenters(
-        augmentations=['none'],
+        augmentations=["none"],
         ntime=ntime,
         nbands=nbands,
         max_crop_class=0,
@@ -554,17 +564,15 @@ def create_and_save_window(
         left=darray.gw.left,
         bottom=darray.gw.bottom,
         right=darray.gw.right,
-        top=darray.gw.top
+        top=darray.gw.top,
     )
     for aug_method in augmenters:
         aug_kwargs = augmenters.aug_args.kwargs
-        aug_kwargs['train_id'] = f'{region}_{year}_{w.row_off}_{w.col_off}'
+        aug_kwargs["train_id"] = f"{region}_{year}_{w.row_off}_{w.col_off}"
         augmenters.update_aug_args(kwargs=aug_kwargs)
         predict_data = aug_method(ldata, aug_args=augmenters.aug_args)
         aug_method.save(
-            out_directory=write_path,
-            data=predict_data,
-            compress=5
+            out_directory=write_path, data=predict_data, compress=5
         )
 
 
@@ -576,35 +584,33 @@ def create_predict_dataset(
     gain: float = 1e-4,
     offset: float = 0.0,
     ref_res: float = 10.0,
-    resampling: str = 'nearest',
+    resampling: str = "nearest",
     window_size: int = 100,
     padding: int = 101,
     num_workers: int = 1,
-    chunksize: int = 100
+    chunksize: int = 100,
 ):
-    with threadpool_limits(limits=1, user_api='blas'):
+    with threadpool_limits(limits=1, user_api="blas"):
         with gw.config.update(ref_res=ref_res):
             with gw.open(
                 image_list,
-                stack_dim='band',
+                stack_dim="band",
                 band_names=list(range(1, len(image_list) + 1)),
                 resampling=resampling,
-                chunks=512
+                chunks=512,
             ) as src_ts:
                 windows = get_window_offsets(
                     src_ts.gw.nrows,
                     src_ts.gw.ncols,
                     window_size,
                     window_size,
-                    padding=(
-                        padding, padding, padding, padding
-                    )
+                    padding=(padding, padding, padding, padding),
                 )
                 time_series = (
-                    (src_ts.astype('float64') * gain + offset)
+                    (src_ts.astype("float64") * gain + offset)
                     .clip(0, 1)
-                    .chunk({'band': -1, 'y': window_size, 'x': window_size})
-                    .transpose('band', 'y', 'x')
+                    .chunk({"band": -1, "y": window_size, "x": window_size})
+                    .transpose("band", "y", "x")
                     .assign_attrs(**src_ts.attrs)
                 )
 
@@ -622,34 +628,34 @@ def create_predict_dataset(
                     region,
                     year,
                     window_size,
-                    padding
+                    padding,
                 )
 
                 with tqdm(
                     total=len(windows),
-                    desc='Creating prediction windows',
-                    position=1
+                    desc="Creating prediction windows",
+                    position=1,
                 ) as pbar_total:
-                    with parallel_backend(
-                        backend='loky',
-                        n_jobs=num_workers
-                    ):
-                        for window_chunk in get_window_chunk(windows, chunksize):
+                    with parallel_backend(backend="loky", n_jobs=num_workers):
+                        for window_chunk in get_window_chunk(
+                            windows, chunksize
+                        ):
                             with TqdmParallel(
                                 tqdm_kwargs={
-                                    'total': len(window_chunk),
-                                    'desc': 'Window chunks',
-                                    'position': 2,
-                                    'leave': False
+                                    "total": len(window_chunk),
+                                    "desc": "Window chunks",
+                                    "position": 2,
+                                    "leave": False,
                                 },
-                                temp_folder='/tmp'
+                                temp_folder="/tmp",
                             ) as pool:
                                 __ = pool(
                                     delayed(partial_create)(
                                         read_slice(time_series, window_pad),
                                         window,
-                                        window_pad
-                                    ) for window, window_pad in window_chunk
+                                        window_pad,
+                                    )
+                                    for window, window_pad in window_chunk
                                 )
                             pbar_total.update(len(window_chunk))
 
@@ -665,17 +671,19 @@ def create_dataset(
     gain: float = 1e-4,
     offset: float = 0.0,
     ref_res: float = 10.0,
-    resampling: str = 'nearest',
+    resampling: str = "nearest",
     num_workers: int = 1,
-    grid_size: T.Optional[T.Union[T.Tuple[int, int], T.List[int], None]] = None,
+    grid_size: T.Optional[
+        T.Union[T.Tuple[int, int], T.List[int], None]
+    ] = None,
     instance_seg: T.Optional[bool] = False,
     zero_padding: T.Optional[int] = 0,
-    crop_column: T.Optional[str] = 'class',
+    crop_column: T.Optional[str] = "class",
     keep_crop_classes: T.Optional[bool] = False,
     replace_dict: T.Optional[T.Dict[int, int]] = None,
-    pbar: T.Optional[object] = None
+    pbar: T.Optional[object] = None,
 ) -> None:
-    """Creates a dataset for training
+    """Creates a dataset for training.
 
     Args:
         image_list: A list of images.
@@ -702,7 +710,7 @@ def create_dataset(
         replace_dict: A dictionary of crop class remappings.
     """
     if transforms is None:
-        transforms = ['none']
+        transforms = ["none"]
 
     merged_grids = []
     sindex = df_grids.sindex
@@ -716,37 +724,41 @@ def create_dataset(
     unprocessed = []
     for row in df_grids.itertuples():
         # Check if the grid has already been saved
-        if hasattr(row, 'grid'):
+        if hasattr(row, "grid"):
             row_grid_id = row.grid
-        elif hasattr(row, 'region'):
+        elif hasattr(row, "region"):
             row_grid_id = row.region
         else:
-            raise AttributeError("The grid id should be given as 'grid' or 'region'.")
+            raise AttributeError(
+                "The grid id should be given as 'grid' or 'region'."
+            )
 
-        uid_format = '{GROUP_ID}_{ROW_ID}_{AUGMENTER}'
+        uid_format = "{GROUP_ID}_{ROW_ID}_{AUGMENTER}"
 
         batch_stored = is_grid_processed(
             process_path=process_path,
             transforms=transforms,
             group_id=group_id,
             grid_id=row_grid_id,
-            uid_format=uid_format
+            uid_format=uid_format,
         )
         if batch_stored:
-            pbar.set_description(f'{group_id} stored.')
+            pbar.set_description(f"{group_id} stored.")
             continue
 
         # Clip the edges to the current grid
         try:
             grid_edges = gpd.clip(df_edges, row.geometry)
-        except:
+        except ValueError:
             logger.warning(
-                TopologyClipError('The input GeoDataFrame contains topology errors.')
+                TopologyClipError(
+                    "The input GeoDataFrame contains topology errors."
+                )
             )
             df_edges = gpd.GeoDataFrame(
                 data=df_edges[crop_column].values,
                 columns=[crop_column],
-                geometry=df_edges.buffer(0).geometry
+                geometry=df_edges.buffer(0).geometry,
             )
             grid_edges = gpd.clip(df_edges, row.geometry)
 
@@ -772,23 +784,33 @@ def create_dataset(
                 # Check if any of the grids have already been stored
                 if any(
                     [
-                        rowg in merged_grids for rowg in df_grids.iloc[int_idx].grid.values.tolist()
+                        rowg in merged_grids
+                        for rowg in df_grids.iloc[int_idx].grid.values.tolist()
                     ]
                 ):
-                    pbar.set_description(f'No edges in {group_id}')
+                    pbar.set_description(f"No edges in {group_id}")
                     continue
 
-                grid_edges = gpd.clip(df_edges, df_grids.iloc[int_idx].geometry)
+                grid_edges = gpd.clip(
+                    df_edges, df_grids.iloc[int_idx].geometry
+                )
                 merged_grids.append(row.grid)
 
             nonzero_mask = grid_edges[crop_column] != 0
 
             # left, bottom, right, top
-            ref_bounds = df_grids.to_crs(image_crs).iloc[int_idx].total_bounds.tolist()
+            ref_bounds = (
+                df_grids.to_crs(image_crs).iloc[int_idx].total_bounds.tolist()
+            )
             if grid_size is not None:
                 height, width = grid_size
                 left, bottom, right, top = ref_bounds
-                ref_bounds = [left, top-ref_res*height, left+ref_res*width, top]
+                ref_bounds = [
+                    left,
+                    top - ref_res * height,
+                    left + ref_res * width,
+                    top,
+                ]
 
             # Data for graph network
             xvars, labels_array, bdist, ori, ntime, nbands = create_image_vars(
@@ -803,25 +825,24 @@ def create_dataset(
                 resampling=resampling,
                 crop_column=crop_column,
                 keep_crop_classes=keep_crop_classes,
-                replace_dict=replace_dict
+                replace_dict=replace_dict,
             )
             if xvars is None:
-                pbar.set_description(f'No fields in {group_id}')
+                pbar.set_description(f"No fields in {group_id}")
                 continue
             if (xvars.shape[1] < 5) or (xvars.shape[2] < 5):
-                pbar.set_description(f'{group_id} too small')
+                pbar.set_description(f"{group_id} too small")
                 continue
 
             # Get the upper left lat/lon
             left, bottom, right, top = (
                 df_grids.iloc[int_idx]
-                .to_crs('epsg:4326')
-                .total_bounds
-                .tolist()
+                .to_crs("epsg:4326")
+                .total_bounds.tolist()
             )
 
             if isinstance(group_id, str):
-                end_year = int(group_id.split('_')[-1])
+                end_year = int(group_id.split("_")[-1])
                 start_year = end_year - 1
             else:
                 start_year, end_year = None, None
@@ -835,7 +856,7 @@ def create_dataset(
                 bdist=bdist,
                 ori=ori,
                 segments=segments,
-                props=props
+                props=props,
             )
 
             if input_height is None:
@@ -844,7 +865,7 @@ def create_dataset(
                 if ldata.y.shape[0] != input_height:
                     warnings.warn(
                         f"{group_id}_{row_grid_id} does not have the same height as the rest of the dataset.",
-                        UserWarning
+                        UserWarning,
                     )
                     unprocessed.append(f"{group_id}_{row_grid_id}")
                     continue
@@ -854,7 +875,7 @@ def create_dataset(
                 if ldata.y.shape[1] != input_width:
                     warnings.warn(
                         f"{group_id}_{row_grid_id} does not have the same width as the rest of the dataset.",
-                        UserWarning
+                        UserWarning,
                     )
                     unprocessed.append(f"{group_id}_{row_grid_id}")
                     continue
@@ -873,21 +894,19 @@ def create_dataset(
                 bottom=bottom,
                 right=right,
                 top=top,
-                res=ref_res
+                res=ref_res,
             )
             for aug_method in augmenters:
                 aug_kwargs = augmenters.aug_args.kwargs
-                aug_kwargs['train_id'] = uid_format.format(
+                aug_kwargs["train_id"] = uid_format.format(
                     GROUP_ID=group_id,
                     ROW_ID=row_grid_id,
-                    AUGMENTER=aug_method.name_
+                    AUGMENTER=aug_method.name_,
                 )
                 augmenters.update_aug_args(kwargs=aug_kwargs)
                 aug_data = aug_method(ldata, aug_args=augmenters.aug_args)
                 aug_method.save(
-                    out_directory=process_path,
-                    data=aug_data,
-                    compress=5
+                    out_directory=process_path, data=aug_data, compress=5
                 )
 
     # if unprocessed:

@@ -6,15 +6,12 @@ import gudhi
 
 
 def critical_points(
-    x: torch.Tensor
-) -> T.Tuple[
-    T.List[np.ndarray], T.List[np.ndarray], T.List[np.ndarray], bool
-]:
+    x: torch.Tensor,
+) -> T.Tuple[T.List[np.ndarray], T.List[np.ndarray], T.List[np.ndarray], bool]:
     batch_size = x.shape[0]
     lh_vector = 1.0 - x.flatten()
     cubical_complex = gudhi.CubicalComplex(
-        dimensions=x.shape,
-        top_dimensional_cells=lh_vector
+        dimensions=x.shape, top_dimensional_cells=lh_vector
     )
     cubical_complex.persistence(homology_coeff_field=2, min_persistence=0)
     cofaces = cubical_complex.cofaces_of_persistence_pairs()
@@ -26,20 +23,23 @@ def critical_points(
     pd_lh = [
         np.c_[
             lh_vector[cofaces[0][batch][:, 0]],
-            lh_vector[cofaces[0][batch][:, 1]]
-        ] for batch in range(0, batch_size)
+            lh_vector[cofaces[0][batch][:, 1]],
+        ]
+        for batch in range(0, batch_size)
     ]
     bcp_lh = [
         np.c_[
             cofaces[0][batch][:, 0] // x.shape[-1],
-            cofaces[0][batch][:, 0] % x.shape[-1]
-        ] for batch in range(0, batch_size)
+            cofaces[0][batch][:, 0] % x.shape[-1],
+        ]
+        for batch in range(0, batch_size)
     ]
     dcp_lh = [
         np.c_[
             cofaces[0][batch][:, 1] // x.shape[-1],
-            cofaces[0][batch][:, 1] % x.shape[-1]
-        ] for batch in range(0, batch_size)
+            cofaces[0][batch][:, 1] % x.shape[-1],
+        ]
+        for batch in range(0, batch_size)
     ]
 
     return pd_lh, bcp_lh, dcp_lh, True
@@ -50,9 +50,9 @@ def compute_dgm_force(
     gt_dgm: np.ndarray,
     pers_thresh: float = 0.03,
     pers_thresh_perfect: float = 0.99,
-    do_return_perfect: bool = False
+    do_return_perfect: bool = False,
 ) -> T.Tuple[np.ndarray, np.ndarray]:
-    """Compute the persistent diagram of the image
+    """Compute the persistent diagram of the image.
 
     Args:
         lh_dgm: likelihood persistent diagram.
@@ -104,9 +104,7 @@ def compute_dgm_force(
 
         # the difference is holes to be fixed to perfect
         idx_holes_to_fix = np.array(
-            list(
-                set(idx_holes_to_fix_or_perfect) - set(idx_holes_perfect)
-            )
+            list(set(idx_holes_to_fix_or_perfect) - set(idx_holes_perfect))
         )
 
         # remaining holes are all to be removed
@@ -117,9 +115,7 @@ def compute_dgm_force(
     pers_thd = pers_thresh
     idx_valid = np.where(lh_pers > pers_thd)[0]
     idx_holes_to_remove = np.array(
-        list(
-            set(idx_holes_to_remove).intersection(set(idx_valid))
-        )
+        list(set(idx_holes_to_remove).intersection(set(idx_valid)))
     )
 
     force_list = np.zeros(lh_dgm.shape)
@@ -131,11 +127,20 @@ def compute_dgm_force(
 
     # push each hole-to-remove to (0,1)
     if idx_holes_to_remove.shape[0] > 0:
-        force_list[idx_holes_to_remove, 0] = lh_pers[idx_holes_to_remove] / np.sqrt(2.0)
-        force_list[idx_holes_to_remove, 1] = -lh_pers[idx_holes_to_remove] / np.sqrt(2.0)
+        force_list[idx_holes_to_remove, 0] = lh_pers[
+            idx_holes_to_remove
+        ] / np.sqrt(2.0)
+        force_list[idx_holes_to_remove, 1] = -lh_pers[
+            idx_holes_to_remove
+        ] / np.sqrt(2.0)
 
     if do_return_perfect:
-        return force_list, idx_holes_to_fix, idx_holes_to_remove, idx_holes_perfect
+        return (
+            force_list,
+            idx_holes_to_fix,
+            idx_holes_to_remove,
+            idx_holes_perfect,
+        )
 
     return force_list, idx_holes_to_fix, idx_holes_to_remove
 
@@ -149,7 +154,7 @@ def adjust_holes_to_fix(
     fill_weight: int,
     fill_ref: int,
     height: int,
-    width: int
+    width: int,
 ) -> T.Tuple[np.ndarray, np.ndarray, np.ndarray]:
     mask = (
         (pairs[hole_indices][:, 0] >= 0)
@@ -159,7 +164,7 @@ def adjust_holes_to_fix(
     )
     indices = (
         pairs[hole_indices][:, 0][mask],
-        pairs[hole_indices][:, 1][mask]
+        pairs[hole_indices][:, 1][mask],
     )
     topo_cp_weight_map[indices] = fill_weight
     topo_cp_ref_map[indices] = fill_ref
@@ -179,7 +184,7 @@ def adjust_holes_to_remove(
     fill_weight: int,
     fill_ref: int,
     height: int,
-    width: int
+    width: int,
 ) -> T.Tuple[np.ndarray, np.ndarray, np.ndarray]:
     mask = (
         (pairs_b[hole_indices][:, 0] >= 0)
@@ -189,7 +194,7 @@ def adjust_holes_to_remove(
     )
     indices = (
         pairs_b[hole_indices][:, 0][mask],
-        pairs_b[hole_indices][:, 1][mask]
+        pairs_b[hole_indices][:, 1][mask],
     )
     topo_cp_weight_map[indices] = fill_weight
     topo_mask[indices] = 1
@@ -203,18 +208,18 @@ def adjust_holes_to_remove(
     )
     indices_b = (
         pairs_b[hole_indices][:, 0][nested_mask],
-        pairs_b[hole_indices][:, 1][nested_mask]
+        pairs_b[hole_indices][:, 1][nested_mask],
     )
     indices_d = (
         pairs_d[hole_indices][:, 0][nested_mask],
-        pairs_d[hole_indices][:, 1][nested_mask]
+        pairs_d[hole_indices][:, 1][nested_mask],
     )
     topo_cp_ref_map[indices_b] = likelihood[indices_d]
     topo_mask[indices_b] = 1
 
     indices_inv = (
         pairs_b[hole_indices][:, 0][mask],
-        pairs_b[hole_indices][:, 1][mask]
+        pairs_b[hole_indices][:, 1][mask],
     )
     topo_cp_ref_map[indices_inv] = fill_ref
     topo_mask[indices_inv] = 1
@@ -232,7 +237,7 @@ def set_topology_weights(
     idx_holes_to_fix: np.ndarray,
     idx_holes_to_remove: np.ndarray,
     height: int,
-    width: int
+    width: int,
 ) -> T.Tuple[np.ndarray, np.ndarray, np.ndarray]:
     x = 0
     y = 0
@@ -247,7 +252,7 @@ def set_topology_weights(
             fill_weight=1,
             fill_ref=0,
             height=height,
-            width=width
+            width=width,
         )
         topo_cp_weight_map, topo_cp_ref_map, topo_mask = adjust_holes_to_fix(
             topo_cp_weight_map,
@@ -258,10 +263,14 @@ def set_topology_weights(
             fill_weight=1,
             fill_ref=1,
             height=height,
-            width=width
+            width=width,
         )
     if len(idx_holes_to_remove) > 0:
-        topo_cp_weight_map, topo_cp_ref_map, topo_mask = adjust_holes_to_remove(
+        (
+            topo_cp_weight_map,
+            topo_cp_ref_map,
+            topo_mask,
+        ) = adjust_holes_to_remove(
             likelihood,
             topo_cp_weight_map,
             topo_cp_ref_map,
@@ -272,9 +281,13 @@ def set_topology_weights(
             fill_weight=1,
             fill_ref=1,
             height=height,
-            width=width
+            width=width,
         )
-        topo_cp_weight_map, topo_cp_ref_map, topo_mask = adjust_holes_to_remove(
+        (
+            topo_cp_weight_map,
+            topo_cp_ref_map,
+            topo_mask,
+        ) = adjust_holes_to_remove(
             likelihood,
             topo_cp_weight_map,
             topo_cp_ref_map,
@@ -285,7 +298,7 @@ def set_topology_weights(
             fill_weight=1,
             fill_ref=0,
             height=height,
-            width=width
+            width=width,
         )
 
     return topo_cp_weight_map, topo_cp_ref_map, topo_mask
