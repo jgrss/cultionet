@@ -51,11 +51,11 @@ class GeoRefinement(torch.nn.Module):
             torch.nn.Sigmoid(),
         )
 
-        self.crop_res_modules = torch.nn.ModuleList(
+        self.x_res_modules = torch.nn.ModuleList(
             [
                 torch.nn.Sequential(
                     ResidualConv(
-                        in_channels=in_features + in_channels,
+                        in_channels=in_features,
                         out_channels=n_hidden,
                         dilation=2,
                         activation_type='SiLU',
@@ -64,7 +64,7 @@ class GeoRefinement(torch.nn.Module):
                 ),
                 torch.nn.Sequential(
                     ResidualConv(
-                        in_channels=in_features + in_channels,
+                        in_channels=in_features,
                         out_channels=n_hidden,
                         dilation=3,
                         activation_type='SiLU',
@@ -73,7 +73,38 @@ class GeoRefinement(torch.nn.Module):
                 ),
                 torch.nn.Sequential(
                     ResidualConv(
-                        in_channels=in_features + in_channels,
+                        in_channels=in_features,
+                        out_channels=n_hidden,
+                        dilation=4,
+                        activation_type='SiLU',
+                    ),
+                    torch.nn.Dropout(0.5),
+                ),
+            ]
+        )
+        self.crop_res_modules = torch.nn.ModuleList(
+            [
+                torch.nn.Sequential(
+                    ResidualConv(
+                        in_channels=in_channels,
+                        out_channels=n_hidden,
+                        dilation=2,
+                        activation_type='SiLU',
+                    ),
+                    torch.nn.Dropout(0.5),
+                ),
+                torch.nn.Sequential(
+                    ResidualConv(
+                        in_channels=in_channels,
+                        out_channels=n_hidden,
+                        dilation=3,
+                        activation_type='SiLU',
+                    ),
+                    torch.nn.Dropout(0.5),
+                ),
+                torch.nn.Sequential(
+                    ResidualConv(
+                        in_channels=in_channels,
                         out_channels=n_hidden,
                         dilation=4,
                         activation_type='SiLU',
@@ -85,7 +116,10 @@ class GeoRefinement(torch.nn.Module):
 
         self.fc = torch.nn.Sequential(
             ConvBlock2d(
-                in_channels=int(n_hidden * len(self.crop_res_modules)),
+                in_channels=(
+                    (n_hidden * len(self.x_res_modules))
+                    + (n_hidden * len(self.crop_res_modules))
+                ),
                 out_channels=n_hidden,
                 kernel_size=1,
                 padding=0,
@@ -97,6 +131,7 @@ class GeoRefinement(torch.nn.Module):
                 kernel_size=1,
                 padding=0,
             ),
+            Softmax(dim=1),
         )
 
     def proba_to_logit(self, x: torch.Tensor) -> torch.Tensor:
@@ -135,9 +170,8 @@ class GeoRefinement(torch.nn.Module):
         geo_attention = self.geo_attention(lat_lon)
         geo_attention = 1.0 + self.gamma * geo_attention
 
-        x = torch.cat(
+        crop_x = torch.cat(
             [
-                data.x,
                 predictions["crop_star_l2"],
                 predictions["crop_star"],
                 predictions["dist"],
@@ -155,12 +189,15 @@ class GeoRefinement(torch.nn.Module):
             ],
             dim=1,
         )
+        x = self.gc(data.x, batch_size, height, width)
+        x = torch.cat([m(x) for m in self.x_res_modules], dim=1)
 
-        # Reshape
-        x = self.gc(x, batch_size, height, width)
-        crop = torch.cat([m(x) for m in self.crop_res_modules], dim=1)
-        crop = self.fc(crop) * geo_attention
-        predictions["crop"] = self.cg(crop)
+        crop_x = self.gc(crop_x, batch_size, height, width)
+        crop_x = torch.cat([m(crop_x) for m in self.crop_res_modules], dim=1)
+
+        x = torch.cat([x, crop_x], dim=1)
+        x = self.fc(x) * geo_attention
+        predictions["crop"] = self.cg(x)
 
         return predictions
 
