@@ -99,42 +99,33 @@ class ModelOutputs(object):
                 .reshape(n_layers, window_obj.height, window_obj.width)
             )
 
+    def inputs_to_probas(self, inputs: np.ndarray, w_pad: Window) -> np.ndarray:
+        if self.apply_softmax:
+            inputs = F.softmax(
+                inputs, dim=1, dtype=inputs.dtype
+            )[:, 1]
+        else:
+            if len(inputs.shape) > 1:
+                if inputs.shape[1] > 1:
+                    # Two-class output
+                    inputs = inputs[:, 1]
+
+        inputs = self._clip_and_reshape(inputs, w_pad)
+
+        return inputs
+
     def reshape(self, w: Window, w_pad: Window) -> None:
         # Get the distance from edges
         self.edge_dist = self._clip_and_reshape(self.distance, w_pad)
-
         # Get the edge probabilities
-        if self.apply_softmax:
-            self.edge_probas = F.softmax(
-                self.edge, dim=1, dtype=self.crop_type.dtype
-            )[:, 1]
-        else:
-            if self.edge.shape[1] > 1:
-                # Two-class output
-                self.edge_probas = self.edge[:, 1]
-            else:
-                self.edge_probas = self.edge
-        self.edge_probas = self._clip_and_reshape(self.edge_probas, w_pad)
-
+        self.edge_probas = self.inputs_to_probas(self.edge, w_pad)
         # Get the crop probabilities
-        if self.apply_softmax:
-            self.crop_probas = F.softmax(
-                self.crop, dim=1, dtype=self.crop_type.dtype
-            )[:, 1]
-        else:
-            self.crop_probas = self.crop[:, 1]
-        self.crop_probas = self._clip_and_reshape(self.crop_probas, w_pad)
+        self.crop_probas = self.inputs_to_probas(self.crop, w_pad)
 
         # Get the crop-type probabilities
         self.crop_type_probas = None
         if self.crop_type is not None:
-            if self.apply_softmax:
-                self.crop_type_probas = F.softmax(
-                    self.crop_type, dim=1, dtype=self.crop_type.dtype
-                )[:, 1:]
-            else:
-                self.crop_type_probas = self.crop_type[:, 1:]
-            self.crop_type_probas = self._clip_and_reshape(self.crop_type_probas, w_pad)
+            self.crop_type_probas = self.inputs_to_probas(self.crop_type, w_pad)
 
         # Reshape the window chunk and slice off padding
         i = abs(w.row_off - w_pad.row_off)
@@ -165,39 +156,31 @@ class ModelOutputs(object):
 
     def nan_to_num(self):
         # Convert the data type to integer and set 'no data' values
-        self.edge_dist = (
-            np.nan_to_num(
-                self.edge_dist,
-                nan=-1.0,
-                neginf=-1.0,
-                posinf=-1.0
-            ).astype('float32')
-        )
+        self.edge_dist =np.nan_to_num(
+            self.edge_dist,
+            nan=-1.0,
+            neginf=-1.0,
+            posinf=-1.0
+        ).astype('float32')
 
-        self.edge_probas = (
-            np.nan_to_num(
-                self.edge_probas,
-                nan=-1.0,
-                neginf=-1.0,
-                posinf=-1.0
-            ).astype('float32')
-        )
+        self.edge_probas = np.nan_to_num(
+            self.edge_probas,
+            nan=-1.0,
+            neginf=-1.0,
+            posinf=-1.0
+        ).astype('float32')
 
-        self.crop_probas = (
-            np.nan_to_num(
-                self.crop_probas,
-                nan=-1.0,
-                neginf=-1.0,
-                posinf=-1.0
-            ).astype('float32')
-        )
+        self.crop_probas = np.nan_to_num(
+            self.crop_probas,
+            nan=-1.0,
+            neginf=-1.0,
+            posinf=-1.0
+        ).astype('float32')
 
         if self.crop_type_probas is not None:
-            self.crop_type_probas = (
-                np.nan_to_num(
-                    self.crop_type_probas,
-                    nan=-1.0,
-                    neginf=-1.0,
-                    posinf=-1.0
-                ).astype('float32')
-            )
+            self.crop_type_probas = np.nan_to_num(
+                self.crop_type_probas,
+                nan=-1.0,
+                neginf=-1.0,
+                posinf=-1.0
+            ).astype('float32')

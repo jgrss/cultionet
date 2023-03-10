@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 from .data import batch_file
@@ -7,16 +6,16 @@ from cultionet.utils.project_paths import setup_paths
 import torch
 
 
-project_path = Path(os.path.abspath(os.path.dirname(__file__)))
+project_path = Path(__file__).parent.absolute()
 ppaths = setup_paths(project_path)
 ds = EdgeDataset(ppaths.train_path)
-data = next(iter(ds))
-loaded_data = ds.load_file(batch_file)
+DATA = next(iter(ds))
+LOADED_DATA = ds.load_file(batch_file)
 
 
 def test_load():
-    assert torch.allclose(data.x, loaded_data.x)
-    assert torch.allclose(data.y, loaded_data.y)
+    assert torch.allclose(DATA.x, LOADED_DATA.x)
+    assert torch.allclose(DATA.y, LOADED_DATA.y)
 
 
 def test_ds_type():
@@ -28,19 +27,19 @@ def test_ds_len():
 
 
 def test_x_type():
-    assert isinstance(data.x, torch.Tensor)
+    assert isinstance(DATA.x, torch.Tensor)
 
 
 def test_x_shape():
-    assert data.x.shape == (10000, 39)
+    assert DATA.x.shape == (10000, 39)
 
 
 def test_y_shape():
-    assert data.y.shape == (10000,)
+    assert DATA.y.shape == (10000,)
 
 
 def test_dims_attr():
-    assert data.nbands == 3
-    assert data.ntime == 13
-    assert data.height == 100
-    assert data.width == 100
+    assert DATA.nbands == 3
+    assert DATA.ntime == 13
+    assert DATA.height == 100
+    assert DATA.width == 100
