@@ -739,7 +739,14 @@ def create_datasets(args):
         )
 
     total_iters = len(
-        list(itertools.product(inputs.year_lists, inputs.regions_lists))
+        list(
+            itertools.product(
+                list(itertools.chain.from_iterable(inputs.inputs.year_lists)),
+                list(
+                    itertools.chain.from_iterable(inputs.inputs.regions_lists)
+                ),
+            )
+        )
     )
     with tqdm(total=total_iters, position=0, leave=True) as pbar:
         for region, end_year, project_path, ref_res in cycle_data(
