@@ -741,9 +741,9 @@ def create_datasets(args):
     total_iters = len(
         list(
             itertools.product(
-                list(itertools.chain.from_iterable(inputs.inputs.year_lists)),
+                list(itertools.chain.from_iterable(inputs.year_lists)),
                 list(
-                    itertools.chain.from_iterable(inputs.inputs.regions_lists)
+                    itertools.chain.from_iterable(inputs.regions_lists)
                 ),
             )
         )
