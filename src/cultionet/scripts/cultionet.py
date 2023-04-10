@@ -785,6 +785,8 @@ def create_datasets(args):
                     continue
 
                 df_grids = gpd.read_file(grids)
+                if not {"region", "grid"}.intersection(df_grids.columns.tolist()):
+                    df_grids["region"] = region
 
                 if not edges.is_file():
                     edges = (
