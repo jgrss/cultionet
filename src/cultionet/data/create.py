@@ -9,6 +9,7 @@ from geowombat.core.windows import get_window_offsets
 import numpy as np
 from scipy.ndimage.measurements import label as nd_label
 import cv2
+from rasterio.warp import calculate_default_transform
 from rasterio.windows import Window
 import xarray as xr
 import geopandas as gpd
@@ -805,12 +806,29 @@ def create_dataset(
             if grid_size is not None:
                 height, width = grid_size
                 left, bottom, right, top = ref_bounds
-                ref_bounds = [
-                    left,
-                    top - ref_res * height,
-                    left + ref_res * width,
-                    top,
-                ]
+
+                (
+                    dst_transform,
+                    dst_width,
+                    dst_height,
+                ) = calculate_default_transform(
+                    src_crs=image_crs,
+                    dst_crs=image_crs,
+                    width=(right - left) / ref_res,
+                    height=(top - bottom) / ref_res,
+                    left=left,
+                    bottom=bottom,
+                    right=right,
+                    top=top,
+                    resolution=ref_res,
+                    dst_width=width,
+                    dst_height=height,
+                )
+                dst_left = dst_transform[2]
+                dst_top = dst_transform[5]
+                dst_right = dst_left + (dst_width * dst_transform[0])
+                dst_bottom = dst_top - (dst_height * dst_transform[4])
+                ref_bounds = [dst_left, dst_bottom, dst_right, dst_top]
 
             # Data for graph network
             xvars, labels_array, bdist, ori, ntime, nbands = create_image_vars(
