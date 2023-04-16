@@ -303,19 +303,27 @@ sudo apt install nvidia-driver-465
 
 3. Install Pyenv
 > See https://github.com/pyenv/pyenv/wiki#suggested-build-environment
+
 ```commandline
+curl https://pyenv.run | bash
+
 sudo apt-get update; sudo apt-get install make build-essential libssl-dev zlib1g-dev \
 libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm \
 libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev
 ```
 
-4. Add to the .bashrc:
+4. Add to the ~/.bashrc:
 ```commandline
-export PYENV_ROOT="$HOME/.pyenv"
+echo 'export PYENV_ROOT="$HOME/.pyenv"
 export PATH="$PYENV_ROOT/bin:$PATH"
 if which pyenv > /dev/null; then eval "$(pyenv init --path)"; fi
 if which pyenv > /dev/null; then eval "$(pyenv init -)"; fi
-if which pyenv > /dev/null; then eval "$(pyenv virtualenv-init -)"; fi
+if which pyenv > /dev/null; then eval "$(pyenv virtualenv-init -)"; fi' >> ~/.bashrc
+source ~/.bashrc
+```
+Then run  ~/.bashrc
+``` commandline
+source ~/.bashrc
 ```
 
 5. Install new version of Python
