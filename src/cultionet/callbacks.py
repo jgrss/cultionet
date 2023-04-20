@@ -38,6 +38,25 @@ class LightningGTiffWriter(BasePredictionWriter):
 
         with gw.config.update(ref_res=ref_res):
             with gw.open(reference_image, resampling=resampling) as src:
+                rechunk = False
+                new_row_chunks = src.gw.check_chunksize(
+                    src.gw.row_chunks, src.gw.nrows
+                )
+                if new_row_chunks != src.gw.row_chunks:
+                    rechunk = True
+                new_col_chunks = src.gw.check_chunksize(
+                    src.gw.col_chunks, src.gw.ncols
+                )
+                if new_col_chunks != src.gw.col_chunks:
+                    rechunk = True
+                if rechunk:
+                    src = src.chunk(
+                        chunks={
+                            'band': -1,
+                            'y': new_row_chunks,
+                            'x': new_col_chunks,
+                        }
+                    )
                 profile = {
                     "crs": src.crs,
                     "transform": src.gw.transform,
@@ -47,8 +66,8 @@ class LightningGTiffWriter(BasePredictionWriter):
                     # `num_classes` includes background
                     "count": 3 + num_classes - 1,
                     "dtype": "uint16",
-                    "blockxsize": max(64, src.gw.col_chunks),
-                    "blockysize": max(64, src.gw.row_chunks),
+                    "blockxsize": src.gw.col_chunks,
+                    "blockysize": src.gw.row_chunks,
                     "driver": "GTiff",
                     "sharing": False,
                     "compress": compression,

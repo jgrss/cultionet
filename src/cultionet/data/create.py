@@ -534,7 +534,7 @@ def create_and_save_window(
             mode="constant",
         )
     if x.shape[1:] != (size, size):
-        logger.exception("The array does not match the expected size.")
+        logger.warning("The array does not match the expected size.")
 
     ldata = LabeledData(
         x=x, y=None, bdist=None, ori=None, segments=None, props=None
