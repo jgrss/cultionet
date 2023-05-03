@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.7.1 (2023-05-04)
+* Pinned the upper version of `pytorch-lightning` and upgraded `geowombat` ([#71](https://github.com/jgrss/cultionet/pull/71))
+
 ## v1.7.0 (2023-03-09)
 * ([#49](https://github.com/jgrss/cultionet/pull/49))
 * Improved and fixed issues in ResUNet 3+ Psi architecture, introduced in v1.6.5
