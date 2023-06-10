@@ -1279,7 +1279,7 @@ def train_model(args):
     )
 
     # Fit the model
-    if args.process == "transfer":
+    if args.process == "train-transfer":
         cultionet.fit_transfer(**train_kwargs)
     else:
         cultionet.fit(**train_kwargs)
@@ -1303,7 +1303,7 @@ def main():
         "maskrcnn",
         "predict",
         "graph",
-        "transfer",
+        "train-transfer",
         "version",
     ]
     for process in available_processes:
@@ -1324,7 +1324,13 @@ def main():
         process_dict = args_config[process.replace("-", "_")]
         if process in ("skfoldcv", "maskrcnn"):
             process_dict.update(args_config["train"])
-        if process in ("train", "transfer", "maskrcnn", "predict", "skfoldcv"):
+        if process in (
+            "train",
+            "train-transfer",
+            "maskrcnn",
+            "predict",
+            "skfoldcv",
+        ):
             process_dict.update(args_config["train_predict"])
             process_dict.update(args_config["shared_partitions"])
         if process in ("create", "create-predict"):
@@ -1387,7 +1393,7 @@ def main():
         create_datasets(args)
     elif args.process == "skfoldcv":
         spatial_kfoldcv(args)
-    elif args.process in ("train", "transfer"):
+    elif args.process in ("train", "train-transfer"):
         train_model(args)
     elif args.process == "maskrcnn":
         train_maskrcnn(args)
