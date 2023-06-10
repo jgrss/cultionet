@@ -14,6 +14,7 @@ from torchvision.ops import box_iou
 from torchvision import transforms
 import torchmetrics
 
+from cultionet.models.nunet import PostUNet3Psi
 from . import model_utils
 from .cultio import CultioNet, GeoRefinement
 from .maskcrnn import BFasterRCNN
@@ -424,7 +425,7 @@ class RefineLitModel(LightningModule):
         }
 
 
-class CultioLitModelTransfer(LightningModule):
+class CultioLitTransferModel(LightningModule):
     """Transfer learning module for Cultionet."""
 
     def __init__(
@@ -434,17 +435,28 @@ class CultioLitModelTransfer(LightningModule):
         ds_time_features: int,
         init_filter: int = 32,
         num_classes: int = 2,
+        optimizer: str = "AdamW",
+        learning_rate: float = 1e-3,
+        lr_scheduler: str = "CosineAnnealingLR",
+        steplr_step_size: int = 5,
+        weight_decay: float = 0.01,
         mask_activation: T.Callable = Softmax(dim=1),
         deep_sup_dist: bool = True,
         deep_sup_edge: bool = True,
         deep_sup_mask: bool = True,
         scale_pos_weight: T.Optional[bool] = True,
+        model_name: str = "cultionet_transfer",
     ):
-        super(CultioLitModelTransfer, self).__init__()
+        super(CultioLitTransferModel, self).__init__()
 
         self.save_hyperparameters()
 
-        from cultionet.models.nunet import PostUNet3Psi
+        self.optimizer = optimizer
+        self.learning_rate = learning_rate
+        self.lr_scheduler = lr_scheduler
+        self.steplr_step_size = steplr_step_size
+        self.weight_decay = weight_decay
+        self.model_name = model_name
 
         up_channels = int(init_filter * 5)
         # Total number of features (time x bands/indices/channels)
