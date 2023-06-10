@@ -1221,26 +1221,12 @@ def train_model(args):
                 random_seed=args.random_seed,
             )
 
-    # Get balanced class weights
-    # Reference: https://github.com/scikit-learn/scikit-learn/blob/f3f51f9b6/sklearn/utils/class_weight.py#L10
-    # def get_class_weights(counts: torch.Tensor) -> torch.Tensor:
-    #     recip_freq = counts.sum() / (len(counts) * counts)
-    #     weights = recip_freq[torch.arange(0, len(counts))]
-
-    #     if torch.cuda.is_available():
-    #         return weights.to('cuda')
-    #     else:
-    #         return weights
-
-    # class_weights = get_class_weights(data_values.crop_counts)
-    # edge_weights = get_class_weights(data_values.edge_counts)
     if torch.cuda.is_available():
         class_counts = data_values.crop_counts.to("cuda")
     else:
         class_counts = data_values.crop_counts
 
-    # Fit the model
-    cultionet.fit(
+    train_kwargs = dict(
         dataset=ds,
         ckpt_file=ppaths.ckpt_file,
         test_dataset=test_ds,
@@ -1292,6 +1278,12 @@ def train_model(args):
         refine_model=args.refine_model,
     )
 
+    # Fit the model
+    if args.process == "transfer":
+        cultionet.fit_transfer(**train_kwargs)
+    else:
+        cultionet.fit(**train_kwargs)
+
 
 def main():
     args_config = open_config((Path(__file__).parent / "args.yml").absolute())
@@ -1311,6 +1303,7 @@ def main():
         "maskrcnn",
         "predict",
         "graph",
+        "transfer",
         "version",
     ]
     for process in available_processes:
@@ -1331,7 +1324,7 @@ def main():
         process_dict = args_config[process.replace("-", "_")]
         if process in ("skfoldcv", "maskrcnn"):
             process_dict.update(args_config["train"])
-        if process in ("train", "maskrcnn", "predict", "skfoldcv"):
+        if process in ("train", "transfer", "maskrcnn", "predict", "skfoldcv"):
             process_dict.update(args_config["train_predict"])
             process_dict.update(args_config["shared_partitions"])
         if process in ("create", "create-predict"):
@@ -1394,7 +1387,7 @@ def main():
         create_datasets(args)
     elif args.process == "skfoldcv":
         spatial_kfoldcv(args)
-    elif args.process == "train":
+    elif args.process in ("train", "transfer"):
         train_model(args)
     elif args.process == "maskrcnn":
         train_maskrcnn(args)
