@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch_geometric import nn
 
 from . import model_utils
-from .enums import ResBlockTypes
+from ..enums import ResBlockTypes
 
 
 class Swish(torch.nn.Module):

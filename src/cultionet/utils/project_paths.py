@@ -2,12 +2,8 @@ from pathlib import Path
 from dataclasses import dataclass
 import shutil
 import typing as T
-import enum
 
-
-class Destinations(enum.Enum):
-    train = 'train'
-    test = 'test'
+from ..enums import Destinations, ModelNames
 
 
 @dataclass
@@ -45,26 +41,30 @@ class ProjectPaths:
 def setup_paths(
     project_path: T.Union[str, Path, bytes],
     append_ts: T.Optional[bool] = True,
-    ckpt_name: T.Optional[str] = 'last.ckpt'
+    ckpt_name: T.Optional[str] = ModelNames.CKPT_NAME.value,
 ) -> ProjectPaths:
     project_path = Path(project_path)
-    image_path = project_path / 'time_series_vars' if append_ts else project_path
+    image_path = (
+        project_path / Destinations.TIME_SERIES_VARS.value
+        if append_ts
+        else project_path
+    )
     composite_path = project_path.parent / 'composites'
     proba_path = project_path.parent / 'composites_probas'
-    figure_path = project_path / 'figures'
-    data_path = project_path / 'data'
-    ckpt_path = project_path / 'ckpt'
-    classes_info_path = data_path / 'classes.info'
-    train_path = data_path / 'train'
-    test_path = data_path / 'test'
-    predict_path = data_path / 'predict'
-    process_path = train_path / 'processed'
-    test_process_path = test_path / 'processed'
-    predict_process_path = predict_path / 'processed'
-    edge_training_path = project_path / 'user_train'
+    figure_path = project_path / Destinations.FIGURES.value
+    data_path = project_path / Destinations.DATA.value
+    ckpt_path = project_path / Destinations.CKPT.value
+    classes_info_path = data_path / ModelNames.CLASS_INFO.value
+    train_path = data_path / Destinations.TRAIN.value
+    test_path = data_path / Destinations.TEST.value
+    predict_path = data_path / Destinations.PREDICT.value
+    process_path = train_path / Destinations.PROCESSED.value
+    test_process_path = test_path / Destinations.PROCESSED.value
+    predict_process_path = predict_path / Destinations.PROCESSED.value
+    edge_training_path = project_path / Destinations.USER_TRAIN.value
     ckpt_file = ckpt_path / ckpt_name
     loss_file = ckpt_path / 'losses.npy'
-    norm_file = ckpt_path / 'last.norm'
+    norm_file = ckpt_path / ModelNames.NORM.value
 
     for p in [
         proba_path,
@@ -73,7 +73,7 @@ def setup_paths(
         process_path,
         test_process_path,
         predict_process_path,
-        ckpt_path
+        ckpt_path,
     ]:
         p.mkdir(exist_ok=True, parents=True)
 
@@ -95,5 +95,5 @@ def setup_paths(
         edge_training_path=edge_training_path,
         ckpt_file=ckpt_file,
         loss_file=loss_file,
-        norm_file=norm_file
+        norm_file=norm_file,
     )

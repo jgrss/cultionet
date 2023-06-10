@@ -31,13 +31,14 @@ from pytorch_lightning import seed_everything
 import cultionet
 from cultionet.data.const import SCALE_FACTOR
 from cultionet.data.datasets import EdgeDataset
-from cultionet.utils.project_paths import setup_paths, ProjectPaths
-from cultionet.errors import TensorShapeError
-from cultionet.utils.normalize import get_norm_values
 from cultionet.data.create import create_dataset, create_predict_dataset
 from cultionet.data.utils import get_image_list_dims, create_network_data
+from cultionet.enums import CLISteps, ModelNames
+from cultionet.errors import TensorShapeError
 from cultionet.utils import model_preprocessing
 from cultionet.utils.logging import set_color_logger
+from cultionet.utils.project_paths import setup_paths, ProjectPaths
+from cultionet.utils.normalize import get_norm_values
 
 
 logger = set_color_logger(__name__)
@@ -472,7 +473,12 @@ def predict_image(args):
             data_stds=data_values.std,
             pattern=f"data_{args.region}_{args.predict_year}*.pt",
         )
-        ckpt_file = ppaths.ckpt_path / "last.ckpt"
+        # FIXME: could these be loaded from the model?
+        if args.process == CLISteps.PREDICT_TRANSFER.value:
+            # Transfer learning model checkpoint
+            ckpt_file = ppaths.ckpt_path / ModelNames.CKPT_TRANSFER_NAME.value
+        else:
+            ckpt_file = ppaths.ckpt_path / ModelNames.CKPT_NAME.value
 
         cultionet.predict_lightning(
             reference_image=args.reference_image,
@@ -488,6 +494,7 @@ def predict_image(args):
             ref_res=ds[0].res,
             resampling=ds[0].resampling,
             compression=args.compression,
+            is_transfer_model=args.process == CLISteps.PREDICT_TRANSFER.value,
             refine_pt=ckpt_file.parent / "refine" / "refine.pt",
         )
 
@@ -1279,7 +1286,7 @@ def train_model(args):
     )
 
     # Fit the model
-    if args.process == "train-transfer":
+    if args.process == CLISteps.TRAIN_TRANSFER.value:
         cultionet.fit_transfer(**train_kwargs)
     else:
         cultionet.fit(**train_kwargs)
@@ -1296,20 +1303,20 @@ def main():
 
     subparsers = parser.add_subparsers(dest="process")
     available_processes = [
-        "create",
-        "create-predict",
-        "skfoldcv",
-        "train",
-        "maskrcnn",
-        "predict",
-        "graph",
-        "train-transfer",
-        "version",
+        CLISteps.CREATE.value,
+        CLISteps.CREATE_PREDICT.value,
+        CLISteps.GRAPH.value,
+        CLISteps.SKFOLDCV.value,
+        CLISteps.TRAIN.value,
+        CLISteps.PREDICT.value,
+        CLISteps.TRAIN_TRANSFER.value,
+        CLISteps.PREDICT_TRANSFER.value,
+        CLISteps.VERSION.value,
     ]
     for process in available_processes:
         subparser = subparsers.add_parser(process)
 
-        if process == "version":
+        if process == CLISteps.VERSION.value:
             continue
 
         subparser.add_argument(
@@ -1318,24 +1325,29 @@ def main():
             dest="project_path",
             help="The project path (the directory that contains the grid ids)",
         )
-        if process == "graph":
+        if process == CLISteps.GRAPH.value:
             break
 
         process_dict = args_config[process.replace("-", "_")]
-        if process in ("skfoldcv", "maskrcnn"):
+        if process in (CLISteps.SKFOLDCV.value):
             process_dict.update(args_config["train"])
         if process in (
-            "train",
-            "train-transfer",
-            "maskrcnn",
-            "predict",
-            "skfoldcv",
+            CLISteps.TRAIN.value,
+            CLISteps.TRAIN_TRANSFER.value,
+            CLISteps.PREDICT.value,
+            CLISteps.PREDICT_TRANSFER.value,
+            CLISteps.SKFOLDCV.value,
         ):
             process_dict.update(args_config["train_predict"])
             process_dict.update(args_config["shared_partitions"])
-        if process in ("create", "create-predict"):
+        if process in (CLISteps.CREATE.value, CLISteps.CREATE_PREDICT.value):
             process_dict.update(args_config["shared_create"])
-        if process in ("create", "create-predict", "predict"):
+        if process in (
+            CLISteps.CREATE.value,
+            CLISteps.CREATE_PREDICT.value,
+            CLISteps.PREDICT.value,
+            CLISteps.PREDICT_TRANSFER.value,
+        ):
             process_dict.update(args_config["shared_image"])
         process_dict.update(args_config["dates"])
         for process_key, process_values in process_dict.items():
@@ -1359,7 +1371,12 @@ def main():
                 **process_values["kwargs"],
             )
 
-        if process in ("create", "create-predict", "predict"):
+        if process in (
+            CLISteps.CREATE.value,
+            CLISteps.CREATE_PREDICT.value,
+            CLISteps.PREDICT.value,
+            CLISteps.PREDICT_TRANSFER.value,
+        ):
             subparser.add_argument(
                 "--config-file",
                 dest="config_file",
@@ -1368,10 +1385,10 @@ def main():
             )
 
     args = parser.parse_args()
-    if args.process == "create-predict":
+    if args.process == CLISteps.CREATE_PREDICT.value:
         setattr(args, "destination", "predict")
 
-    if args.process == "version":
+    if args.process == CLISteps.VERSION.value:
         print(cultionet.__version__)
         return
 
@@ -1389,17 +1406,18 @@ def main():
     ) as f:
         f.write(json.dumps(vars(args), indent=4))
 
-    if args.process in ("create", "create-predict"):
+    if args.process in (CLISteps.CREATE.value, CLISteps.CREATE_PREDICT.value):
         create_datasets(args)
-    elif args.process == "skfoldcv":
+    elif args.process == CLISteps.SKFOLDCV.value:
         spatial_kfoldcv(args)
-    elif args.process in ("train", "train-transfer"):
+    elif args.process in (CLISteps.TRAIN.value, CLISteps.TRAIN_TRANSFER.value):
         train_model(args)
-    elif args.process == "maskrcnn":
-        train_maskrcnn(args)
-    elif args.process == "predict":
+    elif args.process in (
+        CLISteps.PREDICT.value,
+        CLISteps.PREDICT_TRANSFER.value,
+    ):
         predict_image(args)
-    elif args.process == "graph":
+    elif args.process == CLISteps.GRAPH.value:
         generate_model_graph(args)
 
 

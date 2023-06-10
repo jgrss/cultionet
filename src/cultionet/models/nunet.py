@@ -29,7 +29,6 @@ from .base_layers import (
     Squeeze,
     SetActivation,
 )
-from .enums import ResBlockTypes
 from .unet_parts import (
     UNet3P_3_1,
     UNet3P_2_2,
@@ -44,6 +43,7 @@ from .unet_parts import (
     ResUNet3_1_3,
     ResUNet3_0_4,
 )
+from ..enums import ResBlockTypes
 
 
 def weights_init_kaiming(m):

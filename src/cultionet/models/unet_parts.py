@@ -13,7 +13,7 @@ from .base_layers import (
     ResidualAConv,
     ResidualConv,
 )
-from .enums import ModelTypes, ResBlockTypes
+from ..enums import ModelTypes, ResBlockTypes
 
 
 class UNet3Connector(torch.nn.Module):

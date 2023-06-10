@@ -23,6 +23,7 @@ from .data.const import SCALE_FACTOR
 from .data.datasets import EdgeDataset, zscores
 from .data.modules import EdgeDataModule
 from .data.samplers import EpochRandomSampler
+from .enums import ModelNames
 from .models.cultio import GeoRefinement
 from .models.lightning import (
     CultioLitModel,
@@ -389,8 +390,13 @@ def fit_transfer(
         skip_train (Optional[bool]): Whether to refine and calibrate a trained model.
         refine_model (Optional[bool]): Whether to skip training.
     """
+    # This file should already exist
     pretrained_ckpt_file = Path(ckpt_file)
-    ckpt_file = Path(ckpt_file, ckpt_name="last_transfer.ckpt")
+    assert (
+        pretrained_ckpt_file.is_file()
+    ), "The pretrained checkpoint does not exist."
+    # This will be the new checkpoint for the transfer model
+    ckpt_file = Path(ckpt_file).parent / ModelNames.CKPT_TRANSFER_NAME.value
 
     # Split the dataset into train/validation
     data_module = get_data_module(
@@ -922,6 +928,7 @@ def predict_lightning(
     resampling: str,
     ref_res: float,
     compression: str,
+    is_transfer_model: bool = False,
     refine_pt: T.Optional[Path] = None,
 ):
     reference_image = Path(reference_image)
@@ -956,9 +963,14 @@ def predict_lightning(
     )
 
     trainer = pl.Trainer(**trainer_kwargs)
-    cultionet_lit_model = CultioLitModel.load_from_checkpoint(
-        checkpoint_path=str(ckpt_file)
-    )
+    if is_transfer_model:
+        cultionet_lit_model = CultioLitTransferModel.load_from_checkpoint(
+            checkpoint_path=str(ckpt_file)
+        )
+    else:
+        cultionet_lit_model = CultioLitModel.load_from_checkpoint(
+            checkpoint_path=str(ckpt_file)
+        )
 
     geo_refine_model = None
     if refine_pt is not None:
