@@ -26,6 +26,7 @@ from .data.samplers import EpochRandomSampler
 from .models.cultio import GeoRefinement
 from .models.lightning import (
     CultioLitModel,
+    CultioLitTransferModel,
     MaskRCNNLitModel,
     RefineLitModel,
 )
@@ -209,6 +210,354 @@ def fit_maskrcnn(
             )
 
 
+def get_data_module(
+    dataset: EdgeDataset,
+    test_dataset: T.Optional[EdgeDataset] = None,
+    val_frac: T.Optional[float] = 0.2,
+    spatial_partitions: T.Optional[T.Union[str, Path]] = None,
+    batch_size: T.Optional[int] = 4,
+    load_batch_workers: T.Optional[int] = 2,
+) -> EdgeDataModule:
+    # Split the dataset into train/validation
+    if spatial_partitions is not None:
+        # TODO: We removed `dataset.split_train_val_by_partition` but
+        # could make it an option in future versions.
+        train_ds, val_ds = dataset.split_train_val(
+            val_frac=val_frac, spatial_overlap_allowed=False
+        )
+    else:
+        train_ds, val_ds = dataset.split_train_val(val_frac=val_frac)
+
+    # Setup the data module
+    data_module = EdgeDataModule(
+        train_ds=train_ds,
+        val_ds=val_ds,
+        test_ds=test_dataset,
+        batch_size=batch_size,
+        num_workers=load_batch_workers,
+        shuffle=True,
+    )
+
+    return data_module
+
+
+def setup_callbacks(
+    ckpt_file: T.Union[str, Path],
+    save_top_k: T.Optional[int] = 1,
+    early_stopping_min_delta: T.Optional[float] = 0.01,
+    early_stopping_patience: T.Optional[int] = 7,
+    stochastic_weight_averaging: T.Optional[bool] = False,
+    stochastic_weight_averaging_lr: T.Optional[float] = 0.05,
+    stochastic_weight_averaging_start: T.Optional[float] = 0.8,
+    model_pruning: T.Optional[bool] = False,
+) -> T.Tuple[LearningRateMonitor, T.Sequence[T.Any]]:
+    # Checkpoint
+    cb_train_loss = ModelCheckpoint(monitor="loss")
+    # Validation and test loss
+    cb_val_loss = ModelCheckpoint(
+        dirpath=ckpt_file.parent,
+        filename=ckpt_file.stem,
+        save_last=True,
+        save_top_k=save_top_k,
+        mode="min",
+        monitor="val_score",
+        every_n_train_steps=0,
+        every_n_epochs=1,
+    )
+    # Early stopping
+    early_stop_callback = EarlyStopping(
+        monitor="val_score",
+        min_delta=early_stopping_min_delta,
+        patience=early_stopping_patience,
+        mode="min",
+        check_on_train_epoch_end=False,
+    )
+    # Learning rate
+    lr_monitor = LearningRateMonitor(logging_interval="epoch")
+    callbacks = [lr_monitor, cb_train_loss, cb_val_loss, early_stop_callback]
+    if stochastic_weight_averaging:
+        callbacks.append(
+            StochasticWeightAveraging(
+                swa_lrs=stochastic_weight_averaging_lr,
+                swa_epoch_start=stochastic_weight_averaging_start,
+            )
+        )
+    if 0 < model_pruning <= 1:
+        callbacks.append(ModelPruning("l1_unstructured", amount=model_pruning))
+
+    return lr_monitor, callbacks
+
+
+def fit_transfer(
+    dataset: EdgeDataset,
+    ckpt_file: T.Union[str, Path],
+    test_dataset: T.Optional[EdgeDataset] = None,
+    val_frac: T.Optional[float] = 0.2,
+    spatial_partitions: T.Optional[T.Union[str, Path]] = None,
+    partition_name: T.Optional[str] = None,
+    partition_column: T.Optional[str] = None,
+    batch_size: T.Optional[int] = 4,
+    load_batch_workers: T.Optional[int] = 2,
+    accumulate_grad_batches: T.Optional[int] = 1,
+    filters: T.Optional[int] = 32,
+    num_classes: T.Optional[int] = 2,
+    edge_class: T.Optional[int] = None,
+    class_counts: T.Sequence[float] = None,
+    model_type: str = "ResUNet3Psi",
+    activation_type: str = "SiLU",
+    dilations: T.Union[int, T.Sequence[int]] = None,
+    res_block_type: str = "resa",
+    attention_weights: str = "spatial_channel",
+    deep_sup_dist: bool = False,
+    deep_sup_edge: bool = False,
+    deep_sup_mask: bool = False,
+    optimizer: str = "AdamW",
+    learning_rate: T.Optional[float] = 1e-3,
+    lr_scheduler: str = "CosineAnnealingLR",
+    steplr_step_size: T.Optional[T.Sequence[int]] = None,
+    scale_pos_weight: T.Optional[bool] = True,
+    epochs: T.Optional[int] = 30,
+    save_top_k: T.Optional[int] = 1,
+    early_stopping_patience: T.Optional[int] = 7,
+    early_stopping_min_delta: T.Optional[float] = 0.01,
+    gradient_clip_val: T.Optional[float] = 1.0,
+    gradient_clip_algorithm: T.Optional[float] = "norm",
+    reset_model: T.Optional[bool] = False,
+    auto_lr_find: T.Optional[bool] = False,
+    device: T.Optional[str] = "gpu",
+    devices: T.Optional[int] = 1,
+    profiler: T.Optional[str] = None,
+    weight_decay: T.Optional[float] = 1e-5,
+    precision: T.Optional[int] = 32,
+    stochastic_weight_averaging: T.Optional[bool] = False,
+    stochastic_weight_averaging_lr: T.Optional[float] = 0.05,
+    stochastic_weight_averaging_start: T.Optional[float] = 0.8,
+    model_pruning: T.Optional[bool] = False,
+    save_batch_val_metrics: T.Optional[bool] = False,
+    skip_train: T.Optional[bool] = False,
+    refine_model: T.Optional[bool] = False,
+):
+    """Fits a transfer model.
+
+    Args:
+        dataset (EdgeDataset): The dataset to fit on.
+        ckpt_file (str | Path): The checkpoint file path.
+        test_dataset (Optional[EdgeDataset]): A test dataset to evaluate on. If given, early stopping
+            will switch from the validation dataset to the test dataset.
+        val_frac (Optional[float]): The fraction of data to use for model validation.
+        spatial_partitions (Optional[str | Path]): A spatial partitions file.
+        partition_name (Optional[str]): The spatial partition file column query name.
+        partition_column (Optional[str]): The spatial partition file column name.
+        batch_size (Optional[int]): The data batch size.
+        load_batch_workers (Optional[int]): The number of parallel batches to load.
+        filters (Optional[int]): The number of initial model filters.
+        optimizer (Optional[str]): The optimizer.
+        model_type (Optional[str]): The model type.
+        activation_type (Optional[str]): The activation type.
+        dilations (Optional[list]): The dilation size or sizes.
+        res_block_type (Optional[str]): The residual block type.
+        attention_weights (Optional[str]): The attention weights.
+        deep_sup_dist (Optional[bool]): Whether to use deep supervision for distances.
+        deep_sup_edge (Optional[bool]): Whether to use deep supervision for edges.
+        deep_sup_mask (Optional[bool]): Whether to use deep supervision for masks.
+        learning_rate (Optional[float]): The model learning rate.
+        lr_scheduler (Optional[str]): The learning rate scheduler.
+        steplr_step_size (Optional[list]): The multiplicative step size factor.
+        scale_pos_weight (Optional[bool]): Whether to scale class weights (i.e., balance classes).
+        epochs (Optional[int]): The number of epochs.
+        save_top_k (Optional[int]): The number of top-k model checkpoints to save.
+        early_stopping_patience (Optional[int]): The patience (epochs) before early stopping.
+        early_stopping_min_delta (Optional[float]): The minimum change threshold before early stopping.
+        gradient_clip_val (Optional[float]): The gradient clip limit.
+        gradient_clip_algorithm (Optional[str]): The gradient clip algorithm.
+        reset_model (Optional[bool]): Whether to reset an existing model. Otherwise, pick up from last epoch of
+            an existing model.
+        auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
+        device (Optional[str]): The device to train on. Choices are ['cpu', 'gpu'].
+        devices (Optional[int]): The number of GPU devices to use.
+        profiler (Optional[str]): A profiler level. Choices are [None, 'simple', 'advanced'].
+        weight_decay (Optional[float]): The weight decay passed to the optimizer. Default is 1e-5.
+        precision (Optional[int]): The data precision. Default is 32.
+        stochastic_weight_averaging (Optional[bool]): Whether to use stochastic weight averaging.
+            Default is False.
+        stochastic_weight_averaging_lr (Optional[float]): The stochastic weight averaging learning rate.
+            Default is 0.05.
+        stochastic_weight_averaging_start (Optional[float]): The stochastic weight averaging epoch start.
+            Default is 0.8.
+        model_pruning (Optional[bool]): Whether to prune the model. Default is False.
+        save_batch_val_metrics (Optional[bool]): Whether to save batch validation metrics to a parquet file.
+        skip_train (Optional[bool]): Whether to refine and calibrate a trained model.
+        refine_model (Optional[bool]): Whether to skip training.
+    """
+    pretrained_ckpt_file = Path(ckpt_file)
+    ckpt_file = Path(ckpt_file, ckpt_name="last_transfer.ckpt")
+
+    # Split the dataset into train/validation
+    data_module = get_data_module(
+        dataset=dataset,
+        test_dataset=test_dataset,
+        val_frac=val_frac,
+        spatial_partitions=spatial_partitions,
+        batch_size=batch_size,
+        load_batch_workers=load_batch_workers,
+    )
+
+    # Setup the Lightning model
+    lit_model = CultioLitTransferModel(
+        # Load the pretrained model weights
+        ckpt_file=pretrained_ckpt_file,
+        ds_features=data_module.train_ds.num_features,
+        ds_time_features=data_module.train_ds.num_time_features,
+        init_filter=filters,
+        num_classes=num_classes,
+        optimizer=optimizer,
+        learning_rate=learning_rate,
+        lr_scheduler=lr_scheduler,
+        steplr_step_size=steplr_step_size,
+        weight_decay=weight_decay,
+        deep_sup_dist=deep_sup_dist,
+        deep_sup_edge=deep_sup_edge,
+        deep_sup_mask=deep_sup_mask,
+        scale_pos_weight=scale_pos_weight,
+    )
+
+    if reset_model:
+        if ckpt_file.is_file():
+            ckpt_file.unlink()
+        model_file = ckpt_file.parent / f"{lit_model.model_name}.pt"
+        if model_file.is_file():
+            model_file.unlink()
+
+    lr_monitor = callbacks = setup_callbacks(
+        ckpt_file=ckpt_file,
+        save_top_k=save_top_k,
+        early_stopping_min_delta=early_stopping_min_delta,
+        early_stopping_patience=early_stopping_patience,
+        stochastic_weight_averaging=stochastic_weight_averaging,
+        stochastic_weight_averaging_lr=stochastic_weight_averaging_lr,
+        stochastic_weight_averaging_start=stochastic_weight_averaging_start,
+        model_pruning=model_pruning,
+    )
+
+    trainer = pl.Trainer(
+        default_root_dir=str(ckpt_file.parent),
+        callbacks=callbacks,
+        enable_checkpointing=True,
+        auto_lr_find=auto_lr_find,
+        auto_scale_batch_size=False,
+        accumulate_grad_batches=accumulate_grad_batches,
+        gradient_clip_val=gradient_clip_val,
+        gradient_clip_algorithm=gradient_clip_algorithm,
+        check_val_every_n_epoch=1,
+        min_epochs=5 if epochs >= 5 else epochs,
+        max_epochs=epochs,
+        precision=precision,
+        devices=None if device == "cpu" else devices,
+        num_processes=0,
+        accelerator=device,
+        log_every_n_steps=50,
+        profiler=profiler,
+        deterministic=False,
+        benchmark=False,
+    )
+
+    if auto_lr_find:
+        trainer.tune(model=lit_model, datamodule=data_module)
+    else:
+        if not skip_train:
+            trainer.fit(
+                model=lit_model,
+                datamodule=data_module,
+                ckpt_path=ckpt_file if ckpt_file.is_file() else None,
+            )
+        if refine_model:
+            refine_data_module = EdgeDataModule(
+                train_ds=dataset,
+                batch_size=batch_size,
+                num_workers=load_batch_workers,
+                shuffle=True,
+                # For each epoch, train on a random
+                # subset of 50% of the data.
+                sampler=EpochRandomSampler(
+                    dataset, num_samples=int(len(dataset) * 0.5)
+                ),
+            )
+            refine_ckpt_file = ckpt_file.parent / "refine" / ckpt_file.name
+            refine_ckpt_file.parent.mkdir(parents=True, exist_ok=True)
+            # refine checkpoints
+            refine_cb_train_loss = ModelCheckpoint(
+                dirpath=refine_ckpt_file.parent,
+                filename=refine_ckpt_file.stem,
+                save_last=True,
+                save_top_k=save_top_k,
+                mode="min",
+                monitor="loss",
+                every_n_train_steps=0,
+                every_n_epochs=1,
+            )
+            # Early stopping
+            refine_early_stop_callback = EarlyStopping(
+                monitor="loss",
+                min_delta=early_stopping_min_delta,
+                patience=5,
+                mode="min",
+                check_on_train_epoch_end=False,
+            )
+            refine_callbacks = [
+                lr_monitor,
+                refine_cb_train_loss,
+                refine_early_stop_callback,
+            ]
+            refine_trainer = pl.Trainer(
+                default_root_dir=str(refine_ckpt_file.parent),
+                callbacks=refine_callbacks,
+                enable_checkpointing=True,
+                auto_lr_find=auto_lr_find,
+                auto_scale_batch_size=False,
+                gradient_clip_val=gradient_clip_val,
+                gradient_clip_algorithm="value",
+                check_val_every_n_epoch=1,
+                min_epochs=1 if epochs >= 1 else epochs,
+                max_epochs=10,
+                precision=32,
+                devices=None if device == "cpu" else devices,
+                num_processes=0,
+                accelerator=device,
+                log_every_n_steps=50,
+                profiler=profiler,
+                deterministic=False,
+                benchmark=False,
+            )
+            # Calibrate the logits
+            refine_model = RefineLitModel(
+                in_features=data_module.train_ds.num_features,
+                num_classes=num_classes,
+                edge_class=edge_class,
+                class_counts=class_counts,
+                cultionet_ckpt=ckpt_file,
+            )
+            refine_trainer.fit(
+                model=refine_model,
+                datamodule=refine_data_module,
+                ckpt_path=refine_ckpt_file
+                if refine_ckpt_file.is_file()
+                else None,
+            )
+        if test_dataset is not None:
+            trainer.test(
+                model=lit_model,
+                dataloaders=data_module.test_dataloader(),
+                ckpt_path="best",
+            )
+            logged_metrics = trainer.logged_metrics
+            for k, v in logged_metrics.items():
+                logged_metrics[k] = float(v)
+            with open(
+                Path(trainer.logger.save_dir) / "test.metrics", mode="w"
+            ) as f:
+                f.write(json.dumps(logged_metrics))
+
+
 def fit(
     dataset: EdgeDataset,
     ckpt_file: T.Union[str, Path],
@@ -313,29 +662,19 @@ def fit(
     ckpt_file = Path(ckpt_file)
 
     # Split the dataset into train/validation
-    if spatial_partitions is not None:
-        # TODO: We removed `dataset.split_train_val_by_partition` but
-        # could make it an option in future versions.
-        train_ds, val_ds = dataset.split_train_val(
-            val_frac=val_frac, spatial_overlap_allowed=False
-        )
-    else:
-        train_ds, val_ds = dataset.split_train_val(val_frac=val_frac)
-
-    # Setup the data module
-    data_module = EdgeDataModule(
-        train_ds=train_ds,
-        val_ds=val_ds,
-        test_ds=test_dataset,
+    data_module = get_data_module(
+        dataset=dataset,
+        test_dataset=test_dataset,
+        val_frac=val_frac,
+        spatial_partitions=spatial_partitions,
         batch_size=batch_size,
-        num_workers=load_batch_workers,
-        shuffle=True,
+        load_batch_workers=load_batch_workers,
     )
 
     # Setup the Lightning model
     lit_model = CultioLitModel(
-        num_features=train_ds.num_features,
-        num_time_features=train_ds.num_time_features,
+        num_features=data_module.train_ds.num_features,
+        num_time_features=data_module.train_ds.num_time_features,
         num_classes=num_classes,
         filters=filters,
         model_type=model_type,
@@ -360,43 +699,20 @@ def fit(
     if reset_model:
         if ckpt_file.is_file():
             ckpt_file.unlink()
-        model_file = ckpt_file.parent / "cultionet.pt"
+        model_file = ckpt_file.parent / f"{lit_model.model_name}.pt"
         if model_file.is_file():
             model_file.unlink()
 
-    # Checkpoint
-    cb_train_loss = ModelCheckpoint(monitor="loss")
-    # Validation and test loss
-    cb_val_loss = ModelCheckpoint(
-        dirpath=ckpt_file.parent,
-        filename=ckpt_file.stem,
-        save_last=True,
+    lr_monitor, callbacks = setup_callbacks(
+        ckpt_file=ckpt_file,
         save_top_k=save_top_k,
-        mode="min",
-        monitor="val_score",
-        every_n_train_steps=0,
-        every_n_epochs=1,
+        early_stopping_min_delta=early_stopping_min_delta,
+        early_stopping_patience=early_stopping_patience,
+        stochastic_weight_averaging=stochastic_weight_averaging,
+        stochastic_weight_averaging_lr=stochastic_weight_averaging_lr,
+        stochastic_weight_averaging_start=stochastic_weight_averaging_start,
+        model_pruning=model_pruning,
     )
-    # Early stopping
-    early_stop_callback = EarlyStopping(
-        monitor="val_score",
-        min_delta=early_stopping_min_delta,
-        patience=early_stopping_patience,
-        mode="min",
-        check_on_train_epoch_end=False,
-    )
-    # Learning rate
-    lr_monitor = LearningRateMonitor(logging_interval="epoch")
-    callbacks = [lr_monitor, cb_train_loss, cb_val_loss, early_stop_callback]
-    if stochastic_weight_averaging:
-        callbacks.append(
-            StochasticWeightAveraging(
-                swa_lrs=stochastic_weight_averaging_lr,
-                swa_epoch_start=stochastic_weight_averaging_start,
-            )
-        )
-    if 0 < model_pruning <= 1:
-        callbacks.append(ModelPruning("l1_unstructured", amount=model_pruning))
 
     trainer = pl.Trainer(
         default_root_dir=str(ckpt_file.parent),
@@ -489,7 +805,7 @@ def fit(
             )
             # Calibrate the logits
             refine_model = RefineLitModel(
-                in_features=train_ds.num_features,
+                in_features=data_module.train_ds.num_features,
                 num_classes=num_classes,
                 edge_class=edge_class,
                 class_counts=class_counts,
