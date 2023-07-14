@@ -1326,8 +1326,13 @@ def main():
         )
 
         process_dict = args_config[process.replace("-", "_")]
-        if process in (CLISteps.SKFOLDCV.value):
+        # Processes that use train args in addition to 'train'
+        if process in (CLISteps.SKFOLDCV.value, CLISteps.TRAIN_TRANSFER.value):
             process_dict.update(args_config["train"])
+        # Processes that use the predict args in addition to 'predict'
+        if process in (CLISteps.PREDICT_TRANSFER.value,):
+            process_dict.update(args_config["predict"])
+        # Processes that use args shared between train and predict
         if process in (
             CLISteps.TRAIN.value,
             CLISteps.TRAIN_TRANSFER.value,
