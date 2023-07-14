@@ -2,27 +2,27 @@ import enum
 
 
 class CLISteps(enum.Enum):
-    CREATE = enum.auto()
+    CREATE = 'create'
     CREATE_PREDICT = "create-predict"
-    GRAPH = enum.auto()
-    SKFOLDCV = enum.auto()
-    TRAIN = enum.auto()
+    GRAPH = 'graph'
+    SKFOLDCV = 'skfoldcv'
+    TRAIN = 'train'
     TRAIN_TRANSFER = "train-transfer"
-    PREDICT = enum.auto()
+    PREDICT = 'predict'
     PREDICT_TRANSFER = "predict-transfer"
-    VERSION = enum.auto()
+    VERSION = 'version'
 
 
 class Destinations(enum.Enum):
-    CKPT = enum.auto()
-    DATA = enum.auto()
-    FIGURES = enum.auto()
-    PREDICT = enum.auto()
-    PROCESSED = enum.auto()
-    TRAIN = enum.auto()
-    TEST = enum.auto()
-    TIME_SERIES_VARS = enum.auto()
-    USER_TRAIN = enum.auto()
+    CKPT = 'ckpt'
+    DATA = 'data'
+    FIGURES = 'figures'
+    PREDICT = 'predict'
+    PROCESSED = 'processed'
+    TRAIN = 'train'
+    TEST = 'test'
+    TIME_SERIES_VARS = 'time_series_vars'
+    USER_TRAIN = 'user_train'
 
 
 class ModelNames(enum.Enum):
@@ -33,10 +33,10 @@ class ModelNames(enum.Enum):
 
 
 class ModelTypes(enum.Enum):
-    UNET = enum.auto()
-    RESUNET = enum.auto()
+    UNET = 'unet'
+    RESUNET = 'resunet'
 
 
 class ResBlockTypes(enum.Enum):
-    RES = enum.auto()
-    RESA = enum.auto()
+    RES = 'res'
+    RESA = 'resa'

@@ -699,3 +699,15 @@ predict:
     help: Whether to delete the prediction dataset
     kwargs:
       action: store_true
+
+train_transfer:
+  placeholder:
+    short: ''
+    long: placeholder
+    help: Help for placeholder
+
+predict_transfer:
+  placeholder:
+    short: ''
+    long: placeholder
+    help: Help for placeholder

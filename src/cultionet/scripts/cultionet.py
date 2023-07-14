@@ -1305,7 +1305,6 @@ def main():
     available_processes = [
         CLISteps.CREATE.value,
         CLISteps.CREATE_PREDICT.value,
-        CLISteps.GRAPH.value,
         CLISteps.SKFOLDCV.value,
         CLISteps.TRAIN.value,
         CLISteps.PREDICT.value,
@@ -1325,8 +1324,6 @@ def main():
             dest="project_path",
             help="The project path (the directory that contains the grid ids)",
         )
-        if process == CLISteps.GRAPH.value:
-            break
 
         process_dict = args_config[process.replace("-", "_")]
         if process in (CLISteps.SKFOLDCV.value):
