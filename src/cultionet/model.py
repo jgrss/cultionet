@@ -425,6 +425,7 @@ def fit_transfer(
         deep_sup_edge=deep_sup_edge,
         deep_sup_mask=deep_sup_mask,
         scale_pos_weight=scale_pos_weight,
+        edge_class=edge_class,
     )
 
     if reset_model:
@@ -434,7 +435,7 @@ def fit_transfer(
         if model_file.is_file():
             model_file.unlink()
 
-    lr_monitor = callbacks = setup_callbacks(
+    lr_monitor, callbacks = setup_callbacks(
         ckpt_file=ckpt_file,
         save_top_k=save_top_k,
         early_stopping_min_delta=early_stopping_min_delta,
