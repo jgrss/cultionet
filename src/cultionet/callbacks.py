@@ -38,6 +38,10 @@ class LightningGTiffWriter(BasePredictionWriter):
 
         with gw.config.update(ref_res=ref_res):
             with gw.open(reference_image, resampling=resampling) as src:
+                chunksize = src.gw.check_chunksize(
+                    256, min(src.gw.nrows, src.gw.ncols)
+                )
+                src = src.chunk({"band": -1, "y": chunksize, "x": chunksize})
                 profile = {
                     "crs": src.crs,
                     "transform": src.gw.transform,

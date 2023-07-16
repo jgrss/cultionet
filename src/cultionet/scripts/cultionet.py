@@ -492,7 +492,9 @@ def predict_image(args):
             precision=args.precision,
             num_classes=num_classes,
             ref_res=ds[0].res,
-            resampling=ds[0].resampling,
+            resampling=ds[0].resampling
+            if hasattr(ds[0], 'resampling')
+            else 'nearest',
             compression=args.compression,
             is_transfer_model=args.process == CLISteps.PREDICT_TRANSFER.value,
             refine_pt=ckpt_file.parent / "refine" / "refine.pt",
