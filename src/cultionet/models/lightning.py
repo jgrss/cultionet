@@ -970,7 +970,7 @@ class CultioLitTransferModel(LightningModuleMixin):
         )
         self.star_rnn.final_last = FinalRNN(
             hidden_dim=init_filter,
-            dim_factor=2,
+            dim_factor=3,
             activation_type=activation_type,
             final_activation=Softmax(dim=1),
             num_classes=num_classes + 1,
