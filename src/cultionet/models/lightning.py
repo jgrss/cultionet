@@ -14,6 +14,7 @@ from torchvision import transforms
 import torchmetrics
 
 from cultionet.models.nunet import PostUNet3Psi
+from cultionet.models.convstar import FinalRNN
 from . import model_utils
 from .cultio import CultioNet, GeoRefinement
 from .maskcrnn import BFasterRCNN
@@ -901,6 +902,7 @@ class CultioLitTransferModel(LightningModuleMixin):
         ds_features: int,
         ds_time_features: int,
         init_filter: int = 32,
+        activation_type: str = "SiLU",
         num_classes: int = 2,
         optimizer: str = "AdamW",
         learning_rate: float = 1e-3,
@@ -959,6 +961,20 @@ class CultioLitTransferModel(LightningModuleMixin):
         cultionet_model.freeze()
         layers = list(cultionet_model.cultionet_model.children())
         self.star_rnn = layers[-2]
+        self.star_rnn.final_l2 = FinalRNN(
+            hidden_dim=init_filter,
+            dim_factor=2,
+            activation_type=activation_type,
+            final_activation=Softmax(dim=1),
+            num_classes=num_classes,
+        )
+        self.star_rnn.final_last = FinalRNN(
+            hidden_dim=init_filter,
+            dim_factor=2,
+            activation_type=activation_type,
+            final_activation=Softmax(dim=1),
+            num_classes=num_classes + 1,
+        )
         self.mask_model = layers[-1]
         # TODO: for finetuning, we do not need to replace this layer
         # TODO: this is feature extraction
