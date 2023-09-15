@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v1.7.2 (2023-05-04)
+* Upgraded `geowombat` ([#72](https://github.com/jgrss/cultionet/pull/72))
+
 ## v1.7.1 (2023-05-04)
 * Pinned the upper version of `pytorch-lightning` and upgraded `geowombat` ([#71](https://github.com/jgrss/cultionet/pull/71))
 
