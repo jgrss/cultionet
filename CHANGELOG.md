@@ -2,6 +2,11 @@
 
 <!--next-version-placeholder-->
 
+## v1.7.3 (2023-09-16)
+* Addressed Issue #63  ([#63](https://github.com/jgrss/cultionet/issues/63))
+* Better version dependency pinning
+* Improved handling of image resolution and height/width dimensions
+
 ## v1.7.2 (2023-05-04)
 * Upgraded `geowombat` ([#72](https://github.com/jgrss/cultionet/pull/72))
 

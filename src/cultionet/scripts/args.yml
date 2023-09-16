@@ -85,7 +85,7 @@ shared_create:
     long: res
     help: The cell resolution
     kwargs:
-      default: 10.0
+      default: !!null
       type: '&float'
   feature_pattern:
     short: ''

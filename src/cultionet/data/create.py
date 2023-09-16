@@ -9,6 +9,7 @@ from geowombat.core.windows import get_window_offsets
 import numpy as np
 from scipy.ndimage.measurements import label as nd_label
 import cv2
+from rasterio.warp import calculate_default_transform
 from rasterio.windows import Window
 import xarray as xr
 import geopandas as gpd
@@ -274,7 +275,7 @@ def create_image_vars(
     gain: float = 1e-4,
     offset: float = 0.0,
     grid_edges: T.Optional[gpd.GeoDataFrame] = None,
-    ref_res: T.Optional[float] = 10.0,
+    ref_res: T.Optional[T.Union[float, T.Tuple[float, float]]] = 10.0,
     resampling: T.Optional[str] = "nearest",
     crop_column: T.Optional[str] = "class",
     keep_crop_classes: T.Optional[bool] = False,
@@ -533,7 +534,7 @@ def create_and_save_window(
             mode="constant",
         )
     if x.shape[1:] != (size, size):
-        logger.exception("The array does not match the expected size.")
+        logger.warning("The array does not match the expected size.")
 
     ldata = LabeledData(
         x=x, y=None, bdist=None, ori=None, segments=None, props=None
@@ -583,7 +584,7 @@ def create_predict_dataset(
     process_path: Path = None,
     gain: float = 1e-4,
     offset: float = 0.0,
-    ref_res: float = 10.0,
+    ref_res: T.Union[float, T.Tuple[float, float]] = 10.0,
     resampling: str = "nearest",
     window_size: int = 100,
     padding: int = 101,
@@ -718,6 +719,10 @@ def create_dataset(
     # Get the image CRS
     with gw.open(image_list[0]) as src:
         image_crs = src.crs
+        if ref_res is None:
+            ref_res = (src.gw.celly, src.gw.cellx)
+        else:
+            ref_res = (ref_res, ref_res)
 
     input_height = None
     input_width = None
@@ -805,12 +810,28 @@ def create_dataset(
             if grid_size is not None:
                 height, width = grid_size
                 left, bottom, right, top = ref_bounds
-                ref_bounds = [
-                    left,
-                    top - ref_res * height,
-                    left + ref_res * width,
-                    top,
-                ]
+
+                (
+                    dst_transform,
+                    dst_width,
+                    dst_height,
+                ) = calculate_default_transform(
+                    src_crs=image_crs,
+                    dst_crs=image_crs,
+                    width=int(abs(round((right - left) / ref_res[1]))),
+                    height=int(abs(round((top - bottom) / ref_res[0]))),
+                    left=left,
+                    bottom=bottom,
+                    right=right,
+                    top=top,
+                    dst_width=width,
+                    dst_height=height,
+                )
+                dst_left = dst_transform[2]
+                dst_top = dst_transform[5]
+                dst_right = dst_left + abs(dst_width * dst_transform[0])
+                dst_bottom = dst_top - abs(dst_height * dst_transform[4])
+                ref_bounds = [dst_left, dst_bottom, dst_right, dst_top]
 
             # Data for graph network
             xvars, labels_array, bdist, ori, ntime, nbands = create_image_vars(
@@ -821,7 +842,7 @@ def create_dataset(
                 gain=gain,
                 offset=offset,
                 grid_edges=grid_edges if nonzero_mask.any() else None,
-                ref_res=ref_res,
+                ref_res=ref_res[0],
                 resampling=resampling,
                 crop_column=crop_column,
                 keep_crop_classes=keep_crop_classes,
