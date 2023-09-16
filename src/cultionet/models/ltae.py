@@ -118,82 +118,6 @@ class MultiHeadAttention(nn.Module):
             return output, attn
 
 
-class TemporalAggregator(nn.Module):
-    def __init__(self, mode: str = 'mean'):
-        super(TemporalAggregator, self).__init__()
-
-        self.mode = mode
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        pad_mask: Optional[torch.Tensor] = None,
-        attn_mask: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        if pad_mask is not None and pad_mask.any():
-            if self.mode == "att_group":
-                n_heads, b, t, h, w = attn_mask.shape
-                attn = attn_mask.view(n_heads * b, t, h, w)
-
-                if x.shape[-2] > w:
-                    attn = nn.Upsample(
-                        size=x.shape[-2:], mode="bilinear", align_corners=False
-                    )(attn)
-                else:
-                    attn = nn.AvgPool2d(kernel_size=w // x.shape[-2])(attn)
-
-                attn = attn.view(n_heads, b, t, *x.shape[-2:])
-                attn = attn * (~pad_mask).float()[None, :, :, None, None]
-
-                out = torch.stack(x.chunk(n_heads, dim=2))  # hxBxTxC/hxHxW
-                out = attn[:, :, :, None, :, :] * out
-                out = out.sum(dim=2)  # sum on temporal dim -> hxBxC/hxHxW
-                out = torch.cat([group for group in out], dim=1)  # -> BxCxHxW
-
-            elif self.mode == "att_mean":
-                attn = attn_mask.mean(dim=0)  # average over heads -> BxTxHxW
-                attn = nn.Upsample(
-                    size=x.shape[-2:], mode="bilinear", align_corners=False
-                )(attn)
-                attn = attn * (~pad_mask).float()[:, :, None, None]
-                out = (x * attn[:, :, None, :, :]).sum(dim=1)
-
-            elif self.mode == "mean":
-                out = x * (~pad_mask).float()[:, :, None, None, None]
-                out = (
-                    out.sum(dim=1)
-                    / (~pad_mask).sum(dim=1)[:, None, None, None]
-                )
-
-        else:
-            if self.mode == "att_group":
-                n_heads, b, t, h, w = attn_mask.shape
-                attn = attn_mask.view(n_heads * b, t, h, w)
-                if x.shape[-2] > w:
-                    attn = nn.Upsample(
-                        size=x.shape[-2:], mode="bilinear", align_corners=False
-                    )(attn)
-                else:
-                    attn = nn.AvgPool2d(kernel_size=w // x.shape[-2])(attn)
-                attn = attn.view(n_heads, b, t, *x.shape[-2:])
-                out = torch.stack(x.chunk(n_heads, dim=2))  # hxBxTxC/hxHxW
-                out = attn[:, :, :, None, :, :] * out
-                out = out.sum(dim=2)  # sum on temporal dim -> hxBxC/hxHxW
-                out = torch.cat([group for group in out], dim=1)  # -> BxCxHxW
-
-            elif self.mode == "att_mean":
-                attn = attn_mask.mean(dim=0)  # average over heads -> BxTxHxW
-                attn = nn.Upsample(
-                    size=x.shape[-2:], mode="bilinear", align_corners=False
-                )(attn)
-                out = (x * attn[:, :, None, :, :]).sum(dim=1)
-
-            elif self.mode == "mean":
-                out = x.mean(dim=1)
-
-        return out
-
-
 class LightweightTemporalAttentionEncoder(nn.Module):
     def __init__(
         self,
@@ -324,7 +248,7 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         # permuted shape = (B x T x C x H x W)
         x = self.init_conv(x)
         x = x.permute(0, 2, 1, 3, 4)
-        batch_size, time_size, channel_size, height, width = x.shape
+        # x shape = (batch_size, time_size, channel_size, height, width)
 
         pad_mask = None
         if mask_padded:

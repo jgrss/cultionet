@@ -389,10 +389,10 @@ class CultioNet(torch.nn.Module):
         x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
 
         # Transformer attention encoder
-        logits_hidden, logits_l2, logits_last = self.temporal_encoder(x)
+        logits_hidden, classes_l2, classes_last = self.temporal_encoder(x)
 
-        logits_l2 = self.cg(logits_l2)
-        logits_last = self.cg(logits_last)
+        classes_l2 = self.cg(classes_l2)
+        classes_last = self.cg(classes_last)
         # Main stream
         logits = self.mask_model(x, temporal_encoding=logits_hidden)
         logits_distance = self.cg(logits["dist"])
@@ -404,8 +404,8 @@ class CultioNet(torch.nn.Module):
             "edge": logits_edges,
             "crop": logits_crop,
             "crop_type": None,
-            "crop_star_l2": logits_l2,
-            "crop_star": logits_last,
+            "classes_l2": classes_l2,
+            "classes_last": classes_last,
         }
 
         if logits["dist_3_1"] is not None:

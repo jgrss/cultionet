@@ -537,19 +537,19 @@ class LightningModuleMixin(LightningModule):
             batch, crop_type=predictions["crop_type"]
         )
 
-        # RNN level 2 loss (non-crop=0; crop|edge=1)
-        crop_star_l2_loss = self.crop_star_l2_loss(
-            predictions["crop_star_l2"], true_labels_dict["true_crop_and_edge"]
+        # Temporal encoding level 2 loss (non-crop=0; crop|edge=1)
+        classes_l2_loss = self.classes_l2_loss(
+            predictions["classes_l2"], true_labels_dict["true_crop_and_edge"]
         )
-        # RNN final loss (non-crop=0; crop=1; edge=2)
-        crop_star_loss = self.crop_star_loss(
-            predictions["crop_star"], true_labels_dict["true_crop_or_edge"]
+        # Temporal encoding final loss (non-crop=0; crop=1; edge=2)
+        classes_last_loss = self.classes_last_loss(
+            predictions["classes_last"], true_labels_dict["true_crop_or_edge"]
         )
         # Main loss
         loss = (
-            # RNN losses
-            0.25 * crop_star_l2_loss
-            + 0.5 * crop_star_loss
+            # Temporal encoding losses
+            0.25 * classes_l2_loss
+            + 0.5 * classes_last_loss
         )
         # Edge losses
         if self.deep_sup_dist:
@@ -833,9 +833,9 @@ class LightningModuleMixin(LightningModule):
             self.crop_loss_1_3 = TanimotoDistLoss(
                 scale_pos_weight=self.scale_pos_weight
             )
-        # Crop RNN losses
-        self.crop_star_l2_loss = TanimotoDistLoss()
-        self.crop_star_loss = TanimotoDistLoss()
+        # Crop Temporal encoding losses
+        self.classes_l2_loss = TanimotoDistLoss()
+        self.classes_last_loss = TanimotoDistLoss()
         # FIXME:
         if self.num_classes > 2:
             self.crop_type_star_loss = TanimotoDistLoss(
@@ -1021,10 +1021,10 @@ class CultioLitTransferModel(LightningModuleMixin):
         x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
 
         # Transformer attention encoder
-        logits_hidden, logits_l2, logits_last = self.temporal_encoder(x)
+        logits_hidden, classes_l2, classes_last = self.temporal_encoder(x)
 
-        logits_l2 = self.cg(logits_l2)
-        logits_last = self.cg(logits_last)
+        classes_l2 = self.cg(classes_l2)
+        classes_last = self.cg(classes_last)
         # Main stream
         logits = self.cultionet_model(x, logits_hidden)
         logits_distance = self.cg(logits["dist"])
@@ -1036,8 +1036,8 @@ class CultioLitTransferModel(LightningModuleMixin):
             "edge": logits_edges,
             "crop": logits_crop,
             "crop_type": None,
-            "crop_star_l2": logits_l2,
-            "crop_star": logits_last,
+            "classes_l2": classes_l2,
+            "classes_last": classes_last,
         }
 
         if logits["dist_3_1"] is not None:
