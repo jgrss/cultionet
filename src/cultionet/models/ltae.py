@@ -352,17 +352,10 @@ class LightweightTemporalAttentionEncoder(nn.Module):
             out = self.inconv(out.permute(0, 2, 1)).permute(0, 2, 1)
 
         if self.positional_encoder is not None:
-            # bp = (
-            #     batch_positions.unsqueeze(-1)
-            #     .repeat((1, 1, height))
-            #     .unsqueeze(-1)
-            #     .repeat((1, 1, 1, width))
-            # )  # BxTxHxW
             # B x T x C
             bp = batch_positions.contiguous().view(
                 batch_size * height * width, time_size
             )
-            # bp = bp.permute(0, 2, 3, 1).contiguous().view(batch_size * height * width, time_size)
             out = out + self.positional_encoder(bp)
 
         out, attn = self.attention_heads(out, pad_mask=pad_mask)

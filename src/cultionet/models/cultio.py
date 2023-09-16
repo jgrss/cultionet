@@ -7,7 +7,6 @@ from torch_geometric.data import Data
 from . import model_utils
 from .base_layers import ConvBlock2d, ResidualConv, Softmax
 from .nunet import UNet3Psi, ResUNet3Psi
-from .convstar import StarRNN
 from .ltae import LightweightTemporalAttentionEncoder
 
 
@@ -333,7 +332,7 @@ class CultioNet(torch.nn.Module):
         unet3_kwargs = {
             "in_channels": self.ds_num_bands,
             "in_time": self.ds_num_time,
-            "in_rnn_channels": 128,  # <- L-TAE; #int(self.filters * 3), <- ConvSTAR
+            "in_encoding_channels": 128,  # <- L-TAE; #int(self.filters * 3), <- ConvSTAR
             "init_filter": self.filters,
             "num_classes": self.num_classes,
             "activation_type": activation_type,
@@ -395,7 +394,7 @@ class CultioNet(torch.nn.Module):
         logits_l2 = self.cg(logits_l2)
         logits_last = self.cg(logits_last)
         # Main stream
-        logits = self.mask_model(x, logits_hidden)
+        logits = self.mask_model(x, temporal_encoding=logits_hidden)
         logits_distance = self.cg(logits["dist"])
         logits_edges = self.cg(logits["edge"])
         logits_crop = self.cg(logits["mask"])

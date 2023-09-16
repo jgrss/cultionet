@@ -1413,7 +1413,7 @@ class PoolResidualConv(torch.nn.Module):
         dilations: T.List[int] = None,
         attention_weights: str = None,
         activation_type: str = "LeakyReLU",
-        res_block_type: enum = ResBlockTypes.RESA,
+        res_block_type: enum = ResBlockTypes.RES,
     ):
         super(PoolResidualConv, self).__init__()
 

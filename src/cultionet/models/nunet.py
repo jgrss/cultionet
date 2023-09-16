@@ -532,7 +532,9 @@ class PreUnet3Psi(torch.nn.Module):
             SetActivation(activation_type=activation_type),
         )
 
-    def forward(self, x: torch.Tensor, rnn_h: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, temporal_encoding: torch.Tensor
+    ) -> torch.Tensor:
         peak_kernels = []
         pos_trend_kernels = []
         neg_trend_kernels = []
@@ -586,7 +588,7 @@ class PreUnet3Psi(torch.nn.Module):
                 self.reduce_to_channels_max(h),
                 self.reduce_to_channels_mean(h),
                 self.reduce_to_channels_std(h),
-                rnn_h,
+                temporal_encoding,
                 self.reduce_trend_to_time(trend_kernels),
             ],
             dim=1,
@@ -746,7 +748,7 @@ class UNet3Psi(torch.nn.Module):
         self,
         in_channels: int,
         in_time: int,
-        in_rnn_channels: int,
+        in_encoding_channels: int,
         init_filter: int = 32,
         num_classes: int = 2,
         dilation: int = 2,
@@ -782,7 +784,7 @@ class UNet3Psi(torch.nn.Module):
             in_channels=(
                 in_time
                 + int(channels[0] * 4)
-                + in_rnn_channels
+                + in_encoding_channels
                 # Peak kernels and Trend kernels
                 + in_time
             ),
@@ -863,10 +865,10 @@ class UNet3Psi(torch.nn.Module):
                 m.apply(weights_init_kaiming)
 
     def forward(
-        self, x: torch.Tensor, rnn_h: torch.Tensor
+        self, x: torch.Tensor, temporal_encoding: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
         # Inputs shape is (B x C X T|D x H x W)
-        h = self.pre_unet(x, rnn_h)
+        h = self.pre_unet(x, temporal_encoding)
         # h shape is (B x C x H x W)
         # Backbone
         # 1/1
@@ -942,12 +944,12 @@ class ResUNet3Psi(torch.nn.Module):
         self,
         in_channels: int,
         in_time: int,
-        in_rnn_channels: int,
+        in_encoding_channels: int,
         init_filter: int = 32,
         num_classes: int = 2,
         dilations: T.Sequence[int] = None,
         activation_type: str = "LeakyReLU",
-        res_block_type: str = "resa",
+        res_block_type: str = "res",
         attention_weights: T.Optional[str] = None,
         deep_sup_dist: T.Optional[bool] = False,
         deep_sup_edge: T.Optional[bool] = False,
@@ -955,6 +957,11 @@ class ResUNet3Psi(torch.nn.Module):
         mask_activation: T.Union[Softmax, torch.nn.Sigmoid] = Softmax(dim=1),
     ):
         super(ResUNet3Psi, self).__init__()
+
+        if dilations is None:
+            dilations = [2]
+        if attention_weights is None:
+            attention_weights = "spatial_channel"
 
         init_filter = int(init_filter)
         channels = [
@@ -981,7 +988,7 @@ class ResUNet3Psi(torch.nn.Module):
                 in_channels=(
                     in_time
                     + int(channels[0] * 4)
-                    + in_rnn_channels
+                    + in_encoding_channels
                     # Peak kernels and Trend kernels
                     + in_time
                 ),
@@ -995,7 +1002,7 @@ class ResUNet3Psi(torch.nn.Module):
                 in_channels=(
                     in_time
                     + int(channels[0] * 4)
-                    + in_rnn_channels
+                    + in_encoding_channels
                     # Peak kernels and Trend kernels
                     + in_time
                 ),
@@ -1093,10 +1100,10 @@ class ResUNet3Psi(torch.nn.Module):
                 m.apply(weights_init_kaiming)
 
     def forward(
-        self, x: torch.Tensor, rnn_h: torch.Tensor
+        self, x: torch.Tensor, temporal_encoding: torch.Tensor
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
         # Inputs shape is (B x C X T|D x H x W)
-        h = self.pre_unet(x, rnn_h)
+        h = self.pre_unet(x, temporal_encoding=temporal_encoding)
         # h shape is (B x C x H x W)
         # Backbone
         # 1/1

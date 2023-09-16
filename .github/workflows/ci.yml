@@ -11,17 +11,16 @@ on:
 jobs:
   Tests:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9"]
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-python@v2
+      - uses: actions/checkout@v3
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.8.12
-      - uses: syphar/restore-virtualenv@v1
-        id: cnetenv
-        with:
-          requirement_files: setup.cfg
-      - uses: syphar/restore-pip-download-cache@v1
-        if: steps.cnetenv.outputs.cache-hit != 'true'
+          python-version: ${{ matrix.python-version }}
+          cache: pip # caching pip dependencies based on changes to pyproject.toml
       - name: Install GDAL binaries
         run: |
           # Temporary? dpkg fix: https://askubuntu.com/questions/1276111/error-upgrading-grub-efi-amd64-signed-special-device-old-ssd-does-not-exist
@@ -46,12 +45,11 @@ jobs:
       - name: Install PyTorch
         run: |
           TORCH_CPU="https://download.pytorch.org/whl/cpu"
-          TORCH_VERSION="1.13.0"
+          TORCH_VERSION="2.0.0"
           pip install --upgrade --no-cache-dir setuptools>=0.59.5
           pip install torch==${TORCH_VERSION} torchvision torchaudio --extra-index-url $TORCH_CPU
           PYG_TORCH_CPU="https://data.pyg.org/whl/torch-${TORCH_VERSION}+cpu.html"
           pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f $PYG_TORCH_CPU
-        if: steps.cnetenv.outputs.cache-hit != 'true'
       - name: Install cultionet
         run: |
           pip install .
