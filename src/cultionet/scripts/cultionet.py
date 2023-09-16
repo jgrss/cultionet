@@ -739,7 +739,14 @@ def create_datasets(args):
         )
 
     total_iters = len(
-        list(itertools.product(inputs.year_lists, inputs.regions_lists))
+        list(
+            itertools.product(
+                list(itertools.chain.from_iterable(inputs.year_lists)),
+                list(
+                    itertools.chain.from_iterable(inputs.regions_lists)
+                ),
+            )
+        )
     )
     with tqdm(total=total_iters, position=0, leave=True) as pbar:
         for region, end_year, project_path, ref_res in cycle_data(
@@ -778,6 +785,8 @@ def create_datasets(args):
                     continue
 
                 df_grids = gpd.read_file(grids)
+                if not {"region", "grid"}.intersection(df_grids.columns.tolist()):
+                    df_grids["region"] = region
 
                 if not edges.is_file():
                     edges = (
