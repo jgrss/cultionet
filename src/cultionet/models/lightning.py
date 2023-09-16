@@ -14,7 +14,7 @@ from torchvision import transforms
 import torchmetrics
 
 from cultionet.models.nunet import PostUNet3Psi
-from cultionet.models.convstar import FinalRNN
+from cultionet.models.base_layers import FinalConv2dDropout
 from . import model_utils
 from .cultio import CultioNet, GeoRefinement
 from .maskcrnn import BFasterRCNN
@@ -960,17 +960,17 @@ class CultioLitTransferModel(LightningModuleMixin):
         # Freeze all parameters
         cultionet_model.freeze()
         layers = list(cultionet_model.cultionet_model.children())
-        self.star_rnn = layers[-2]
-        self.star_rnn.final_l2 = FinalRNN(
-            hidden_dim=init_filter,
-            dim_factor=2,
+        self.temporal_encoder = layers[-2]
+        self.temporal_encoder.final_l2 = FinalConv2dDropout(
+            hidden_dim=128,
+            dim_factor=1,
             activation_type=activation_type,
             final_activation=Softmax(dim=1),
             num_classes=num_classes,
         )
-        self.star_rnn.final_last = FinalRNN(
-            hidden_dim=init_filter,
-            dim_factor=3,
+        self.temporal_encoder.final_last = FinalConv2dDropout(
+            hidden_dim=128,
+            dim_factor=1,
             activation_type=activation_type,
             final_activation=Softmax(dim=1),
             num_classes=num_classes + 1,
@@ -1019,13 +1019,14 @@ class CultioLitTransferModel(LightningModuleMixin):
         x = self.gc(batch.x, batch_size, height, width)
         # Reshape from (B x C x H x W) -> (B x C x T|D x H x W)
         x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
-        # StarRNN
-        logits_star_hidden, logits_star_l2, logits_star_last = self.star_rnn(x)
-        logits_star_l2 = self.cg(logits_star_l2)
-        logits_star_last = self.cg(logits_star_last)
 
+        # Transformer attention encoder
+        logits_hidden, logits_l2, logits_last = self.temporal_encoder(x)
+
+        logits_l2 = self.cg(logits_l2)
+        logits_last = self.cg(logits_last)
         # Main stream
-        logits = self.cultionet_model(x, logits_star_hidden)
+        logits = self.cultionet_model(x, logits_hidden)
         logits_distance = self.cg(logits["dist"])
         logits_edges = self.cg(logits["edge"])
         logits_crop = self.cg(logits["mask"])
@@ -1035,8 +1036,8 @@ class CultioLitTransferModel(LightningModuleMixin):
             "edge": logits_edges,
             "crop": logits_crop,
             "crop_type": None,
-            "crop_star_l2": logits_star_l2,
-            "crop_star": logits_star_last,
+            "crop_star_l2": logits_l2,
+            "crop_star": logits_last,
         }
 
         if logits["dist_3_1"] is not None:

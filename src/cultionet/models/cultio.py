@@ -6,8 +6,9 @@ from torch_geometric.data import Data
 
 from . import model_utils
 from .base_layers import ConvBlock2d, ResidualConv, Softmax
-from .nunet import UNet3, UNet3Psi, ResUNet3Psi
+from .nunet import UNet3Psi, ResUNet3Psi
 from .convstar import StarRNN
+from .ltae import LightweightTemporalAttentionEncoder
 
 
 def scale_min_max(
@@ -313,20 +314,26 @@ class CultioNet(torch.nn.Module):
         self.cg = model_utils.ConvToGraph()
         self.ct = model_utils.ConvToTime()
 
-        self.star_rnn = StarRNN(
-            input_dim=self.ds_num_bands,
-            hidden_dim=self.filters,
-            n_layers=3,
+        self.temporal_encoder = LightweightTemporalAttentionEncoder(
+            in_channels=self.ds_num_bands,
+            hidden_size=128,
+            d_model=256,
+            n_head=16,
+            n_time=self.ds_num_time,
+            # [d_model, encoder_widths[-1]]
+            mlp=[256, 128],
+            return_att=False,
+            d_k=4,
             num_classes_l2=self.num_classes,
             num_classes_last=self.num_classes + 1,
-            crop_type_layer=True if self.num_classes > 2 else False,
             activation_type=activation_type,
             final_activation=Softmax(dim=1),
         )
+
         unet3_kwargs = {
             "in_channels": self.ds_num_bands,
             "in_time": self.ds_num_time,
-            "in_rnn_channels": int(self.filters * 3),
+            "in_rnn_channels": 128,  # <- L-TAE; #int(self.filters * 3), <- ConvSTAR
             "init_filter": self.filters,
             "num_classes": self.num_classes,
             "activation_type": activation_type,
@@ -381,12 +388,14 @@ class CultioNet(torch.nn.Module):
         x = self.gc(data.x, batch_size, height, width)
         # Reshape from (B x C x H x W) -> (B x C x T|D x H x W)
         x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
-        # StarRNN
-        logits_star_hidden, logits_star_l2, logits_star_last = self.star_rnn(x)
-        logits_star_l2 = self.cg(logits_star_l2)
-        logits_star_last = self.cg(logits_star_last)
+
+        # Transformer attention encoder
+        logits_hidden, logits_l2, logits_last = self.temporal_encoder(x)
+
+        logits_l2 = self.cg(logits_l2)
+        logits_last = self.cg(logits_last)
         # Main stream
-        logits = self.mask_model(x, logits_star_hidden)
+        logits = self.mask_model(x, logits_hidden)
         logits_distance = self.cg(logits["dist"])
         logits_edges = self.cg(logits["edge"])
         logits_crop = self.cg(logits["mask"])
@@ -396,8 +405,8 @@ class CultioNet(torch.nn.Module):
             "edge": logits_edges,
             "crop": logits_crop,
             "crop_type": None,
-            "crop_star_l2": logits_star_l2,
-            "crop_star": logits_star_last,
+            "crop_star_l2": logits_l2,
+            "crop_star": logits_last,
         }
 
         if logits["dist_3_1"] is not None:

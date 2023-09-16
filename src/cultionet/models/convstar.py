@@ -7,7 +7,7 @@ import typing as T
 import torch
 from torch.autograd import Variable
 
-from .base_layers import Softmax, ResidualConv
+from .base_layers import Softmax, FinalConv2dDropout
 
 
 class ConvSTARCell(torch.nn.Module):
@@ -138,38 +138,6 @@ class ConvSTAR(torch.nn.Module):
         return upd_hidden
 
 
-class FinalRNN(torch.nn.Module):
-    def __init__(
-        self,
-        hidden_dim: int,
-        dim_factor: int,
-        activation_type: str,
-        final_activation: T.Callable,
-        num_classes: int,
-    ):
-        super(FinalRNN, self).__init__()
-
-        self.net = torch.nn.Sequential(
-            ResidualConv(
-                in_channels=int(hidden_dim * dim_factor),
-                out_channels=hidden_dim,
-                dilation=2,
-                activation_type=activation_type,
-            ),
-            torch.nn.Dropout(0.1),
-            torch.nn.Conv2d(
-                in_channels=hidden_dim,
-                out_channels=num_classes,
-                kernel_size=1,
-                padding=0,
-            ),
-            final_activation,
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
-
-
 class StarRNN(torch.nn.Module):
     def __init__(
         self,
@@ -201,7 +169,7 @@ class StarRNN(torch.nn.Module):
         )
 
         # Level 2 level (non-crop; crop)
-        self.final_l2 = FinalRNN(
+        self.final_l2 = FinalConv2dDropout(
             hidden_dim=hidden_dim,
             dim_factor=2,
             activation_type=activation_type,
@@ -209,7 +177,7 @@ class StarRNN(torch.nn.Module):
             num_classes=num_classes_l2,
         )
         # Last level (non-crop; crop; edges)
-        self.final_last = FinalRNN(
+        self.final_last = FinalConv2dDropout(
             hidden_dim=hidden_dim,
             dim_factor=3,
             activation_type=activation_type,

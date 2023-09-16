@@ -1530,3 +1530,35 @@ class TemporalConv(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
+
+
+class FinalConv2dDropout(torch.nn.Module):
+    def __init__(
+        self,
+        hidden_dim: int,
+        dim_factor: int,
+        activation_type: str,
+        final_activation: T.Callable,
+        num_classes: int,
+    ):
+        super(FinalConv2dDropout, self).__init__()
+
+        self.net = torch.nn.Sequential(
+            ResidualConv(
+                in_channels=int(hidden_dim * dim_factor),
+                out_channels=hidden_dim,
+                dilation=2,
+                activation_type=activation_type,
+            ),
+            torch.nn.Dropout(0.1),
+            torch.nn.Conv2d(
+                in_channels=hidden_dim,
+                out_channels=num_classes,
+                kernel_size=1,
+                padding=0,
+            ),
+            final_activation,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
