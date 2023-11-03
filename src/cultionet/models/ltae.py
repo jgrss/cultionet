@@ -268,7 +268,7 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         out = (
             x.permute(0, 3, 4, 1, 2)
             .contiguous()
-            .view(batch_size * height * width, time_size, channel_size)
+            .view(batch_size * height * width, time_size, x.shape[-3])
         )
         out = self.in_norm(out.permute(0, 2, 1)).permute(0, 2, 1)
 
