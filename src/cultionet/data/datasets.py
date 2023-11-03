@@ -13,7 +13,7 @@ import pandas as pd
 import geopandas as gpd
 from shapely.geometry import box
 from pytorch_lightning import seed_everything
-from geosample import QuadTree
+from pygrts import QuadTree
 from tqdm.auto import tqdm
 
 from ..errors import TensorShapeError
@@ -455,7 +455,7 @@ class EdgeDataset(Dataset):
                     .drop(columns=["grid_id"])
                 ).to_crs("EPSG:8858")
                 # Setup a quad-tree using the GRTS method
-                # (see https://github.com/jgrss/geosample for details)
+                # (see https://github.com/jgrss/pygrts for details)
                 qt = QuadTree(df_unique_locations, force_square=False)
                 # Recursively split the quad-tree until each grid has
                 # only one sample.
