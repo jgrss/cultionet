@@ -720,13 +720,10 @@ def fit(
         stochastic_weight_averaging_start=stochastic_weight_averaging_start,
         model_pruning=model_pruning,
     )
-
     trainer = pl.Trainer(
         default_root_dir=str(ckpt_file.parent),
         callbacks=callbacks,
         enable_checkpointing=True,
-        auto_lr_find=auto_lr_find,
-        auto_scale_batch_size=False,
         accumulate_grad_batches=accumulate_grad_batches,
         gradient_clip_val=gradient_clip_val,
         gradient_clip_algorithm=gradient_clip_algorithm,
@@ -734,8 +731,7 @@ def fit(
         min_epochs=5 if epochs >= 5 else epochs,
         max_epochs=epochs,
         precision=precision,
-        devices=None if device == "cpu" else devices,
-        num_processes=0,
+        devices=devices,
         accelerator=device,
         log_every_n_steps=50,
         profiler=profiler,
