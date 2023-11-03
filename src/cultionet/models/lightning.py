@@ -959,22 +959,35 @@ class CultioLitTransferModel(LightningModuleMixin):
         )
         # Freeze all parameters
         cultionet_model.freeze()
+        # layers[-2] ->
+        #   LightweightTemporalAttentionEncoder()
         layers = list(cultionet_model.cultionet_model.children())
         self.temporal_encoder = layers[-2]
+        # Set new final layers to learn new weights
+        # Level 2 level (non-crop; crop)
         self.temporal_encoder.final_l2 = FinalConv2dDropout(
-            hidden_dim=128,
+            hidden_dim=self.temporal_encoder.final_l2.net[0]
+            .seq.seq[0]
+            .seq[0]
+            .in_channels,
             dim_factor=1,
             activation_type=activation_type,
             final_activation=Softmax(dim=1),
             num_classes=num_classes,
         )
+        # Last level (non-crop; crop; edges)
         self.temporal_encoder.final_last = FinalConv2dDropout(
-            hidden_dim=128,
+            hidden_dim=self.temporal_encoder.final_last.net[0]
+            .seq.seq[0]
+            .seq[0]
+            .in_channels,
             dim_factor=1,
             activation_type=activation_type,
             final_activation=Softmax(dim=1),
             num_classes=num_classes + 1,
         )
+        # layers[-1] ->
+        #   ResUNet3Psi()
         self.mask_model = layers[-1]
         # TODO: for finetuning, we do not need to replace this layer
         # TODO: this is feature extraction

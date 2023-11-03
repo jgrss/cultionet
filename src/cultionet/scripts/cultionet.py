@@ -468,7 +468,7 @@ def predict_image(args):
 
     if args.data_path is not None:
         ds = EdgeDataset(
-            ppaths.predict_path,
+            root=ppaths.predict_path,
             data_means=data_values.mean,
             data_stds=data_values.std,
             pattern=f"data_{args.region}_{args.predict_year}*.pt",
@@ -815,8 +815,11 @@ def create_datasets(args):
                 image_vis=config["image_vis"]
             ).image_vis:
                 # Set the full path to the images
-                vi_path = ppaths.image_path / args.feature_pattern.format(
-                    region=region, image_vi=image_vi
+                vi_path = (
+                    ppaths.image_path.resolve()
+                    / args.feature_pattern.format(
+                        region=region, image_vi=image_vi
+                    )
                 )
 
                 if not vi_path.is_dir():
@@ -918,7 +921,7 @@ def train_maskrcnn(args):
         or (ppaths.norm_file.is_file() and args.recalc_zscores)
     ):
         ds = EdgeDataset(
-            ppaths.train_path,
+            root=ppaths.train_path,
             processes=args.processes,
             threads_per_worker=args.threads,
             random_seed=args.random_seed,
@@ -952,7 +955,7 @@ def train_maskrcnn(args):
     # Create the train data object again, this time passing
     # the means and standard deviation tensors
     ds = EdgeDataset(
-        ppaths.train_path,
+        root=ppaths.train_path,
         data_means=data_values.mean,
         data_stds=data_values.std,
         random_seed=args.random_seed,
@@ -961,7 +964,7 @@ def train_maskrcnn(args):
     test_ds = None
     if list((ppaths.test_process_path).glob("*.pt")):
         test_ds = EdgeDataset(
-            ppaths.test_path,
+            root=ppaths.test_path,
             data_means=data_values.mean,
             data_stds=data_values.std,
             random_seed=args.random_seed,
@@ -1015,7 +1018,7 @@ def spatial_kfoldcv(args):
         class_info = json.load(f)
 
     ds = EdgeDataset(
-        ppaths.train_path,
+        root=ppaths.train_path,
         processes=args.processes,
         threads_per_worker=args.threads,
         random_seed=args.random_seed,
@@ -1101,7 +1104,7 @@ def generate_model_graph(args):
     ppaths = setup_paths(args.project_path)
     data_values = torch.load(str(ppaths.norm_file))
     ds = EdgeDataset(
-        ppaths.train_path,
+        root=ppaths.train_path,
         data_means=data_values.mean,
         data_stds=data_values.std,
         crop_counts=data_values.crop_counts,
@@ -1147,7 +1150,7 @@ def train_model(args):
         or (ppaths.norm_file.is_file() and args.recalc_zscores)
     ):
         ds = EdgeDataset(
-            ppaths.train_path,
+            root=ppaths.train_path,
             processes=args.processes,
             threads_per_worker=args.threads,
             random_seed=args.random_seed,
@@ -1165,7 +1168,7 @@ def train_model(args):
         except TensorShapeError as e:
             raise ValueError(e)
         ds = EdgeDataset(
-            ppaths.train_path,
+            root=ppaths.train_path,
             processes=args.processes,
             threads_per_worker=args.threads,
             random_seed=args.random_seed,
@@ -1204,7 +1207,7 @@ def train_model(args):
     # Create the train data object again, this time passing
     # the means and standard deviation tensors
     ds = EdgeDataset(
-        ppaths.train_path,
+        root=ppaths.train_path,
         data_means=data_values.mean,
         data_stds=data_values.std,
         crop_counts=data_values.crop_counts,
@@ -1216,7 +1219,7 @@ def train_model(args):
     test_ds = None
     if list((ppaths.test_process_path).glob("*.pt")):
         test_ds = EdgeDataset(
-            ppaths.test_path,
+            root=ppaths.test_path,
             data_means=data_values.mean,
             data_stds=data_values.std,
             crop_counts=data_values.crop_counts,
@@ -1231,7 +1234,7 @@ def train_model(args):
             except TensorShapeError as e:
                 raise ValueError(e)
             test_ds = EdgeDataset(
-                ppaths.test_path,
+                root=ppaths.test_path,
                 data_means=data_values.mean,
                 data_stds=data_values.std,
                 crop_counts=data_values.crop_counts,
@@ -1304,6 +1307,8 @@ def train_model(args):
 
 
 def main():
+    # torch.set_float32_matmul_precision("high")
+
     args_config = open_config((Path(__file__).parent / "args.yml").absolute())
 
     parser = argparse.ArgumentParser(

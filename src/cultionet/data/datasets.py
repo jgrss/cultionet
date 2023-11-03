@@ -5,15 +5,15 @@ from functools import partial
 import numpy as np
 import attr
 import torch
-from torch_geometric.data import Data, Dataset
 import psutil
 import joblib
 from joblib import delayed, parallel_backend
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import box
 from pytorch_lightning import seed_everything
 from pygrts import QuadTree
+from shapely.geometry import box
+from torch_geometric.data import Data, Dataset
 from tqdm.auto import tqdm
 
 from ..errors import TensorShapeError
@@ -51,11 +51,15 @@ def update_data(
         return Data(
             x=x,
             image_id=image_id,
-            **{k: getattr(batch, k) for k in batch.keys if k not in exclusion},
+            **{
+                k: getattr(batch, k)
+                for k in batch.keys()
+                if k not in exclusion
+            },
         )
     else:
         return Data(
-            image_id=image_id, **{k: getattr(batch, k) for k in batch.keys}
+            image_id=image_id, **{k: getattr(batch, k) for k in batch.keys()}
         )
 
 
@@ -87,49 +91,39 @@ def _check_shape(
     return True, index, uid
 
 
-@attr.s
 class EdgeDataset(Dataset):
     """An edge dataset."""
-
-    root: T.Union[str, Path, bytes] = attr.ib(default=".")
-    transform: T.Any = attr.ib(default=None)
-    pre_transform: T.Any = attr.ib(default=None)
-    data_means: T.Optional[torch.Tensor] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
-    )
-    data_stds: T.Optional[torch.Tensor] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
-    )
-    crop_counts: T.Optional[torch.Tensor] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
-    )
-    edge_counts: T.Optional[torch.Tensor] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
-    )
-    pattern: T.Optional[str] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(str)), default="data*.pt"
-    )
-    processes: T.Optional[int] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=psutil.cpu_count()
-    )
-    threads_per_worker: T.Optional[int] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=1
-    )
-    random_seed: T.Optional[int] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=42
-    )
 
     data_list_ = None
     grid_id_column = "grid_id"
 
-    def __attrs_post_init__(self):
-        super(EdgeDataset, self).__init__(
-            str(self.root),
-            transform=self.transform,
-            pre_transform=self.pre_transform,
-        )
+    def __init__(
+        self,
+        root: T.Union[str, Path, bytes] = ".",
+        data_means: T.Optional[torch.Tensor] = None,
+        data_stds: T.Optional[torch.Tensor] = None,
+        crop_counts: T.Optional[torch.Tensor] = None,
+        edge_counts: T.Optional[torch.Tensor] = None,
+        pattern: T.Optional[str] = "data*.pt",
+        processes: T.Optional[int] = psutil.cpu_count(),
+        threads_per_worker: T.Optional[int] = 1,
+        random_seed: T.Optional[int] = 42,
+        transform: T.Any = None,
+        pre_transform: T.Any = None,
+        pre_filter: T.Any = None,
+    ):
+        self.data_means = data_means
+        self.data_stds = data_stds
+        self.crop_counts = crop_counts
+        self.edge_counts = edge_counts
+        self.pattern = pattern
+        self.processes = processes
+        self.threads_per_worker = threads_per_worker
+        self.random_seed = random_seed
         seed_everything(self.random_seed, workers=True)
         self.rng = np.random.default_rng(self.random_seed)
+
+        super().__init__(root, transform, pre_transform, pre_filter)
 
     def get_data_list(self):
         """Gets the list of data files."""
@@ -326,7 +320,6 @@ class EdgeDataset(Dataset):
         check_partial = partial(
             _check_shape, expected_dim, expected_height, expected_width
         )
-
         with parallel_backend(
             backend="loky",
             n_jobs=self.processes,

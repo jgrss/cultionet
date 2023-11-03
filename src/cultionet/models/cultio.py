@@ -380,8 +380,8 @@ class CultioNet(torch.nn.Module):
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
-        for attribute in ("ntime", "nbands", "height", "width"):
-            check_batch_dims(data, attribute)
+        # for attribute in ("ntime", "nbands", "height", "width"):
+        #     check_batch_dims(data, attribute)
 
         # Reshape from ((H*W) x (C*T)) -> (B x C x H x W)
         x = self.gc(data.x, batch_size, height, width)
