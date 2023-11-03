@@ -150,7 +150,7 @@ class StarRNN(torch.nn.Module):
         n_layers: int = 6,
         cell: str = "star",
         crop_type_layer: bool = False,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
         final_activation: T.Callable = Softmax(dim=1),
     ):
         super(StarRNN, self).__init__()

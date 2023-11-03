@@ -35,7 +35,7 @@ class SetActivation(torch.nn.Module):
             >>> act = SetActivation('ReLU')
             >>> act(x)
             >>>
-            >>> act = SetActivation('LeakyReLU')
+            >>> act = SetActivation('SiLU')
             >>> act(x)
             >>>
             >>> act = SetActivation('Swish', channels=32)
@@ -248,7 +248,7 @@ class ConvBlock2d(torch.nn.Module):
         padding: int = 0,
         dilation: int = 1,
         add_activation: bool = True,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(ConvBlock2d, self).__init__()
 
@@ -282,7 +282,7 @@ class ResBlock2d(torch.nn.Module):
         kernel_size: int,
         padding: int = 0,
         dilation: int = 1,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(ResBlock2d, self).__init__()
 
@@ -315,7 +315,7 @@ class ConvBlock3d(torch.nn.Module):
         dilation: int = 1,
         add_activation: bool = True,
         squeeze: bool = False,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(ConvBlock3d, self).__init__()
 
@@ -383,7 +383,7 @@ class AttentionGate3d(torch.nn.Module):
                 (conv_x, "x -> x"),
                 (conv_g, "g -> g"),
                 (AttentionAdd(), "x, g -> x"),
-                (torch.nn.LeakyReLU(inplace=False), "x -> x"),
+                (SetActivation("SiLU"), 'x -> x'),
                 (conv1d, "x -> x"),
                 (torch.nn.Sigmoid(), "x -> x"),
             ],
@@ -430,7 +430,7 @@ class AttentionGate(torch.nn.Module):
                 (conv_x, "x -> x"),
                 (conv_g, "g -> g"),
                 (AttentionAdd(), "x, g -> x"),
-                (torch.nn.LeakyReLU(inplace=False), "x -> x"),
+                (SetActivation("SiLU"), 'x -> x'),
                 (conv1d, "x -> x"),
                 (torch.nn.Sigmoid(), "x -> x"),
             ],
@@ -813,7 +813,7 @@ class ResSpatioTemporalConv3d(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(ResSpatioTemporalConv3d, self).__init__()
 
@@ -861,7 +861,7 @@ class SpatioTemporalConv3d(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(SpatioTemporalConv3d, self).__init__()
 
@@ -900,7 +900,7 @@ class DoubleConv(torch.nn.Module):
         out_channels: int,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(DoubleConv, self).__init__()
 
@@ -1049,7 +1049,7 @@ class PoolConv(torch.nn.Module):
         pool_size: int = 2,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
         dropout: T.Optional[float] = None,
     ):
         super(PoolConv, self).__init__()
@@ -1079,7 +1079,7 @@ class ResidualConvInit(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(ResidualConvInit, self).__init__()
 
@@ -1129,7 +1129,7 @@ class ResConvLayer(torch.nn.Module):
         in_channels: int,
         out_channels: int,
         dilation: int,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
         num_blocks: int = 2,
     ):
         super(ResConvLayer, self).__init__()
@@ -1198,7 +1198,7 @@ class ResidualConv(torch.nn.Module):
         out_channels: int,
         dilation: int = 2,
         attention_weights: str = None,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(ResidualConv, self).__init__()
 
@@ -1326,7 +1326,7 @@ class ResidualAConv(torch.nn.Module):
         out_channels: int,
         dilations: T.List[int] = None,
         attention_weights: str = None,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(ResidualAConv, self).__init__()
 
@@ -1412,7 +1412,7 @@ class PoolResidualConv(torch.nn.Module):
         dropout: T.Optional[float] = None,
         dilations: T.List[int] = None,
         attention_weights: str = None,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
         res_block_type: enum = ResBlockTypes.RES,
     ):
         super(PoolResidualConv, self).__init__()
@@ -1478,7 +1478,7 @@ class SingleConv(torch.nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(SingleConv, self).__init__()
 

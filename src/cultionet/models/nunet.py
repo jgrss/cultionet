@@ -162,7 +162,7 @@ class UNet2(torch.nn.Module):
 
         if self.linear_fc:
             self.net_final = torch.nn.Sequential(
-                torch.nn.LeakyReLU(inplace=False),
+                SetActivation("SiLU"),
                 Permute((0, 2, 3, 1)),
                 torch.nn.Linear(channels[0], out_channels),
                 Permute((0, 3, 1, 2)),
@@ -948,7 +948,7 @@ class ResUNet3Psi(torch.nn.Module):
         init_filter: int = 32,
         num_classes: int = 2,
         dilations: T.Sequence[int] = None,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
         res_block_type: str = "res",
         attention_weights: T.Optional[str] = None,
         deep_sup_dist: T.Optional[bool] = False,

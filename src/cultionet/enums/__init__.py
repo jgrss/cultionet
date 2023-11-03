@@ -1,7 +1,20 @@
 import enum
 
 
-class CLISteps(enum.Enum):
+class StrEnum(str, enum.Enum):
+    """
+    Source:
+        https://github.com/irgeek/StrEnum/blob/master/strenum/__init__.py
+    """
+
+    def __new__(cls, value, *args, **kwargs):
+        return super().__new__(cls, value, *args, **kwargs)
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class CLISteps(StrEnum):
     CREATE = 'create'
     CREATE_PREDICT = "create-predict"
     GRAPH = 'graph'
@@ -13,7 +26,7 @@ class CLISteps(enum.Enum):
     VERSION = 'version'
 
 
-class Destinations(enum.Enum):
+class Destinations(StrEnum):
     CKPT = 'ckpt'
     DATA = 'data'
     FIGURES = 'figures'
@@ -25,18 +38,18 @@ class Destinations(enum.Enum):
     USER_TRAIN = 'user_train'
 
 
-class ModelNames(enum.Enum):
+class ModelNames(StrEnum):
     CLASS_INFO = "classes.info"
     CKPT_NAME = "last.ckpt"
     CKPT_TRANSFER_NAME = "last_transfer.ckpt"
     NORM = "last.norm"
 
 
-class ModelTypes(enum.Enum):
+class ModelTypes(StrEnum):
     UNET = 'unet'
     RESUNET = 'resunet'
 
 
-class ResBlockTypes(enum.Enum):
+class ResBlockTypes(StrEnum):
     RES = 'res'
     RESA = 'resa'

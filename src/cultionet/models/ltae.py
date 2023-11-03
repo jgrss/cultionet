@@ -134,7 +134,7 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         positional_encoding: bool = True,
         num_classes_l2: int = 2,
         num_classes_last: int = 3,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
         final_activation: Callable = Softmax(dim=1),
     ):
         """Lightweight Temporal Attention Encoder (L-TAE) for image time
@@ -199,13 +199,13 @@ class LightweightTemporalAttentionEncoder(nn.Module):
             num_channels=mlp[-1],
         )
 
-        layers = []
+        layers: T.List[T.callable] = []
         for i in range(len(self.mlp) - 1):
             layers.extend(
                 [
                     nn.Linear(self.mlp[i], self.mlp[i + 1]),
                     nn.BatchNorm1d(self.mlp[i + 1]),
-                    nn.ReLU(),
+                    nn.SiLU(inplace=False),
                 ]
             )
 

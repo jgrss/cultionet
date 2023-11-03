@@ -6,7 +6,6 @@ import torch
 from . import model_utils
 from .base_layers import (
     AttentionGate,
-    AtrousPyramidPooling,
     DoubleConv,
     PoolConv,
     PoolResidualConv,
@@ -34,7 +33,7 @@ class UNet3Connector(torch.nn.Module):
         dilations: T.Sequence[int] = None,
         model_type: enum = ModelTypes.UNET,
         res_block_type: enum = ResBlockTypes.RESA,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(UNet3Connector, self).__init__()
 
@@ -391,7 +390,7 @@ class UNet3P_3_1(torch.nn.Module):
         up_channels: int,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(UNet3P_3_1, self).__init__()
 
@@ -434,7 +433,7 @@ class UNet3P_2_2(torch.nn.Module):
         up_channels: int,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(UNet3P_2_2, self).__init__()
 
@@ -479,7 +478,7 @@ class UNet3P_1_3(torch.nn.Module):
         up_channels: int,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(UNet3P_1_3, self).__init__()
 
@@ -524,7 +523,7 @@ class UNet3P_0_4(torch.nn.Module):
         up_channels: int,
         init_point_conv: bool = False,
         double_dilation: int = 1,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(UNet3P_0_4, self).__init__()
 
@@ -569,7 +568,7 @@ class UNet3_3_1(torch.nn.Module):
         up_channels: int,
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(UNet3_3_1, self).__init__()
 
@@ -650,7 +649,7 @@ class UNet3_2_2(torch.nn.Module):
         up_channels: int,
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(UNet3_2_2, self).__init__()
 
@@ -733,7 +732,7 @@ class UNet3_1_3(torch.nn.Module):
         up_channels: int,
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(UNet3_1_3, self).__init__()
 
@@ -818,7 +817,7 @@ class UNet3_0_4(torch.nn.Module):
         up_channels: int,
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
     ):
         super(UNet3_0_4, self).__init__()
 
@@ -899,7 +898,7 @@ class ResUNet3_3_1(torch.nn.Module):
         up_channels: int,
         dilations: T.Sequence[int] = None,
         attention_weights: str = "spatial_channel",
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
         res_block_type: enum = ResBlockTypes.RESA,
     ):
         super(ResUNet3_3_1, self).__init__()
@@ -992,7 +991,7 @@ class ResUNet3_2_2(torch.nn.Module):
         up_channels: int,
         dilations: T.Sequence[int] = None,
         attention_weights: str = "spatial_channel",
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
         res_block_type: enum = ResBlockTypes.RESA,
     ):
         super(ResUNet3_2_2, self).__init__()
@@ -1087,7 +1086,7 @@ class ResUNet3_1_3(torch.nn.Module):
         up_channels: int,
         dilations: T.Sequence[int] = None,
         attention_weights: str = "spatial_channel",
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
         res_block_type: enum = ResBlockTypes.RESA,
     ):
         super(ResUNet3_1_3, self).__init__()
@@ -1184,7 +1183,7 @@ class ResUNet3_0_4(torch.nn.Module):
         up_channels: int,
         dilations: T.Sequence[int] = None,
         attention_weights: str = "spatial_channel",
-        activation_type: str = "LeakyReLU",
+        activation_type: str = "SiLU",
         res_block_type: enum = ResBlockTypes.RESA,
     ):
         super(ResUNet3_0_4, self).__init__()

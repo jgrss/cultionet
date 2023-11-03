@@ -304,7 +304,7 @@ def fit_transfer(
     model_type: str = "ResUNet3Psi",
     activation_type: str = "SiLU",
     dilations: T.Union[int, T.Sequence[int]] = None,
-    res_block_type: str = "resa",
+    res_block_type: str = "res",
     attention_weights: str = "spatial_channel",
     deep_sup_dist: bool = False,
     deep_sup_edge: bool = False,
@@ -393,7 +393,7 @@ def fit_transfer(
         pretrained_ckpt_file.is_file()
     ), "The pretrained checkpoint does not exist."
     # This will be the new checkpoint for the transfer model
-    ckpt_file = Path(ckpt_file).parent / ModelNames.CKPT_TRANSFER_NAME.value
+    ckpt_file = Path(ckpt_file).parent / ModelNames.CKPT_TRANSFER_NAME
 
     # Split the dataset into train/validation
     data_module = get_data_module(
@@ -574,7 +574,7 @@ def fit(
     model_type: str = "ResUNet3Psi",
     activation_type: str = "SiLU",
     dilations: T.Union[int, T.Sequence[int]] = None,
-    res_block_type: str = "resa",
+    res_block_type: str = "res",
     attention_weights: str = "spatial_channel",
     deep_sup_dist: bool = False,
     deep_sup_edge: bool = False,

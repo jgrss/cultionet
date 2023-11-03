@@ -292,7 +292,7 @@ class CultioNet(torch.nn.Module):
         model_type: str = "ResUNet3Psi",
         activation_type: str = "SiLU",
         dilations: T.Union[int, T.Sequence[int]] = None,
-        res_block_type: str = "resa",
+        res_block_type: str = "res",
         attention_weights: str = "spatial_channel",
         deep_sup_dist: bool = False,
         deep_sup_edge: bool = False,

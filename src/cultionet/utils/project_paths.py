@@ -41,30 +41,30 @@ class ProjectPaths:
 def setup_paths(
     project_path: T.Union[str, Path, bytes],
     append_ts: T.Optional[bool] = True,
-    ckpt_name: T.Optional[str] = ModelNames.CKPT_NAME.value,
+    ckpt_name: T.Optional[str] = ModelNames.CKPT_NAME,
 ) -> ProjectPaths:
     project_path = Path(project_path)
     image_path = (
-        project_path / Destinations.TIME_SERIES_VARS.value
+        project_path / Destinations.TIME_SERIES_VARS
         if append_ts
         else project_path
     )
     composite_path = project_path.parent / 'composites'
     proba_path = project_path.parent / 'composites_probas'
-    figure_path = project_path / Destinations.FIGURES.value
-    data_path = project_path / Destinations.DATA.value
-    ckpt_path = project_path / Destinations.CKPT.value
-    classes_info_path = data_path / ModelNames.CLASS_INFO.value
-    train_path = data_path / Destinations.TRAIN.value
-    test_path = data_path / Destinations.TEST.value
-    predict_path = data_path / Destinations.PREDICT.value
-    process_path = train_path / Destinations.PROCESSED.value
-    test_process_path = test_path / Destinations.PROCESSED.value
-    predict_process_path = predict_path / Destinations.PROCESSED.value
-    edge_training_path = project_path / Destinations.USER_TRAIN.value
+    figure_path = project_path / Destinations.FIGURES
+    data_path = project_path / Destinations.DATA
+    ckpt_path = project_path / Destinations.CKPT
+    classes_info_path = data_path / ModelNames.CLASS_INFO
+    train_path = data_path / Destinations.TRAIN
+    test_path = data_path / Destinations.TEST
+    predict_path = data_path / Destinations.PREDICT
+    process_path = train_path / Destinations.PROCESSED
+    test_process_path = test_path / Destinations.PROCESSED
+    predict_process_path = predict_path / Destinations.PROCESSED
+    edge_training_path = project_path / Destinations.USER_TRAIN
     ckpt_file = ckpt_path / ckpt_name
     loss_file = ckpt_path / 'losses.npy'
-    norm_file = ckpt_path / ModelNames.NORM.value
+    norm_file = ckpt_path / ModelNames.NORM
 
     for p in [
         proba_path,
