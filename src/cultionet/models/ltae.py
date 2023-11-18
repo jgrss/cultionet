@@ -3,6 +3,7 @@ Source:
     https://github.com/VSainteuf/utae-paps/blob/main/src/backbones/ltae.py
 """
 import copy
+import math
 from typing import Callable, Optional, Tuple, Sequence, Union
 
 import numpy as np
@@ -10,7 +11,7 @@ import torch
 import torch.nn as nn
 
 from .base_layers import Softmax, FinalConv2dDropout
-from .positional_encoding import PositionalEncoder
+from .encodings import cartesian, get_sinusoid_encoding_table
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -19,31 +20,55 @@ class ScaledDotProductAttention(nn.Module):
     Modified from github.com/jadore801120/attention-is-all-you-need-pytorch
     """
 
-    def __init__(self, temperature: float, attn_dropout: float = 0.1):
+    def __init__(
+        self,
+        dropout: float = 0.1,
+        scale: Optional[float] = None,
+    ):
         super(ScaledDotProductAttention, self).__init__()
 
-        self.temperature = temperature
-        self.dropout = nn.Dropout(attn_dropout)
+        self.dropout = nn.Dropout(dropout)
+        self.scale = scale
         self.softmax = nn.Softmax(dim=2)
 
     def forward(
         self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        pad_mask: Optional[torch.Tensor] = None,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        is_causal: bool = False,
         return_comp: bool = False,
     ):
-        attn = torch.matmul(q.unsqueeze(1), k.transpose(1, 2))
-        attn = attn / self.temperature
-        if pad_mask is not None:
-            attn = attn.masked_fill(pad_mask.unsqueeze(1), -1e3)
+        # Source: https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
+        L, S = query.size(-2), key.size(-2)
+        scale_factor = (
+            1.0 / math.sqrt(query.size(-1))
+            if self.scale is None
+            else self.scale
+        )
+        attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+        if is_causal:
+            assert attn_mask is None
+            temp_mask = torch.ones(
+                L, S, dtype=torch.bool, device=query.device
+            ).tril(diagonal=0)
+            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+            attn_bias.to(query.dtype)
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                attn_mask.masked_fill_(attn_mask.logical_not(), float("-inf"))
+            attn_bias = attn_bias + attn_mask
+
+        attn = (query.unsqueeze(1) @ key.transpose(1, 2)) * scale_factor
+        attn = attn + attn_bias.unsqueeze(1)
+
         if return_comp:
             comp = attn
-        # compat = attn
+
         attn = self.softmax(attn)
         attn = self.dropout(attn)
-        output = torch.matmul(attn, v)
+        output = attn @ value
 
         if return_comp:
             return output, attn, comp
@@ -68,44 +93,48 @@ class MultiHeadAttention(nn.Module):
         self.fc1_k = nn.Linear(d_in, n_head * d_k)
         nn.init.normal_(self.fc1_k.weight, mean=0, std=np.sqrt(2.0 / (d_k)))
 
-        self.attention = ScaledDotProductAttention(
-            temperature=np.power(d_k, 0.5)
-        )
+        self.attention = ScaledDotProductAttention()
+        # self.attention = nn.MultiheadAttention(
+        #     n_head,
+        #     d_k,
+        #     dropout=0.1,
+        #     # (batch x seq x feature)
+        #     batch_first=False,
+        # )
 
     def forward(
         self,
-        v: torch.Tensor,
-        pad_mask: Optional[torch.Tensor] = None,
+        value: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
         return_comp: bool = False,
     ):
         d_k, d_in, n_head = self.d_k, self.d_in, self.n_head
-        batch_size, time_size, _ = v.size()
+        batch_size, time_size, _ = value.size()
 
-        q = torch.stack([self.Q for _ in range(batch_size)], dim=1).view(
-            -1, d_k
-        )  # (n*b) x d_k
+        # (n*b) x d_k
+        query = self.Q.repeat(batch_size, 1)
+        key = self.fc1_k(value).view(batch_size, time_size, n_head, d_k)
+        # (n*b) x lk x dk
+        key = key.permute(2, 0, 1, 3).contiguous().view(-1, time_size, d_k)
 
-        k = self.fc1_k(v).view(batch_size, time_size, n_head, d_k)
-        k = (
-            k.permute(2, 0, 1, 3).contiguous().view(-1, time_size, d_k)
-        )  # (n*b) x lk x dk
-
-        if pad_mask is not None:
-            pad_mask = pad_mask.repeat(
+        if attn_mask is not None:
+            attn_mask = attn_mask.repeat(
                 (n_head, 1)
-            )  # replicate pad_mask for each head (nxb) x lk
+            )  # replicate attn_mask for each head (nxb) x lk
 
-        v = torch.stack(v.split(v.shape[-1] // n_head, dim=-1)).view(
-            n_head * batch_size, time_size, -1
-        )
+        value = torch.stack(
+            value.split(value.shape[-1] // n_head, dim=-1)
+        ).view(n_head * batch_size, time_size, -1)
+
         if return_comp:
             output, attn, comp = self.attention(
-                q, k, v, pad_mask=pad_mask, return_comp=return_comp
+                query, key, value, attn_mask=attn_mask, return_comp=return_comp
             )
         else:
             output, attn = self.attention(
-                q, k, v, pad_mask=pad_mask, return_comp=return_comp
+                query, key, value, attn_mask=attn_mask, return_comp=return_comp
             )
+
         attn = attn.view(n_head, batch_size, 1, time_size)
         attn = attn.squeeze(dim=2)
 
@@ -118,12 +147,28 @@ class MultiHeadAttention(nn.Module):
             return output, attn
 
 
+class MLPBlock(nn.Module):
+    def __init__(self, idx: int, dimensions: Sequence[int]):
+        super(MLPBlock, self).__init__()
+
+        self.seq = nn.Sequential(
+            nn.Linear(dimensions[idx], dimensions[idx]),
+            nn.BatchNorm1d(dimensions[idx]),
+            nn.GELU(),
+            nn.Linear(dimensions[idx], dimensions[idx + 1]),
+            nn.GELU(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
+
+
 class LightweightTemporalAttentionEncoder(nn.Module):
     def __init__(
         self,
         in_channels: int,
         hidden_size: int = 128,
-        n_head: int = 16,
+        n_head: int = 8,
         n_time: int = 1,
         d_k: int = 4,
         mlp: Sequence[int] = [256, 128],
@@ -131,7 +176,6 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         d_model: int = 256,
         T: int = 1_000,
         return_att: bool = False,
-        positional_encoding: bool = True,
         num_classes_l2: int = 2,
         num_classes_last: int = 3,
         activation_type: str = "SiLU",
@@ -153,14 +197,13 @@ class LightweightTemporalAttentionEncoder(nn.Module):
                 to project them into a feature space of dimension d_model.
             T (int): Period to use for the positional encoding.
             return_att (bool): If true, the module returns the attention masks along with the embeddings (default False)
-            positional_encoding (bool): If False, no positional encoding is used (default True).
         """
         super(LightweightTemporalAttentionEncoder, self).__init__()
 
         self.in_channels = in_channels
-        self.mlp = copy.deepcopy(mlp)
         self.return_att = return_att
         self.n_head = n_head
+        mlp = copy.deepcopy(mlp)
 
         self.init_conv = nn.Conv3d(
             in_channels,
@@ -178,15 +221,25 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         else:
             self.d_model = in_channels
             self.inconv = None
-        assert self.mlp[0] == self.d_model
+        assert mlp[0] == self.d_model
 
-        if positional_encoding:
-            self.positional_encoder = PositionalEncoder(
-                self.d_model // n_head, T=T, repeat=n_head
-            )
-        else:
-            self.positional_encoder = None
+        # Absolute positional embeddings
+        self.positional_encoder = nn.Embedding.from_pretrained(
+            get_sinusoid_encoding_table(
+                positions=n_time,
+                d_hid=d_model,
+                time_scaler=T,
+            ),
+            freeze=True,
+        )
+        # Coordinate embeddings
+        self.coordinate_encoder = nn.Linear(3, d_model)
+        # self.channel_embed = nn.Embedding(
+        #     num_embeddings=in_channels,
+        #     embedding_dim=d_model,
+        # )
 
+        # Attention
         self.attention_heads = MultiHeadAttention(
             n_head=n_head, d_k=d_k, d_in=self.d_model
         )
@@ -199,18 +252,9 @@ class LightweightTemporalAttentionEncoder(nn.Module):
             num_channels=mlp[-1],
         )
 
-        layers: T.List[T.callable] = []
-        for i in range(len(self.mlp) - 1):
-            layers.extend(
-                [
-                    nn.Linear(self.mlp[i], self.mlp[i + 1]),
-                    nn.BatchNorm1d(self.mlp[i + 1]),
-                    nn.SiLU(inplace=False),
-                ]
-            )
-
-        self.mlp = nn.Sequential(*layers)
-        self.dropout = nn.Dropout(dropout)
+        layers = [MLPBlock(i, mlp) for i in range(len(mlp) - 1)]
+        layers += [nn.Dropout(dropout)]
+        self.mlp_seq = nn.Sequential(*layers)
 
         # Level 2 level (non-crop; crop)
         self.final_l2 = FinalConv2dDropout(
@@ -232,35 +276,30 @@ class LightweightTemporalAttentionEncoder(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
+        longitude: torch.Tensor,
+        latitude: torch.Tensor,
         mask_padded: bool = True,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         batch_size, channel_size, time_size, height, width = x.shape
-        batch_positions = (
-            torch.arange(time_size)
-            .unsqueeze(-1)
-            .repeat(batch_size, 1, 1)
-            .unsqueeze(-1)
-            .repeat(1, 1, 1, height)
-            .unsqueeze(-1)
-            .repeat(1, 1, 1, 1, width)
-        ).to(dtype=x.dtype, device=x.device)
+        # TODO: Channel embedding
+
         # input shape = (B x C x T x H x W)
         # permuted shape = (B x T x C x H x W)
         x = self.init_conv(x)
         x = x.permute(0, 2, 1, 3, 4)
         # x shape = (batch_size, time_size, channel_size, height, width)
 
-        pad_mask = None
+        attn_mask = None
         if mask_padded:
-            pad_mask = (x == 0).all(dim=-1).all(dim=-1).all(dim=-1)
-            pad_mask = (
-                pad_mask.unsqueeze(-1)
+            attn_mask = (x == 0).all(dim=-1).all(dim=-1).all(dim=-1)
+            attn_mask = (
+                attn_mask.unsqueeze(-1)
                 .repeat((1, 1, height))
                 .unsqueeze(-1)
                 .repeat((1, 1, 1, width))
             )  # BxTxHxW
-            pad_mask = (
-                pad_mask.permute(0, 2, 3, 1)
+            attn_mask = (
+                attn_mask.permute(0, 2, 3, 1)
                 .contiguous()
                 .view(batch_size * height * width, time_size)
             )
@@ -275,35 +314,49 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         if self.inconv is not None:
             out = self.inconv(out.permute(0, 2, 1)).permute(0, 2, 1)
 
-        if self.positional_encoder is not None:
-            # B x T x C
-            bp = batch_positions.contiguous().view(
-                batch_size * height * width, time_size
+        # Positional embedding
+        src_pos = (
+            torch.arange(0, out.shape[1], dtype=torch.long)
+            .expand(out.shape[0], out.shape[1])
+            .to(x.device)
+        )
+        position_tokens = self.positional_encoder(src_pos)
+        # Coordinate embedding
+        coordinate_tokens = self.coordinate_encoder(
+            cartesian(
+                torch.tile(longitude[:, None], (1, height * width)).view(
+                    batch_size * height * width, 1
+                ),
+                torch.tile(latitude[:, None], (1, height * width)).view(
+                    batch_size * height * width, 1
+                ),
             )
-            out = out + self.positional_encoder(bp)
-
-        out, attn = self.attention_heads(out, pad_mask=pad_mask)
-
+        )
+        # TODO: concatenate?
+        out = out + position_tokens + coordinate_tokens
+        # Attention
+        out, attn = self.attention_heads(out, attn_mask=attn_mask)
+        # Concatenate heads
         out = (
             out.permute(1, 0, 2)
             .contiguous()
             .view(batch_size * height * width, -1)
-        )  # Concatenate heads
-        out = self.dropout(self.mlp(out))
+        )
+        out = self.mlp_seq(out)
         out = self.out_norm(out) if self.out_norm is not None else out
         out = out.view(batch_size, height, width, -1).permute(0, 3, 1, 2)
 
+        # head x b x t x h x w
         attn = attn.view(
             self.n_head, batch_size, height, width, time_size
-        ).permute(
-            0, 1, 4, 2, 3
-        )  # head x b x t x h x w
+        ).permute(0, 1, 4, 2, 3)
 
         # attn shape = (n_head x batch_size x time_size x height x width)
         last_l2 = self.final_l2(
             attn.permute(1, 0, 2, 3, 4).reshape(batch_size, -1, height, width)
         )
         last = self.final_last(out)
+
         if self.return_att:
             return out, last_l2, last, attn
         else:
