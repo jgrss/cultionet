@@ -320,7 +320,7 @@ class CultioNet(torch.nn.Module):
             n_head=16,
             n_time=self.ds_num_time,
             # [d_model, encoder_widths[-1]]
-            mlp=[256, 128],
+            mlp=[256, 128, 64, filters],
             return_att=False,
             d_k=4,
             num_classes_l2=self.num_classes,
@@ -332,7 +332,7 @@ class CultioNet(torch.nn.Module):
         unet3_kwargs = {
             "in_channels": self.ds_num_bands,
             "in_time": self.ds_num_time,
-            "in_encoding_channels": 128,  # <- L-TAE; #int(self.filters * 3), <- ConvSTAR
+            "in_encoding_channels": filters,  # <- L-TAE; int(self.filters * 3), <- ConvSTAR
             "init_filter": self.filters,
             "num_classes": self.num_classes,
             "activation_type": activation_type,
@@ -389,7 +389,11 @@ class CultioNet(torch.nn.Module):
         x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
 
         # Transformer attention encoder
-        logits_hidden, classes_l2, classes_last = self.temporal_encoder(x)
+        logits_hidden, classes_l2, classes_last = self.temporal_encoder(
+            x,
+            longitude=data.left + (data.right - data.left) / 2,
+            latitude=data.top - (data.top - data.bottom) / 2,
+        )
 
         classes_l2 = self.cg(classes_l2)
         classes_last = self.cg(classes_last)
