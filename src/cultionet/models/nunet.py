@@ -46,11 +46,7 @@ from .unet_parts import (
 from ..enums import ResBlockTypes
 
 
-def weights_init_kaiming(m):
-    """
-    Source:
-        https://github.com/ZJUGiveLab/UNet-Version/blob/master/models/init_weights.py
-    """
+def init_weights_kaiming(m):
     classname = m.__class__.__name__
     if classname.find("Conv") != -1:
         torch.nn.init.kaiming_normal_(m.weight.data, a=0, mode="fan_in")
@@ -196,7 +192,7 @@ class UNet2(torch.nn.Module):
         # Initialise weights
         for m in self.modules():
             if isinstance(m, (torch.nn.Conv2d, torch.nn.BatchNorm2d)):
-                m.apply(weights_init_kaiming)
+                m.apply(init_weights_kaiming)
 
     def forward(
         self, x: torch.Tensor
@@ -429,7 +425,7 @@ class UNet3(torch.nn.Module):
         # Initialise weights
         for m in self.modules():
             if isinstance(m, (torch.nn.Conv2d, torch.nn.BatchNorm2d)):
-                m.apply(weights_init_kaiming)
+                m.apply(init_weights_kaiming)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Backbone
@@ -779,7 +775,7 @@ class UNet3Psi(torch.nn.Module):
         # Inputs =
         # Reduced time dimensions
         # Reduced channels (x2) for mean and max
-        # Input filters for RNN hidden logits
+        # Input filters for transformer hidden logits
         self.conv0_0 = SingleConv(
             in_channels=(
                 in_time
@@ -862,7 +858,7 @@ class UNet3Psi(torch.nn.Module):
                     torch.nn.BatchNorm3d,
                 ),
             ):
-                m.apply(weights_init_kaiming)
+                m.apply(init_weights_kaiming)
 
     def forward(
         self, x: torch.Tensor, temporal_encoding: torch.Tensor
@@ -1097,7 +1093,7 @@ class ResUNet3Psi(torch.nn.Module):
                     torch.nn.BatchNorm3d,
                 ),
             ):
-                m.apply(weights_init_kaiming)
+                m.apply(init_weights_kaiming)
 
     def forward(
         self, x: torch.Tensor, temporal_encoding: torch.Tensor
