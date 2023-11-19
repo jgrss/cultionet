@@ -3,6 +3,7 @@ import warnings
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.data import Data
 import torchmetrics
@@ -15,13 +16,13 @@ def one_hot(targets: torch.Tensor, dims: int) -> torch.Tensor:
     return F.one_hot(targets.contiguous().view(-1), dims).float()
 
 
-class LossPreprocessing(torch.nn.Module):
+class LossPreprocessing(nn.Module):
     def __init__(self, inputs_are_logits: bool, apply_transform: bool):
         super(LossPreprocessing, self).__init__()
 
         self.inputs_are_logits = inputs_are_logits
         self.apply_transform = apply_transform
-        self.sigmoid = torch.nn.Sigmoid()
+        self.sigmoid = nn.Sigmoid()
 
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor = None
@@ -56,7 +57,7 @@ class LossPreprocessing(torch.nn.Module):
         return inputs, targets
 
 
-class TopologicalLoss(torch.nn.Module):
+class TopologicalLoss(nn.Module):
     """
     Reference:
         https://arxiv.org/abs/1906.05404
@@ -157,7 +158,7 @@ class TopologicalLoss(torch.nn.Module):
         return topo_loss.mean()
 
 
-class TanimotoComplementLoss(torch.nn.Module):
+class TanimotoComplementLoss(nn.Module):
     """Tanimoto distance loss.
 
     Adapted from publications and source code below:
@@ -261,6 +262,7 @@ def tanimoto_dist(
     beta: float,
     smooth: float,
 ) -> torch.Tensor:
+    """Tanimoto distance."""
     ytrue = ytrue.to(dtype=ypred.dtype)
     if scale_pos_weight:
         if class_counts is None:
@@ -284,7 +286,7 @@ def tanimoto_dist(
     return tanimoto
 
 
-class TanimotoDistLoss(torch.nn.Module):
+class TanimotoDistLoss(nn.Module):
     """Tanimoto distance loss.
 
     References:
@@ -398,7 +400,7 @@ class TanimotoDistLoss(torch.nn.Module):
         return loss.mean()
 
 
-class CrossEntropyLoss(torch.nn.Module):
+class CrossEntropyLoss(nn.Module):
     """Cross entropy loss."""
 
     def __init__(
@@ -409,7 +411,7 @@ class CrossEntropyLoss(torch.nn.Module):
     ):
         super(CrossEntropyLoss, self).__init__()
 
-        self.loss_func = torch.nn.CrossEntropyLoss(
+        self.loss_func = nn.CrossEntropyLoss(
             weight=weight, reduction=reduction, label_smoothing=label_smoothing
         )
 
@@ -428,7 +430,7 @@ class CrossEntropyLoss(torch.nn.Module):
         return self.loss_func(inputs, targets)
 
 
-class FocalLoss(torch.nn.Module):
+class FocalLoss(nn.Module):
     """Focal loss.
 
     Reference:
@@ -450,7 +452,7 @@ class FocalLoss(torch.nn.Module):
         self.preprocessor = LossPreprocessing(
             inputs_are_logits=True, apply_transform=True
         )
-        self.cross_entropy_loss = torch.nn.CrossEntropyLoss(
+        self.cross_entropy_loss = nn.CrossEntropyLoss(
             weight=weight, reduction="none", label_smoothing=label_smoothing
         )
 
@@ -465,7 +467,7 @@ class FocalLoss(torch.nn.Module):
         return focal_loss.mean()
 
 
-class QuantileLoss(torch.nn.Module):
+class QuantileLoss(nn.Module):
     """Loss function for quantile regression.
 
     Reference:
@@ -502,7 +504,7 @@ class QuantileLoss(torch.nn.Module):
         return loss
 
 
-class WeightedL1Loss(torch.nn.Module):
+class WeightedL1Loss(nn.Module):
     """Weighted L1Loss loss."""
 
     def __init__(self):
@@ -530,13 +532,13 @@ class WeightedL1Loss(torch.nn.Module):
         return loss
 
 
-class MSELoss(torch.nn.Module):
+class MSELoss(nn.Module):
     """MSE loss."""
 
     def __init__(self):
         super(MSELoss, self).__init__()
 
-        self.loss_func = torch.nn.MSELoss()
+        self.loss_func = nn.MSELoss()
 
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor
@@ -555,7 +557,7 @@ class MSELoss(torch.nn.Module):
         )
 
 
-class BoundaryLoss(torch.nn.Module):
+class BoundaryLoss(nn.Module):
     """Boundary (surface) loss.
 
     Reference:
@@ -593,7 +595,7 @@ class BoundaryLoss(torch.nn.Module):
         return torch.einsum("bchw, bchw -> bchw", inputs, targets).mean()
 
 
-class MultiScaleSSIMLoss(torch.nn.Module):
+class MultiScaleSSIMLoss(nn.Module):
     """Multi-scale Structural Similarity Index Measure loss."""
 
     def __init__(self):

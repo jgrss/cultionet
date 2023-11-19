@@ -14,16 +14,21 @@ class StrEnum(str, enum.Enum):
         return self.value
 
 
+class AttentionTypes(StrEnum):
+    FRACTAL = "fractal"
+    SPATIAL_CHANNEL = "spatial_channel"
+
+
 class CLISteps(StrEnum):
-    CREATE = 'create'
+    CREATE = "create"
     CREATE_PREDICT = "create-predict"
-    GRAPH = 'graph'
-    SKFOLDCV = 'skfoldcv'
-    TRAIN = 'train'
+    GRAPH = "graph"
+    SKFOLDCV = "skfoldcv"
+    TRAIN = "train"
     TRAIN_TRANSFER = "train-transfer"
-    PREDICT = 'predict'
+    PREDICT = "predict"
     PREDICT_TRANSFER = "predict-transfer"
-    VERSION = 'version'
+    VERSION = "version"
 
 
 class Destinations(StrEnum):
@@ -48,6 +53,8 @@ class ModelNames(StrEnum):
 class ModelTypes(StrEnum):
     UNET = 'unet'
     RESUNET = 'resunet'
+    UNET3PSI = 'UNet3Psi'
+    RESUNET3PSI = 'ResUNet3Psi'
 
 
 class ResBlockTypes(StrEnum):

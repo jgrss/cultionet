@@ -7,6 +7,7 @@ Copyright (c) 2018 Takato Kimura
 import typing as T
 
 import torch
+import torch.nn as nn
 
 from . import model_utils
 from . import kernels
@@ -49,15 +50,15 @@ from ..enums import ResBlockTypes
 def init_weights_kaiming(m):
     classname = m.__class__.__name__
     if classname.find("Conv") != -1:
-        torch.nn.init.kaiming_normal_(m.weight.data, a=0, mode="fan_in")
+        nn.init.kaiming_normal_(m.weight.data, a=0, mode="fan_in")
     elif classname.find("Linear") != -1:
-        torch.nn.init.kaiming_normal_(m.weight.data, a=0, mode="fan_in")
+        nn.init.kaiming_normal_(m.weight.data, a=0, mode="fan_in")
     elif classname.find("BatchNorm") != -1:
-        torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
-        torch.nn.init.constant_(m.bias.data, 0.0)
+        nn.init.normal_(m.weight.data, 1.0, 0.02)
+        nn.init.constant_(m.bias.data, 0.0)
 
 
-class UNet2(torch.nn.Module):
+class UNet2(nn.Module):
     """UNet++
 
     References:
@@ -132,7 +133,7 @@ class UNet2(torch.nn.Module):
             self.bound3_0_pool = PoolConv(channels[3], channels[4])
             self.bound4_0 = DoubleConv(channels[4] * 2, channels[4])
 
-            self.bound_final = torch.nn.Conv2d(
+            self.bound_final = nn.Conv2d(
                 channels[0], out_side_channels, kernel_size=1, padding=0
             )
 
@@ -157,26 +158,26 @@ class UNet2(torch.nn.Module):
         self.conv0_4 = ResidualConv(channels[0] * 4 + channels[1], channels[0])
 
         if self.linear_fc:
-            self.net_final = torch.nn.Sequential(
+            self.net_final = nn.Sequential(
                 SetActivation("SiLU"),
                 Permute((0, 2, 3, 1)),
-                torch.nn.Linear(channels[0], out_channels),
+                nn.Linear(channels[0], out_channels),
                 Permute((0, 3, 1, 2)),
             )
         else:
             if self.deep_supervision:
                 in_final_layers = out_channels
 
-                self.final_1 = torch.nn.Conv2d(
+                self.final_1 = nn.Conv2d(
                     channels[0], out_channels, kernel_size=1, padding=0
                 )
-                self.final_2 = torch.nn.Conv2d(
+                self.final_2 = nn.Conv2d(
                     channels[0], out_channels, kernel_size=1, padding=0
                 )
-                self.final_3 = torch.nn.Conv2d(
+                self.final_3 = nn.Conv2d(
                     channels[0], out_channels, kernel_size=1, padding=0
                 )
-                self.final_4 = torch.nn.Conv2d(
+                self.final_4 = nn.Conv2d(
                     channels[0], out_channels, kernel_size=1, padding=0
                 )
             else:
@@ -185,13 +186,13 @@ class UNet2(torch.nn.Module):
             if boundary_layer:
                 in_final_layers += out_side_channels
 
-            self.net_final = torch.nn.Conv2d(
+            self.net_final = nn.Conv2d(
                 in_final_layers, out_channels, kernel_size=1, padding=0
             )
 
         # Initialise weights
         for m in self.modules():
-            if isinstance(m, (torch.nn.Conv2d, torch.nn.BatchNorm2d)):
+            if isinstance(m, (nn.Conv2d, nn.BatchNorm2d)):
                 m.apply(init_weights_kaiming)
 
     def forward(
@@ -323,7 +324,7 @@ class UNet2(torch.nn.Module):
         return {"mask": mask, "boundary": boundary}
 
 
-class UNet3(torch.nn.Module):
+class UNet3(nn.Module):
     """UNet+++
 
     References:
@@ -415,7 +416,7 @@ class UNet3(torch.nn.Module):
             activation_type=activation_type,
         )
 
-        self.final = torch.nn.Conv2d(
+        self.final = nn.Conv2d(
             in_channels=up_channels,
             out_channels=out_channels,
             kernel_size=1,
@@ -424,7 +425,7 @@ class UNet3(torch.nn.Module):
 
         # Initialise weights
         for m in self.modules():
-            if isinstance(m, (torch.nn.Conv2d, torch.nn.BatchNorm2d)):
+            if isinstance(m, (nn.Conv2d, nn.BatchNorm2d)):
                 m.apply(init_weights_kaiming)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -462,7 +463,7 @@ class UNet3(torch.nn.Module):
         return out
 
 
-class PreUnet3Psi(torch.nn.Module):
+class PreUnet3Psi(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -482,7 +483,7 @@ class PreUnet3Psi(torch.nn.Module):
         self.neg_trend_kernel = kernels.Trend(
             kernel_size=trend_kernel_size, direction="negative"
         )
-        self.reduce_trend_to_time = torch.nn.Sequential(
+        self.reduce_trend_to_time = nn.Sequential(
             SpatioTemporalConv3d(
                 in_channels=int(in_channels * 3),
                 out_channels=1,
@@ -496,7 +497,7 @@ class PreUnet3Psi(torch.nn.Module):
             out_channels=channels[0],
             activation_type=activation_type,
         )
-        self.reduce_to_time = torch.nn.Sequential(
+        self.reduce_to_time = nn.Sequential(
             SpatioTemporalConv3d(
                 in_channels=channels[0],
                 out_channels=1,
@@ -507,24 +508,24 @@ class PreUnet3Psi(torch.nn.Module):
         # (B x C x T|D x H x W)
         # Temporal reductions
         # Reduce to 2d (B x C x H x W)
-        self.reduce_to_channels_min = torch.nn.Sequential(
+        self.reduce_to_channels_min = nn.Sequential(
             Min(dim=2),
-            torch.nn.BatchNorm2d(channels[0]),
+            nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type),
         )
-        self.reduce_to_channels_max = torch.nn.Sequential(
+        self.reduce_to_channels_max = nn.Sequential(
             Max(dim=2),
-            torch.nn.BatchNorm2d(channels[0]),
+            nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type),
         )
-        self.reduce_to_channels_mean = torch.nn.Sequential(
+        self.reduce_to_channels_mean = nn.Sequential(
             Mean(dim=2),
-            torch.nn.BatchNorm2d(channels[0]),
+            nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type),
         )
-        self.reduce_to_channels_std = torch.nn.Sequential(
+        self.reduce_to_channels_std = nn.Sequential(
             Std(dim=2),
-            torch.nn.BatchNorm2d(channels[0]),
+            nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type),
         )
 
@@ -593,7 +594,7 @@ class PreUnet3Psi(torch.nn.Module):
         return h
 
 
-class PostUNet3Psi(torch.nn.Module):
+class PostUNet3Psi(nn.Module):
     def __init__(
         self,
         up_channels: int,
@@ -611,63 +612,55 @@ class PostUNet3Psi(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
-        self.final_dist = torch.nn.Sequential(
-            torch.nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
-            torch.nn.Sigmoid(),
+        self.final_dist = nn.Sequential(
+            nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
+            nn.Sigmoid(),
         )
-        self.final_edge = torch.nn.Sequential(
-            torch.nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
+        self.final_edge = nn.Sequential(
+            nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
             SigmoidCrisp(),
         )
-        self.final_mask = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                up_channels, num_classes, kernel_size=1, padding=0
-            ),
+        self.final_mask = nn.Sequential(
+            nn.Conv2d(up_channels, num_classes, kernel_size=1, padding=0),
             mask_activation,
         )
         if self.deep_sup_dist:
-            self.final_dist_3_1 = torch.nn.Sequential(
-                torch.nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
-                torch.nn.Sigmoid(),
+            self.final_dist_3_1 = nn.Sequential(
+                nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
+                nn.Sigmoid(),
             )
-            self.final_dist_2_2 = torch.nn.Sequential(
-                torch.nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
-                torch.nn.Sigmoid(),
+            self.final_dist_2_2 = nn.Sequential(
+                nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
+                nn.Sigmoid(),
             )
-            self.final_dist_1_3 = torch.nn.Sequential(
-                torch.nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
-                torch.nn.Sigmoid(),
+            self.final_dist_1_3 = nn.Sequential(
+                nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
+                nn.Sigmoid(),
             )
         if self.deep_sup_edge:
-            self.final_edge_3_1 = torch.nn.Sequential(
-                torch.nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
+            self.final_edge_3_1 = nn.Sequential(
+                nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
                 SigmoidCrisp(),
             )
-            self.final_edge_2_2 = torch.nn.Sequential(
-                torch.nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
+            self.final_edge_2_2 = nn.Sequential(
+                nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
                 SigmoidCrisp(),
             )
-            self.final_edge_1_3 = torch.nn.Sequential(
-                torch.nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
+            self.final_edge_1_3 = nn.Sequential(
+                nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
                 SigmoidCrisp(),
             )
         if self.deep_sup_mask:
-            self.final_mask_3_1 = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    up_channels, num_classes, kernel_size=1, padding=0
-                ),
+            self.final_mask_3_1 = nn.Sequential(
+                nn.Conv2d(up_channels, num_classes, kernel_size=1, padding=0),
                 mask_activation,
             )
-            self.final_mask_2_2 = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    up_channels, num_classes, kernel_size=1, padding=0
-                ),
+            self.final_mask_2_2 = nn.Sequential(
+                nn.Conv2d(up_channels, num_classes, kernel_size=1, padding=0),
                 mask_activation,
             )
-            self.final_mask_1_3 = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    up_channels, num_classes, kernel_size=1, padding=0
-                ),
+            self.final_mask_1_3 = nn.Sequential(
+                nn.Conv2d(up_channels, num_classes, kernel_size=1, padding=0),
                 mask_activation,
             )
 
@@ -731,7 +724,7 @@ class PostUNet3Psi(torch.nn.Module):
         return out
 
 
-class UNet3Psi(torch.nn.Module):
+class UNet3Psi(nn.Module):
     """UNet+++ with Psi-Net.
 
     References:
@@ -752,7 +745,7 @@ class UNet3Psi(torch.nn.Module):
         deep_sup_dist: T.Optional[bool] = False,
         deep_sup_edge: T.Optional[bool] = False,
         deep_sup_mask: T.Optional[bool] = False,
-        mask_activation: T.Union[Softmax, torch.nn.Sigmoid] = Softmax(dim=1),
+        mask_activation: T.Union[Softmax, nn.Sigmoid] = Softmax(dim=1),
     ):
         super(UNet3Psi, self).__init__()
 
@@ -852,10 +845,10 @@ class UNet3Psi(torch.nn.Module):
             if isinstance(
                 m,
                 (
-                    torch.nn.Conv2d,
-                    torch.nn.BatchNorm2d,
-                    torch.nn.Conv3d,
-                    torch.nn.BatchNorm3d,
+                    nn.Conv2d,
+                    nn.BatchNorm2d,
+                    nn.Conv3d,
+                    nn.BatchNorm3d,
                 ),
             ):
                 m.apply(init_weights_kaiming)
@@ -926,7 +919,7 @@ class UNet3Psi(torch.nn.Module):
         return out
 
 
-class ResUNet3Psi(torch.nn.Module):
+class ResUNet3Psi(nn.Module):
     """Residual UNet+++ with Psi-Net (Multi-head streams) and Attention.
 
     References:
@@ -945,12 +938,12 @@ class ResUNet3Psi(torch.nn.Module):
         num_classes: int = 2,
         dilations: T.Sequence[int] = None,
         activation_type: str = "SiLU",
-        res_block_type: str = "res",
+        res_block_type: str = ResBlockTypes.RES,
         attention_weights: T.Optional[str] = None,
         deep_sup_dist: T.Optional[bool] = False,
         deep_sup_edge: T.Optional[bool] = False,
         deep_sup_mask: T.Optional[bool] = False,
-        mask_activation: T.Union[Softmax, torch.nn.Sigmoid] = Softmax(dim=1),
+        mask_activation: T.Union[Softmax, nn.Sigmoid] = Softmax(dim=1),
     ):
         super(ResUNet3Psi, self).__init__()
 
@@ -979,7 +972,7 @@ class ResUNet3Psi(torch.nn.Module):
         # Reduced time dimensions
         # Reduced channels (x2) for mean and max
         # Input filters for RNN hidden logits
-        if res_block_type.lower() == "res":
+        if res_block_type.lower() == ResBlockTypes.RES:
             self.conv0_0 = ResidualConv(
                 in_channels=(
                     in_time
@@ -1012,7 +1005,7 @@ class ResUNet3Psi(torch.nn.Module):
             channels[1],
             dilations=dilations,
             attention_weights=attention_weights,
-            res_block_type=ResBlockTypes[res_block_type.upper()],
+            res_block_type=res_block_type,
         )
         self.conv2_0 = PoolResidualConv(
             channels[1],
@@ -1020,7 +1013,7 @@ class ResUNet3Psi(torch.nn.Module):
             dilations=dilations,
             activation_type=activation_type,
             attention_weights=attention_weights,
-            res_block_type=ResBlockTypes[res_block_type.upper()],
+            res_block_type=res_block_type,
         )
         self.conv3_0 = PoolResidualConv(
             channels[2],
@@ -1028,7 +1021,7 @@ class ResUNet3Psi(torch.nn.Module):
             dilations=dilations,
             activation_type=activation_type,
             attention_weights=attention_weights,
-            res_block_type=ResBlockTypes[res_block_type.upper()],
+            res_block_type=res_block_type,
         )
         self.conv4_0 = PoolResidualConv(
             channels[3],
@@ -1036,7 +1029,7 @@ class ResUNet3Psi(torch.nn.Module):
             dilations=dilations,
             activation_type=activation_type,
             attention_weights=attention_weights,
-            res_block_type=ResBlockTypes[res_block_type.upper()],
+            res_block_type=res_block_type,
         )
 
         # Connect 3
@@ -1046,7 +1039,7 @@ class ResUNet3Psi(torch.nn.Module):
             dilations=dilations,
             attention_weights=attention_weights,
             activation_type=activation_type,
-            res_block_type=ResBlockTypes[res_block_type.upper()],
+            res_block_type=res_block_type,
         )
         self.convs_2_2 = ResUNet3_2_2(
             channels=channels,
@@ -1054,7 +1047,7 @@ class ResUNet3Psi(torch.nn.Module):
             dilations=dilations,
             attention_weights=attention_weights,
             activation_type=activation_type,
-            res_block_type=ResBlockTypes[res_block_type.upper()],
+            res_block_type=res_block_type,
         )
         self.convs_1_3 = ResUNet3_1_3(
             channels=channels,
@@ -1062,7 +1055,7 @@ class ResUNet3Psi(torch.nn.Module):
             dilations=dilations,
             attention_weights=attention_weights,
             activation_type=activation_type,
-            res_block_type=ResBlockTypes[res_block_type.upper()],
+            res_block_type=res_block_type,
         )
         self.convs_0_4 = ResUNet3_0_4(
             channels=channels,
@@ -1070,7 +1063,7 @@ class ResUNet3Psi(torch.nn.Module):
             dilations=dilations,
             attention_weights=attention_weights,
             activation_type=activation_type,
-            res_block_type=ResBlockTypes[res_block_type.upper()],
+            res_block_type=res_block_type,
         )
 
         self.post_unet = PostUNet3Psi(
@@ -1087,10 +1080,10 @@ class ResUNet3Psi(torch.nn.Module):
             if isinstance(
                 m,
                 (
-                    torch.nn.Conv2d,
-                    torch.nn.BatchNorm2d,
-                    torch.nn.Conv3d,
-                    torch.nn.BatchNorm3d,
+                    nn.Conv2d,
+                    nn.BatchNorm2d,
+                    nn.Conv3d,
+                    nn.BatchNorm3d,
                 ),
             ):
                 m.apply(init_weights_kaiming)
@@ -1115,7 +1108,11 @@ class ResUNet3Psi(torch.nn.Module):
 
         # 1/8 connection
         out_3_1 = self.convs_3_1(
-            x0_0=x0_0, x1_0=x1_0, x2_0=x2_0, x3_0=x3_0, x4_0=x4_0
+            x0_0=x0_0,
+            x1_0=x1_0,
+            x2_0=x2_0,
+            x3_0=x3_0,
+            x4_0=x4_0,
         )
         # 1/4 connection
         out_2_2 = self.convs_2_2(
@@ -1155,7 +1152,10 @@ class ResUNet3Psi(torch.nn.Module):
         )
 
         out = self.post_unet(
-            out_0_4=out_0_4, out_3_1=out_3_1, out_2_2=out_2_2, out_1_3=out_1_3
+            out_0_4=out_0_4,
+            out_3_1=out_3_1,
+            out_2_2=out_2_2,
+            out_1_3=out_1_3,
         )
 
         return out

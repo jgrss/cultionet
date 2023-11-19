@@ -12,7 +12,7 @@ from .base_layers import (
     ResidualAConv,
     ResidualConv,
 )
-from ..enums import ModelTypes, ResBlockTypes
+from ..enums import AttentionTypes, ModelTypes, ResBlockTypes
 
 
 class UNet3Connector(torch.nn.Module):
@@ -28,7 +28,7 @@ class UNet3Connector(torch.nn.Module):
         n_pools: int = 0,
         n_prev_down: int = 0,
         n_stream_down: int = 0,
-        attention_weights: str = "spatial_channel",
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
         model_type: enum = ModelTypes.UNET,
@@ -39,8 +39,8 @@ class UNet3Connector(torch.nn.Module):
 
         assert attention_weights in [
             "gate",
-            "fractal",
-            "spatial_channel",
+            AttentionTypes.FRACTAL,
+            AttentionTypes.SPATIAL_CHANNEL,
         ], "Choose from 'gate', 'fractal', or 'spatial_channel' attention weights."
 
         assert model_type in (ModelTypes.UNET, ModelTypes.RESUNET)
@@ -897,7 +897,7 @@ class ResUNet3_3_1(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.Sequence[int] = None,
-        attention_weights: str = "spatial_channel",
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         activation_type: str = "SiLU",
         res_block_type: enum = ResBlockTypes.RESA,
     ):
@@ -990,7 +990,7 @@ class ResUNet3_2_2(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.Sequence[int] = None,
-        attention_weights: str = "spatial_channel",
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         activation_type: str = "SiLU",
         res_block_type: enum = ResBlockTypes.RESA,
     ):
@@ -1085,7 +1085,7 @@ class ResUNet3_1_3(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.Sequence[int] = None,
-        attention_weights: str = "spatial_channel",
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         activation_type: str = "SiLU",
         res_block_type: enum = ResBlockTypes.RESA,
     ):
@@ -1182,7 +1182,7 @@ class ResUNet3_0_4(torch.nn.Module):
         channels: T.Sequence[int],
         up_channels: int,
         dilations: T.Sequence[int] = None,
-        attention_weights: str = "spatial_channel",
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         activation_type: str = "SiLU",
         res_block_type: enum = ResBlockTypes.RESA,
     ):

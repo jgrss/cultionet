@@ -1,6 +1,10 @@
 """
 Source:
     https://github.com/VSainteuf/utae-paps/blob/main/src/backbones/ltae.py
+
+TODO:
+    https://www.sciencedirect.com/science/article/pii/S0893608023005361
+    https://github.com/AzadDeihim/STTRE/blob/main/STTRE.ipynb
 """
 import copy
 import math
@@ -174,7 +178,7 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         mlp: Sequence[int] = [256, 128],
         dropout: float = 0.2,
         d_model: int = 256,
-        T: int = 1_000,
+        time_scaler: int = 1_000,
         return_att: bool = False,
         num_classes_l2: int = 2,
         num_classes_last: int = 3,
@@ -195,7 +199,7 @@ class LightweightTemporalAttentionEncoder(nn.Module):
             dropout (float): dropout
             d_model (int, optional): If specified, the input tensors will first processed by a fully connected layer
                 to project them into a feature space of dimension d_model.
-            T (int): Period to use for the positional encoding.
+            time_scaler (int): Period to use for the positional encoding.
             return_att (bool): If true, the module returns the attention masks along with the embeddings (default False)
         """
         super(LightweightTemporalAttentionEncoder, self).__init__()
@@ -228,7 +232,7 @@ class LightweightTemporalAttentionEncoder(nn.Module):
             get_sinusoid_encoding_table(
                 positions=n_time,
                 d_hid=d_model,
-                time_scaler=T,
+                time_scaler=time_scaler,
             ),
             freeze=True,
         )

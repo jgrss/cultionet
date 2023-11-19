@@ -1,29 +1,29 @@
 import typing as T
-import enum
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric import nn
+from torch_geometric import nn as gnn
 
 from . import model_utils
-from ..enums import ResBlockTypes
+from ..enums import AttentionTypes, ResBlockTypes
 
 
-class Swish(torch.nn.Module):
+class Swish(nn.Module):
     def __init__(self, channels: int, dims: int):
         super(Swish, self).__init__()
 
-        self.sigmoid = torch.nn.Sigmoid()
-        self.beta = torch.nn.Parameter(torch.ones(1))
+        self.sigmoid = nn.Sigmoid()
+        self.beta = nn.Parameter(torch.ones(1))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x * self.sigmoid(self.beta * x)
 
     def reset_parameters(self):
-        torch.nn.init.ones_(self.beta)
+        nn.init.ones_(self.beta)
 
 
-class SetActivation(torch.nn.Module):
+class SetActivation(nn.Module):
     def __init__(
         self,
         activation_type: str,
@@ -58,7 +58,7 @@ class SetActivation(torch.nn.Module):
         return self.activation(x)
 
 
-class LogSoftmax(torch.nn.Module):
+class LogSoftmax(nn.Module):
     def __init__(self, dim: int = 1):
         super(LogSoftmax, self).__init__()
 
@@ -68,7 +68,7 @@ class LogSoftmax(torch.nn.Module):
         return F.log_softmax(x, dim=self.dim, dtype=x.dtype)
 
 
-class Softmax(torch.nn.Module):
+class Softmax(nn.Module):
     def __init__(self, dim: int = 1):
         super(Softmax, self).__init__()
 
@@ -78,7 +78,7 @@ class Softmax(torch.nn.Module):
         return F.softmax(x, dim=self.dim, dtype=x.dtype)
 
 
-class Permute(torch.nn.Module):
+class Permute(nn.Module):
     def __init__(self, axis_order: T.Sequence[int]):
         super(Permute, self).__init__()
         self.axis_order = axis_order
@@ -87,7 +87,7 @@ class Permute(torch.nn.Module):
         return x.permute(*self.axis_order)
 
 
-class Add(torch.nn.Module):
+class Add(nn.Module):
     def __init__(self):
         super(Add, self).__init__()
 
@@ -95,7 +95,7 @@ class Add(torch.nn.Module):
         return x + y
 
 
-class Min(torch.nn.Module):
+class Min(nn.Module):
     def __init__(self, dim: int, keepdim: bool = False):
         super(Min, self).__init__()
 
@@ -106,7 +106,7 @@ class Min(torch.nn.Module):
         return x.min(dim=self.dim, keepdim=self.keepdim)[0]
 
 
-class Max(torch.nn.Module):
+class Max(nn.Module):
     def __init__(self, dim: int, keepdim: bool = False):
         super(Max, self).__init__()
 
@@ -117,7 +117,7 @@ class Max(torch.nn.Module):
         return x.max(dim=self.dim, keepdim=self.keepdim)[0]
 
 
-class Mean(torch.nn.Module):
+class Mean(nn.Module):
     def __init__(self, dim: int, keepdim: bool = False):
         super(Mean, self).__init__()
 
@@ -128,7 +128,7 @@ class Mean(torch.nn.Module):
         return x.mean(dim=self.dim, keepdim=self.keepdim)
 
 
-class Var(torch.nn.Module):
+class Var(nn.Module):
     def __init__(
         self, dim: int, keepdim: bool = False, unbiased: bool = False
     ):
@@ -144,7 +144,7 @@ class Var(torch.nn.Module):
         )
 
 
-class Std(torch.nn.Module):
+class Std(nn.Module):
     def __init__(
         self, dim: int, keepdim: bool = False, unbiased: bool = False
     ):
@@ -160,7 +160,7 @@ class Std(torch.nn.Module):
         )
 
 
-class Squeeze(torch.nn.Module):
+class Squeeze(nn.Module):
     def __init__(self, dim: T.Optional[int] = None):
         super(Squeeze, self).__init__()
 
@@ -170,7 +170,7 @@ class Squeeze(torch.nn.Module):
         return x.squeeze(dim=self.dim)
 
 
-class Unsqueeze(torch.nn.Module):
+class Unsqueeze(nn.Module):
     def __init__(self, dim: int):
         super(Unsqueeze, self).__init__()
 
@@ -180,7 +180,7 @@ class Unsqueeze(torch.nn.Module):
         return x.unsqueeze(self.dim)
 
 
-class SigmoidCrisp(torch.nn.Module):
+class SigmoidCrisp(nn.Module):
     r"""Sigmoid crisp.
 
     Adapted from publication and source code below:
@@ -227,8 +227,8 @@ class SigmoidCrisp(torch.nn.Module):
         super(SigmoidCrisp, self).__init__()
 
         self.smooth = smooth
-        self.gamma = torch.nn.Parameter(torch.ones(1))
-        self.sigmoid = torch.nn.Sigmoid()
+        self.gamma = nn.Parameter(torch.ones(1))
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.smooth + self.sigmoid(self.gamma)
@@ -239,7 +239,7 @@ class SigmoidCrisp(torch.nn.Module):
         return out
 
 
-class ConvBlock2d(torch.nn.Module):
+class ConvBlock2d(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -253,7 +253,7 @@ class ConvBlock2d(torch.nn.Module):
         super(ConvBlock2d, self).__init__()
 
         layers = [
-            torch.nn.Conv2d(
+            nn.Conv2d(
                 in_channels,
                 out_channels,
                 kernel_size=kernel_size,
@@ -261,20 +261,20 @@ class ConvBlock2d(torch.nn.Module):
                 dilation=dilation,
                 bias=False,
             ),
-            torch.nn.BatchNorm2d(out_channels),
+            nn.BatchNorm2d(out_channels),
         ]
         if add_activation:
             layers += [
                 SetActivation(activation_type, channels=out_channels, dims=2)
             ]
 
-        self.seq = torch.nn.Sequential(*layers)
+        self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
 
 
-class ResBlock2d(torch.nn.Module):
+class ResBlock2d(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -286,25 +286,23 @@ class ResBlock2d(torch.nn.Module):
     ):
         super(ResBlock2d, self).__init__()
 
-        layers = [
-            torch.nn.BatchNorm2d(in_channels),
+        self.seq = nn.Sequential(
+            nn.BatchNorm2d(in_channels),
             SetActivation(activation_type, channels=in_channels, dims=2),
-            torch.nn.Conv2d(
+            nn.Conv2d(
                 in_channels,
                 out_channels,
                 kernel_size=kernel_size,
                 padding=padding,
                 dilation=dilation,
             ),
-        ]
-
-        self.seq = torch.nn.Sequential(*layers)
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
 
 
-class ConvBlock3d(torch.nn.Module):
+class ConvBlock3d(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -320,7 +318,7 @@ class ConvBlock3d(torch.nn.Module):
         super(ConvBlock3d, self).__init__()
 
         layers = [
-            torch.nn.Conv3d(
+            nn.Conv3d(
                 in_channels,
                 out_channels,
                 kernel_size=kernel_size,
@@ -330,10 +328,10 @@ class ConvBlock3d(torch.nn.Module):
             )
         ]
         if squeeze:
-            layers += [Squeeze(), torch.nn.BatchNorm2d(in_time)]
+            layers += [Squeeze(), nn.BatchNorm2d(in_time)]
             dims = 2
         else:
-            layers += [torch.nn.BatchNorm3d(out_channels)]
+            layers += [nn.BatchNorm3d(out_channels)]
             dims = 3
         if add_activation:
             layers += [
@@ -342,13 +340,13 @@ class ConvBlock3d(torch.nn.Module):
                 )
             ]
 
-        self.seq = torch.nn.Sequential(*layers)
+        self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
 
 
-class AttentionAdd(torch.nn.Module):
+class AttentionAdd(nn.Module):
     def __init__(self):
         super(AttentionAdd, self).__init__()
 
@@ -361,23 +359,23 @@ class AttentionAdd(torch.nn.Module):
         return x + g
 
 
-class AttentionGate3d(torch.nn.Module):
+class AttentionGate3d(nn.Module):
     def __init__(self, high_channels: int, low_channels: int):
         super(AttentionGate3d, self).__init__()
 
-        conv_x = torch.nn.Conv3d(
+        conv_x = nn.Conv3d(
             high_channels, high_channels, kernel_size=1, padding=0
         )
-        conv_g = torch.nn.Conv3d(
+        conv_g = nn.Conv3d(
             low_channels,
             high_channels,
             kernel_size=1,
             padding=0,
         )
-        conv1d = torch.nn.Conv3d(high_channels, 1, kernel_size=1, padding=0)
+        conv1d = nn.Conv3d(high_channels, 1, kernel_size=1, padding=0)
         self.up = model_utils.UpSample()
 
-        self.seq = nn.Sequential(
+        self.seq = gnn.Sequential(
             "x, g",
             [
                 (conv_x, "x -> x"),
@@ -385,7 +383,7 @@ class AttentionGate3d(torch.nn.Module):
                 (AttentionAdd(), "x, g -> x"),
                 (SetActivation("SiLU"), 'x -> x'),
                 (conv1d, "x -> x"),
-                (torch.nn.Sigmoid(), "x -> x"),
+                (nn.Sigmoid(), "x -> x"),
             ],
         )
         self.final = ConvBlock3d(
@@ -408,20 +406,20 @@ class AttentionGate3d(torch.nn.Module):
         return self.final(x * h)
 
 
-class AttentionGate(torch.nn.Module):
+class AttentionGate(nn.Module):
     def __init__(self, high_channels: int, low_channels: int):
         super(AttentionGate, self).__init__()
 
-        conv_x = torch.nn.Conv2d(
+        conv_x = nn.Conv2d(
             high_channels, high_channels, kernel_size=1, padding=0
         )
-        conv_g = torch.nn.Conv2d(
+        conv_g = nn.Conv2d(
             low_channels,
             high_channels,
             kernel_size=1,
             padding=0,
         )
-        conv1d = torch.nn.Conv2d(high_channels, 1, kernel_size=1, padding=0)
+        conv1d = nn.Conv2d(high_channels, 1, kernel_size=1, padding=0)
         self.up = model_utils.UpSample()
 
         self.seq = nn.Sequential(
@@ -432,7 +430,7 @@ class AttentionGate(torch.nn.Module):
                 (AttentionAdd(), "x, g -> x"),
                 (SetActivation("SiLU"), 'x -> x'),
                 (conv1d, "x -> x"),
-                (torch.nn.Sigmoid(), "x -> x"),
+                (nn.Sigmoid(), "x -> x"),
             ],
         )
         self.final = ConvBlock2d(
@@ -455,7 +453,7 @@ class AttentionGate(torch.nn.Module):
         return self.final(x * h)
 
 
-class TanimotoComplement(torch.nn.Module):
+class TanimotoComplement(nn.Module):
     """Tanimoto distance with complement.
 
     THIS IS NOT CURRENTLY USED ANYWHERE IN THIS REPOSITORY
@@ -542,7 +540,7 @@ class TanimotoComplement(torch.nn.Module):
         return score
 
 
-class TanimotoDist(torch.nn.Module):
+class TanimotoDist(nn.Module):
     r"""Tanimoto distance.
 
     Adapted from publication and source code below:
@@ -637,7 +635,7 @@ class TanimotoDist(torch.nn.Module):
         return score
 
 
-class FractalAttention(torch.nn.Module):
+class FractalAttention(nn.Module):
     """Fractal Tanimoto Attention Layer (FracTAL)
 
     Adapted from publication and source code below:
@@ -672,7 +670,7 @@ class FractalAttention(torch.nn.Module):
     def __init__(self, in_channels: int, out_channels: int):
         super(FractalAttention, self).__init__()
 
-        self.query = torch.nn.Sequential(
+        self.query = nn.Sequential(
             ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -680,9 +678,9 @@ class FractalAttention(torch.nn.Module):
                 padding=1,
                 add_activation=False,
             ),
-            torch.nn.Sigmoid(),
+            nn.Sigmoid(),
         )
-        self.key = torch.nn.Sequential(
+        self.key = nn.Sequential(
             ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -690,9 +688,9 @@ class FractalAttention(torch.nn.Module):
                 padding=1,
                 add_activation=False,
             ),
-            torch.nn.Sigmoid(),
+            nn.Sigmoid(),
         )
-        self.value = torch.nn.Sequential(
+        self.value = nn.Sequential(
             ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -700,12 +698,12 @@ class FractalAttention(torch.nn.Module):
                 padding=1,
                 add_activation=False,
             ),
-            torch.nn.Sigmoid(),
+            nn.Sigmoid(),
         )
 
         self.spatial_sim = TanimotoDist(dim=1)
         self.channel_sim = TanimotoDist(dim=[2, 3])
-        self.norm = torch.nn.BatchNorm2d(out_channels)
+        self.norm = nn.BatchNorm2d(out_channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         q = self.query(x)
@@ -724,16 +722,16 @@ class FractalAttention(torch.nn.Module):
         return attention
 
 
-class ChannelAttention(torch.nn.Module):
+class ChannelAttention(nn.Module):
     def __init__(self, out_channels: int, activation_type: str):
         super(ChannelAttention, self).__init__()
 
         # Channel attention
-        self.channel_adaptive_avg = torch.nn.AdaptiveAvgPool2d(1)
-        self.channel_adaptive_max = torch.nn.AdaptiveMaxPool2d(1)
-        self.sigmoid = torch.nn.Sigmoid()
-        self.seq = torch.nn.Sequential(
-            torch.nn.Conv2d(
+        self.channel_adaptive_avg = nn.AdaptiveAvgPool2d(1)
+        self.channel_adaptive_max = nn.AdaptiveMaxPool2d(1)
+        self.sigmoid = nn.Sigmoid()
+        self.seq = nn.Sequential(
+            nn.Conv2d(
                 in_channels=out_channels,
                 out_channels=int(out_channels / 2),
                 kernel_size=1,
@@ -741,7 +739,7 @@ class ChannelAttention(torch.nn.Module):
                 bias=False,
             ),
             SetActivation(activation_type=activation_type),
-            torch.nn.Conv2d(
+            nn.Conv2d(
                 in_channels=int(out_channels / 2),
                 out_channels=out_channels,
                 kernel_size=1,
@@ -759,16 +757,20 @@ class ChannelAttention(torch.nn.Module):
         return attention.expand_as(x)
 
 
-class SpatialAttention(torch.nn.Module):
+class SpatialAttention(nn.Module):
     def __init__(self):
         super(SpatialAttention, self).__init__()
 
-        self.conv = torch.nn.Conv2d(
-            in_channels=2, out_channels=1, kernel_size=3, padding=1, bias=False
+        self.conv = nn.Conv2d(
+            in_channels=2,
+            out_channels=1,
+            kernel_size=3,
+            padding=1,
+            bias=False,
         )
         self.channel_mean = Mean(dim=1, keepdim=True)
         self.channel_max = Max(dim=1, keepdim=True)
-        self.sigmoid = torch.nn.Sigmoid()
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         avg_attention = self.channel_mean(x)
@@ -780,7 +782,7 @@ class SpatialAttention(torch.nn.Module):
         return attention.expand_as(x)
 
 
-class SpatialChannelAttention(torch.nn.Module):
+class SpatialChannelAttention(nn.Module):
     """Spatial-Channel Attention Block.
 
     References:
@@ -806,7 +808,7 @@ class SpatialChannelAttention(torch.nn.Module):
         return attention
 
 
-class ResSpatioTemporalConv3d(torch.nn.Module):
+class ResSpatioTemporalConv3d(nn.Module):
     """A spatio-temporal convolution layer."""
 
     def __init__(
@@ -837,7 +839,7 @@ class ResSpatioTemporalConv3d(torch.nn.Module):
             ),
         ]
 
-        self.seq = torch.nn.Sequential(*layers)
+        self.seq = nn.Sequential(*layers)
         # Conv -> Batchnorm
         self.skip = ConvBlock3d(
             in_channels=in_channels,
@@ -854,7 +856,7 @@ class ResSpatioTemporalConv3d(torch.nn.Module):
         return self.final_act(x)
 
 
-class SpatioTemporalConv3d(torch.nn.Module):
+class SpatioTemporalConv3d(nn.Module):
     """A spatio-temporal convolution layer."""
 
     def __init__(
@@ -885,13 +887,13 @@ class SpatioTemporalConv3d(torch.nn.Module):
             ),
         ]
 
-        self.seq = torch.nn.Sequential(*layers)
+        self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
 
 
-class DoubleConv(torch.nn.Module):
+class DoubleConv(nn.Module):
     """A double convolution layer."""
 
     def __init__(
@@ -937,13 +939,13 @@ class DoubleConv(torch.nn.Module):
             ),
         ]
 
-        self.seq = torch.nn.Sequential(*layers)
+        self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
 
 
-class AtrousPyramidPooling(torch.nn.Module):
+class AtrousPyramidPooling(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -956,10 +958,10 @@ class AtrousPyramidPooling(torch.nn.Module):
 
         self.up = model_utils.UpSample()
 
-        self.pool_a = torch.nn.AdaptiveAvgPool2d((1, 1))
-        self.pool_b = torch.nn.AdaptiveAvgPool2d((2, 2))
-        self.pool_c = torch.nn.AdaptiveAvgPool2d((4, 4))
-        self.pool_d = torch.nn.AdaptiveAvgPool2d((8, 8))
+        self.pool_a = nn.AdaptiveAvgPool2d((1, 1))
+        self.pool_b = nn.AdaptiveAvgPool2d((2, 2))
+        self.pool_c = nn.AdaptiveAvgPool2d((4, 4))
+        self.pool_d = nn.AdaptiveAvgPool2d((8, 8))
 
         self.conv_a = ConvBlock2d(
             in_channels=in_channels,
@@ -1017,7 +1019,7 @@ class AtrousPyramidPooling(torch.nn.Module):
         return out
 
 
-class PoolConvSingle(torch.nn.Module):
+class PoolConvSingle(nn.Module):
     """Max pooling followed by convolution."""
 
     def __init__(
@@ -1025,8 +1027,8 @@ class PoolConvSingle(torch.nn.Module):
     ):
         super(PoolConvSingle, self).__init__()
 
-        self.seq = torch.nn.Sequential(
-            torch.nn.MaxPool2d(pool_size),
+        self.seq = nn.Sequential(
+            nn.MaxPool2d(pool_size),
             ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -1039,7 +1041,7 @@ class PoolConvSingle(torch.nn.Module):
         return self.seq(x)
 
 
-class PoolConv(torch.nn.Module):
+class PoolConv(nn.Module):
     """Max pooling with (optional) dropout."""
 
     def __init__(
@@ -1054,9 +1056,9 @@ class PoolConv(torch.nn.Module):
     ):
         super(PoolConv, self).__init__()
 
-        layers = [torch.nn.MaxPool2d(pool_size)]
+        layers = [nn.MaxPool2d(pool_size)]
         if dropout is not None:
-            layers += [torch.nn.Dropout(dropout)]
+            layers += [nn.Dropout(dropout)]
         layers += [
             DoubleConv(
                 in_channels=in_channels,
@@ -1066,13 +1068,13 @@ class PoolConv(torch.nn.Module):
                 activation_type=activation_type,
             )
         ]
-        self.seq = torch.nn.Sequential(*layers)
+        self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
 
 
-class ResidualConvInit(torch.nn.Module):
+class ResidualConvInit(nn.Module):
     """A residual convolution layer."""
 
     def __init__(
@@ -1083,7 +1085,7 @@ class ResidualConvInit(torch.nn.Module):
     ):
         super(ResidualConvInit, self).__init__()
 
-        self.seq = torch.nn.Sequential(
+        self.seq = nn.Sequential(
             # Conv -> Batchnorm -> Activation
             ConvBlock2d(
                 in_channels=in_channels,
@@ -1118,7 +1120,7 @@ class ResidualConvInit(torch.nn.Module):
         return self.final_act(x)
 
 
-class ResConvLayer(torch.nn.Module):
+class ResConvLayer(nn.Module):
     """Convolution layer designed for a residual activation.
 
     if num_blocks [Conv2d-BatchNorm-Activation -> Conv2dAtrous-BatchNorm]
@@ -1169,7 +1171,7 @@ class ResConvLayer(torch.nn.Module):
                         dilation=dilation,
                         activation_type=activation_type,
                     )
-                    for __ in range(num_blocks - 2)
+                    for _ in range(num_blocks - 2)
                 ]
             # Block N
             layers += [
@@ -1183,13 +1185,13 @@ class ResConvLayer(torch.nn.Module):
                 )
             ]
 
-        self.seq = torch.nn.Sequential(*layers)
+        self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
 
 
-class ResidualConv(torch.nn.Module):
+class ResidualConv(nn.Module):
     """A residual convolution layer with (optional) attention."""
 
     def __init__(
@@ -1197,7 +1199,7 @@ class ResidualConv(torch.nn.Module):
         in_channels: int,
         out_channels: int,
         dilation: int = 2,
-        attention_weights: str = None,
+        attention_weights: T.Optional[AttentionTypes] = None,
         activation_type: str = "SiLU",
     ):
         super(ResidualConv, self).__init__()
@@ -1206,17 +1208,17 @@ class ResidualConv(torch.nn.Module):
 
         if self.attention_weights is not None:
             assert self.attention_weights in [
-                "fractal",
-                "spatial_channel",
+                AttentionTypes.FRACTAL,
+                AttentionTypes.SPATIAL_CHANNEL,
             ], "The attention method is not supported."
 
-            self.gamma = torch.nn.Parameter(torch.ones(1))
+            self.gamma = nn.Parameter(torch.ones(1))
 
-            if self.attention_weights == "fractal":
+            if self.attention_weights == AttentionTypes.FRACTAL:
                 self.attention_conv = FractalAttention(
                     in_channels=in_channels, out_channels=out_channels
                 )
-            elif self.attention_weights == "spatial_channel":
+            elif self.attention_weights == AttentionTypes.SPATIAL_CHANNEL:
                 self.attention_conv = SpatialChannelAttention(
                     out_channels=out_channels, activation_type=activation_type
                 )
@@ -1250,10 +1252,10 @@ class ResidualConv(torch.nn.Module):
 
         if self.attention_weights is not None:
             # Get the attention weights
-            if self.attention_weights == "spatial_channel":
+            if self.attention_weights == AttentionTypes.SPATIAL_CHANNEL:
                 # Get weights from the residual
                 attention = self.attention_conv(residual)
-            elif self.attention_weights == "fractal":
+            elif self.attention_weights == AttentionTypes.FRACTAL:
                 # Get weights from the input
                 attention = self.attention_conv(x)
 
@@ -1266,7 +1268,7 @@ class ResidualConv(torch.nn.Module):
         return out
 
 
-class ResidualAConv(torch.nn.Module):
+class ResidualAConv(nn.Module):
     r"""Residual convolution with atrous/dilated convolutions.
 
     Adapted from publication below:
@@ -1334,22 +1336,22 @@ class ResidualAConv(torch.nn.Module):
 
         if self.attention_weights is not None:
             assert self.attention_weights in [
-                "fractal",
-                "spatial_channel",
+                AttentionTypes.FRACTAL,
+                AttentionTypes.SPATIAL_CHANNEL,
             ], "The attention method is not supported."
 
-            self.gamma = torch.nn.Parameter(torch.ones(1))
+            self.gamma = nn.Parameter(torch.ones(1))
 
-            if self.attention_weights == "fractal":
+            if self.attention_weights == AttentionTypes.FRACTAL:
                 self.attention_conv = FractalAttention(
                     in_channels=in_channels, out_channels=out_channels
                 )
-            elif self.attention_weights == "spatial_channel":
+            elif self.attention_weights == AttentionTypes.SPATIAL_CHANNEL:
                 self.attention_conv = SpatialChannelAttention(
                     out_channels=out_channels, activation_type=activation_type
                 )
 
-        self.res_modules = torch.nn.ModuleList(
+        self.res_modules = nn.ModuleList(
             [
                 # Conv2dAtrous -> Batchnorm
                 ResConvLayer(
@@ -1385,10 +1387,10 @@ class ResidualAConv(torch.nn.Module):
 
         if self.attention_weights is not None:
             # Get the attention weights
-            if self.attention_weights == "spatial_channel":
+            if self.attention_weights == AttentionTypes.SPATIAL_CHANNEL:
                 # Get weights from the residual
                 attention = self.attention_conv(residual)
-            elif self.attention_weights == "fractal":
+            elif self.attention_weights == AttentionTypes.FRACTAL:
                 # Get weights from the input
                 attention = self.attention_conv(x)
 
@@ -1401,7 +1403,7 @@ class ResidualAConv(torch.nn.Module):
         return out
 
 
-class PoolResidualConv(torch.nn.Module):
+class PoolResidualConv(nn.Module):
     """Max pooling followed by a residual convolution."""
 
     def __init__(
@@ -1411,21 +1413,21 @@ class PoolResidualConv(torch.nn.Module):
         pool_size: int = 2,
         dropout: T.Optional[float] = None,
         dilations: T.List[int] = None,
-        attention_weights: str = None,
+        attention_weights: T.Optional[AttentionTypes] = None,
         activation_type: str = "SiLU",
-        res_block_type: enum = ResBlockTypes.RES,
+        res_block_type: ResBlockTypes = ResBlockTypes.RES,
     ):
         super(PoolResidualConv, self).__init__()
 
         assert res_block_type in (ResBlockTypes.RES, ResBlockTypes.RESA)
 
-        layers = [torch.nn.MaxPool2d(pool_size)]
+        layers = [nn.MaxPool2d(pool_size)]
 
         if dropout is not None:
             assert isinstance(
                 dropout, float
             ), "The dropout arg must be a float."
-            layers += [torch.nn.Dropout(dropout)]
+            layers += [nn.Dropout(dropout)]
 
         if res_block_type == ResBlockTypes.RES:
             layers += [
@@ -1448,13 +1450,13 @@ class PoolResidualConv(torch.nn.Module):
                 )
             ]
 
-        self.seq = torch.nn.Sequential(*layers)
+        self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
 
 
-class SingleConv3d(torch.nn.Module):
+class SingleConv3d(nn.Module):
     """A single convolution layer."""
 
     def __init__(self, in_channels: int, out_channels: int):
@@ -1471,7 +1473,7 @@ class SingleConv3d(torch.nn.Module):
         return self.seq(x)
 
 
-class SingleConv(torch.nn.Module):
+class SingleConv(nn.Module):
     """A single convolution layer."""
 
     def __init__(
@@ -1494,7 +1496,7 @@ class SingleConv(torch.nn.Module):
         return self.seq(x)
 
 
-class TemporalConv(torch.nn.Module):
+class TemporalConv(nn.Module):
     """A temporal convolution layer."""
 
     def __init__(
@@ -1526,13 +1528,13 @@ class TemporalConv(torch.nn.Module):
                 padding=0,
             ),
         ]
-        self.seq = torch.nn.Sequential(*layers)
+        self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
 
 
-class FinalConv2dDropout(torch.nn.Module):
+class FinalConv2dDropout(nn.Module):
     def __init__(
         self,
         hidden_dim: int,
@@ -1543,15 +1545,15 @@ class FinalConv2dDropout(torch.nn.Module):
     ):
         super(FinalConv2dDropout, self).__init__()
 
-        self.net = torch.nn.Sequential(
+        self.net = nn.Sequential(
             ResidualConv(
                 in_channels=int(hidden_dim * dim_factor),
                 out_channels=hidden_dim,
                 dilation=2,
                 activation_type=activation_type,
             ),
-            torch.nn.Dropout(0.1),
-            torch.nn.Conv2d(
+            nn.Dropout(0.1),
+            nn.Conv2d(
                 in_channels=hidden_dim,
                 out_channels=num_classes,
                 kernel_size=1,
