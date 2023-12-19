@@ -8,11 +8,13 @@ import typing as T
 
 import torch
 import torch.nn as nn
+from einops.layers.torch import Rearrange
 
 from cultionet.enums import ResBlockTypes
+from cultionet.layers.weights import init_conv_weights
 from cultionet.models import model_utils
-from cultionet.models import kernels
-from cultionet.models.base_layers import (
+from cultionet.layers import kernels
+from cultionet.layers.base_layers import (
     AttentionGate,
     DoubleConv,
     SpatioTemporalConv3d,
@@ -45,17 +47,6 @@ from cultionet.models.unet_parts import (
     ResUNet3_1_3,
     ResUNet3_0_4,
 )
-
-
-def init_weights_kaiming(m):
-    classname = m.__class__.__name__
-    if classname.find("Conv") != -1:
-        nn.init.kaiming_normal_(m.weight.data, a=0, mode="fan_in")
-    elif classname.find("Linear") != -1:
-        nn.init.kaiming_normal_(m.weight.data, a=0, mode="fan_in")
-    elif classname.find("BatchNorm") != -1:
-        nn.init.normal_(m.weight.data, 1.0, 0.02)
-        nn.init.constant_(m.bias.data, 0.0)
 
 
 class UNet2(nn.Module):
@@ -191,9 +182,7 @@ class UNet2(nn.Module):
             )
 
         # Initialise weights
-        for m in self.modules():
-            if isinstance(m, (nn.Conv2d, nn.BatchNorm2d)):
-                m.apply(init_weights_kaiming)
+        self.apply(init_conv_weights)
 
     def forward(
         self, x: torch.Tensor
@@ -424,9 +413,7 @@ class UNet3(nn.Module):
         )
 
         # Initialise weights
-        for m in self.modules():
-            if isinstance(m, (nn.Conv2d, nn.BatchNorm2d)):
-                m.apply(init_weights_kaiming)
+        self.apply(init_conv_weights)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Backbone
@@ -468,8 +455,11 @@ class PreUnet3Psi(nn.Module):
         self,
         in_channels: int,
         channels: T.Sequence[int],
+        concat_channels: int,
+        out_channels: int,
         activation_type: str,
         trend_kernel_size: int = 5,
+        num_layers: int = 1,
     ):
         super(PreUnet3Psi, self).__init__()
 
@@ -487,6 +477,7 @@ class PreUnet3Psi(nn.Module):
             SpatioTemporalConv3d(
                 in_channels=int(in_channels * 3),
                 out_channels=1,
+                num_layers=num_layers,
                 activation_type=activation_type,
             ),
             Squeeze(dim=1),
@@ -495,12 +486,14 @@ class PreUnet3Psi(nn.Module):
         self.time_conv0 = SpatioTemporalConv3d(
             in_channels=in_channels,
             out_channels=channels[0],
+            num_layers=num_layers,
             activation_type=activation_type,
         )
         self.reduce_to_time = nn.Sequential(
             SpatioTemporalConv3d(
                 in_channels=channels[0],
                 out_channels=1,
+                num_layers=num_layers,
                 activation_type=activation_type,
             ),
             Squeeze(dim=1),
@@ -526,6 +519,17 @@ class PreUnet3Psi(nn.Module):
         self.reduce_to_channels_std = nn.Sequential(
             Std(dim=2),
             nn.BatchNorm2d(channels[0]),
+            SetActivation(activation_type=activation_type),
+        )
+        self.linear = nn.Sequential(
+            nn.Conv2d(
+                concat_channels,
+                out_channels,
+                kernel_size=1,
+                padding=0,
+                bias=False,
+            ),
+            nn.BatchNorm2d(out_channels),
             SetActivation(activation_type=activation_type),
         )
 
@@ -585,11 +589,12 @@ class PreUnet3Psi(nn.Module):
                 self.reduce_to_channels_max(h),
                 self.reduce_to_channels_mean(h),
                 self.reduce_to_channels_std(h),
-                temporal_encoding,
                 self.reduce_trend_to_time(trend_kernels),
+                temporal_encoding,
             ],
             dim=1,
         )
+        h = self.linear(h)
 
         return h
 
@@ -841,17 +846,7 @@ class UNet3Psi(nn.Module):
         )
 
         # Initialise weights
-        for m in self.modules():
-            if isinstance(
-                m,
-                (
-                    nn.Conv2d,
-                    nn.BatchNorm2d,
-                    nn.Conv3d,
-                    nn.BatchNorm3d,
-                ),
-            ):
-                m.apply(init_weights_kaiming)
+        self.apply(init_conv_weights)
 
     def forward(
         self, x: torch.Tensor, temporal_encoding: torch.Tensor
@@ -962,9 +957,19 @@ class ResUNet3Psi(nn.Module):
         ]
         up_channels = int(channels[0] * 5)
 
+        pre_concat_channels = (
+            in_time
+            + int(channels[0] * 4)
+            + in_encoding_channels
+            # Peak kernels and Trend kernels
+            + in_time
+        )
+
         self.pre_unet = PreUnet3Psi(
             in_channels=in_channels,
             channels=channels,
+            concat_channels=pre_concat_channels,
+            out_channels=channels[0],
             activation_type=activation_type,
         )
 
@@ -974,13 +979,7 @@ class ResUNet3Psi(nn.Module):
         # Input filters for RNN hidden logits
         if res_block_type.lower() == ResBlockTypes.RES:
             self.conv0_0 = ResidualConv(
-                in_channels=(
-                    in_time
-                    + int(channels[0] * 4)
-                    + in_encoding_channels
-                    # Peak kernels and Trend kernels
-                    + in_time
-                ),
+                in_channels=channels[0],
                 out_channels=channels[0],
                 dilation=dilations[0],
                 activation_type=activation_type,
@@ -988,13 +987,7 @@ class ResUNet3Psi(nn.Module):
             )
         else:
             self.conv0_0 = ResidualAConv(
-                in_channels=(
-                    in_time
-                    + int(channels[0] * 4)
-                    + in_encoding_channels
-                    # Peak kernels and Trend kernels
-                    + in_time
-                ),
+                in_channels=channels[0],
                 out_channels=channels[0],
                 dilations=dilations,
                 activation_type=activation_type,
@@ -1076,17 +1069,7 @@ class ResUNet3Psi(nn.Module):
         )
 
         # Initialise weights
-        for m in self.modules():
-            if isinstance(
-                m,
-                (
-                    nn.Conv2d,
-                    nn.BatchNorm2d,
-                    nn.Conv3d,
-                    nn.BatchNorm3d,
-                ),
-            ):
-                m.apply(init_weights_kaiming)
+        self.apply(init_conv_weights)
 
     def forward(
         self, x: torch.Tensor, temporal_encoding: torch.Tensor
@@ -1189,4 +1172,4 @@ if __name__ == '__main__':
 
     assert logits['dist'].shape == (batch_size, 1, height, width)
     assert logits['edge'].shape == (batch_size, 1, height, width)
-    assert logits['mask'].shape == (batch_size, 1, height, width)
+    assert logits['mask'].shape == (batch_size, 2, height, width)
