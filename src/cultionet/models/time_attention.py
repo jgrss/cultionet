@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from cultionet.models.base_layers import SigmoidCrisp
-from cultionet.models.encodings import get_sinusoid_encoding_table
+from cultionet.layers.base_layers import SigmoidCrisp
+from cultionet.layers.encodings import get_sinusoid_encoding_table
 
 
 class ConvLayer(nn.Module):
