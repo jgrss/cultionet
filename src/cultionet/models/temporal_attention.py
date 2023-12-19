@@ -6,15 +6,16 @@ TODO:
     https://www.sciencedirect.com/science/article/pii/S0893608023005361
     https://github.com/AzadDeihim/STTRE/blob/main/STTRE.ipynb
 """
-from typing import Callable, Optional, Tuple, Sequence, Union
+from typing import Callable, Optional
 
 import einops
 import torch
 import torch.nn as nn
 from einops.layers.torch import Rearrange
 
-from cultionet.models.base_layers import Softmax, FinalConv2dDropout
-from cultionet.models.encodings import cartesian, get_sinusoid_encoding_table
+from cultionet.layers.weights import init_attention_weights
+from cultionet.layers.base_layers import Softmax, FinalConv2dDropout
+from cultionet.layers.encodings import cartesian, get_sinusoid_encoding_table
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -235,6 +236,8 @@ class TemporalAttention(nn.Module):
             num_classes=num_classes_last,
         )
 
+        self.apply(init_attention_weights)
+
     def forward(
         self,
         x: torch.Tensor,
@@ -299,7 +302,7 @@ class TemporalAttention(nn.Module):
 if __name__ == '__main__':
     batch_size = 2
     num_channels = 3
-    hidden_size = 64
+    hidden_channels = 64
     num_head = 8
     d_model = 128
     num_time = 12
@@ -315,7 +318,7 @@ if __name__ == '__main__':
 
     model = TemporalAttention(
         in_channels=num_channels,
-        hidden_size=hidden_size,
+        hidden_channels=hidden_channels,
         num_head=num_head,
         d_model=d_model,
         num_time=num_time,
