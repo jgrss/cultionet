@@ -317,11 +317,11 @@ class CultioNet(torch.nn.Module):
 
         self.temporal_encoder = LightweightTemporalAttentionEncoder(
             in_channels=self.ds_num_bands,
-            hidden_size=filters,
+            hidden_size=self.filters,
             num_head=8,
             num_time=self.ds_num_time,
             dropout=0.1,
-            d_model=filters * 2,
+            d_model=self.filters,
             time_scaler=1_000,
             num_classes_l2=self.num_classes,
             num_classes_last=self.num_classes + 1,
