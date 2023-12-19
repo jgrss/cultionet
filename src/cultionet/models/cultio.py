@@ -8,7 +8,7 @@ from . import model_utils
 from .base_layers import ConvBlock2d, ResidualConv, Softmax
 from .nunet import UNet3Psi, ResUNet3Psi
 from .time_attention import TemporalResAUNet
-from .ltae import LightweightTemporalAttentionEncoder
+from .ltae import TemporalAttention
 from ..enums import ModelTypes, ResBlockTypes
 
 
@@ -315,9 +315,9 @@ class CultioNet(torch.nn.Module):
         self.cg = model_utils.ConvToGraph()
         self.ct = model_utils.ConvToTime()
 
-        self.temporal_encoder = LightweightTemporalAttentionEncoder(
+        self.temporal_encoder = TemporalAttention(
             in_channels=self.ds_num_bands,
-            hidden_size=self.filters,
+            hidden_channels=self.filters,
             num_head=8,
             num_time=self.ds_num_time,
             dropout=0.1,
