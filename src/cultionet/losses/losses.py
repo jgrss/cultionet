@@ -205,6 +205,25 @@ class TanimotoComplementLoss(nn.Module):
             inputs_are_logits=True, apply_transform=True
         )
 
+    def tanimoto_distance(
+        self, y: torch.Tensor, yhat: torch.Tensor
+    ) -> torch.Tensor:
+        scale = 1.0 / self.depth
+        tpl = (y * yhat).sum(dim=0)
+        numerator = tpl + self.smooth
+        sq_sum = (y**2 + yhat**2).sum(dim=0)
+        denominator = torch.zeros(yhat.shape[1]).to(
+            dtype=yhat.dtype, device=yhat.device
+        )
+        for d in range(0, self.depth):
+            a = 2.0**d
+            b = -(2.0 * a - 1.0)
+            denominator = denominator + torch.reciprocal(
+                (a * sq_sum) + (b * tpl) + self.smooth
+            )
+
+        return ((numerator * denominator) * scale).mean()
+
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor
     ) -> torch.Tensor:
@@ -217,41 +236,20 @@ class TanimotoComplementLoss(nn.Module):
         Returns:
             Tanimoto distance loss (float)
         """
-        if self.targets_are_labels:
-            # Discrete targets
+        if len(inputs.shape) > 1:
             if inputs.shape[1] > 1:
-                # Softmax and One-hot encoding
-                inputs, targets = self.preprocessor(inputs, targets)
+                targets = one_hot(targets, dims=inputs.shape[1])
 
         if len(inputs.shape) == 1:
             inputs = inputs.unsqueeze(1)
         if len(targets.shape) == 1:
             targets = targets.unsqueeze(1)
 
-        length = inputs.shape[1]
+        dist1 = self.tanimoto_distance(targets, inputs)
+        dist2 = self.tanimoto_distance(1.0 - targets, 1.0 - inputs)
+        dist = (dist1 + dist2) * 0.5
 
-        def tanimoto(y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
-            scale = 1.0 / self.depth
-            tpl = (y * yhat).sum(dim=0)
-            numerator = tpl + self.smooth
-            sq_sum = (y**2 + yhat**2).sum(dim=0)
-            denominator = torch.zeros(length, dtype=inputs.dtype).to(
-                device=inputs.device
-            )
-            for d in range(0, self.depth):
-                a = 2**d
-                b = -(2.0 * a - 1.0)
-                denominator = denominator + torch.reciprocal(
-                    (a * sq_sum) + (b * tpl) + self.smooth
-                )
-
-            return numerator * denominator * scale
-
-        score = tanimoto(targets, inputs)
-        if inputs.shape[1] == 1:
-            score = (score + tanimoto(1.0 - targets, 1.0 - inputs)) * 0.5
-
-        return (1.0 - score).mean()
+        return 1.0 - dist
 
 
 def tanimoto_dist(
