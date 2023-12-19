@@ -7,6 +7,7 @@ from torch_geometric.data import Data
 from . import model_utils
 from .base_layers import ConvBlock2d, ResidualConv, Softmax
 from .nunet import UNet3Psi, ResUNet3Psi
+from .time_attention import TemporalResAUNet
 from .ltae import LightweightTemporalAttentionEncoder
 from ..enums import ModelTypes, ResBlockTypes
 
@@ -316,14 +317,11 @@ class CultioNet(torch.nn.Module):
 
         self.temporal_encoder = LightweightTemporalAttentionEncoder(
             in_channels=self.ds_num_bands,
-            hidden_size=128,
-            n_head=8,
-            n_time=self.ds_num_time,
-            d_k=4,
-            # [d_model, encoder_widths[-1]]
-            mlp=[128, 64, filters],
+            hidden_size=filters,
+            num_head=8,
+            num_time=self.ds_num_time,
             dropout=0.1,
-            d_model=128,
+            d_model=filters * 2,
             time_scaler=1_000,
             num_classes_l2=self.num_classes,
             num_classes_last=self.num_classes + 1,
@@ -334,7 +332,7 @@ class CultioNet(torch.nn.Module):
         unet3_kwargs = {
             "in_channels": self.ds_num_bands,
             "in_time": self.ds_num_time,
-            "in_encoding_channels": filters,  # <- L-TAE; int(self.filters * 3), <- ConvSTAR
+            "in_encoding_channels": self.filters,  # <- L-TAE; int(self.filters * 3), <- ConvSTAR
             "init_filter": self.filters,
             "num_classes": self.num_classes,
             "activation_type": activation_type,
@@ -346,6 +344,7 @@ class CultioNet(torch.nn.Module):
         assert model_type in (
             ModelTypes.UNET3PSI,
             ModelTypes.RESUNET3PSI,
+            ModelTypes.TRESAUNET,
         ), "The model type is not supported."
         if model_type == ModelTypes.UNET3PSI:
             unet3_kwargs["dilation"] = 2 if dilations is None else dilations
@@ -374,6 +373,15 @@ class CultioNet(torch.nn.Module):
                 unet3_kwargs["dilations"], list
             ), f"The dilations for {ModelTypes.RESUNET3PSI} must be a sequence of integers."
             self.mask_model = ResUNet3Psi(**unet3_kwargs)
+        elif model_type == ModelTypes.TRESAUNET:
+            self.mask_model = TemporalResAUNet(
+                in_channels=self.ds_num_bands,
+                hidden_channels=self.filters,
+                out_channels=1,
+                num_time=self.ds_num_time,
+                height=100,
+                width=100,
+            )
 
     def forward(self, data: Data) -> T.Dict[str, torch.Tensor]:
         height = (
@@ -401,6 +409,7 @@ class CultioNet(torch.nn.Module):
         classes_last = self.cg(classes_last)
         # Main stream
         logits = self.mask_model(x, temporal_encoding=logits_hidden)
+
         logits_distance = self.cg(logits["dist"])
         logits_edges = self.cg(logits["edge"])
         logits_crop = self.cg(logits["mask"])
