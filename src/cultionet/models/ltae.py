@@ -6,16 +6,15 @@ TODO:
     https://www.sciencedirect.com/science/article/pii/S0893608023005361
     https://github.com/AzadDeihim/STTRE/blob/main/STTRE.ipynb
 """
-import copy
-import math
 from typing import Callable, Optional, Tuple, Sequence, Union
 
-import numpy as np
+import einops
 import torch
 import torch.nn as nn
+from einops.layers.torch import Rearrange
 
-from .base_layers import Softmax, FinalConv2dDropout
-from .encodings import cartesian, get_sinusoid_encoding_table
+from cultionet.models.base_layers import Softmax, FinalConv2dDropout
+from cultionet.models.encodings import cartesian, get_sinusoid_encoding_table
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -26,129 +25,77 @@ class ScaledDotProductAttention(nn.Module):
 
     def __init__(
         self,
+        scale: float,
         dropout: float = 0.1,
-        scale: Optional[float] = None,
     ):
         super(ScaledDotProductAttention, self).__init__()
 
         self.dropout = nn.Dropout(dropout)
         self.scale = scale
-        self.softmax = nn.Softmax(dim=2)
+        self.softmax = nn.Softmax(dim=-1)
 
     def forward(
         self,
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        attn_mask: Optional[torch.Tensor] = None,
-        is_causal: bool = False,
-        return_comp: bool = False,
+        prev_attention: Optional[torch.Tensor] = None,
     ):
-        # Source: https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
-        L, S = query.size(-2), key.size(-2)
-        scale_factor = (
-            1.0 / math.sqrt(query.size(-1))
-            if self.scale is None
-            else self.scale
-        )
-        attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
-        if is_causal:
-            assert attn_mask is None
-            temp_mask = torch.ones(
-                L, S, dtype=torch.bool, device=query.device
-            ).tril(diagonal=0)
-            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-            attn_bias.to(query.dtype)
-        if attn_mask is not None:
-            if attn_mask.dtype == torch.bool:
-                attn_mask.masked_fill_(attn_mask.logical_not(), float("-inf"))
-            attn_bias = attn_bias + attn_mask
+        scores = torch.einsum('hblk, hbtk -> hblt', [query, key]) * self.scale
+        if prev_attention is not None:
+            scores = scores + prev_attention
+        attention = self.softmax(scores)
+        output = torch.einsum('hblt, hbtv -> hblv', [attention, value])
+        output = self.dropout(output)
 
-        attn = (query.unsqueeze(1) @ key.transpose(1, 2)) * scale_factor
-        attn = attn + attn_bias.unsqueeze(1)
-
-        if return_comp:
-            comp = attn
-
-        attn = self.softmax(attn)
-        attn = self.dropout(attn)
-        output = attn @ value
-
-        if return_comp:
-            return output, attn, comp
-        else:
-            return output, attn
+        return output, attention
 
 
 class MultiHeadAttention(nn.Module):
     """Multi-Head Attention module Modified from
     github.com/jadore801120/attention-is-all-you-need-pytorch."""
 
-    def __init__(self, n_head: int, d_k: int, d_in: int):
+    def __init__(self, num_head: int, d_in: int, dropout: float = 0.1):
         super(MultiHeadAttention, self).__init__()
 
-        self.n_head = n_head
-        self.d_k = d_k
-        self.d_in = d_in
+        d_k = d_in // num_head
+        scale = 1.0 / d_k**0.5
 
-        self.Q = nn.Parameter(torch.zeros((n_head, d_k))).requires_grad_(True)
-        nn.init.normal_(self.Q, mean=0, std=np.sqrt(2.0 / (d_k)))
+        self.projection = nn.Linear(d_in, 3 * d_in, bias=False)
 
-        self.fc1_k = nn.Linear(d_in, n_head * d_k)
-        nn.init.normal_(self.fc1_k.weight, mean=0, std=np.sqrt(2.0 / (d_k)))
+        self.scaled_attention = ScaledDotProductAttention(
+            scale, dropout=dropout
+        )
+        self.final = nn.Sequential(
+            Rearrange('head b t c -> b t (head c)'),
+            nn.LayerNorm(d_in),
+        )
 
-        self.attention = ScaledDotProductAttention()
-        # self.attention = nn.MultiheadAttention(
-        #     n_head,
-        #     d_k,
-        #     dropout=0.1,
-        #     # (batch x seq x feature)
-        #     batch_first=False,
-        # )
+    def split(self, x: torch.Tensor) -> torch.Tensor:
+        return einops.rearrange(
+            x, 'b t (num_head k) -> num_head b t k', num_head=num_head
+        )
 
     def forward(
         self,
-        value: torch.Tensor,
-        attn_mask: Optional[torch.Tensor] = None,
-        return_comp: bool = False,
+        query: torch.Tensor,
+        prev_attention: Optional[torch.Tensor] = None,
     ):
-        d_k, d_in, n_head = self.d_k, self.d_in, self.n_head
-        batch_size, time_size, _ = value.size()
+        # batch_size, num_time, n_channels = query.shape
+        residual = query
+        kqv = self.projection(query)
+        query, key, value = torch.chunk(kqv, 3, dim=-1)
+        query = self.split(query)
+        key = self.split(key)
+        value = self.split(value)
 
-        # (n*b) x d_k
-        query = self.Q.repeat(batch_size, 1)
-        key = self.fc1_k(value).view(batch_size, time_size, n_head, d_k)
-        # (n*b) x lk x dk
-        key = key.permute(2, 0, 1, 3).contiguous().view(-1, time_size, d_k)
+        output, attention = self.scaled_attention(
+            query, key, value, prev_attention=prev_attention
+        )
+        output = self.final(output)
+        output = output + residual
 
-        if attn_mask is not None:
-            attn_mask = attn_mask.repeat(
-                (n_head, 1)
-            )  # replicate attn_mask for each head (nxb) x lk
-
-        value = torch.stack(
-            value.split(value.shape[-1] // n_head, dim=-1)
-        ).view(n_head * batch_size, time_size, -1)
-
-        if return_comp:
-            output, attn, comp = self.attention(
-                query, key, value, attn_mask=attn_mask, return_comp=return_comp
-            )
-        else:
-            output, attn = self.attention(
-                query, key, value, attn_mask=attn_mask, return_comp=return_comp
-            )
-
-        attn = attn.view(n_head, batch_size, 1, time_size)
-        attn = attn.squeeze(dim=2)
-
-        output = output.view(n_head, batch_size, 1, d_in // n_head)
-        output = output.squeeze(dim=2)
-
-        if return_comp:
-            return output, attn, comp
-        else:
-            return output, attn
+        return output, attention
 
 
 class MLPBlock(nn.Module):
@@ -172,14 +119,11 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         self,
         in_channels: int,
         hidden_size: int = 128,
-        n_head: int = 8,
-        n_time: int = 1,
-        d_k: int = 4,
-        mlp: Sequence[int] = [256, 128],
-        dropout: float = 0.2,
+        num_head: int = 8,
+        num_time: int = 1,
         d_model: int = 256,
+        dropout: float = 0.1,
         time_scaler: int = 1_000,
-        return_att: bool = False,
         num_classes_l2: int = 2,
         num_classes_last: int = 3,
         activation_type: str = "SiLU",
@@ -193,44 +137,48 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         Args:
             in_channels (int): Number of channels of the inputs.
             hidden_size (int): Number of hidden layers.
-            n_head (int): Number of attention heads.
+            num_head (int): Number of attention heads.
             d_k (int): Dimension of the key and query vectors.
-            mlp (List[int]): Widths of the layers of the MLP that processes the concatenated outputs of the attention heads.
             dropout (float): dropout
             d_model (int, optional): If specified, the input tensors will first processed by a fully connected layer
                 to project them into a feature space of dimension d_model.
             time_scaler (int): Period to use for the positional encoding.
-            return_att (bool): If true, the module returns the attention masks along with the embeddings (default False)
         """
         super(LightweightTemporalAttentionEncoder, self).__init__()
 
-        self.in_channels = in_channels
-        self.return_att = return_att
-        self.n_head = n_head
-        mlp = copy.deepcopy(mlp)
-
-        self.init_conv = nn.Conv3d(
-            in_channels,
-            hidden_size,
-            kernel_size=3,
-            stride=1,
-            padding=1,
-            dilation=1,
-            bias=True,
+        self.init_conv = nn.Sequential(
+            nn.Conv3d(
+                in_channels,
+                hidden_size,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                dilation=1,
+                bias=False,
+            ),
+            Rearrange('b c t h w -> b t h w c'),
+            nn.LayerNorm(hidden_size),
+            Rearrange('b t h w c -> b c t h w'),
+            nn.GELU(),
+            nn.Conv3d(
+                hidden_size,
+                d_model,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                dilation=1,
+                bias=False,
+            ),
+            Rearrange('b c t h w -> b t h w c'),
+            nn.LayerNorm(d_model),
+            Rearrange('b t h w c -> b c t h w'),
+            nn.GELU(),
         )
-
-        if d_model is not None:
-            self.d_model = d_model
-            self.inconv = nn.Conv1d(hidden_size, d_model, 1)
-        else:
-            self.d_model = in_channels
-            self.inconv = None
-        assert mlp[0] == self.d_model
 
         # Absolute positional embeddings
         self.positional_encoder = nn.Embedding.from_pretrained(
             get_sinusoid_encoding_table(
-                positions=n_time,
+                positions=num_time,
                 d_hid=d_model,
                 time_scaler=time_scaler,
             ),
@@ -244,25 +192,19 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         # )
 
         # Attention
-        self.attention_heads = MultiHeadAttention(
-            n_head=n_head, d_k=d_k, d_in=self.d_model
+        self.attention_heads = nn.ModuleList(
+            [
+                MultiHeadAttention(
+                    num_head=num_head, d_in=d_model, dropout=dropout
+                ),
+                MultiHeadAttention(
+                    num_head=num_head, d_in=d_model, dropout=dropout
+                ),
+            ]
         )
-        self.in_norm = nn.GroupNorm(
-            num_groups=n_head,
-            num_channels=hidden_size,
-        )
-        self.out_norm = nn.GroupNorm(
-            num_groups=n_head,
-            num_channels=mlp[-1],
-        )
-
-        layers = [MLPBlock(i, mlp) for i in range(len(mlp) - 1)]
-        layers += [nn.Dropout(dropout)]
-        self.mlp_seq = nn.Sequential(*layers)
-
         # Level 2 level (non-crop; crop)
         self.final_l2 = FinalConv2dDropout(
-            hidden_dim=n_head * n_time,
+            hidden_dim=d_model,
             dim_factor=1,
             activation_type=activation_type,
             final_activation=final_activation,
@@ -270,7 +212,7 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         )
         # Last level (non-crop; crop; edges)
         self.final_last = FinalConv2dDropout(
-            hidden_dim=mlp[-1],
+            hidden_dim=d_model,
             dim_factor=1,
             activation_type=activation_type,
             final_activation=Softmax(dim=1),
@@ -282,41 +224,13 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         x: torch.Tensor,
         longitude: torch.Tensor,
         latitude: torch.Tensor,
-        mask_padded: bool = True,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> tuple:
         batch_size, channel_size, time_size, height, width = x.shape
-        # TODO: Channel embedding
 
-        # input shape = (B x C x T x H x W)
-        # permuted shape = (B x T x C x H x W)
         x = self.init_conv(x)
-        x = x.permute(0, 2, 1, 3, 4)
-        # x shape = (batch_size, time_size, channel_size, height, width)
-
-        attn_mask = None
-        if mask_padded:
-            attn_mask = (x == 0).all(dim=-1).all(dim=-1).all(dim=-1)
-            attn_mask = (
-                attn_mask.unsqueeze(-1)
-                .repeat((1, 1, height))
-                .unsqueeze(-1)
-                .repeat((1, 1, 1, width))
-            )  # BxTxHxW
-            attn_mask = (
-                attn_mask.permute(0, 2, 3, 1)
-                .contiguous()
-                .view(batch_size * height * width, time_size)
-            )
-
-        out = (
-            x.permute(0, 3, 4, 1, 2)
-            .contiguous()
-            .view(batch_size * height * width, time_size, x.shape[-3])
-        )
-        out = self.in_norm(out.permute(0, 2, 1)).permute(0, 2, 1)
-
-        if self.inconv is not None:
-            out = self.inconv(out.permute(0, 2, 1)).permute(0, 2, 1)
+        # input shape = (B x C x T x H x W)
+        # permuted shape = ([B x H x W] x T x C)
+        out = einops.rearrange(x, 'b c t h w -> (b h w) t c')
 
         # Positional embedding
         src_pos = (
@@ -328,40 +242,71 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         # Coordinate embedding
         coordinate_tokens = self.coordinate_encoder(
             cartesian(
-                torch.tile(longitude[:, None], (1, height * width)).view(
-                    batch_size * height * width, 1
+                einops.rearrange(
+                    torch.tile(longitude[:, None], (1, height * width)),
+                    'b (h w) -> (b h w) 1',
+                    b=batch_size,
+                    h=height,
+                    w=width,
                 ),
-                torch.tile(latitude[:, None], (1, height * width)).view(
-                    batch_size * height * width, 1
+                einops.rearrange(
+                    torch.tile(latitude[:, None], (1, height * width)),
+                    'b (h w) -> (b h w) 1',
+                    b=batch_size,
+                    h=height,
+                    w=width,
                 ),
             )
         )
-        # TODO: concatenate?
         out = out + position_tokens + coordinate_tokens
+
         # Attention
-        out, attn = self.attention_heads(out, attn_mask=attn_mask)
+        out, attention = self.attention_heads[0](out)
         # Concatenate heads
-        out = (
-            out.permute(1, 0, 2)
-            .contiguous()
-            .view(batch_size * height * width, -1)
+        last_l2 = einops.rearrange(
+            out, '(b h w) t c -> b c t h w', b=batch_size, h=height, w=width
         )
-        out = self.mlp_seq(out)
-        out = self.out_norm(out) if self.out_norm is not None else out
-        out = out.view(batch_size, height, width, -1).permute(0, 3, 1, 2)
+        last_l2 = einops.reduce(last_l2, 'b c t h w -> b c h w', 'mean')
+        last_l2 = self.final_l2(last_l2)
 
-        # head x b x t x h x w
-        attn = attn.view(
-            self.n_head, batch_size, height, width, time_size
-        ).permute(0, 1, 4, 2, 3)
-
-        # attn shape = (n_head x batch_size x time_size x height x width)
-        last_l2 = self.final_l2(
-            attn.permute(1, 0, 2, 3, 4).reshape(batch_size, -1, height, width)
+        # Attention
+        out, attention = self.attention_heads[1](out, prev_attention=attention)
+        # Concatenate heads
+        out = einops.rearrange(
+            out, '(b h w) t c -> b c t h w', b=batch_size, h=height, w=width
         )
+        out = einops.reduce(out, 'b c t h w -> b c h w', 'mean')
         last = self.final_last(out)
 
-        if self.return_att:
-            return out, last_l2, last, attn
-        else:
-            return out, last_l2, last
+        return out, last_l2, last
+
+
+if __name__ == '__main__':
+    batch_size = 2
+    num_channels = 3
+    hidden_size = 64
+    num_head = 8
+    d_model = 128
+    num_time = 12
+    height = 100
+    width = 100
+
+    x = torch.rand(
+        (batch_size, num_channels, num_time, height, width),
+        dtype=torch.float32,
+    )
+    lon = torch.distributions.uniform.Uniform(-180, 180).sample([batch_size])
+    lat = torch.distributions.uniform.Uniform(-90, 90).sample([batch_size])
+
+    model = LightweightTemporalAttentionEncoder(
+        in_channels=num_channels,
+        hidden_size=hidden_size,
+        num_head=num_head,
+        d_model=d_model,
+        num_time=num_time,
+    )
+    logits_hidden, classes_l2, classes_last = model(x, lon, lat)
+
+    assert logits_hidden.shape == (batch_size, d_model, height, width)
+    assert classes_l2.shape == (batch_size, 2, height, width)
+    assert classes_last.shape == (batch_size, 3, height, width)
