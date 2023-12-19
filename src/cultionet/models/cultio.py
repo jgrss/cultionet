@@ -8,7 +8,7 @@ from . import model_utils
 from .base_layers import ConvBlock2d, ResidualConv, Softmax
 from .nunet import UNet3Psi, ResUNet3Psi
 from .time_attention import TemporalResAUNet
-from .ltae import TemporalAttention
+from .temporal_attention import TemporalAttention
 from ..enums import ModelTypes, ResBlockTypes
 
 
