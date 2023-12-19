@@ -62,7 +62,9 @@ class MultiHeadAttention(nn.Module):
         d_k = d_in // num_head
         scale = 1.0 / d_k**0.5
 
-        self.projection = nn.Linear(d_in, 3 * d_in, bias=False)
+        self.proj_query = nn.Linear(d_in, d_in, bias=False)
+        self.proj_key = nn.Linear(d_in, d_in, bias=False)
+        self.proj_value = nn.Linear(d_in, d_in, bias=False)
 
         self.scaled_attention = ScaledDotProductAttention(
             scale, dropout=dropout
@@ -80,12 +82,16 @@ class MultiHeadAttention(nn.Module):
     def forward(
         self,
         query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
         prev_attention: Optional[torch.Tensor] = None,
     ):
         # batch_size, num_time, n_channels = query.shape
         residual = query
-        kqv = self.projection(query)
-        query, key, value = torch.chunk(kqv, 3, dim=-1)
+        query = self.proj_query(query)
+        key = self.proj_key(key)
+        value = self.proj_value(value)
+        # Split heads
         query = self.split(query)
         key = self.split(key)
         value = self.split(value)
@@ -99,27 +105,63 @@ class MultiHeadAttention(nn.Module):
         return output, attention
 
 
-class MLPBlock(nn.Module):
-    def __init__(self, idx: int, dimensions: Sequence[int]):
-        super(MLPBlock, self).__init__()
+class InLayer(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int):
+        super(InLayer, self).__init__()
 
         self.seq = nn.Sequential(
-            nn.Linear(dimensions[idx], dimensions[idx]),
-            nn.BatchNorm1d(dimensions[idx]),
-            nn.GELU(),
-            nn.Linear(dimensions[idx], dimensions[idx + 1]),
-            nn.GELU(),
+            nn.Conv3d(
+                in_channels,
+                out_channels,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                dilation=1,
+                bias=False,
+            ),
+            nn.BatchNorm3d(out_channels),
+            nn.SiLU(),
+        )
+        self.skip = nn.Sequential(
+            Rearrange('b c t h w -> b t h w c'),
+            nn.Linear(in_channels, out_channels),
+            Rearrange('b t h w c -> b c t h w'),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.seq(x)
+        residual = self.skip(x)
+        return self.seq(x) + residual
 
 
-class LightweightTemporalAttentionEncoder(nn.Module):
+class InBlock(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        hidden_size: int = 128,
+        hidden_channels: int,
+        out_channels: int,
+    ):
+        super(InBlock, self).__init__()
+
+        self.seq = nn.Sequential(
+            InLayer(in_channels=in_channels, out_channels=hidden_channels),
+            InLayer(in_channels=hidden_channels, out_channels=out_channels),
+        )
+        self.skip = nn.Sequential(
+            Rearrange('b c t h w -> b t h w c'),
+            nn.Linear(in_channels, out_channels),
+            Rearrange('b t h w c -> b c t h w'),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        residual = self.skip(x)
+        return self.seq(x) + residual
+
+
+class TemporalAttention(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        hidden_channels: int = 128,
         num_head: int = 8,
         num_time: int = 1,
         d_model: int = 256,
@@ -134,7 +176,7 @@ class LightweightTemporalAttentionEncoder(nn.Module):
 
         Args:
             in_channels (int): Number of channels of the inputs.
-            hidden_size (int): Number of hidden layers.
+            hidden_channels (int): Number of hidden layers.
             num_head (int): Number of attention heads.
             d_k (int): Dimension of the key and query vectors.
             dropout (float): dropout
@@ -142,35 +184,15 @@ class LightweightTemporalAttentionEncoder(nn.Module):
                 to project them into a feature space of dimension d_model.
             time_scaler (int): Period to use for the positional encoding.
         """
-        super(LightweightTemporalAttentionEncoder, self).__init__()
+        super(TemporalAttention, self).__init__()
 
         self.init_conv = nn.Sequential(
-            nn.Conv3d(
-                in_channels,
-                hidden_size,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-                dilation=1,
-                bias=False,
+            InBlock(
+                in_channels=in_channels,
+                hidden_channels=hidden_channels,
+                out_channels=d_model,
             ),
-            Rearrange('b c t h w -> b t h w c'),
-            nn.LayerNorm(hidden_size),
-            Rearrange('b t h w c -> b c t h w'),
-            nn.GELU(),
-            nn.Conv3d(
-                hidden_size,
-                d_model,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-                dilation=1,
-                bias=False,
-            ),
-            Rearrange('b c t h w -> b t h w c'),
-            nn.LayerNorm(d_model),
-            Rearrange('b t h w c -> b c t h w'),
-            nn.GELU(),
+            Rearrange('b c t h w -> (b h w) t c'),
         )
 
         # Absolute positional embeddings
@@ -190,15 +212,11 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         # )
 
         # Attention
-        self.attention_heads = nn.ModuleList(
-            [
-                MultiHeadAttention(
-                    num_head=num_head, d_in=d_model, dropout=dropout
-                ),
-                MultiHeadAttention(
-                    num_head=num_head, d_in=d_model, dropout=dropout
-                ),
-            ]
+        self.attention_a = MultiHeadAttention(
+            num_head=num_head, d_in=d_model, dropout=dropout
+        )
+        self.attention_b = MultiHeadAttention(
+            num_head=num_head, d_in=d_model, dropout=dropout
         )
         # Level 2 level (non-crop; crop)
         self.final_l2 = FinalConv2dDropout(
@@ -223,12 +241,9 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         longitude: torch.Tensor,
         latitude: torch.Tensor,
     ) -> tuple:
-        batch_size, channel_size, time_size, height, width = x.shape
+        batch_size, num_channels, num_time, height, width = x.shape
 
-        x = self.init_conv(x)
-        # input shape = (B x C x T x H x W)
-        # permuted shape = ([B x H x W] x T x C)
-        out = einops.rearrange(x, 'b c t h w -> (b h w) t c')
+        out = self.init_conv(x)
 
         # Positional embedding
         src_pos = (
@@ -259,7 +274,7 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         out = out + position_tokens + coordinate_tokens
 
         # Attention
-        out, attention = self.attention_heads[0](out)
+        out, attention = self.attention_a(out, out, out)
         # Concatenate heads
         last_l2 = einops.rearrange(
             out, '(b h w) t c -> b c t h w', b=batch_size, h=height, w=width
@@ -268,7 +283,9 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         last_l2 = self.final_l2(last_l2)
 
         # Attention
-        out, attention = self.attention_heads[1](out, prev_attention=attention)
+        out, attention = self.attention_b(
+            out, out, out, prev_attention=attention
+        )
         # Concatenate heads
         out = einops.rearrange(
             out, '(b h w) t c -> b c t h w', b=batch_size, h=height, w=width
@@ -296,7 +313,7 @@ if __name__ == '__main__':
     lon = torch.distributions.uniform.Uniform(-180, 180).sample([batch_size])
     lat = torch.distributions.uniform.Uniform(-90, 90).sample([batch_size])
 
-    model = LightweightTemporalAttentionEncoder(
+    model = TemporalAttention(
         in_channels=num_channels,
         hidden_size=hidden_size,
         num_head=num_head,
