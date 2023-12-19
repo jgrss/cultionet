@@ -227,6 +227,7 @@ train_predict:
       choices:
         - 'UNet3Psi'
         - 'ResUNet3Psi'
+        - 'TemporalResAUNet'
   activation_type:
     short: ''
     long: activation-type
