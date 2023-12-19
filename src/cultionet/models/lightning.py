@@ -14,11 +14,11 @@ from torchvision import transforms
 import torchmetrics
 
 from cultionet.models.nunet import PostUNet3Psi
-from cultionet.models.base_layers import FinalConv2dDropout
+from cultionet.layers.base_layers import FinalConv2dDropout
 from . import model_utils
 from .cultio import CultioNet, GeoRefinement
 from .maskcrnn import BFasterRCNN
-from .base_layers import Softmax
+from ..layers.base_layers import Softmax
 from ..losses import TanimotoComplementLoss, TanimotoDistLoss
 
 
