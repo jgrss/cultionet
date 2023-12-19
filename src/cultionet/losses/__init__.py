@@ -1,1 +1,1 @@
-from .losses import TanimotoDistLoss
+from .losses import TanimotoComplementLoss, TanimotoDistLoss
