@@ -1,5 +1,6 @@
 import typing as T
 
+import einops
 import torch
 from torch_geometric import nn
 from torch_geometric.data import Data
@@ -32,8 +33,14 @@ class GraphToConv(torch.nn.Module):
     def forward(
         self, x: torch.Tensor, nbatch: int, nrows: int, ncols: int
     ) -> torch.Tensor:
-        n_channels = x.shape[1]
-        return x.reshape(nbatch, nrows, ncols, n_channels).permute(0, 3, 1, 2)
+        return einops.rearrange(
+            x,
+            '(b h w) c -> b c h w',
+            b=nbatch,
+            c=x.shape[1],
+            h=nrows,
+            w=ncols,
+        )
 
 
 class ConvToGraph(torch.nn.Module):
@@ -43,11 +50,7 @@ class ConvToGraph(torch.nn.Module):
         super(ConvToGraph, self).__init__()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        nbatch, n_channels, nrows, ncols = x.shape
-
-        return x.permute(0, 2, 3, 1).reshape(
-            nbatch * nrows * ncols, n_channels
-        )
+        return einops.rearrange(x, 'b c h w -> (b h w) c')
 
 
 class ConvToTime(torch.nn.Module):
@@ -61,7 +64,15 @@ class ConvToTime(torch.nn.Module):
     ) -> torch.Tensor:
         nbatch, __, height, width = x.shape
 
-        return x.reshape(nbatch, nbands, ntime, height, width)
+        return einops.rearrange(
+            x,
+            'b (bands t) h w -> b bands t h w',
+            b=nbatch,
+            bands=nbands,
+            t=ntime,
+            h=height,
+            w=width,
+        )
 
 
 def max_pool_neighbor_x(
