@@ -4,7 +4,7 @@ import enum
 import torch
 
 from . import model_utils
-from .base_layers import (
+from ..layers.base_layers import (
     AttentionGate,
     DoubleConv,
     PoolConv,
@@ -302,7 +302,7 @@ class UNet3Connector(torch.nn.Module):
         prev_down: T.List[torch.Tensor] = None,
         stream_down: T.List[torch.Tensor] = None,
     ):
-        h = []
+        h: T.List[torch.Tensor] = []
         # Pooling layer of the backbone
         if pools is not None:
             assert self.n_pools == len(
