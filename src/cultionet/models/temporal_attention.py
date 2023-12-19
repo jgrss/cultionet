@@ -206,11 +206,7 @@ class TemporalAttention(nn.Module):
             freeze=True,
         )
         # Coordinate embeddings
-        self.coordinate_encoder = nn.Linear(3, d_model)
-        # self.channel_embed = nn.Embedding(
-        #     num_embeddings=in_channels,
-        #     embedding_dim=d_model,
-        # )
+        # self.coordinate_encoder = nn.Linear(3, d_model)
 
         # Attention
         self.attention_a = MultiHeadAttention(
@@ -256,25 +252,25 @@ class TemporalAttention(nn.Module):
         )
         position_tokens = self.positional_encoder(src_pos)
         # Coordinate embedding
-        coordinate_tokens = self.coordinate_encoder(
-            cartesian(
-                einops.rearrange(
-                    torch.tile(longitude[:, None], (1, height * width)),
-                    'b (h w) -> (b h w) 1',
-                    b=batch_size,
-                    h=height,
-                    w=width,
-                ),
-                einops.rearrange(
-                    torch.tile(latitude[:, None], (1, height * width)),
-                    'b (h w) -> (b h w) 1',
-                    b=batch_size,
-                    h=height,
-                    w=width,
-                ),
-            )
-        )
-        out = out + position_tokens + coordinate_tokens
+        # coordinate_tokens = self.coordinate_encoder(
+        #     cartesian(
+        #         einops.rearrange(
+        #             torch.tile(longitude[:, None], (1, height * width)),
+        #             'b (h w) -> (b h w) 1',
+        #             b=batch_size,
+        #             h=height,
+        #             w=width,
+        #         ),
+        #         einops.rearrange(
+        #             torch.tile(latitude[:, None], (1, height * width)),
+        #             'b (h w) -> (b h w) 1',
+        #             b=batch_size,
+        #             h=height,
+        #             w=width,
+        #         ),
+        #     )
+        # )
+        out = out + position_tokens  # + coordinate_tokens
 
         # Attention
         out, attention = self.attention_a(out, out, out)

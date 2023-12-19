@@ -36,10 +36,10 @@ def cartesian(lon: torch.Tensor, lat: torch.Tensor) -> torch.Tensor:
         https://github.com/nasaharvest/presto/blob/main/presto/presto.py
     """
     with torch.no_grad():
-        lon = torch.deg2rad(lon)
-        lat = torch.deg2rad(lat)
-        x = torch.cos(lat) * torch.cos(lon)
-        y = torch.cos(lat) * torch.sin(lon)
-        z = torch.sin(lat)
+        lon_rad = torch.deg2rad(lon)
+        lat_rad = torch.deg2rad(lat)
+        x = torch.cos(lat_rad) * torch.cos(lon_rad)
+        y = torch.cos(lat_rad) * torch.sin(lon_rad)
+        z = torch.sin(lat_rad)
 
     return torch.stack([x, y, z], dim=-1)
