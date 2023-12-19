@@ -9,9 +9,10 @@ import typing as T
 import torch
 import torch.nn as nn
 
-from . import model_utils
-from . import kernels
-from .base_layers import (
+from cultionet.enums import ResBlockTypes
+from cultionet.models import model_utils
+from cultionet.models import kernels
+from cultionet.models.base_layers import (
     AttentionGate,
     DoubleConv,
     SpatioTemporalConv3d,
@@ -30,7 +31,7 @@ from .base_layers import (
     Squeeze,
     SetActivation,
 )
-from .unet_parts import (
+from cultionet.models.unet_parts import (
     UNet3P_3_1,
     UNet3P_2_2,
     UNet3P_1_3,
@@ -44,7 +45,6 @@ from .unet_parts import (
     ResUNet3_1_3,
     ResUNet3_0_4,
 )
-from ..enums import ResBlockTypes
 
 
 def init_weights_kaiming(m):
@@ -1159,3 +1159,34 @@ class ResUNet3Psi(nn.Module):
         )
 
         return out
+
+
+if __name__ == '__main__':
+    batch_size = 2
+    num_channels = 3
+    in_encoding_channels = 64
+    num_head = 8
+    num_time = 12
+    height = 100
+    width = 100
+
+    x = torch.rand(
+        (batch_size, num_channels, num_time, height, width),
+        dtype=torch.float32,
+    )
+    logits_hidden = torch.rand(
+        (batch_size, in_encoding_channels, height, width), dtype=torch.float32
+    )
+
+    model = ResUNet3Psi(
+        in_channels=num_channels,
+        in_time=num_time,
+        in_encoding_channels=in_encoding_channels,
+        activation_type="SiLU",
+        res_block_type=ResBlockTypes.RES,
+    )
+    logits = model(x, temporal_encoding=logits_hidden)
+
+    assert logits['dist'].shape == (batch_size, 1, height, width)
+    assert logits['edge'].shape == (batch_size, 1, height, width)
+    assert logits['mask'].shape == (batch_size, 1, height, width)
