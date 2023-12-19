@@ -5,7 +5,7 @@ import torch
 from torch_geometric.data import Data
 
 from . import model_utils
-from .base_layers import ConvBlock2d, ResidualConv, Softmax
+from ..layers.base_layers import ConvBlock2d, ResidualConv, Softmax
 from .nunet import UNet3Psi, ResUNet3Psi
 from .time_attention import TemporalResAUNet
 from .temporal_attention import TemporalAttention

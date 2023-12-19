@@ -7,7 +7,7 @@ import typing as T
 import torch
 from torch.autograd import Variable
 
-from .base_layers import Softmax, FinalConv2dDropout
+from ..layers.base_layers import Softmax, FinalConv2dDropout
 
 
 class ConvSTARCell(torch.nn.Module):
