@@ -23,7 +23,7 @@ from .data.const import SCALE_FACTOR
 from .data.datasets import EdgeDataset, zscores
 from .data.modules import EdgeDataModule
 from .data.samplers import EpochRandomSampler
-from .enums import ModelNames
+from .enums import AttentionTypes, ModelNames, ModelTypes, ResBlockTypes
 from .models.cultio import GeoRefinement
 from .models.lightning import (
     CultioLitModel,
@@ -571,11 +571,11 @@ def fit(
     num_classes: T.Optional[int] = 2,
     edge_class: T.Optional[int] = None,
     class_counts: T.Sequence[float] = None,
-    model_type: str = "ResUNet3Psi",
+    model_type: str = ModelTypes.RESUNET3PSI,
     activation_type: str = "SiLU",
     dilations: T.Union[int, T.Sequence[int]] = None,
-    res_block_type: str = "res",
-    attention_weights: str = "spatial_channel",
+    res_block_type: str = ResBlockTypes.RES,
+    attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
     deep_sup_dist: bool = False,
     deep_sup_edge: bool = False,
     deep_sup_mask: bool = False,
