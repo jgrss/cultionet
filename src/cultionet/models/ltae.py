@@ -58,6 +58,7 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, num_head: int, d_in: int, dropout: float = 0.1):
         super(MultiHeadAttention, self).__init__()
 
+        self.num_head = num_head
         d_k = d_in // num_head
         scale = 1.0 / d_k**0.5
 
@@ -73,7 +74,7 @@ class MultiHeadAttention(nn.Module):
 
     def split(self, x: torch.Tensor) -> torch.Tensor:
         return einops.rearrange(
-            x, 'b t (num_head k) -> num_head b t k', num_head=num_head
+            x, 'b t (num_head k) -> num_head b t k', num_head=self.num_head
         )
 
     def forward(
@@ -129,10 +130,7 @@ class LightweightTemporalAttentionEncoder(nn.Module):
         activation_type: str = "SiLU",
         final_activation: Callable = Softmax(dim=1),
     ):
-        """Lightweight Temporal Attention Encoder (L-TAE) for image time
-        series. Attention-based sequence encoding that maps a sequence of
-        images to a single feature map. A shared L-TAE is applied to all pixel
-        positions of the image sequence.
+        """Transformer Self-Attention.
 
         Args:
             in_channels (int): Number of channels of the inputs.
