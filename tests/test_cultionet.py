@@ -3,7 +3,7 @@ import torch
 from cultionet.models import model_utils
 from cultionet.models.base_layers import Softmax
 from cultionet.models.nunet import ResUNet3Psi
-from cultionet.models.ltae import LightweightTemporalAttentionEncoder
+from cultionet.models.temporal_attention import TemporalAttention
 
 
 def test_cultionet():
@@ -28,22 +28,19 @@ def test_cultionet():
         dtype=torch.float32,
     )
 
-    temporal_encoder = LightweightTemporalAttentionEncoder(
+    temporal_encoder = TemporalAttention(
         in_channels=in_channels,
         hidden_size=hidden_size,
         d_model=d_model,
-        n_head=n_head,
-        n_time=in_time,
-        mlp=[d_model, hidden_size],
-        return_att=False,
-        d_k=4,
+        num_head=n_head,
+        num_time=in_time,
         num_classes_l2=num_classes_l2,
         num_classes_last=num_classes_last,
     )
     unet3_kwargs = {
         "in_channels": in_channels,
         "in_time": in_time,
-        "in_encoding_channels": hidden_size,
+        "in_encoding_channels": d_model,
         "init_filter": filters,
         "num_classes": num_classes_last,
         "activation_type": activation_type,
@@ -58,9 +55,9 @@ def test_cultionet():
     logits_hidden, logits_l2, logits_last = temporal_encoder(x)
     logits_l2 = cg(logits_l2)
     logits_last = cg(logits_last)
-    logits = mask_model(x, logits_hidden)
+    logits = mask_model(x, temporal_encoding=logits_hidden)
 
-    assert logits_hidden.shape == (batch_size, hidden_size, height, width)
+    assert logits_hidden.shape == (batch_size, d_model, height, width)
     assert logits_l2.shape == (batch_size * height * width, num_classes_l2)
     assert logits_last.shape == (batch_size * height * width, num_classes_last)
     assert len(logits) == 12
