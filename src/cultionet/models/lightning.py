@@ -19,7 +19,7 @@ from . import model_utils
 from .cultio import CultioNet, GeoRefinement
 from .maskcrnn import BFasterRCNN
 from .base_layers import Softmax
-from ..losses import TanimotoDistLoss
+from ..losses import TanimotoComplementLoss, TanimotoDistLoss
 
 
 warnings.filterwarnings("ignore")
@@ -808,21 +808,19 @@ class LightningModuleMixin(LightningModule):
             )
 
     def configure_loss(self):
-        self.dist_loss = TanimotoDistLoss()
+        self.dist_loss = TanimotoComplementLoss()
         if self.deep_sup_dist:
             self.dist_loss_3_1 = TanimotoDistLoss()
             self.dist_loss_2_2 = TanimotoDistLoss()
             self.dist_loss_1_3 = TanimotoDistLoss()
         # Edge losses
-        self.edge_loss = TanimotoDistLoss()
+        self.edge_loss = TanimotoComplementLoss()
         if self.deep_sup_edge:
             self.edge_loss_3_1 = TanimotoDistLoss()
             self.edge_loss_2_2 = TanimotoDistLoss()
             self.edge_loss_1_3 = TanimotoDistLoss()
         # Crop mask losses
-        self.crop_loss = TanimotoDistLoss(
-            scale_pos_weight=self.scale_pos_weight
-        )
+        self.crop_loss = TanimotoComplementLoss()
         if self.deep_sup_mask:
             self.crop_loss_3_1 = TanimotoDistLoss(
                 scale_pos_weight=self.scale_pos_weight
@@ -834,8 +832,8 @@ class LightningModuleMixin(LightningModule):
                 scale_pos_weight=self.scale_pos_weight
             )
         # Crop Temporal encoding losses
-        self.classes_l2_loss = TanimotoDistLoss()
-        self.classes_last_loss = TanimotoDistLoss()
+        self.classes_l2_loss = TanimotoComplementLoss()
+        self.classes_last_loss = TanimotoComplementLoss()
         # FIXME:
         if self.num_classes > 2:
             self.crop_type_star_loss = TanimotoDistLoss(
