@@ -3,9 +3,10 @@ import typing as T
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops.layers.torch import Rearrange
 from torch_geometric import nn as gnn
 
-from . import model_utils
+from ..models import model_utils
 from ..enums import AttentionTypes, ResBlockTypes
 
 
@@ -863,6 +864,7 @@ class SpatioTemporalConv3d(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
+        num_layers: int = 1,
         activation_type: str = "SiLU",
     ):
         super(SpatioTemporalConv3d, self).__init__()
@@ -876,21 +878,31 @@ class SpatioTemporalConv3d(nn.Module):
                 padding=1,
                 activation_type=activation_type,
             ),
-            # Conv -> Batchnorm
-            ConvBlock3d(
-                in_channels=out_channels,
-                out_channels=out_channels,
-                kernel_size=3,
-                padding=2,
-                dilation=2,
-                activation_type=activation_type,
-            ),
         ]
+        if num_layers > 1:
+            for _ in range(1, num_layers):
+                # Conv -> Batchnorm -> Activation
+                layers += [
+                    ConvBlock3d(
+                        in_channels=out_channels,
+                        out_channels=out_channels,
+                        kernel_size=3,
+                        padding=2,
+                        dilation=2,
+                        activation_type=activation_type,
+                    )
+                ]
 
+        self.skip = nn.Sequential(
+            Rearrange('b c t h w -> b t h w c'),
+            nn.Linear(in_channels, out_channels),
+            Rearrange('b t h w c -> b c t h w'),
+        )
         self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.seq(x)
+        residual = self.skip(x)
+        return self.seq(x) + residual
 
 
 class DoubleConv(nn.Module):
@@ -1366,7 +1378,7 @@ class ResidualAConv(nn.Module):
         )
         self.skip = None
         if in_channels != out_channels:
-            # Conv2dAtrous -> BatchNorm2d
+            # Conv2d -> BatchNorm2d
             self.skip = ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -1419,7 +1431,10 @@ class PoolResidualConv(nn.Module):
     ):
         super(PoolResidualConv, self).__init__()
 
-        assert res_block_type in (ResBlockTypes.RES, ResBlockTypes.RESA)
+        assert res_block_type in (
+            ResBlockTypes.RES,
+            ResBlockTypes.RESA,
+        )
 
         layers = [nn.MaxPool2d(pool_size)]
 
