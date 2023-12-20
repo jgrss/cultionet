@@ -531,11 +531,12 @@ train:
     long: lr-scheduler
     help: The learning rate scheduler
     kwargs:
-      default: 'CosineAnnealingLR'
+      default: 'OneCycleLR'
       choices:
         - 'ExponentialLR'
         - 'CosineAnnealingLR'
         - 'StepLR'
+        - 'OneCycleLR'
   steplr_step_size:
     short: ''
     long: steplr-step-size

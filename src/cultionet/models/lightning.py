@@ -874,6 +874,13 @@ class LightningModuleMixin(LightningModule):
             model_lr_scheduler = optim_lr_scheduler.StepLR(
                 optimizer, step_size=self.steplr_step_size, gamma=0.5
             )
+        elif self.lr_scheduler == 'OneCycleLR':
+            model_lr_scheduler = optim_lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=0.01,
+                epochs=100,
+                steps_per_epoch=len(self.train_split) // self.batch_size,
+            )
         else:
             raise NameError(
                 "The learning rate scheduler is not implemented in Cultionet."
@@ -904,7 +911,7 @@ class CultioLitTransferModel(LightningModuleMixin):
         num_classes: int = 2,
         optimizer: str = "AdamW",
         learning_rate: float = 1e-3,
-        lr_scheduler: str = "CosineAnnealingLR",
+        lr_scheduler: str = "OneCycleLR",
         steplr_step_size: int = 5,
         weight_decay: float = 0.01,
         eps: float = 1e-4,
