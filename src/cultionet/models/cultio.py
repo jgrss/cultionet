@@ -6,7 +6,7 @@ from torch_geometric.data import Data
 
 from . import model_utils
 from ..layers.base_layers import ConvBlock2d, ResidualConv, Softmax
-from .nunet import UNet3Psi, ResUNet3Psi
+from .nunet import UNet3Psi, ResUNet3Psi, ResELUNetPsi
 from .time_attention import TemporalResAUNet
 from .temporal_attention import TemporalAttention
 from ..enums import ModelTypes, ResBlockTypes
@@ -344,6 +344,7 @@ class CultioNet(torch.nn.Module):
         assert model_type in (
             ModelTypes.UNET3PSI,
             ModelTypes.RESUNET3PSI,
+            ModelTypes.RESELUNETPSI,
             ModelTypes.TRESAUNET,
         ), "The model type is not supported."
         if model_type == ModelTypes.UNET3PSI:
@@ -352,7 +353,10 @@ class CultioNet(torch.nn.Module):
                 unet3_kwargs["dilation"], int
             ), f"The dilation for {ModelTypes.UNET3PSI} must be an integer."
             self.mask_model = UNet3Psi(**unet3_kwargs)
-        elif model_type == ModelTypes.RESUNET3PSI:
+        elif model_type in (
+            ModelTypes.RESUNET3PSI,
+            ModelTypes.RESELUNETPSI,
+        ):
             # ResUNet3Psi
             unet3_kwargs["attention_weights"] = (
                 None if attention_weights == "none" else attention_weights
@@ -372,7 +376,11 @@ class CultioNet(torch.nn.Module):
             assert isinstance(
                 unet3_kwargs["dilations"], list
             ), f"The dilations for {ModelTypes.RESUNET3PSI} must be a sequence of integers."
-            self.mask_model = ResUNet3Psi(**unet3_kwargs)
+
+            if model_type == ModelTypes.RESUNET3PSI:
+                self.mask_model = ResUNet3Psi(**unet3_kwargs)
+            else:
+                self.mask_model = ResELUNetPsi(**unet3_kwargs)
         elif model_type == ModelTypes.TRESAUNET:
             self.mask_model = TemporalResAUNet(
                 in_channels=self.ds_num_bands,
