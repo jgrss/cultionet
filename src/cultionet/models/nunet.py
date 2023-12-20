@@ -8,21 +8,17 @@ import typing as T
 
 import torch
 import torch.nn as nn
-from einops.layers.torch import Rearrange
 
-from cultionet.enums import ModelTypes, ResBlockTypes
+from cultionet.enums import ResBlockTypes
 from cultionet.layers.weights import init_conv_weights
 from cultionet.models import model_utils
 from cultionet.layers import kernels
 from cultionet.layers.base_layers import (
-    AttentionGate,
-    DoubleConv,
     SpatioTemporalConv3d,
     Min,
     Max,
     Mean,
     Std,
-    Permute,
     PoolConv,
     PoolResidualConv,
     ResidualConv,
@@ -1076,7 +1072,7 @@ if __name__ == '__main__':
         (batch_size, in_encoding_channels, height, width), dtype=torch.float32
     )
 
-    model = ResELUNetPsi(
+    model = ResUNet3Psi(
         in_channels=num_channels,
         in_time=num_time,
         in_encoding_channels=in_encoding_channels,

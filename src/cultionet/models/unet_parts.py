@@ -2,6 +2,7 @@ import typing as T
 import enum
 
 import torch
+import torch.nn as nn
 
 from . import model_utils
 from ..layers.base_layers import (
@@ -13,6 +14,160 @@ from ..layers.base_layers import (
     ResidualConv,
 )
 from ..enums import AttentionTypes, ModelTypes, ResBlockTypes
+
+
+class ResELUNetPsiLayer(nn.Module):
+    def __init__(
+        self,
+        out_channels: int,
+        side_in: dict = None,
+        down_in: dict = None,
+        dilations: T.Sequence[int] = None,
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
+        activation_type: str = "SiLU",
+    ):
+        super(ResELUNetPsiLayer, self).__init__()
+
+        self.up = model_utils.UpSample()
+        if dilations is None:
+            dilations = [2]
+
+        cat_channels = 0
+        if side_in is not None:
+            for name, info in side_in.items():
+                setattr(
+                    self,
+                    name,
+                    ResidualConv(
+                        in_channels=info['in_channels'],
+                        out_channels=out_channels,
+                        dilation=dilations[0],
+                        attention_weights=attention_weights,
+                        activation_type=activation_type,
+                    ),
+                )
+                cat_channels += out_channels
+        if down_in is not None:
+            for name, info in down_in.items():
+                setattr(
+                    self,
+                    name,
+                    ResidualConv(
+                        in_channels=info['in_channels'],
+                        out_channels=out_channels,
+                        dilation=dilations[0],
+                        attention_weights=attention_weights,
+                        activation_type=activation_type,
+                    ),
+                )
+                cat_channels += out_channels
+
+        self.final = ResidualConv(
+            in_channels=cat_channels,
+            out_channels=out_channels,
+            dilation=dilations[0],
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+        )
+
+    def forward(
+        self,
+        side: dict,
+        down: dict,
+        shape: tuple,
+    ) -> torch.Tensor:
+        out = []
+        for name, info in side.items():
+            layer = getattr(self, name)
+            x = info['data']
+            out += [layer(x)]
+        for name, info in down.items():
+            layer = getattr(self, name)
+            x = info['data']
+            x = self.up(
+                x,
+                size=shape,
+                mode="bilinear",
+            )
+            out += [layer(x)]
+
+        out = torch.cat(out, dim=1)
+        out = self.final(out)
+
+        return out
+
+
+class ResELUNetPsiBlock(nn.Module):
+    def __init__(
+        self,
+        out_channels: int,
+        side_in: dict,
+        down_in: dict,
+        dilations: T.Sequence[int] = None,
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
+        activation_type: str = "SiLU",
+    ):
+        super(ResELUNetPsiBlock, self).__init__()
+
+        self.dist_layer = ResELUNetPsiLayer(
+            out_channels=out_channels,
+            side_in=side_in['dist'],
+            down_in=down_in['dist'],
+            dilations=dilations,
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+        )
+        self.edge_layer = ResELUNetPsiLayer(
+            out_channels=out_channels,
+            side_in=side_in['edge'],
+            down_in=down_in['edge'],
+            dilations=dilations,
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+        )
+        self.mask_layer = ResELUNetPsiLayer(
+            out_channels=out_channels,
+            side_in=side_in['mask'],
+            down_in=down_in['mask'],
+            dilations=dilations,
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+        )
+
+    def update_data(self, data_dict: dict, data: torch.Tensor) -> dict:
+        for key, info in data_dict.items():
+            if info['data'] is None:
+                data_dict[key]['data'] = data
+
+        return data_dict
+
+    def forward(
+        self,
+        side: dict,
+        down: dict,
+        shape: tuple,
+    ) -> dict:
+        dist_out = self.dist_layer(
+            side=side['dist'],
+            down=down['dist'],
+            shape=shape,
+        )
+        edge_out = self.edge_layer(
+            side=self.update_data(side['edge'], dist_out),
+            down=down['edge'],
+            shape=shape,
+        )
+        mask_out = self.mask_layer(
+            side=self.update_data(side['mask'], edge_out),
+            down=down['mask'],
+            shape=shape,
+        )
+
+        return {
+            "dist": dist_out,
+            "edge": edge_out,
+            "mask": mask_out,
+        }
 
 
 class UNet3Connector(torch.nn.Module):
@@ -28,11 +183,12 @@ class UNet3Connector(torch.nn.Module):
         n_pools: int = 0,
         n_prev_down: int = 0,
         n_stream_down: int = 0,
+        prev_down_is_pooled: bool = False,
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         init_point_conv: bool = False,
         dilations: T.Sequence[int] = None,
-        model_type: enum = ModelTypes.UNET,
-        res_block_type: enum = ResBlockTypes.RESA,
+        model_type: str = ModelTypes.UNET,
+        res_block_type: str = ResBlockTypes.RESA,
         activation_type: str = "SiLU",
     ):
         super(UNet3Connector, self).__init__()
@@ -43,8 +199,16 @@ class UNet3Connector(torch.nn.Module):
             AttentionTypes.SPATIAL_CHANNEL,
         ], "Choose from 'gate', 'fractal', or 'spatial_channel' attention weights."
 
-        assert model_type in (ModelTypes.UNET, ModelTypes.RESUNET)
-        assert res_block_type in (ResBlockTypes.RES, ResBlockTypes.RESA)
+        assert model_type in (
+            ModelTypes.UNET,
+            ModelTypes.RESUNET,
+            ModelTypes.RESUNET3PSI,
+            ModelTypes.RESELUNETPSI,
+        )
+        assert res_block_type in (
+            ResBlockTypes.RES,
+            ResBlockTypes.RESA,
+        )
 
         self.n_pools = n_pools
         self.n_prev_down = n_prev_down
@@ -204,6 +368,15 @@ class UNet3Connector(torch.nn.Module):
                     attention_module = AttentionGate(up_channels, up_channels)
                     setattr(self, f"attn_stream_{n}", attention_module)
                     in_stream_channels = up_channels * 2
+
+                # All but the last inputs are pooled
+                if prev_down_is_pooled and (n + 1 < self.n_stream_down):
+                    in_stream_channels = channels[
+                        prev_backbone_channel_index
+                        + (self.n_stream_down - 1)
+                        - n
+                    ]
+
                 if model_type == ModelTypes.UNET:
                     setattr(
                         self,
@@ -289,15 +462,11 @@ class UNet3Connector(torch.nn.Module):
                     attention_weights=attention_weights,
                     activation_type=activation_type,
                 )
-            # self.pool4_0 = AtrousPyramidPooling(
-            #     in_channels=channels[0],
-            #     out_channels=channels[0]
-            # )
 
     def forward(
         self,
         prev_same: T.List[T.Tuple[str, torch.Tensor]],
-        x4_0: torch.Tensor,
+        x4_0: torch.Tensor = None,
         pools: T.List[torch.Tensor] = None,
         prev_down: T.List[torch.Tensor] = None,
         stream_down: T.List[torch.Tensor] = None,
@@ -368,13 +537,14 @@ class UNet3Connector(torch.nn.Module):
                     ]
 
         # Lowest level
-        x4_0_up = self.conv4_0(
-            self.up(x4_0, size=prev_same[0][1].shape[-2:], mode="bilinear")
-        )
-        if self.pool4_0 is not None:
-            h += [self.pool4_0(x4_0_up)]
-        else:
-            h += [x4_0_up]
+        if x4_0 is not None:
+            x4_0_up = self.conv4_0(
+                self.up(x4_0, size=prev_same[0][1].shape[-2:], mode="bilinear")
+            )
+            if self.pool4_0 is not None:
+                h += [self.pool4_0(x4_0_up)]
+            else:
+                h += [x4_0_up]
         h = torch.cat(h, dim=1)
         h = self.final(h)
 
@@ -889,6 +1059,23 @@ class UNet3_0_4(torch.nn.Module):
         }
 
 
+def get_prev_list(
+    use_backbone: bool,
+    x: torch.Tensor,
+    prev_same: T.List[tuple],
+) -> T.List[tuple]:
+    prev = [
+        (
+            "prev",
+            x,
+        )
+    ]
+    if use_backbone:
+        prev += prev_same
+
+    return prev
+
+
 class ResUNet3_3_1(torch.nn.Module):
     """Residual UNet 3+ connection from backbone to upstream 3,1."""
 
@@ -896,13 +1083,17 @@ class ResUNet3_3_1(torch.nn.Module):
         self,
         channels: T.Sequence[int],
         up_channels: int,
+        n_pools: int = 3,
+        use_backbone: bool = True,
         dilations: T.Sequence[int] = None,
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         activation_type: str = "SiLU",
-        res_block_type: enum = ResBlockTypes.RESA,
+        res_block_type: str = ResBlockTypes.RESA,
+        model_type: str = ModelTypes.RESUNET,
     ):
         super(ResUNet3_3_1, self).__init__()
 
+        self.use_backbone = use_backbone
         self.up = model_utils.UpSample()
 
         # Distance stream connection
@@ -912,10 +1103,10 @@ class ResUNet3_3_1(torch.nn.Module):
             use_backbone=True,
             is_side_stream=False,
             prev_backbone_channel_index=3,
-            n_pools=3,
+            n_pools=n_pools,
             dilations=dilations,
             attention_weights=attention_weights,
-            model_type=ModelTypes.RESUNET,
+            model_type=model_type,
             res_block_type=res_block_type,
             activation_type=activation_type,
         )
@@ -923,13 +1114,13 @@ class ResUNet3_3_1(torch.nn.Module):
         self.conv_edge = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
-            use_backbone=True,
+            use_backbone=use_backbone,
             is_side_stream=True,
             prev_backbone_channel_index=3,
-            n_pools=3,
+            n_pools=n_pools,
             dilations=dilations,
             attention_weights=attention_weights,
-            model_type=ModelTypes.RESUNET,
+            model_type=model_type,
             res_block_type=res_block_type,
             activation_type=activation_type,
         )
@@ -937,42 +1128,46 @@ class ResUNet3_3_1(torch.nn.Module):
         self.conv_mask = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
-            use_backbone=True,
+            use_backbone=use_backbone,
             is_side_stream=True,
             prev_backbone_channel_index=3,
-            n_pools=3,
+            n_pools=n_pools,
             dilations=dilations,
             attention_weights=attention_weights,
-            model_type=ModelTypes.RESUNET,
+            model_type=model_type,
             res_block_type=res_block_type,
             activation_type=activation_type,
         )
 
     def forward(
         self,
-        x0_0: torch.Tensor,
-        x1_0: torch.Tensor,
-        x2_0: torch.Tensor,
-        x3_0: torch.Tensor,
-        x4_0: torch.Tensor,
+        side: torch.Tensor,
+        down: torch.Tensor,
+        pools: T.Sequence[torch.Tensor] = None,
     ) -> T.Dict[str, torch.Tensor]:
+        prev_same = [
+            (
+                "prev_backbone",
+                side,
+            )
+        ]
         # Distance logits
         h_dist = self.conv_dist(
-            prev_same=[("prev_backbone", x3_0)],
-            pools=[x0_0, x1_0, x2_0],
-            x4_0=x4_0,
+            prev_same=prev_same,
+            pools=pools,
+            x4_0=down,
         )
         # Output distance logits pass to edge layer
         h_edge = self.conv_edge(
-            prev_same=[("prev_backbone", x3_0), ("prev", h_dist)],
-            pools=[x0_0, x1_0, x2_0],
-            x4_0=x4_0,
+            prev_same=get_prev_list(self.use_backbone, h_dist, prev_same),
+            pools=pools,
+            x4_0=down,
         )
         # Output edge logits pass to mask layer
         h_mask = self.conv_mask(
-            prev_same=[("prev_backbone", x3_0), ("prev", h_edge)],
-            pools=[x0_0, x1_0, x2_0],
-            x4_0=x4_0,
+            prev_same=get_prev_list(self.use_backbone, h_edge, prev_same),
+            pools=pools,
+            x4_0=down,
         )
 
         return {
@@ -989,13 +1184,19 @@ class ResUNet3_2_2(torch.nn.Module):
         self,
         channels: T.Sequence[int],
         up_channels: int,
+        n_pools: int = 2,
+        use_backbone: bool = True,
+        n_stream_down: int = 1,
+        prev_down_is_pooled: bool = False,
         dilations: T.Sequence[int] = None,
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         activation_type: str = "SiLU",
-        res_block_type: enum = ResBlockTypes.RESA,
+        res_block_type: str = ResBlockTypes.RESA,
+        model_type: str = ModelTypes.RESUNET,
     ):
         super(ResUNet3_2_2, self).__init__()
 
+        self.use_backbone = use_backbone
         self.up = model_utils.UpSample()
 
         self.conv_dist = UNet3Connector(
@@ -1004,70 +1205,79 @@ class ResUNet3_2_2(torch.nn.Module):
             use_backbone=True,
             is_side_stream=False,
             prev_backbone_channel_index=2,
-            n_pools=2,
-            n_stream_down=1,
+            n_pools=n_pools,
+            n_stream_down=n_stream_down,
+            prev_down_is_pooled=prev_down_is_pooled,
             dilations=dilations,
             attention_weights=attention_weights,
-            model_type=ModelTypes.RESUNET,
+            model_type=model_type,
             res_block_type=res_block_type,
             activation_type=activation_type,
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
-            use_backbone=True,
+            use_backbone=use_backbone,
             is_side_stream=True,
             prev_backbone_channel_index=2,
-            n_pools=2,
-            n_stream_down=1,
+            n_pools=n_pools,
+            n_stream_down=n_stream_down,
+            prev_down_is_pooled=False,
             dilations=dilations,
             attention_weights=attention_weights,
-            model_type=ModelTypes.RESUNET,
+            model_type=model_type,
             res_block_type=res_block_type,
             activation_type=activation_type,
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
-            use_backbone=True,
+            use_backbone=use_backbone,
             is_side_stream=True,
             prev_backbone_channel_index=2,
-            n_pools=2,
-            n_stream_down=1,
+            n_pools=n_pools,
+            n_stream_down=n_stream_down,
+            prev_down_is_pooled=False,
             dilations=dilations,
             attention_weights=attention_weights,
-            model_type=ModelTypes.RESUNET,
+            model_type=model_type,
             res_block_type=res_block_type,
             activation_type=activation_type,
         )
 
     def forward(
         self,
-        x0_0: torch.Tensor,
-        x1_0: torch.Tensor,
-        x2_0: torch.Tensor,
-        h3_1_dist: torch.Tensor,
-        h3_1_edge: torch.Tensor,
-        h3_1_mask: torch.Tensor,
-        x4_0: torch.Tensor,
+        side: torch.Tensor,
+        dist_down: T.Sequence[torch.Tensor],
+        edge_down: T.Sequence[torch.Tensor],
+        mask_down: T.Sequence[torch.Tensor],
+        down: torch.Tensor = None,
+        pools: T.Sequence[torch.Tensor] = None,
     ) -> T.Dict[str, torch.Tensor]:
+        prev_same = [
+            (
+                "prev_backbone",
+                side,
+            )
+        ]
+
         h_dist = self.conv_dist(
-            prev_same=[("prev_backbone", x2_0)],
-            pools=[x0_0, x1_0],
-            x4_0=x4_0,
-            stream_down=[h3_1_dist],
+            prev_same=prev_same,
+            pools=pools,
+            x4_0=down,
+            stream_down=dist_down,
         )
         h_edge = self.conv_edge(
-            prev_same=[("prev_backbone", x2_0), ("prev", h_dist)],
-            pools=[x0_0, x1_0],
-            x4_0=x4_0,
-            stream_down=[h3_1_edge],
+            prev_same=get_prev_list(self.use_backbone, h_dist, prev_same),
+            pools=pools,
+            x4_0=down,
+            stream_down=edge_down,
         )
         h_mask = self.conv_mask(
-            prev_same=[("prev_backbone", x2_0), ("prev", h_edge)],
-            pools=[x0_0, x1_0],
-            x4_0=x4_0,
-            stream_down=[h3_1_mask],
+            prev_same=get_prev_list(self.use_backbone, h_edge, prev_same),
+            pools=pools,
+            x4_0=down,
+            stream_down=mask_down,
         )
 
         return {
@@ -1084,13 +1294,19 @@ class ResUNet3_1_3(torch.nn.Module):
         self,
         channels: T.Sequence[int],
         up_channels: int,
+        n_pools: int = 1,
+        use_backbone: bool = True,
+        n_stream_down: int = 2,
+        prev_down_is_pooled: bool = False,
         dilations: T.Sequence[int] = None,
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         activation_type: str = "SiLU",
         res_block_type: enum = ResBlockTypes.RESA,
+        model_type: str = ModelTypes.RESUNET,
     ):
         super(ResUNet3_1_3, self).__init__()
 
+        self.use_backbone = use_backbone
         self.up = model_utils.UpSample()
 
         self.conv_dist = UNet3Connector(
@@ -1099,72 +1315,79 @@ class ResUNet3_1_3(torch.nn.Module):
             use_backbone=True,
             is_side_stream=False,
             prev_backbone_channel_index=1,
-            n_pools=1,
-            n_stream_down=2,
+            n_pools=n_pools,
+            n_stream_down=n_stream_down,
+            prev_down_is_pooled=prev_down_is_pooled,
             dilations=dilations,
             attention_weights=attention_weights,
-            model_type=ModelTypes.RESUNET,
+            model_type=model_type,
             res_block_type=res_block_type,
             activation_type=activation_type,
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
-            use_backbone=True,
+            use_backbone=use_backbone,
             is_side_stream=True,
             prev_backbone_channel_index=1,
-            n_pools=1,
-            n_stream_down=2,
+            n_pools=n_pools,
+            n_stream_down=n_stream_down,
+            prev_down_is_pooled=prev_down_is_pooled,
             dilations=dilations,
             attention_weights=attention_weights,
-            model_type=ModelTypes.RESUNET,
+            model_type=model_type,
             res_block_type=res_block_type,
             activation_type=activation_type,
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
-            use_backbone=True,
+            use_backbone=use_backbone,
             is_side_stream=True,
             prev_backbone_channel_index=1,
-            n_pools=1,
-            n_stream_down=2,
+            n_pools=n_pools,
+            n_stream_down=n_stream_down,
+            prev_down_is_pooled=prev_down_is_pooled,
             dilations=dilations,
             attention_weights=attention_weights,
-            model_type=ModelTypes.RESUNET,
+            model_type=model_type,
             res_block_type=res_block_type,
             activation_type=activation_type,
         )
 
     def forward(
         self,
-        x0_0: torch.Tensor,
-        x1_0: torch.Tensor,
-        h2_2_dist: torch.Tensor,
-        h3_1_dist: torch.Tensor,
-        h2_2_edge: torch.Tensor,
-        h3_1_edge: torch.Tensor,
-        h2_2_mask: torch.Tensor,
-        h3_1_mask: torch.Tensor,
-        x4_0: torch.Tensor,
+        side: torch.Tensor,
+        dist_down: T.Sequence[torch.Tensor],
+        edge_down: T.Sequence[torch.Tensor],
+        mask_down: T.Sequence[torch.Tensor],
+        down: torch.Tensor = None,
+        pools: T.Sequence[torch.Tensor] = None,
     ) -> T.Dict[str, torch.Tensor]:
+        prev_same = [
+            (
+                "prev_backbone",
+                side,
+            )
+        ]
+
         h_dist = self.conv_dist(
-            prev_same=[("prev_backbone", x1_0)],
-            pools=[x0_0],
-            x4_0=x4_0,
-            stream_down=[h3_1_dist, h2_2_dist],
+            prev_same=prev_same,
+            pools=pools,
+            x4_0=down,
+            stream_down=dist_down,
         )
         h_edge = self.conv_edge(
-            prev_same=[("prev_backbone", x1_0), ("prev", h_dist)],
-            pools=[x0_0],
-            x4_0=x4_0,
-            stream_down=[h3_1_edge, h2_2_edge],
+            prev_same=get_prev_list(self.use_backbone, h_dist, prev_same),
+            pools=pools,
+            x4_0=down,
+            stream_down=edge_down,
         )
         h_mask = self.conv_mask(
-            prev_same=[("prev_backbone", x1_0), ("prev", h_edge)],
-            pools=[x0_0],
-            x4_0=x4_0,
-            stream_down=[h3_1_mask, h2_2_mask],
+            prev_same=get_prev_list(self.use_backbone, h_edge, prev_same),
+            pools=pools,
+            x4_0=down,
+            stream_down=mask_down,
         )
 
         return {
@@ -1181,13 +1404,18 @@ class ResUNet3_0_4(torch.nn.Module):
         self,
         channels: T.Sequence[int],
         up_channels: int,
+        n_stream_down: int = 3,
+        use_backbone: bool = True,
+        prev_down_is_pooled: bool = False,
         dilations: T.Sequence[int] = None,
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         activation_type: str = "SiLU",
-        res_block_type: enum = ResBlockTypes.RESA,
+        res_block_type: str = ResBlockTypes.RESA,
+        model_type: str = ModelTypes.RESUNET,
     ):
         super(ResUNet3_0_4, self).__init__()
 
+        self.use_backbone = use_backbone
         self.up = model_utils.UpSample()
 
         self.conv_dist = UNet3Connector(
@@ -1196,68 +1424,72 @@ class ResUNet3_0_4(torch.nn.Module):
             use_backbone=True,
             is_side_stream=False,
             prev_backbone_channel_index=0,
-            n_stream_down=3,
+            n_stream_down=n_stream_down,
+            prev_down_is_pooled=prev_down_is_pooled,
             dilations=dilations,
             attention_weights=attention_weights,
-            model_type=ModelTypes.RESUNET,
+            model_type=model_type,
             res_block_type=res_block_type,
             activation_type=activation_type,
         )
         self.conv_edge = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
-            use_backbone=True,
+            use_backbone=use_backbone,
             is_side_stream=True,
             prev_backbone_channel_index=0,
-            n_stream_down=3,
+            n_stream_down=n_stream_down,
+            prev_down_is_pooled=prev_down_is_pooled,
             dilations=dilations,
             attention_weights=attention_weights,
-            model_type=ModelTypes.RESUNET,
+            model_type=model_type,
             res_block_type=res_block_type,
             activation_type=activation_type,
         )
         self.conv_mask = UNet3Connector(
             channels=channels,
             up_channels=up_channels,
-            use_backbone=True,
+            use_backbone=use_backbone,
             is_side_stream=True,
             prev_backbone_channel_index=0,
-            n_stream_down=3,
+            n_stream_down=n_stream_down,
+            prev_down_is_pooled=prev_down_is_pooled,
             dilations=dilations,
             attention_weights=attention_weights,
-            model_type=ModelTypes.RESUNET,
+            model_type=model_type,
             res_block_type=res_block_type,
             activation_type=activation_type,
         )
 
     def forward(
         self,
-        x0_0: torch.Tensor,
-        h1_3_dist: torch.Tensor,
-        h2_2_dist: torch.Tensor,
-        h3_1_dist: torch.Tensor,
-        h1_3_edge: torch.Tensor,
-        h2_2_edge: torch.Tensor,
-        h3_1_edge: torch.Tensor,
-        h1_3_mask: torch.Tensor,
-        h2_2_mask: torch.Tensor,
-        h3_1_mask: torch.Tensor,
-        x4_0: torch.Tensor,
+        side: torch.Tensor,
+        dist_down: T.Sequence[torch.Tensor],
+        edge_down: T.Sequence[torch.Tensor],
+        mask_down: T.Sequence[torch.Tensor],
+        down: torch.Tensor = None,
     ) -> T.Dict[str, torch.Tensor]:
+        prev_same = [
+            (
+                "prev_backbone",
+                side,
+            )
+        ]
+
         h_dist = self.conv_dist(
-            prev_same=[("prev_backbone", x0_0)],
-            x4_0=x4_0,
-            stream_down=[h3_1_dist, h2_2_dist, h1_3_dist],
+            prev_same=prev_same,
+            x4_0=down,
+            stream_down=dist_down,
         )
         h_edge = self.conv_edge(
-            prev_same=[("prev_backbone", x0_0), ("prev", h_dist)],
-            x4_0=x4_0,
-            stream_down=[h3_1_edge, h2_2_edge, h1_3_edge],
+            prev_same=get_prev_list(self.use_backbone, h_dist, prev_same),
+            x4_0=down,
+            stream_down=edge_down,
         )
         h_mask = self.conv_mask(
-            prev_same=[("prev_backbone", x0_0), ("prev", h_edge)],
-            x4_0=x4_0,
-            stream_down=[h3_1_mask, h2_2_mask, h1_3_mask],
+            prev_same=get_prev_list(self.use_backbone, h_edge, prev_same),
+            x4_0=down,
+            stream_down=mask_down,
         )
 
         return {
