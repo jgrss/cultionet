@@ -1297,6 +1297,7 @@ def train_model(args):
         save_batch_val_metrics=args.save_batch_val_metrics,
         skip_train=args.skip_train,
         refine_model=args.refine_model,
+        finetune=args.finetune,
     )
 
     # Fit the model

@@ -223,7 +223,7 @@ train_predict:
     long: model-type
     help: The model type
     kwargs:
-      default: 'ResUNet3Psi'
+      default: 'ResELUNetPsi'
       choices:
         - 'UNet3Psi'
         - 'ResUNet3Psi'
@@ -624,6 +624,12 @@ train:
     short: ''
     long: skip-train
     help: Whether to skip training
+    kwargs:
+      action: store_true
+  finetune:
+    short: ''
+    long: finetune
+    help: Whether to finetune a transfer model (otherwise, do feature extraction)
     kwargs:
       action: store_true
 

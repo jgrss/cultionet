@@ -13,13 +13,13 @@ from torchvision.ops import box_iou
 from torchvision import transforms
 import torchmetrics
 
+from cultionet.losses import TanimotoComplementLoss, TanimotoDistLoss
+from cultionet.layers.base_layers import FinalConv2dDropout, Softmax
+from cultionet.layers.weights import init_attention_weights
+from cultionet.models import model_utils
+from cultionet.models.cultio import CultioNet, GeoRefinement
+from cultionet.models.maskcrnn import BFasterRCNN
 from cultionet.models.nunet import PostUNet3Psi
-from cultionet.layers.base_layers import FinalConv2dDropout
-from . import model_utils
-from .cultio import CultioNet, GeoRefinement
-from .maskcrnn import BFasterRCNN
-from ..layers.base_layers import Softmax
-from ..losses import TanimotoComplementLoss, TanimotoDistLoss
 
 
 warnings.filterwarnings("ignore")
@@ -431,6 +431,18 @@ class LightningModuleMixin(LightningModule):
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
+
+    def forward(
+        self, batch: Data, batch_idx: int = None
+    ) -> T.Dict[str, torch.Tensor]:
+        """Performs a single model forward pass.
+
+        Returns:
+            distance: Normalized distance transform (from boundaries), [0,1].
+            edge: Probabilities of edge|non-edge, [0,1].
+            crop: Logits of crop|non-crop.
+        """
+        return self.cultionet_model(batch)
 
     @property
     def cultionet_model(self) -> CultioNet:
@@ -845,6 +857,7 @@ class LightningModuleMixin(LightningModule):
 
     def configure_optimizers(self):
         params_list = list(self.cultionet_model.parameters())
+        interval = 'epoch'
         if self.optimizer == "AdamW":
             optimizer = torch.optim.AdamW(
                 params_list,
@@ -878,9 +891,10 @@ class LightningModuleMixin(LightningModule):
             model_lr_scheduler = optim_lr_scheduler.OneCycleLR(
                 optimizer,
                 max_lr=0.01,
-                epochs=100,
-                steps_per_epoch=len(self.train_split) // self.batch_size,
+                epochs=self.trainer.max_epochs,
+                steps_per_epoch=self.trainer.estimated_stepping_batches,
             )
+            interval = 'step'
         else:
             raise NameError(
                 "The learning rate scheduler is not implemented in Cultionet."
@@ -892,7 +906,7 @@ class LightningModuleMixin(LightningModule):
                 "scheduler": model_lr_scheduler,
                 "name": "lr_sch",
                 "monitor": "val_score",
-                "interval": "epoch",
+                "interval": interval,
                 "frequency": 1,
             },
         }
@@ -923,6 +937,7 @@ class CultioLitTransferModel(LightningModuleMixin):
         model_name: str = "cultionet_transfer",
         edge_class: T.Optional[int] = None,
         save_batch_val_metrics: T.Optional[bool] = False,
+        finetune: bool = False,
     ):
         super(CultioLitTransferModel, self).__init__()
 
@@ -959,119 +974,86 @@ class CultioLitTransferModel(LightningModuleMixin):
         self.cg = model_utils.ConvToGraph()
         self.ct = model_utils.ConvToTime()
 
-        cultionet_model = CultioLitModel.load_from_checkpoint(
+        self.cultionet_model = CultioLitModel.load_from_checkpoint(
             checkpoint_path=str(ckpt_file)
         )
-        # Freeze all parameters
-        cultionet_model.freeze()
+
+        if not finetune:
+            # Freeze all parameters for feature extraction
+            self.cultionet_model.freeze()
+
         # layers[-2] ->
-        #   LightweightTemporalAttentionEncoder()
-        layers = list(cultionet_model.cultionet_model.children())
-        self.temporal_encoder = layers[-2]
-        # Set new final layers to learn new weights
-        # Level 2 level (non-crop; crop)
-        self.temporal_encoder.final_l2 = FinalConv2dDropout(
-            hidden_dim=self.temporal_encoder.final_l2.net[0]
-            .seq.seq[0]
-            .seq[0]
-            .in_channels,
-            dim_factor=1,
-            activation_type=activation_type,
-            final_activation=Softmax(dim=1),
-            num_classes=num_classes,
-        )
-        # Last level (non-crop; crop; edges)
-        self.temporal_encoder.final_last = FinalConv2dDropout(
-            hidden_dim=self.temporal_encoder.final_last.net[0]
-            .seq.seq[0]
-            .seq[0]
-            .in_channels,
-            dim_factor=1,
-            activation_type=activation_type,
-            final_activation=Softmax(dim=1),
-            num_classes=num_classes + 1,
-        )
-        # layers[-1] ->
-        #   ResUNet3Psi()
-        self.mask_model = layers[-1]
-        # TODO: for finetuning, we do not need to replace this layer
-        # TODO: this is feature extraction
-        # Update the post-UNet layer with trainable parameters
-        post_unet = PostUNet3Psi(
-            up_channels=up_channels,
-            num_classes=num_classes,
-            mask_activation=mask_activation,
-            deep_sup_dist=deep_sup_dist,
-            deep_sup_edge=deep_sup_edge,
-            deep_sup_mask=deep_sup_mask,
-        )
-        self.mask_model.post_unet = post_unet
+        #   TemporalAttention()
+        layers = list(self.cultionet_model.cultionet_model.children())
+        self.cultionet_model.temporal_encoder = layers[-2]
+
+        if not finetune:
+            # Unfreeze the temporal encoder
+            self.cultionet_model.temporal_encoder = self.unfreeze_layer(
+                self.temporal_encoder
+            )
+            # Set new final layers to learn new weights
+            # Level 2 level (non-crop; crop)
+            self.cultionet_model.temporal_encoder.final_l2 = (
+                FinalConv2dDropout(
+                    hidden_dim=self.temporal_encoder.final_l2.net[0]
+                    .seq.seq[0]
+                    .seq[0]
+                    .in_channels,
+                    dim_factor=1,
+                    activation_type=activation_type,
+                    final_activation=Softmax(dim=1),
+                    num_classes=num_classes,
+                )
+            )
+            self.cultionet_model.temporal_encoder.final_l2.apply(
+                init_attention_weights
+            )
+            # Last level (non-crop; crop; edges)
+            self.cultionet_model.temporal_encoder.final_last = (
+                FinalConv2dDropout(
+                    hidden_dim=self.temporal_encoder.final_last.net[0]
+                    .seq.seq[0]
+                    .seq[0]
+                    .in_channels,
+                    dim_factor=1,
+                    activation_type=activation_type,
+                    final_activation=Softmax(dim=1),
+                    num_classes=num_classes + 1,
+                )
+            )
+            self.cultionet_model.temporal_encoder.final_last.apply(
+                init_attention_weights
+            )
+
+            # layers[-1] ->
+            #   ResUNet3Psi()
+            self.cultionet_model.mask_model = layers[-1]
+            # Update the post-UNet layer with trainable parameters
+            post_unet = PostUNet3Psi(
+                up_channels=up_channels,
+                num_classes=num_classes,
+                mask_activation=mask_activation,
+                deep_sup_dist=deep_sup_dist,
+                deep_sup_edge=deep_sup_edge,
+                deep_sup_mask=deep_sup_mask,
+            )
+            self.cultionet_model.mask_model.post_unet = post_unet
 
         self.model_attr = model_name
         setattr(
             self,
             self.model_attr,
-            self.mask_model,
+            self.cultionet_model,
         )
         self.configure_loss()
         self.configure_scorer()
 
-    def forward(
-        self, batch: Data, batch_idx: int = None
-    ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
-        """
-        NOTE: In the main module, the full cultionet model is contained within
-        ``self.cultionet_model``. Here, the ``forward`` method is not shared with
-        the main Lightning module because we need to separate the RNN layer from
-        the UNET layer.
-        """
-        height = (
-            int(batch.height) if batch.batch is None else int(batch.height[0])
-        )
-        width = (
-            int(batch.width) if batch.batch is None else int(batch.width[0])
-        )
-        batch_size = 1 if batch.batch is None else batch.batch.unique().size(0)
+    def unfreeze_layer(self, layer):
+        for param in layer.parameters():
+            param.requires_grad = True
 
-        # Reshape from ((H*W) x (C*T)) -> (B x C x H x W)
-        x = self.gc(batch.x, batch_size, height, width)
-        # Reshape from (B x C x H x W) -> (B x C x T|D x H x W)
-        x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
-
-        # Transformer attention encoder
-        logits_hidden, classes_l2, classes_last = self.temporal_encoder(x)
-
-        classes_l2 = self.cg(classes_l2)
-        classes_last = self.cg(classes_last)
-        # Main stream
-        logits = self.cultionet_model(x, logits_hidden)
-        logits_distance = self.cg(logits["dist"])
-        logits_edges = self.cg(logits["edge"])
-        logits_crop = self.cg(logits["mask"])
-
-        out = {
-            "dist": logits_distance,
-            "edge": logits_edges,
-            "crop": logits_crop,
-            "crop_type": None,
-            "classes_l2": classes_l2,
-            "classes_last": classes_last,
-        }
-
-        if logits["dist_3_1"] is not None:
-            out["dist_3_1"] = self.cg(logits["dist_3_1"])
-            out["dist_2_2"] = self.cg(logits["dist_2_2"])
-            out["dist_1_3"] = self.cg(logits["dist_1_3"])
-        if logits["mask_3_1"] is not None:
-            out["crop_3_1"] = self.cg(logits["mask_3_1"])
-            out["crop_2_2"] = self.cg(logits["mask_2_2"])
-            out["crop_1_3"] = self.cg(logits["mask_1_3"])
-        if logits["edge_3_1"] is not None:
-            out["edge_3_1"] = self.cg(logits["edge_3_1"])
-            out["edge_2_2"] = self.cg(logits["edge_2_2"])
-            out["edge_1_3"] = self.cg(logits["edge_1_3"])
-
-        return out
+        return layer
 
 
 class CultioLitModel(LightningModuleMixin):
@@ -1088,7 +1070,7 @@ class CultioLitModel(LightningModuleMixin):
         attention_weights: str = "spatial_channel",
         optimizer: str = "AdamW",
         learning_rate: float = 1e-3,
-        lr_scheduler: str = "CosineAnnealingLR",
+        lr_scheduler: str = "OneCycleLR",
         steplr_step_size: int = 5,
         weight_decay: float = 0.01,
         eps: float = 1e-4,
@@ -1152,18 +1134,6 @@ class CultioLitModel(LightningModuleMixin):
         )
         self.configure_loss()
         self.configure_scorer()
-
-    def forward(
-        self, batch: Data, batch_idx: int = None
-    ) -> T.Dict[str, torch.Tensor]:
-        """Performs a single model forward pass.
-
-        Returns:
-            distance: Normalized distance transform (from boundaries), [0,1].
-            edge: Probabilities of edge|non-edge, [0,1].
-            crop: Logits of crop|non-crop.
-        """
-        return self.cultionet_model(batch)
 
     # def on_train_epoch_start(self):
     #     # Get the current learning rate from the optimizer
