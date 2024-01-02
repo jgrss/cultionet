@@ -1,0 +1,58 @@
+FROM nvidia/cuda:12.1.0-base-ubuntu20.04
+
+# Install GDAL
+RUN apt update -y && \
+    apt upgrade -y && \
+    apt install software-properties-common -y && \
+    add-apt-repository ppa:ubuntugis/ubuntugis-unstable -y && \
+    apt update -y && \
+    apt install \
+    build-essential \
+    python3.8 \
+    python3-pip \
+    libgeos++-dev \
+    libgeos-3.8.0 \
+    libgeos-c1v5 \
+    libgeos-dev \
+    libgeos-doc \
+    libspatialindex-dev \
+    g++ \
+    libgdal-dev \
+    gdal-bin \
+    libproj-dev \
+    libspatialindex-dev \
+    geotiff-bin \
+    libgl1 \
+    git -y
+
+ENV CPLUS_INCLUDE_PATH="/usr/include/gdal"
+ENV C_INCLUDE_PATH="/usr/include/gdal"
+ENV LD_LIBRARY_PATH="/usr/local/lib"
+ENV PATH="/root/.local/bin:$PATH"
+
+RUN pip install -U pip setuptools wheel
+RUN pip install -U --no-cache-dir "setuptools>=59.5.0"
+RUN pip install -U "Cython>=0.29.0,<3.0.0" numpy>=1.22.0
+RUN pip install intel-openmp
+
+# Install PyTorch Geometric and its dependencies
+RUN pip install \
+    torch==2.1.0 \
+    torchvision \
+    torchaudio --extra-index-url https://download.pytorch.org/whl/cu121
+
+RUN TORCH_VERSION=`(python -c "import torch;print(torch.__version__)")` &&
+    pip install \
+    torch_geometric \
+    torch_scatter \
+    torch_sparse \
+    torch_cluster \
+    torch_spline_conv --extra-index-url https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
+
+RUN GDAL_VERSION=$(gdal-config --version | awk -F'[.]' '{print $1"."$2"."$3}') && \
+    pip install GDAL==$GDAL_VERSION --no-binary=gdal
+
+# Install cultionet
+RUN pip install --user cultionet@git+https://github.com/jgrss/cultionet.git@jgrss/transfer_ltae
+
+CMD ["cultionet"]

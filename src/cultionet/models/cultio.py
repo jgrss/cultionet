@@ -5,9 +5,11 @@ import torch
 from torch_geometric.data import Data
 
 from . import model_utils
-from .base_layers import ConvBlock2d, ResidualConv, Softmax
-from .nunet import UNet3, UNet3Psi, ResUNet3Psi
-from .convstar import StarRNN
+from ..layers.base_layers import ConvBlock2d, ResidualConv, Softmax
+from .nunet import UNet3Psi, ResUNet3Psi, ResELUNetPsi
+from .time_attention import TemporalResAUNet
+from .temporal_attention import TemporalAttention
+from ..enums import ModelTypes, ResBlockTypes
 
 
 def scale_min_max(
@@ -289,10 +291,10 @@ class CultioNet(torch.nn.Module):
         ds_time_features: int,
         filters: int = 32,
         num_classes: int = 2,
-        model_type: str = "ResUNet3Psi",
+        model_type: str = ModelTypes.RESUNET3PSI,
         activation_type: str = "SiLU",
         dilations: T.Union[int, T.Sequence[int]] = None,
-        res_block_type: str = "resa",
+        res_block_type: str = ResBlockTypes.RES,
         attention_weights: str = "spatial_channel",
         deep_sup_dist: bool = False,
         deep_sup_edge: bool = False,
@@ -313,20 +315,24 @@ class CultioNet(torch.nn.Module):
         self.cg = model_utils.ConvToGraph()
         self.ct = model_utils.ConvToTime()
 
-        self.star_rnn = StarRNN(
-            input_dim=self.ds_num_bands,
-            hidden_dim=self.filters,
-            n_layers=3,
+        self.temporal_encoder = TemporalAttention(
+            in_channels=self.ds_num_bands,
+            hidden_channels=self.filters,
+            num_head=8,
+            num_time=self.ds_num_time,
+            dropout=0.1,
+            d_model=self.filters,
+            time_scaler=1_000,
             num_classes_l2=self.num_classes,
             num_classes_last=self.num_classes + 1,
-            crop_type_layer=True if self.num_classes > 2 else False,
             activation_type=activation_type,
             final_activation=Softmax(dim=1),
         )
+
         unet3_kwargs = {
             "in_channels": self.ds_num_bands,
             "in_time": self.ds_num_time,
-            "in_rnn_channels": int(self.filters * 3),
+            "in_encoding_channels": self.filters,  # <- L-TAE; int(self.filters * 3), <- ConvSTAR
             "init_filter": self.filters,
             "num_classes": self.num_classes,
             "activation_type": activation_type,
@@ -336,36 +342,54 @@ class CultioNet(torch.nn.Module):
             "mask_activation": Softmax(dim=1),
         }
         assert model_type in (
-            "UNet3Psi",
-            "ResUNet3Psi",
+            ModelTypes.UNET3PSI,
+            ModelTypes.RESUNET3PSI,
+            ModelTypes.RESELUNETPSI,
+            ModelTypes.TRESAUNET,
         ), "The model type is not supported."
-        if model_type == "UNet3Psi":
+        if model_type == ModelTypes.UNET3PSI:
             unet3_kwargs["dilation"] = 2 if dilations is None else dilations
             assert isinstance(
                 unet3_kwargs["dilation"], int
-            ), "The dilation for UNet3Psi must be an integer."
+            ), f"The dilation for {ModelTypes.UNET3PSI} must be an integer."
             self.mask_model = UNet3Psi(**unet3_kwargs)
-        elif model_type == "ResUNet3Psi":
+        elif model_type in (
+            ModelTypes.RESUNET3PSI,
+            ModelTypes.RESELUNETPSI,
+        ):
             # ResUNet3Psi
             unet3_kwargs["attention_weights"] = (
                 None if attention_weights == "none" else attention_weights
             )
             unet3_kwargs["res_block_type"] = res_block_type
-            if res_block_type == "res":
+            if res_block_type == ResBlockTypes.RES:
                 unet3_kwargs["dilations"] = (
                     [2] if dilations is None else dilations
                 )
                 assert (
                     len(unet3_kwargs["dilations"]) == 1
-                ), "The dilations for ResUNet3Psi must be a length-1 integer sequence."
-            elif res_block_type == "resa":
+                ), f"The dilations for {ModelTypes.RESUNET3PSI} must be a length-1 integer sequence."
+            elif res_block_type == ResBlockTypes.RESA:
                 unet3_kwargs["dilations"] = (
                     [1, 2] if dilations is None else dilations
                 )
             assert isinstance(
                 unet3_kwargs["dilations"], list
-            ), "The dilations for ResUNet3Psi must be a sequence of integers."
-            self.mask_model = ResUNet3Psi(**unet3_kwargs)
+            ), f"The dilations for {ModelTypes.RESUNET3PSI} must be a sequence of integers."
+
+            if model_type == ModelTypes.RESUNET3PSI:
+                self.mask_model = ResUNet3Psi(**unet3_kwargs)
+            else:
+                self.mask_model = ResELUNetPsi(**unet3_kwargs)
+        elif model_type == ModelTypes.TRESAUNET:
+            self.mask_model = TemporalResAUNet(
+                in_channels=self.ds_num_bands,
+                hidden_channels=self.filters,
+                out_channels=1,
+                num_time=self.ds_num_time,
+                height=100,
+                width=100,
+            )
 
     def forward(self, data: Data) -> T.Dict[str, torch.Tensor]:
         height = (
@@ -374,19 +398,26 @@ class CultioNet(torch.nn.Module):
         width = int(data.width) if data.batch is None else int(data.width[0])
         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
-        for attribute in ("ntime", "nbands", "height", "width"):
-            check_batch_dims(data, attribute)
+        # for attribute in ("ntime", "nbands", "height", "width"):
+        #     check_batch_dims(data, attribute)
 
         # Reshape from ((H*W) x (C*T)) -> (B x C x H x W)
         x = self.gc(data.x, batch_size, height, width)
         # Reshape from (B x C x H x W) -> (B x C x T|D x H x W)
         x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
-        # StarRNN
-        logits_star_hidden, logits_star_l2, logits_star_last = self.star_rnn(x)
-        logits_star_l2 = self.cg(logits_star_l2)
-        logits_star_last = self.cg(logits_star_last)
+
+        # Transformer attention encoder
+        logits_hidden, classes_l2, classes_last = self.temporal_encoder(
+            x,
+            longitude=data.left + (data.right - data.left) / 2,
+            latitude=data.top - (data.top - data.bottom) / 2,
+        )
+
+        classes_l2 = self.cg(classes_l2)
+        classes_last = self.cg(classes_last)
         # Main stream
-        logits = self.mask_model(x, logits_star_hidden)
+        logits = self.mask_model(x, temporal_encoding=logits_hidden)
+
         logits_distance = self.cg(logits["dist"])
         logits_edges = self.cg(logits["edge"])
         logits_crop = self.cg(logits["mask"])
@@ -396,8 +427,8 @@ class CultioNet(torch.nn.Module):
             "edge": logits_edges,
             "crop": logits_crop,
             "crop_type": None,
-            "crop_star_l2": logits_star_l2,
-            "crop_star": logits_star_last,
+            "classes_l2": classes_l2,
+            "classes_last": classes_last,
         }
 
         if logits["dist_3_1"] is not None:

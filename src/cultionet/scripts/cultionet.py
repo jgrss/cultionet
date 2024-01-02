@@ -31,13 +31,14 @@ from pytorch_lightning import seed_everything
 import cultionet
 from cultionet.data.const import SCALE_FACTOR
 from cultionet.data.datasets import EdgeDataset
-from cultionet.utils.project_paths import setup_paths, ProjectPaths
-from cultionet.errors import TensorShapeError
-from cultionet.utils.normalize import get_norm_values
 from cultionet.data.create import create_dataset, create_predict_dataset
 from cultionet.data.utils import get_image_list_dims, create_network_data
+from cultionet.enums import CLISteps, ModelNames
+from cultionet.errors import TensorShapeError
 from cultionet.utils import model_preprocessing
 from cultionet.utils.logging import set_color_logger
+from cultionet.utils.project_paths import setup_paths, ProjectPaths
+from cultionet.utils.normalize import get_norm_values
 
 
 logger = set_color_logger(__name__)
@@ -467,12 +468,17 @@ def predict_image(args):
 
     if args.data_path is not None:
         ds = EdgeDataset(
-            ppaths.predict_path,
+            root=ppaths.predict_path,
             data_means=data_values.mean,
             data_stds=data_values.std,
             pattern=f"data_{args.region}_{args.predict_year}*.pt",
         )
-        ckpt_file = ppaths.ckpt_path / "last.ckpt"
+        # FIXME: could these be loaded from the model?
+        if args.process == CLISteps.PREDICT_TRANSFER:
+            # Transfer learning model checkpoint
+            ckpt_file = ppaths.ckpt_path / ModelNames.CKPT_TRANSFER_NAME
+        else:
+            ckpt_file = ppaths.ckpt_path / ModelNames.CKPT_NAME
 
         cultionet.predict_lightning(
             reference_image=args.reference_image,
@@ -486,8 +492,11 @@ def predict_image(args):
             precision=args.precision,
             num_classes=num_classes,
             ref_res=ds[0].res,
-            resampling=ds[0].resampling,
+            resampling=ds[0].resampling
+            if hasattr(ds[0], 'resampling')
+            else 'nearest',
             compression=args.compression,
+            is_transfer_model=args.process == CLISteps.PREDICT_TRANSFER,
             refine_pt=ckpt_file.parent / "refine" / "refine.pt",
         )
 
@@ -742,9 +751,7 @@ def create_datasets(args):
         list(
             itertools.product(
                 list(itertools.chain.from_iterable(inputs.year_lists)),
-                list(
-                    itertools.chain.from_iterable(inputs.regions_lists)
-                ),
+                list(itertools.chain.from_iterable(inputs.regions_lists)),
             )
         )
     )
@@ -785,7 +792,9 @@ def create_datasets(args):
                     continue
 
                 df_grids = gpd.read_file(grids)
-                if not {"region", "grid"}.intersection(df_grids.columns.tolist()):
+                if not {"region", "grid"}.intersection(
+                    df_grids.columns.tolist()
+                ):
                     df_grids["region"] = region
 
                 if not edges.is_file():
@@ -806,8 +815,11 @@ def create_datasets(args):
                 image_vis=config["image_vis"]
             ).image_vis:
                 # Set the full path to the images
-                vi_path = ppaths.image_path / args.feature_pattern.format(
-                    region=region, image_vi=image_vi
+                vi_path = (
+                    ppaths.image_path.resolve()
+                    / args.feature_pattern.format(
+                        region=region, image_vi=image_vi
+                    )
                 )
 
                 if not vi_path.is_dir():
@@ -909,7 +921,7 @@ def train_maskrcnn(args):
         or (ppaths.norm_file.is_file() and args.recalc_zscores)
     ):
         ds = EdgeDataset(
-            ppaths.train_path,
+            root=ppaths.train_path,
             processes=args.processes,
             threads_per_worker=args.threads,
             random_seed=args.random_seed,
@@ -943,7 +955,7 @@ def train_maskrcnn(args):
     # Create the train data object again, this time passing
     # the means and standard deviation tensors
     ds = EdgeDataset(
-        ppaths.train_path,
+        root=ppaths.train_path,
         data_means=data_values.mean,
         data_stds=data_values.std,
         random_seed=args.random_seed,
@@ -952,7 +964,7 @@ def train_maskrcnn(args):
     test_ds = None
     if list((ppaths.test_process_path).glob("*.pt")):
         test_ds = EdgeDataset(
-            ppaths.test_path,
+            root=ppaths.test_path,
             data_means=data_values.mean,
             data_stds=data_values.std,
             random_seed=args.random_seed,
@@ -1006,7 +1018,7 @@ def spatial_kfoldcv(args):
         class_info = json.load(f)
 
     ds = EdgeDataset(
-        ppaths.train_path,
+        root=ppaths.train_path,
         processes=args.processes,
         threads_per_worker=args.threads,
         random_seed=args.random_seed,
@@ -1092,7 +1104,7 @@ def generate_model_graph(args):
     ppaths = setup_paths(args.project_path)
     data_values = torch.load(str(ppaths.norm_file))
     ds = EdgeDataset(
-        ppaths.train_path,
+        root=ppaths.train_path,
         data_means=data_values.mean,
         data_stds=data_values.std,
         crop_counts=data_values.crop_counts,
@@ -1138,7 +1150,7 @@ def train_model(args):
         or (ppaths.norm_file.is_file() and args.recalc_zscores)
     ):
         ds = EdgeDataset(
-            ppaths.train_path,
+            root=ppaths.train_path,
             processes=args.processes,
             threads_per_worker=args.threads,
             random_seed=args.random_seed,
@@ -1156,7 +1168,7 @@ def train_model(args):
         except TensorShapeError as e:
             raise ValueError(e)
         ds = EdgeDataset(
-            ppaths.train_path,
+            root=ppaths.train_path,
             processes=args.processes,
             threads_per_worker=args.threads,
             random_seed=args.random_seed,
@@ -1195,7 +1207,7 @@ def train_model(args):
     # Create the train data object again, this time passing
     # the means and standard deviation tensors
     ds = EdgeDataset(
-        ppaths.train_path,
+        root=ppaths.train_path,
         data_means=data_values.mean,
         data_stds=data_values.std,
         crop_counts=data_values.crop_counts,
@@ -1207,7 +1219,7 @@ def train_model(args):
     test_ds = None
     if list((ppaths.test_process_path).glob("*.pt")):
         test_ds = EdgeDataset(
-            ppaths.test_path,
+            root=ppaths.test_path,
             data_means=data_values.mean,
             data_stds=data_values.std,
             crop_counts=data_values.crop_counts,
@@ -1222,7 +1234,7 @@ def train_model(args):
             except TensorShapeError as e:
                 raise ValueError(e)
             test_ds = EdgeDataset(
-                ppaths.test_path,
+                root=ppaths.test_path,
                 data_means=data_values.mean,
                 data_stds=data_values.std,
                 crop_counts=data_values.crop_counts,
@@ -1230,26 +1242,12 @@ def train_model(args):
                 random_seed=args.random_seed,
             )
 
-    # Get balanced class weights
-    # Reference: https://github.com/scikit-learn/scikit-learn/blob/f3f51f9b6/sklearn/utils/class_weight.py#L10
-    # def get_class_weights(counts: torch.Tensor) -> torch.Tensor:
-    #     recip_freq = counts.sum() / (len(counts) * counts)
-    #     weights = recip_freq[torch.arange(0, len(counts))]
-
-    #     if torch.cuda.is_available():
-    #         return weights.to('cuda')
-    #     else:
-    #         return weights
-
-    # class_weights = get_class_weights(data_values.crop_counts)
-    # edge_weights = get_class_weights(data_values.edge_counts)
     if torch.cuda.is_available():
         class_counts = data_values.crop_counts.to("cuda")
     else:
         class_counts = data_values.crop_counts
 
-    # Fit the model
-    cultionet.fit(
+    train_kwargs = dict(
         dataset=ds,
         ckpt_file=ppaths.ckpt_file,
         test_dataset=test_ds,
@@ -1299,10 +1297,19 @@ def train_model(args):
         save_batch_val_metrics=args.save_batch_val_metrics,
         skip_train=args.skip_train,
         refine_model=args.refine_model,
+        finetune=args.finetune,
     )
+
+    # Fit the model
+    if args.process == CLISteps.TRAIN_TRANSFER:
+        cultionet.fit_transfer(**train_kwargs)
+    else:
+        cultionet.fit(**train_kwargs)
 
 
 def main():
+    # torch.set_float32_matmul_precision("high")
+
     args_config = open_config((Path(__file__).parent / "args.yml").absolute())
 
     parser = argparse.ArgumentParser(
@@ -1313,19 +1320,19 @@ def main():
 
     subparsers = parser.add_subparsers(dest="process")
     available_processes = [
-        "create",
-        "create-predict",
-        "skfoldcv",
-        "train",
-        "maskrcnn",
-        "predict",
-        "graph",
-        "version",
+        CLISteps.CREATE,
+        CLISteps.CREATE_PREDICT,
+        CLISteps.SKFOLDCV,
+        CLISteps.TRAIN,
+        CLISteps.PREDICT,
+        CLISteps.TRAIN_TRANSFER,
+        CLISteps.PREDICT_TRANSFER,
+        CLISteps.VERSION,
     ]
     for process in available_processes:
         subparser = subparsers.add_parser(process)
 
-        if process == "version":
+        if process == CLISteps.VERSION:
             continue
 
         subparser.add_argument(
@@ -1334,18 +1341,32 @@ def main():
             dest="project_path",
             help="The project path (the directory that contains the grid ids)",
         )
-        if process == "graph":
-            break
 
         process_dict = args_config[process.replace("-", "_")]
-        if process in ("skfoldcv", "maskrcnn"):
+        # Processes that use train args in addition to 'train'
+        if process in (CLISteps.SKFOLDCV, CLISteps.TRAIN_TRANSFER):
             process_dict.update(args_config["train"])
-        if process in ("train", "maskrcnn", "predict", "skfoldcv"):
+        # Processes that use the predict args in addition to 'predict'
+        if process in (CLISteps.PREDICT_TRANSFER,):
+            process_dict.update(args_config["predict"])
+        # Processes that use args shared between train and predict
+        if process in (
+            CLISteps.TRAIN,
+            CLISteps.TRAIN_TRANSFER,
+            CLISteps.PREDICT,
+            CLISteps.PREDICT_TRANSFER,
+            CLISteps.SKFOLDCV,
+        ):
             process_dict.update(args_config["train_predict"])
             process_dict.update(args_config["shared_partitions"])
-        if process in ("create", "create-predict"):
+        if process in (CLISteps.CREATE, CLISteps.CREATE_PREDICT):
             process_dict.update(args_config["shared_create"])
-        if process in ("create", "create-predict", "predict"):
+        if process in (
+            CLISteps.CREATE,
+            CLISteps.CREATE_PREDICT,
+            CLISteps.PREDICT,
+            CLISteps.PREDICT_TRANSFER,
+        ):
             process_dict.update(args_config["shared_image"])
         process_dict.update(args_config["dates"])
         for process_key, process_values in process_dict.items():
@@ -1369,7 +1390,12 @@ def main():
                 **process_values["kwargs"],
             )
 
-        if process in ("create", "create-predict", "predict"):
+        if process in (
+            CLISteps.CREATE,
+            CLISteps.CREATE_PREDICT,
+            CLISteps.PREDICT,
+            CLISteps.PREDICT_TRANSFER,
+        ):
             subparser.add_argument(
                 "--config-file",
                 dest="config_file",
@@ -1378,10 +1404,10 @@ def main():
             )
 
     args = parser.parse_args()
-    if args.process == "create-predict":
+    if args.process == CLISteps.CREATE_PREDICT:
         setattr(args, "destination", "predict")
 
-    if args.process == "version":
+    if args.process == CLISteps.VERSION:
         print(cultionet.__version__)
         return
 
@@ -1399,17 +1425,24 @@ def main():
     ) as f:
         f.write(json.dumps(vars(args), indent=4))
 
-    if args.process in ("create", "create-predict"):
+    if args.process in (
+        CLISteps.CREATE,
+        CLISteps.CREATE_PREDICT,
+    ):
         create_datasets(args)
-    elif args.process == "skfoldcv":
+    elif args.process == CLISteps.SKFOLDCV:
         spatial_kfoldcv(args)
-    elif args.process == "train":
+    elif args.process in (
+        CLISteps.TRAIN,
+        CLISteps.TRAIN_TRANSFER,
+    ):
         train_model(args)
-    elif args.process == "maskrcnn":
-        train_maskrcnn(args)
-    elif args.process == "predict":
+    elif args.process in (
+        CLISteps.PREDICT,
+        CLISteps.PREDICT_TRANSFER,
+    ):
         predict_image(args)
-    elif args.process == "graph":
+    elif args.process == CLISteps.GRAPH:
         generate_model_graph(args)
 
 

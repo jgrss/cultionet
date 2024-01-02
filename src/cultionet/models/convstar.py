@@ -7,7 +7,7 @@ import typing as T
 import torch
 from torch.autograd import Variable
 
-from .base_layers import Softmax, ResidualConv
+from ..layers.base_layers import Softmax, FinalConv2dDropout
 
 
 class ConvSTARCell(torch.nn.Module):
@@ -150,8 +150,8 @@ class StarRNN(torch.nn.Module):
         n_layers: int = 6,
         cell: str = "star",
         crop_type_layer: bool = False,
-        activation_type: str = "LeakyReLU",
-        final_activation: str = Softmax(dim=1),
+        activation_type: str = "SiLU",
+        final_activation: T.Callable = Softmax(dim=1),
     ):
         super(StarRNN, self).__init__()
 
@@ -169,38 +169,20 @@ class StarRNN(torch.nn.Module):
         )
 
         # Level 2 level (non-crop; crop)
-        self.final_l2 = torch.nn.Sequential(
-            ResidualConv(
-                in_channels=int(hidden_dim * 2),
-                out_channels=hidden_dim,
-                dilation=2,
-                activation_type=activation_type,
-            ),
-            torch.nn.Dropout(0.1),
-            torch.nn.Conv2d(
-                in_channels=hidden_dim,
-                out_channels=num_classes_l2,
-                kernel_size=1,
-                padding=0,
-            ),
-            final_activation,
+        self.final_l2 = FinalConv2dDropout(
+            hidden_dim=hidden_dim,
+            dim_factor=2,
+            activation_type=activation_type,
+            final_activation=final_activation,
+            num_classes=num_classes_l2,
         )
         # Last level (non-crop; crop; edges)
-        self.final_last = torch.nn.Sequential(
-            ResidualConv(
-                in_channels=int(hidden_dim * 3),
-                out_channels=hidden_dim,
-                dilation=2,
-                activation_type=activation_type,
-            ),
-            torch.nn.Dropout(0.1),
-            torch.nn.Conv2d(
-                in_channels=hidden_dim,
-                out_channels=num_classes_last,
-                kernel_size=1,
-                padding=0,
-            ),
-            Softmax(dim=1),
+        self.final_last = FinalConv2dDropout(
+            hidden_dim=hidden_dim,
+            dim_factor=3,
+            activation_type=activation_type,
+            final_activation=Softmax(dim=1),
+            num_classes=num_classes_last,
         )
 
     def forward(

@@ -3,6 +3,7 @@ import warnings
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.data import Data
 import torchmetrics
@@ -15,13 +16,13 @@ def one_hot(targets: torch.Tensor, dims: int) -> torch.Tensor:
     return F.one_hot(targets.contiguous().view(-1), dims).float()
 
 
-class LossPreprocessing(torch.nn.Module):
+class LossPreprocessing(nn.Module):
     def __init__(self, inputs_are_logits: bool, apply_transform: bool):
         super(LossPreprocessing, self).__init__()
 
         self.inputs_are_logits = inputs_are_logits
         self.apply_transform = apply_transform
-        self.sigmoid = torch.nn.Sigmoid()
+        self.sigmoid = nn.Sigmoid()
 
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor = None
@@ -56,7 +57,7 @@ class LossPreprocessing(torch.nn.Module):
         return inputs, targets
 
 
-class TopologicalLoss(torch.nn.Module):
+class TopologicalLoss(nn.Module):
     """
     Reference:
         https://arxiv.org/abs/1906.05404
@@ -157,7 +158,7 @@ class TopologicalLoss(torch.nn.Module):
         return topo_loss.mean()
 
 
-class TanimotoComplementLoss(torch.nn.Module):
+class TanimotoComplementLoss(nn.Module):
     """Tanimoto distance loss.
 
     Adapted from publications and source code below:
@@ -204,6 +205,25 @@ class TanimotoComplementLoss(torch.nn.Module):
             inputs_are_logits=True, apply_transform=True
         )
 
+    def tanimoto_distance(
+        self, y: torch.Tensor, yhat: torch.Tensor
+    ) -> torch.Tensor:
+        scale = 1.0 / self.depth
+        tpl = (y * yhat).sum(dim=0)
+        numerator = tpl + self.smooth
+        sq_sum = (y**2 + yhat**2).sum(dim=0)
+        denominator = torch.zeros(yhat.shape[1]).to(
+            dtype=yhat.dtype, device=yhat.device
+        )
+        for d in range(0, self.depth):
+            a = 2.0**d
+            b = -(2.0 * a - 1.0)
+            denominator = denominator + torch.reciprocal(
+                (a * sq_sum) + (b * tpl) + self.smooth
+            )
+
+        return ((numerator * denominator) * scale).mean()
+
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor
     ) -> torch.Tensor:
@@ -216,44 +236,55 @@ class TanimotoComplementLoss(torch.nn.Module):
         Returns:
             Tanimoto distance loss (float)
         """
-        if self.targets_are_labels:
-            # Discrete targets
+        if len(inputs.shape) > 1:
             if inputs.shape[1] > 1:
-                # Softmax and One-hot encoding
-                inputs, targets = self.preprocessor(inputs, targets)
+                targets = one_hot(targets, dims=inputs.shape[1])
 
         if len(inputs.shape) == 1:
             inputs = inputs.unsqueeze(1)
         if len(targets.shape) == 1:
             targets = targets.unsqueeze(1)
 
-        length = inputs.shape[1]
+        dist1 = self.tanimoto_distance(targets, inputs)
+        dist2 = self.tanimoto_distance(1.0 - targets, 1.0 - inputs)
+        dist = (dist1 + dist2) * 0.5
 
-        def tanimoto(y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
-            scale = 1.0 / self.depth
-            tpl = (y * yhat).sum(dim=0)
-            numerator = tpl + self.smooth
-            sq_sum = (y**2 + yhat**2).sum(dim=0)
-            denominator = torch.zeros(length, dtype=inputs.dtype).to(
-                device=inputs.device
-            )
-            for d in range(0, self.depth):
-                a = 2**d
-                b = -(2.0 * a - 1.0)
-                denominator = denominator + torch.reciprocal(
-                    (a * sq_sum) + (b * tpl) + self.smooth
-                )
-
-            return numerator * denominator * scale
-
-        score = tanimoto(targets, inputs)
-        if inputs.shape[1] == 1:
-            score = (score + tanimoto(1.0 - targets, 1.0 - inputs)) * 0.5
-
-        return (1.0 - score).mean()
+        return 1.0 - dist
 
 
-class TanimotoDistLoss(torch.nn.Module):
+def tanimoto_dist(
+    ypred: torch.Tensor,
+    ytrue: torch.Tensor,
+    scale_pos_weight: bool,
+    class_counts: T.Union[None, torch.Tensor],
+    beta: float,
+    smooth: float,
+) -> torch.Tensor:
+    """Tanimoto distance."""
+    ytrue = ytrue.to(dtype=ypred.dtype)
+    if scale_pos_weight:
+        if class_counts is None:
+            class_counts = ytrue.sum(dim=0)
+        else:
+            class_counts = class_counts
+        effective_num = 1.0 - beta**class_counts
+        weights = (1.0 - beta) / effective_num
+        weights = weights / weights.sum() * class_counts.shape[0]
+    else:
+        weights = torch.ones(
+            ytrue.shape[1], dtype=ytrue.dtype, device=ytrue.device
+        )
+    # Reduce
+    tpl = (ypred * ytrue).sum(dim=0)
+    sq_sum = (ypred**2 + ytrue**2).sum(dim=0)
+    numerator = tpl * weights + smooth
+    denominator = (sq_sum - tpl) * weights + smooth
+    tanimoto = numerator / denominator
+
+    return tanimoto
+
+
+class TanimotoDistLoss(nn.Module):
     """Tanimoto distance loss.
 
     References:
@@ -346,39 +377,28 @@ class TanimotoDistLoss(torch.nn.Module):
         if len(targets.shape) == 1:
             targets = targets.unsqueeze(1)
 
-        def tanimoto_loss(yhat: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            y = y.to(dtype=yhat.dtype)
-            if self.scale_pos_weight:
-                if self.class_counts is None:
-                    class_counts = y.sum(dim=0)
-                else:
-                    class_counts = self.class_counts
-                effective_num = 1.0 - self.beta**class_counts
-                weights = (1.0 - self.beta) / effective_num
-                weights = weights / weights.sum() * class_counts.shape[0]
-            else:
-                weights = torch.ones(
-                    inputs.shape[1], dtype=inputs.dtype, device=inputs.device
-                )
-            # Reduce
-            tpl = (yhat * y).sum(dim=0)
-            sq_sum = (yhat**2 + y**2).sum(dim=0)
-            numerator = tpl * weights + self.smooth
-            denominator = (sq_sum - tpl) * weights + self.smooth
-            tanimoto = numerator / denominator
-            loss = 1.0 - tanimoto
-
-            return loss
-
-        loss = tanimoto_loss(inputs, targets)
-        if inputs.shape[1] == 1:
-            compl_loss = tanimoto_loss(1.0 - inputs, 1.0 - targets)
-            loss = (loss + compl_loss) * 0.5
+        loss = 1.0 - tanimoto_dist(
+            inputs,
+            targets,
+            scale_pos_weight=self.scale_pos_weight,
+            class_counts=self.class_counts,
+            beta=self.beta,
+            smooth=self.smooth,
+        )
+        compl_loss = 1.0 - tanimoto_dist(
+            1.0 - inputs,
+            1.0 - targets,
+            scale_pos_weight=self.scale_pos_weight,
+            class_counts=self.class_counts,
+            beta=self.beta,
+            smooth=self.smooth,
+        )
+        loss = (loss + compl_loss) * 0.5
 
         return loss.mean()
 
 
-class CrossEntropyLoss(torch.nn.Module):
+class CrossEntropyLoss(nn.Module):
     """Cross entropy loss."""
 
     def __init__(
@@ -389,7 +409,7 @@ class CrossEntropyLoss(torch.nn.Module):
     ):
         super(CrossEntropyLoss, self).__init__()
 
-        self.loss_func = torch.nn.CrossEntropyLoss(
+        self.loss_func = nn.CrossEntropyLoss(
             weight=weight, reduction=reduction, label_smoothing=label_smoothing
         )
 
@@ -408,7 +428,7 @@ class CrossEntropyLoss(torch.nn.Module):
         return self.loss_func(inputs, targets)
 
 
-class FocalLoss(torch.nn.Module):
+class FocalLoss(nn.Module):
     """Focal loss.
 
     Reference:
@@ -430,7 +450,7 @@ class FocalLoss(torch.nn.Module):
         self.preprocessor = LossPreprocessing(
             inputs_are_logits=True, apply_transform=True
         )
-        self.cross_entropy_loss = torch.nn.CrossEntropyLoss(
+        self.cross_entropy_loss = nn.CrossEntropyLoss(
             weight=weight, reduction="none", label_smoothing=label_smoothing
         )
 
@@ -445,7 +465,7 @@ class FocalLoss(torch.nn.Module):
         return focal_loss.mean()
 
 
-class QuantileLoss(torch.nn.Module):
+class QuantileLoss(nn.Module):
     """Loss function for quantile regression.
 
     Reference:
@@ -482,7 +502,7 @@ class QuantileLoss(torch.nn.Module):
         return loss
 
 
-class WeightedL1Loss(torch.nn.Module):
+class WeightedL1Loss(nn.Module):
     """Weighted L1Loss loss."""
 
     def __init__(self):
@@ -510,13 +530,13 @@ class WeightedL1Loss(torch.nn.Module):
         return loss
 
 
-class MSELoss(torch.nn.Module):
+class MSELoss(nn.Module):
     """MSE loss."""
 
     def __init__(self):
         super(MSELoss, self).__init__()
 
-        self.loss_func = torch.nn.MSELoss()
+        self.loss_func = nn.MSELoss()
 
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor
@@ -535,7 +555,7 @@ class MSELoss(torch.nn.Module):
         )
 
 
-class BoundaryLoss(torch.nn.Module):
+class BoundaryLoss(nn.Module):
     """Boundary (surface) loss.
 
     Reference:
@@ -573,7 +593,7 @@ class BoundaryLoss(torch.nn.Module):
         return torch.einsum("bchw, bchw -> bchw", inputs, targets).mean()
 
 
-class MultiScaleSSIMLoss(torch.nn.Module):
+class MultiScaleSSIMLoss(nn.Module):
     """Multi-scale Structural Similarity Index Measure loss."""
 
     def __init__(self):

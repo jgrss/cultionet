@@ -223,10 +223,11 @@ train_predict:
     long: model-type
     help: The model type
     kwargs:
-      default: 'ResUNet3Psi'
+      default: 'ResELUNetPsi'
       choices:
         - 'UNet3Psi'
         - 'ResUNet3Psi'
+        - 'ResELUNetPsi'
   activation_type:
     short: ''
     long: activation-type
@@ -530,10 +531,11 @@ train:
     long: lr-scheduler
     help: The learning rate scheduler
     kwargs:
-      default: 'CosineAnnealingLR'
+      default: 'OneCycleLR'
       choices:
-        - 'ExponentialLR'
         - 'CosineAnnealingLR'
+        - 'ExponentialLR'
+        - 'OneCycleLR'
         - 'StepLR'
   steplr_step_size:
     short: ''
@@ -624,6 +626,12 @@ train:
     help: Whether to skip training
     kwargs:
       action: store_true
+  finetune:
+    short: ''
+    long: finetune
+    help: Whether to finetune a transfer model (otherwise, do feature extraction)
+    kwargs:
+      action: store_true
 
 predict:
   predict_year:
@@ -699,3 +707,15 @@ predict:
     help: Whether to delete the prediction dataset
     kwargs:
       action: store_true
+
+train_transfer:
+  placeholder:
+    short: ''
+    long: placeholder
+    help: Help for placeholder
+
+predict_transfer:
+  placeholder:
+    short: ''
+    long: placeholder
+    help: Help for placeholder

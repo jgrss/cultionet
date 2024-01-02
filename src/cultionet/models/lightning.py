@@ -1,6 +1,5 @@
 import typing as T
 from pathlib import Path
-import json
 import warnings
 import logging
 
@@ -14,11 +13,14 @@ from torchvision.ops import box_iou
 from torchvision import transforms
 import torchmetrics
 
-from . import model_utils
-from .cultio import CultioNet, GeoRefinement
-from .maskcrnn import BFasterRCNN
-from .base_layers import Softmax
-from ..losses import TanimotoDistLoss
+from cultionet.enums import LearningRateSchedulers, ModelTypes, ResBlockTypes
+from cultionet.losses import TanimotoComplementLoss, TanimotoDistLoss
+from cultionet.layers.base_layers import FinalConv2dDropout, Softmax
+from cultionet.layers.weights import init_attention_weights
+from cultionet.models import model_utils
+from cultionet.models.cultio import CultioNet, GeoRefinement
+from cultionet.models.maskcrnn import BFasterRCNN
+from cultionet.models.nunet import PostUNet3Psi
 
 
 warnings.filterwarnings("ignore")
@@ -424,91 +426,12 @@ class RefineLitModel(LightningModule):
         }
 
 
-class CultioLitModel(LightningModule):
-    def __init__(
-        self,
-        num_features: int = None,
-        num_time_features: int = None,
-        num_classes: int = 2,
-        filters: int = 32,
-        model_type: str = "ResUNet3Psi",
-        activation_type: str = "SiLU",
-        dilations: T.Union[int, T.Sequence[int]] = None,
-        res_block_type: str = "resa",
-        attention_weights: str = "spatial_channel",
-        optimizer: str = "AdamW",
-        learning_rate: float = 1e-3,
-        lr_scheduler: str = "CosineAnnealingLR",
-        steplr_step_size: int = 5,
-        weight_decay: float = 0.01,
-        eps: float = 1e-4,
-        ckpt_name: str = "last",
-        model_name: str = "cultionet",
-        deep_sup_dist: bool = False,
-        deep_sup_edge: bool = False,
-        deep_sup_mask: bool = False,
-        class_counts: T.Optional[torch.Tensor] = None,
-        edge_class: T.Optional[int] = None,
-        temperature_lit_model: T.Optional[GeoRefinement] = None,
-        scale_pos_weight: T.Optional[bool] = True,
-        save_batch_val_metrics: T.Optional[bool] = False,
-    ):
-        """Lightning model."""
-        super(CultioLitModel, self).__init__()
-
-        self.save_hyperparameters()
-
-        self.optimizer = optimizer
-        self.learning_rate = learning_rate
-        self.lr_scheduler = lr_scheduler
-        self.steplr_step_size = steplr_step_size
-        self.weight_decay = weight_decay
-        self.eps = eps
-        self.ckpt_name = ckpt_name
-        self.model_name = model_name
-        self.num_classes = num_classes
-        self.num_time_features = num_time_features
-        self.class_counts = class_counts
-        self.temperature_lit_model = temperature_lit_model
-        self.scale_pos_weight = scale_pos_weight
-        self.save_batch_val_metrics = save_batch_val_metrics
-        self.deep_sup_dist = deep_sup_dist
-        self.deep_sup_edge = deep_sup_edge
-        self.deep_sup_mask = deep_sup_mask
-        self.sigmoid = torch.nn.Sigmoid()
-        if edge_class is not None:
-            self.edge_class = edge_class
-        else:
-            self.edge_class = num_classes
-
-        self.model_attr = f"{model_name}_{model_type}"
-        setattr(
-            self,
-            self.model_attr,
-            CultioNet(
-                ds_features=num_features,
-                ds_time_features=num_time_features,
-                filters=filters,
-                num_classes=self.num_classes,
-                model_type=model_type,
-                activation_type=activation_type,
-                dilations=dilations,
-                res_block_type=res_block_type,
-                attention_weights=attention_weights,
-                deep_sup_dist=deep_sup_dist,
-                deep_sup_edge=deep_sup_edge,
-                deep_sup_mask=deep_sup_mask,
-            ),
-        )
-        self.configure_loss()
-        self.configure_scorer()
+class LightningModuleMixin(LightningModule):
+    def __init__(self):
+        super(LightningModuleMixin, self).__init__()
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
-
-    @property
-    def cultionet_model(self) -> CultioNet:
-        return getattr(self, self.model_attr)
 
     def forward(
         self, batch: Data, batch_idx: int = None
@@ -522,12 +445,41 @@ class CultioLitModel(LightningModule):
         """
         return self.cultionet_model(batch)
 
+    @property
+    def cultionet_model(self) -> CultioNet:
+        return getattr(self, self.model_attr)
+
     @staticmethod
     def get_cuda_memory():
         t = torch.cuda.get_device_properties(0).total_memory
         r = torch.cuda.memory_reserved(0)
         a = torch.cuda.memory_allocated(0)
         print(f"{t * 1e-6:.02f}MB", f"{r * 1e-6:.02f}MB", f"{a * 1e-6:.02f}MB")
+
+    def softmax(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
+        return F.softmax(x, dim=dim, dtype=x.dtype)
+
+    def probas_to_labels(
+        self, x: torch.Tensor, thresh: float = 0.5
+    ) -> torch.Tensor:
+        if x.shape[1] == 1:
+            labels = x.gt(thresh).long()
+        else:
+            labels = x.argmax(dim=1).long()
+
+        return labels
+
+    def logits_to_probas(self, x: torch.Tensor) -> T.Union[None, torch.Tensor]:
+        if x is not None:
+            # Single-dimension inputs are sigmoid probabilities
+            if x.shape[1] > 1:
+                # Transform logits to probabilities
+                x = self.softmax(x)
+            else:
+                x = self.sigmoid(x)
+            x = x.clip(0, 1)
+
+        return x
 
     def predict_step(
         self, batch: Data, batch_idx: int = None
@@ -576,38 +528,6 @@ class CultioLitModel(LightningModule):
             "true_crop_type": true_crop_type,
         }
 
-    def softmax(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
-        return F.softmax(x, dim=dim, dtype=x.dtype)
-
-    def probas_to_labels(
-        self, x: torch.Tensor, thresh: float = 0.5
-    ) -> torch.Tensor:
-        if x.shape[1] == 1:
-            labels = x.gt(thresh).long()
-        else:
-            labels = x.argmax(dim=1).long()
-
-        return labels
-
-    def logits_to_probas(self, x: torch.Tensor) -> T.Union[None, torch.Tensor]:
-        if x is not None:
-            # Single-dimension inputs are sigmoid probabilities
-            if x.shape[1] > 1:
-                # Transform logits to probabilities
-                x = self.softmax(x)
-            else:
-                x = self.sigmoid(x)
-            x = x.clip(0, 1)
-
-        return x
-
-    # def on_train_epoch_start(self):
-    #     # Get the current learning rate from the optimizer
-    #     eps = self.optimizers().optimizer.param_groups[0]['eps']
-    #     weight_decay = self.optimizers().optimizer.param_groups[0]['weight_decay']
-    #     if (weight_decay != self.weight_decay) or (eps != self.eps):
-    #         self.configure_optimizers()
-
     def on_validation_epoch_end(self, *args, **kwargs):
         """Save the model on validation end."""
         if self.logger.save_dir is not None:
@@ -630,19 +550,19 @@ class CultioLitModel(LightningModule):
             batch, crop_type=predictions["crop_type"]
         )
 
-        # RNN level 2 loss (non-crop=0; crop|edge=1)
-        crop_star_l2_loss = self.crop_star_l2_loss(
-            predictions["crop_star_l2"], true_labels_dict["true_crop_and_edge"]
+        # Temporal encoding level 2 loss (non-crop=0; crop|edge=1)
+        classes_l2_loss = self.classes_l2_loss(
+            predictions["classes_l2"], true_labels_dict["true_crop_and_edge"]
         )
-        # RNN final loss (non-crop=0; crop=1; edge=2)
-        crop_star_loss = self.crop_star_loss(
-            predictions["crop_star"], true_labels_dict["true_crop_or_edge"]
+        # Temporal encoding final loss (non-crop=0; crop=1; edge=2)
+        classes_last_loss = self.classes_last_loss(
+            predictions["classes_last"], true_labels_dict["true_crop_or_edge"]
         )
         # Main loss
         loss = (
-            # RNN losses
-            0.25 * crop_star_l2_loss
-            + 0.5 * crop_star_loss
+            # Temporal encoding losses
+            0.25 * classes_l2_loss
+            + 0.5 * classes_last_loss
         )
         # Edge losses
         if self.deep_sup_dist:
@@ -901,21 +821,19 @@ class CultioLitModel(LightningModule):
             )
 
     def configure_loss(self):
-        self.dist_loss = TanimotoDistLoss()
+        self.dist_loss = TanimotoComplementLoss()
         if self.deep_sup_dist:
             self.dist_loss_3_1 = TanimotoDistLoss()
             self.dist_loss_2_2 = TanimotoDistLoss()
             self.dist_loss_1_3 = TanimotoDistLoss()
         # Edge losses
-        self.edge_loss = TanimotoDistLoss()
+        self.edge_loss = TanimotoComplementLoss()
         if self.deep_sup_edge:
             self.edge_loss_3_1 = TanimotoDistLoss()
             self.edge_loss_2_2 = TanimotoDistLoss()
             self.edge_loss_1_3 = TanimotoDistLoss()
         # Crop mask losses
-        self.crop_loss = TanimotoDistLoss(
-            scale_pos_weight=self.scale_pos_weight
-        )
+        self.crop_loss = TanimotoComplementLoss()
         if self.deep_sup_mask:
             self.crop_loss_3_1 = TanimotoDistLoss(
                 scale_pos_weight=self.scale_pos_weight
@@ -926,9 +844,9 @@ class CultioLitModel(LightningModule):
             self.crop_loss_1_3 = TanimotoDistLoss(
                 scale_pos_weight=self.scale_pos_weight
             )
-        # Crop RNN losses
-        self.crop_star_l2_loss = TanimotoDistLoss()
-        self.crop_star_loss = TanimotoDistLoss()
+        # Crop Temporal encoding losses
+        self.classes_l2_loss = TanimotoComplementLoss()
+        self.classes_last_loss = TanimotoComplementLoss()
         # FIXME:
         if self.num_classes > 2:
             self.crop_type_star_loss = TanimotoDistLoss(
@@ -940,6 +858,7 @@ class CultioLitModel(LightningModule):
 
     def configure_optimizers(self):
         params_list = list(self.cultionet_model.parameters())
+        interval = 'epoch'
         if self.optimizer == "AdamW":
             optimizer = torch.optim.AdamW(
                 params_list,
@@ -957,15 +876,23 @@ class CultioLitModel(LightningModule):
         else:
             raise NameError("Choose either 'AdamW' or 'SGD'.")
 
-        if self.lr_scheduler == "ExponentialLR":
-            model_lr_scheduler = optim_lr_scheduler.ExponentialLR(
-                optimizer, gamma=0.5
-            )
-        elif self.lr_scheduler == "CosineAnnealingLR":
+        if self.lr_scheduler == LearningRateSchedulers.COSINE_ANNEALING_LR:
             model_lr_scheduler = optim_lr_scheduler.CosineAnnealingLR(
                 optimizer, T_max=20, eta_min=1e-5, last_epoch=-1
             )
-        elif self.lr_scheduler == "StepLR":
+        elif self.lr_scheduler == LearningRateSchedulers.EXPONENTIAL_LR:
+            model_lr_scheduler = optim_lr_scheduler.ExponentialLR(
+                optimizer, gamma=0.5
+            )
+        elif self.lr_scheduler == LearningRateSchedulers.ONE_CYCLE_LR:
+            model_lr_scheduler = optim_lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=0.01,
+                epochs=self.trainer.max_epochs,
+                steps_per_epoch=self.trainer.estimated_stepping_batches,
+            )
+            interval = 'step'
+        elif self.lr_scheduler == LearningRateSchedulers.STEP_LR:
             model_lr_scheduler = optim_lr_scheduler.StepLR(
                 optimizer, step_size=self.steplr_step_size, gamma=0.5
             )
@@ -980,7 +907,237 @@ class CultioLitModel(LightningModule):
                 "scheduler": model_lr_scheduler,
                 "name": "lr_sch",
                 "monitor": "val_score",
-                "interval": "epoch",
+                "interval": interval,
                 "frequency": 1,
             },
         }
+
+
+class CultioLitTransferModel(LightningModuleMixin):
+    """Transfer learning module for Cultionet."""
+
+    def __init__(
+        self,
+        ckpt_file: T.Union[Path, str],
+        ds_features: int,
+        ds_time_features: int,
+        init_filter: int = 32,
+        activation_type: str = "SiLU",
+        num_classes: int = 2,
+        optimizer: str = "AdamW",
+        learning_rate: float = 1e-3,
+        lr_scheduler: str = LearningRateSchedulers.ONE_CYCLE_LR,
+        steplr_step_size: int = 5,
+        weight_decay: float = 0.01,
+        eps: float = 1e-4,
+        mask_activation: T.Callable = Softmax(dim=1),
+        deep_sup_dist: bool = True,
+        deep_sup_edge: bool = True,
+        deep_sup_mask: bool = True,
+        scale_pos_weight: bool = True,
+        model_name: str = "cultionet_transfer",
+        edge_class: T.Optional[int] = None,
+        save_batch_val_metrics: bool = False,
+        finetune: bool = False,
+    ):
+        super(CultioLitTransferModel, self).__init__()
+
+        self.save_hyperparameters()
+
+        self.num_classes = num_classes
+        self.optimizer = optimizer
+        self.learning_rate = learning_rate
+        self.lr_scheduler = lr_scheduler
+        self.steplr_step_size = steplr_step_size
+        self.weight_decay = weight_decay
+        self.eps = eps
+        self.model_name = model_name
+        self.temperature_lit_model = None
+        self.save_batch_val_metrics = save_batch_val_metrics
+        if edge_class is not None:
+            self.edge_class = edge_class
+        else:
+            self.edge_class = num_classes
+
+        up_channels = int(init_filter * 5)
+        # Total number of features (time x bands/indices/channels)
+        self.ds_num_features = ds_features
+        # Total number of time features
+        self.ds_num_time = ds_time_features
+        # Total number of bands
+        self.ds_num_bands = int(self.ds_num_features / self.ds_num_time)
+        self.deep_sup_dist = deep_sup_dist
+        self.deep_sup_edge = deep_sup_edge
+        self.deep_sup_mask = deep_sup_mask
+        self.scale_pos_weight = scale_pos_weight
+
+        self.gc = model_utils.GraphToConv()
+        self.cg = model_utils.ConvToGraph()
+        self.ct = model_utils.ConvToTime()
+
+        self.cultionet_model = CultioLitModel.load_from_checkpoint(
+            checkpoint_path=str(ckpt_file)
+        )
+
+        if not finetune:
+            # Freeze all parameters for feature extraction
+            self.cultionet_model.freeze()
+
+        # layers[-2] ->
+        #   TemporalAttention()
+        layers = list(self.cultionet_model.cultionet_model.children())
+        self.cultionet_model.temporal_encoder = layers[-2]
+
+        if not finetune:
+            # Unfreeze the temporal encoder
+            self.cultionet_model.temporal_encoder = self.unfreeze_layer(
+                self.temporal_encoder
+            )
+            # Set new final layers to learn new weights
+            # Level 2 level (non-crop; crop)
+            self.cultionet_model.temporal_encoder.final_l2 = (
+                FinalConv2dDropout(
+                    hidden_dim=self.temporal_encoder.final_l2.net[0]
+                    .seq.seq[0]
+                    .seq[0]
+                    .in_channels,
+                    dim_factor=1,
+                    activation_type=activation_type,
+                    final_activation=Softmax(dim=1),
+                    num_classes=num_classes,
+                )
+            )
+            self.cultionet_model.temporal_encoder.final_l2.apply(
+                init_attention_weights
+            )
+            # Last level (non-crop; crop; edges)
+            self.cultionet_model.temporal_encoder.final_last = (
+                FinalConv2dDropout(
+                    hidden_dim=self.temporal_encoder.final_last.net[0]
+                    .seq.seq[0]
+                    .seq[0]
+                    .in_channels,
+                    dim_factor=1,
+                    activation_type=activation_type,
+                    final_activation=Softmax(dim=1),
+                    num_classes=num_classes + 1,
+                )
+            )
+            self.cultionet_model.temporal_encoder.final_last.apply(
+                init_attention_weights
+            )
+
+            # layers[-1] ->
+            #   ResUNet3Psi()
+            self.cultionet_model.mask_model = layers[-1]
+            # Update the post-UNet layer with trainable parameters
+            post_unet = PostUNet3Psi(
+                up_channels=up_channels,
+                num_classes=num_classes,
+                mask_activation=mask_activation,
+                deep_sup_dist=deep_sup_dist,
+                deep_sup_edge=deep_sup_edge,
+                deep_sup_mask=deep_sup_mask,
+            )
+            self.cultionet_model.mask_model.post_unet = post_unet
+
+        self.model_attr = model_name
+        setattr(
+            self,
+            self.model_attr,
+            self.cultionet_model,
+        )
+        self.configure_loss()
+        self.configure_scorer()
+
+    def unfreeze_layer(self, layer):
+        for param in layer.parameters():
+            param.requires_grad = True
+
+        return layer
+
+
+class CultioLitModel(LightningModuleMixin):
+    def __init__(
+        self,
+        num_features: int = None,
+        num_time_features: int = None,
+        num_classes: int = 2,
+        filters: int = 32,
+        model_type: str = ModelTypes.RESELUNETPSI,
+        activation_type: str = "SiLU",
+        dilations: T.Union[int, T.Sequence[int]] = None,
+        res_block_type: str = ResBlockTypes.RES,
+        attention_weights: str = "spatial_channel",
+        optimizer: str = "AdamW",
+        learning_rate: float = 1e-3,
+        lr_scheduler: str = LearningRateSchedulers.ONE_CYCLE_LR,
+        steplr_step_size: int = 5,
+        weight_decay: float = 0.01,
+        eps: float = 1e-4,
+        ckpt_name: str = "last",
+        model_name: str = "cultionet",
+        deep_sup_dist: bool = False,
+        deep_sup_edge: bool = False,
+        deep_sup_mask: bool = False,
+        class_counts: T.Optional[torch.Tensor] = None,
+        edge_class: T.Optional[int] = None,
+        temperature_lit_model: T.Optional[GeoRefinement] = None,
+        scale_pos_weight: bool = True,
+        save_batch_val_metrics: bool = False,
+    ):
+        """Lightning model."""
+        super(CultioLitModel, self).__init__()
+
+        self.save_hyperparameters()
+
+        self.optimizer = optimizer
+        self.learning_rate = learning_rate
+        self.lr_scheduler = lr_scheduler
+        self.steplr_step_size = steplr_step_size
+        self.weight_decay = weight_decay
+        self.eps = eps
+        self.ckpt_name = ckpt_name
+        self.model_name = model_name
+        self.num_classes = num_classes
+        self.num_time_features = num_time_features
+        self.class_counts = class_counts
+        self.temperature_lit_model = temperature_lit_model
+        self.scale_pos_weight = scale_pos_weight
+        self.save_batch_val_metrics = save_batch_val_metrics
+        self.deep_sup_dist = deep_sup_dist
+        self.deep_sup_edge = deep_sup_edge
+        self.deep_sup_mask = deep_sup_mask
+        self.sigmoid = torch.nn.Sigmoid()
+        if edge_class is not None:
+            self.edge_class = edge_class
+        else:
+            self.edge_class = num_classes
+
+        self.model_attr = f"{model_name}_{model_type}"
+        setattr(
+            self,
+            self.model_attr,
+            CultioNet(
+                ds_features=num_features,
+                ds_time_features=num_time_features,
+                filters=filters,
+                num_classes=self.num_classes,
+                model_type=model_type,
+                activation_type=activation_type,
+                dilations=dilations,
+                res_block_type=res_block_type,
+                attention_weights=attention_weights,
+                deep_sup_dist=deep_sup_dist,
+                deep_sup_edge=deep_sup_edge,
+                deep_sup_mask=deep_sup_mask,
+            ),
+        )
+        self.configure_loss()
+        self.configure_scorer()
+
+    # def on_train_epoch_start(self):
+    #     # Get the current learning rate from the optimizer
+    #     weight_decay = self.optimizers().optimizer.param_groups[0]['weight_decay']
+    #     if (weight_decay != self.weight_decay) or (eps != self.eps):
+    #         self.configure_optimizers()
