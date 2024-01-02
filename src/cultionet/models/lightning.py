@@ -13,6 +13,7 @@ from torchvision.ops import box_iou
 from torchvision import transforms
 import torchmetrics
 
+from cultionet.enums import LearningRateSchedulers, ModelTypes, ResBlockTypes
 from cultionet.losses import TanimotoComplementLoss, TanimotoDistLoss
 from cultionet.layers.base_layers import FinalConv2dDropout, Softmax
 from cultionet.layers.weights import init_attention_weights
@@ -875,19 +876,15 @@ class LightningModuleMixin(LightningModule):
         else:
             raise NameError("Choose either 'AdamW' or 'SGD'.")
 
-        if self.lr_scheduler == "ExponentialLR":
-            model_lr_scheduler = optim_lr_scheduler.ExponentialLR(
-                optimizer, gamma=0.5
-            )
-        elif self.lr_scheduler == "CosineAnnealingLR":
+        if self.lr_scheduler == LearningRateSchedulers.COSINE_ANNEALING_LR:
             model_lr_scheduler = optim_lr_scheduler.CosineAnnealingLR(
                 optimizer, T_max=20, eta_min=1e-5, last_epoch=-1
             )
-        elif self.lr_scheduler == "StepLR":
-            model_lr_scheduler = optim_lr_scheduler.StepLR(
-                optimizer, step_size=self.steplr_step_size, gamma=0.5
+        elif self.lr_scheduler == LearningRateSchedulers.EXPONENTIAL_LR:
+            model_lr_scheduler = optim_lr_scheduler.ExponentialLR(
+                optimizer, gamma=0.5
             )
-        elif self.lr_scheduler == 'OneCycleLR':
+        elif self.lr_scheduler == LearningRateSchedulers.ONE_CYCLE_LR:
             model_lr_scheduler = optim_lr_scheduler.OneCycleLR(
                 optimizer,
                 max_lr=0.01,
@@ -895,6 +892,10 @@ class LightningModuleMixin(LightningModule):
                 steps_per_epoch=self.trainer.estimated_stepping_batches,
             )
             interval = 'step'
+        elif self.lr_scheduler == LearningRateSchedulers.STEP_LR:
+            model_lr_scheduler = optim_lr_scheduler.StepLR(
+                optimizer, step_size=self.steplr_step_size, gamma=0.5
+            )
         else:
             raise NameError(
                 "The learning rate scheduler is not implemented in Cultionet."
@@ -925,7 +926,7 @@ class CultioLitTransferModel(LightningModuleMixin):
         num_classes: int = 2,
         optimizer: str = "AdamW",
         learning_rate: float = 1e-3,
-        lr_scheduler: str = "OneCycleLR",
+        lr_scheduler: str = LearningRateSchedulers.ONE_CYCLE_LR,
         steplr_step_size: int = 5,
         weight_decay: float = 0.01,
         eps: float = 1e-4,
@@ -933,10 +934,10 @@ class CultioLitTransferModel(LightningModuleMixin):
         deep_sup_dist: bool = True,
         deep_sup_edge: bool = True,
         deep_sup_mask: bool = True,
-        scale_pos_weight: T.Optional[bool] = True,
+        scale_pos_weight: bool = True,
         model_name: str = "cultionet_transfer",
         edge_class: T.Optional[int] = None,
-        save_batch_val_metrics: T.Optional[bool] = False,
+        save_batch_val_metrics: bool = False,
         finetune: bool = False,
     ):
         super(CultioLitTransferModel, self).__init__()
@@ -1063,14 +1064,14 @@ class CultioLitModel(LightningModuleMixin):
         num_time_features: int = None,
         num_classes: int = 2,
         filters: int = 32,
-        model_type: str = "ResUNet3Psi",
+        model_type: str = ModelTypes.RESELUNETPSI,
         activation_type: str = "SiLU",
         dilations: T.Union[int, T.Sequence[int]] = None,
-        res_block_type: str = "res",
+        res_block_type: str = ResBlockTypes.RES,
         attention_weights: str = "spatial_channel",
         optimizer: str = "AdamW",
         learning_rate: float = 1e-3,
-        lr_scheduler: str = "OneCycleLR",
+        lr_scheduler: str = LearningRateSchedulers.ONE_CYCLE_LR,
         steplr_step_size: int = 5,
         weight_decay: float = 0.01,
         eps: float = 1e-4,
@@ -1082,8 +1083,8 @@ class CultioLitModel(LightningModuleMixin):
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         temperature_lit_model: T.Optional[GeoRefinement] = None,
-        scale_pos_weight: T.Optional[bool] = True,
-        save_batch_val_metrics: T.Optional[bool] = False,
+        scale_pos_weight: bool = True,
+        save_batch_val_metrics: bool = False,
     ):
         """Lightning model."""
         super(CultioLitModel, self).__init__()

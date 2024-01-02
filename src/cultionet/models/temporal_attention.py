@@ -31,7 +31,9 @@ class ScaledDotProductAttention(nn.Module):
     ):
         super(ScaledDotProductAttention, self).__init__()
 
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = None
+        if dropout > 0:
+            self.dropout = nn.Dropout(dropout)
         self.scale = scale
         self.softmax = nn.Softmax(dim=-1)
 
@@ -46,15 +48,18 @@ class ScaledDotProductAttention(nn.Module):
         if prev_attention is not None:
             scores = scores + prev_attention
         attention = self.softmax(scores)
+        if self.dropout is not None:
+            attention = self.dropout(attention)
         output = torch.einsum('hblt, hbtv -> hblv', [attention, value])
-        output = self.dropout(output)
 
         return output, attention
 
 
 class MultiHeadAttention(nn.Module):
-    """Multi-Head Attention module Modified from
-    github.com/jadore801120/attention-is-all-you-need-pytorch."""
+    """Multi-Head Attention module.add()
+
+    Modified from github.com/jadore801120/attention-is-all-you-need-pytorch
+    """
 
     def __init__(self, num_head: int, d_in: int, dropout: float = 0.1):
         super(MultiHeadAttention, self).__init__()
@@ -197,6 +202,7 @@ class TemporalAttention(nn.Module):
         )
 
         # Absolute positional embeddings
+        self.positions = torch.arange(0, num_time, dtype=torch.long)
         self.positional_encoder = nn.Embedding.from_pretrained(
             get_sinusoid_encoding_table(
                 positions=num_time,
@@ -234,6 +240,21 @@ class TemporalAttention(nn.Module):
 
         self.apply(init_attention_weights)
 
+    def reshape_coordinates(
+        self,
+        coordinates: torch.Tensor,
+        batch_size: int,
+        height: int,
+        width: int,
+    ) -> torch.Tensor:
+        return einops.rearrange(
+            torch.tile(coordinates[:, None], (1, height * width)),
+            'b (h w) -> (b h w) 1',
+            b=batch_size,
+            h=height,
+            w=width,
+        )
+
     def forward(
         self,
         x: torch.Tensor,
@@ -242,48 +263,34 @@ class TemporalAttention(nn.Module):
     ) -> tuple:
         batch_size, num_channels, num_time, height, width = x.shape
 
-        out = self.init_conv(x)
+        x = self.init_conv(x)
 
         # Positional embedding
         src_pos = (
-            torch.arange(0, out.shape[1], dtype=torch.long)
-            .expand(out.shape[0], out.shape[1])
-            .to(x.device)
-        )
+            self.positions.expand(batch_size * height * width, num_time)
+        ).to(x.device)
         position_tokens = self.positional_encoder(src_pos)
         # Coordinate embedding
         coordinate_tokens = self.coordinate_encoder(
             cartesian(
-                einops.rearrange(
-                    torch.tile(longitude[:, None], (1, height * width)),
-                    'b (h w) -> (b h w) 1',
-                    b=batch_size,
-                    h=height,
-                    w=width,
-                ),
-                einops.rearrange(
-                    torch.tile(latitude[:, None], (1, height * width)),
-                    'b (h w) -> (b h w) 1',
-                    b=batch_size,
-                    h=height,
-                    w=width,
-                ),
+                self.reshape_coordinates(longitude, batch_size, height, width),
+                self.reshape_coordinates(latitude, batch_size, height, width),
             )
         )
-        out = out + position_tokens + coordinate_tokens
+        x = x + position_tokens + coordinate_tokens
 
         # Attention
-        out, attention = self.attention_a(out, out, out)
+        out_a, attention = self.attention_a(x, x, x)
         # Concatenate heads
         last_l2 = einops.rearrange(
-            out, '(b h w) t c -> b c t h w', b=batch_size, h=height, w=width
+            out_a, '(b h w) t c -> b c t h w', b=batch_size, h=height, w=width
         )
         last_l2 = einops.reduce(last_l2, 'b c t h w -> b c h w', 'mean')
         last_l2 = self.final_l2(last_l2)
 
         # Attention
         out, attention = self.attention_b(
-            out, out, out, prev_attention=attention
+            x, out_a, out_a, prev_attention=attention
         )
         # Concatenate heads
         out = einops.rearrange(

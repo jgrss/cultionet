@@ -62,3 +62,10 @@ class ModelTypes(StrEnum):
 class ResBlockTypes(StrEnum):
     RES = 'res'
     RESA = 'resa'
+
+
+class LearningRateSchedulers(StrEnum):
+    COSINE_ANNEALING_LR = 'CosineAnnealingLR'
+    EXPONENTIAL_LR = 'ExponentialLR'
+    ONE_CYCLE_LR = 'OneCycleLR'
+    STEP_LR = 'StepLR'

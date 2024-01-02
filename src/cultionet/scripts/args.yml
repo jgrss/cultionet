@@ -533,10 +533,10 @@ train:
     kwargs:
       default: 'OneCycleLR'
       choices:
-        - 'ExponentialLR'
         - 'CosineAnnealingLR'
-        - 'StepLR'
+        - 'ExponentialLR'
         - 'OneCycleLR'
+        - 'StepLR'
   steplr_step_size:
     short: ''
     long: steplr-step-size
