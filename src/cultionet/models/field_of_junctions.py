@@ -10,6 +10,11 @@ from cultionet.models import model_utils
 
 
 class FieldOfJunctions(nn.Module):
+    """
+    Source:
+        https://github.com/dorverbin/fieldofjunctions/tree/main
+    """
+
     def __init__(
         self,
         in_channels: int,
