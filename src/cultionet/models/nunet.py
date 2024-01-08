@@ -29,6 +29,7 @@ from cultionet.layers.base_layers import (
     Squeeze,
     SetActivation,
 )
+from cultionet.models.field_of_junctions import FieldOfJunctions
 from cultionet.models.unet_parts import (
     ResELUNetPsiBlock,
     UNet3_3_1,
@@ -784,6 +785,11 @@ class ResELUNetPsi(nn.Module):
             activation_type=activation_type,
         )
 
+        self.field_of_junctions = FieldOfJunctions(
+            in_channels=channels[0],
+            patch_size=9,
+        )
+
         # Inputs =
         # Reduced time dimensions
         # Reduced channels (x2) for mean and max
@@ -949,6 +955,7 @@ class ResELUNetPsi(nn.Module):
         # Inputs shape is (B x C X T|D x H x W)
         h = self.pre_unet(x, temporal_encoding=temporal_encoding)
         # h shape is (B x C x H x W)
+        h_foj = self.field_of_junctions(h)
         # Backbone
         # 1/1
         x0_0 = self.conv0_0(h)
@@ -1044,7 +1051,8 @@ class ResELUNetPsi(nn.Module):
             },
             shape=x0_0.shape[-2:],
         )
-
+        out_0_4['edge'] = out_0_4['edge'] + h_foj['boundaries']
+        out_0_4['mask'] = out_0_4['mask'] + h_foj['image']
         out = self.post_unet(
             out_0_4=out_0_4,
             out_3_1=out_3_1,
@@ -1072,7 +1080,7 @@ if __name__ == '__main__':
         (batch_size, in_encoding_channels, height, width), dtype=torch.float32
     )
 
-    model = ResUNet3Psi(
+    model = ResELUNetPsi(
         in_channels=num_channels,
         in_time=num_time,
         in_encoding_channels=in_encoding_channels,
