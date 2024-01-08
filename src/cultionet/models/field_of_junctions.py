@@ -3,7 +3,10 @@ import typing as T
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
+
+from cultionet.models import model_utils
 
 
 class FieldOfJunctions(nn.Module):
@@ -24,6 +27,8 @@ class FieldOfJunctions(nn.Module):
         self.delta = delta
         self.eta = eta
 
+        self.up = model_utils.UpSample()
+
         self.reduce = nn.Sequential(
             nn.Conv2d(in_channels, 3, kernel_size=1, padding=0, bias=False),
             nn.BatchNorm2d(3),
@@ -41,6 +46,13 @@ class FieldOfJunctions(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> T.Dict[str, torch.Tensor]:
+        batch_size, num_channels, in_height, in_width = x.shape
+        x = F.interpolate(
+            x,
+            size=(in_height // 2, in_width // 2),
+            mode="bilinear",
+            align_corners=True,
+        )
         x = self.reduce(x)
 
         batch_size, num_channels, height, width = x.shape
@@ -158,6 +170,17 @@ class FieldOfJunctions(nn.Module):
 
         global_boundaries = self.final_boundaries(global_boundaries)
         smoothed_image = self.final_image(smoothed_image)
+
+        global_boundaries = self.up(
+            global_boundaries,
+            size=(in_height, in_width),
+            mode="bilinear",
+        )
+        smoothed_image = self.up(
+            smoothed_image,
+            size=(in_height, in_width),
+            mode="bilinear",
+        )
 
         return {
             "boundaries": global_boundaries,

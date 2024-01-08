@@ -751,6 +751,7 @@ class ResELUNetPsi(nn.Module):
         deep_sup_edge: T.Optional[bool] = False,
         deep_sup_mask: T.Optional[bool] = False,
         mask_activation: T.Union[Softmax, nn.Sigmoid] = Softmax(dim=1),
+        field_of_junctions_patch_size: int = 5,
     ):
         super(ResELUNetPsi, self).__init__()
 
@@ -787,7 +788,7 @@ class ResELUNetPsi(nn.Module):
 
         self.field_of_junctions = FieldOfJunctions(
             in_channels=channels[0],
-            patch_size=9,
+            patch_size=field_of_junctions_patch_size,
         )
 
         # Inputs =
