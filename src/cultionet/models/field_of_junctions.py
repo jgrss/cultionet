@@ -77,6 +77,7 @@ class FieldOfJunctions(nn.Module):
             self.w_patches,
             dtype=x.dtype,
             device=x.device,
+            requires_grad=True,
         )
         x0_y0 = torch.zeros(
             batch_size,
@@ -85,6 +86,7 @@ class FieldOfJunctions(nn.Module):
             self.w_patches,
             dtype=x.dtype,
             device=x.device,
+            requires_grad=True,
         )
 
         # Compute number of patches containing each pixel: has shape [H, W]
