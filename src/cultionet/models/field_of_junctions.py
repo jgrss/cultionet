@@ -699,6 +699,7 @@ class FieldOfJunctions(nn.Module):
     def forward(self, x: torch.Tensor) -> T.Dict[str, torch.Tensor]:
         """Optimize field of junctions."""
         batch_size, num_channels, in_height, in_width = x.shape
+        x = x.clone().detach()
         x = F.interpolate(
             x,
             size=(in_height // 2, in_width // 2),
