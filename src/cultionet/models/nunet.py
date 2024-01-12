@@ -957,6 +957,7 @@ class ResELUNetPsi(nn.Module):
         h = self.pre_unet(x, temporal_encoding=temporal_encoding)
         # h shape is (B x C x H x W)
         h_foj = self.field_of_junctions(h)
+        h = h + h_foj['boundaries'] + h_foj['image']
         # Backbone
         # 1/1
         x0_0 = self.conv0_0(h)
@@ -1052,8 +1053,6 @@ class ResELUNetPsi(nn.Module):
             },
             shape=x0_0.shape[-2:],
         )
-        out_0_4['edge'] = out_0_4['edge'] + h_foj['boundaries']
-        out_0_4['mask'] = out_0_4['mask'] + h_foj['image']
         out = self.post_unet(
             out_0_4=out_0_4,
             out_3_1=out_3_1,

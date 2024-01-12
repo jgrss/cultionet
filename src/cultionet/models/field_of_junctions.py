@@ -1,4 +1,5 @@
 import typing as T
+from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -9,7 +10,23 @@ from einops import rearrange
 from cultionet.models import model_utils
 
 
-class FieldOfJunctions(nn.Module):
+@dataclass
+class FieldOfJunctionsArgs:
+    patch_size: int
+    stride: int
+    nvals: int
+    delta: float
+    eta: float
+    lambda_boundary_final: float
+    lambda_color_final: float
+    num_initialization_iters: int
+    num_refinement_iters: int
+    num_iters: int
+    greedy_step_every_iters: int
+    parallel_mode: bool
+
+
+class _FieldOfJunctions:
     """
     Source:
         https://github.com/dorverbin/fieldofjunctions/tree/main
@@ -17,181 +34,273 @@ class FieldOfJunctions(nn.Module):
 
     def __init__(
         self,
-        in_channels: int,
-        patch_size: int,
-        stride: int = 1,
-        nvals: int = 31,
-        delta: float = 0.05,
-        eta: float = 0.01,
-    ):
-        super(FieldOfJunctions, self).__init__()
+        x: torch.Tensor,
+        in_height: int,
+        in_width: int,
+        foj_args: FieldOfJunctionsArgs,
+    ) -> T.Dict[str, torch.Tensor]:
+        self.dtype = x.dtype
+        self.device = x.device
+        self.in_height = in_height
+        self.in_width = in_width
+        self.foj_args = foj_args
 
-        self.patch_size = patch_size
-        self.stride = stride
-        self.nvals = nvals
-        self.delta = delta
-        self.eta = eta
-
-        self.up = model_utils.UpSample()
-
-        self.reduce = nn.Sequential(
-            nn.Conv2d(in_channels, 3, kernel_size=1, padding=0, bias=False),
-            nn.BatchNorm2d(3),
-            nn.SiLU(),
-        )
-        self.final_boundaries = nn.Sequential(
-            nn.Conv2d(3, 1, kernel_size=1, padding=0, bias=False),
-            nn.BatchNorm2d(1),
-            nn.SiLU(),
-        )
-        self.final_image = nn.Sequential(
-            nn.Conv2d(3, 1, kernel_size=1, padding=0, bias=False),
-            nn.BatchNorm2d(1),
-            nn.SiLU(),
-        )
-
-    def forward(self, x: torch.Tensor) -> T.Dict[str, torch.Tensor]:
-        batch_size, num_channels, in_height, in_width = x.shape
-        x = F.interpolate(
-            x,
-            size=(in_height // 2, in_width // 2),
-            mode="bilinear",
-            align_corners=True,
-        )
-        x = self.reduce(x)
-
+        x = x.clone().detach()
         batch_size, num_channels, height, width = x.shape
+        self.batch_size = batch_size
+        self.num_channels = num_channels
+        self.height = height
+        self.width = width
 
-        self.h_patches = (height - self.patch_size) // self.stride + 1
-        self.w_patches = (width - self.patch_size) // self.stride + 1
+        self.h_patches = (
+            self.height - self.foj_args.patch_size
+        ) // self.foj_args.stride + 1
+        self.w_patches = (
+            self.width - self.foj_args.patch_size
+        ) // self.foj_args.stride + 1
 
         # Split image into overlapping patches, creating a tensor of shape [N, C, R, R, H', W']
-        unfold = nn.Unfold(self.patch_size, stride=self.stride)
-        image_patches = rearrange(
+        unfold = nn.Unfold(foj_args.patch_size, stride=foj_args.stride)
+        self.image_patches = rearrange(
             unfold(x),
             'b (c hps wps) (hp wp) -> b c hps wps hp wp',
-            hps=self.patch_size,
-            wps=self.patch_size,
+            hps=self.foj_args.patch_size,
+            wps=self.foj_args.patch_size,
             hp=self.h_patches,
             wp=self.w_patches,
         )
-        angles = torch.zeros(
-            batch_size,
-            3,
+
+        self.params_init = torch.zeros(
+            self.batch_size,
+            5,
             self.h_patches,
             self.w_patches,
             dtype=x.dtype,
             device=x.device,
-            requires_grad=True,
-        )
-        x0_y0 = torch.zeros(
-            batch_size,
-            2,
-            self.h_patches,
-            self.w_patches,
-            dtype=x.dtype,
-            device=x.device,
-            requires_grad=True,
+            requires_grad=False,
         )
 
         # Compute number of patches containing each pixel: has shape [H, W]
         fold = nn.Fold(
-            output_size=[height, width],
-            kernel_size=self.patch_size,
-            stride=self.stride,
+            output_size=[self.height, self.width],
+            kernel_size=self.foj_args.patch_size,
+            stride=self.foj_args.stride,
         )
-        num_patches = fold(
+        self.num_patches = fold(
             torch.ones(
-                batch_size,
-                self.patch_size**2,
+                self.batch_size,
+                self.foj_args.patch_size**2,
                 self.h_patches * self.w_patches,
                 dtype=x.dtype,
                 device=x.device,
             ),
-        ).squeeze(dim=1)
+        ).view(self.height, self.width)
 
         # Create local grid within each patch
         meshy, meshx = torch.meshgrid(
             [
-                torch.linspace(-1.0, 1.0, self.patch_size, device=x.device),
-                torch.linspace(-1.0, 1.0, self.patch_size, device=x.device),
+                torch.linspace(
+                    -1.0, 1.0, self.foj_args.patch_size, device=x.device
+                ),
+                torch.linspace(
+                    -1.0, 1.0, self.foj_args.patch_size, device=x.device
+                ),
             ],
         )
         self.y = rearrange(meshy, 'hps wps -> 1 hps wps 1 1')
         self.x = rearrange(meshx, 'hps wps -> 1 hps wps 1 1')
 
-        params = torch.cat([angles, x0_y0], dim=1).detach()
         # Values to search over in Algorithm 2: [0, 2pi) for angles, [-3, 3] for vertex position.
-        angle_range = torch.linspace(
-            0.0, 2 * np.pi, self.nvals + 1, device=x.device
-        )[: self.nvals]
-        x0_y0_range = torch.linspace(-3.0, 3.0, self.nvals, device=x.device)
+        self.angle_range = torch.linspace(
+            0.0, 2 * np.pi, self.foj_args.nvals + 1, device=self.device
+        )[: self.foj_args.nvals]
+        self.x0_y0_range = torch.linspace(
+            -3.0, 3.0, self.foj_args.nvals, device=self.device
+        )
 
-        # Save current global image and boundary map (initially None)
-        for i in range(5):
-            for bidx in range(batch_size):
-                # Repeat the set of parameters `nvals` times along 0th dimension
-                params_query = (
-                    params[bidx].unsqueeze(0).repeat(self.nvals, 1, 1, 1)
-                )
-                param_range = angle_range if i < 3 else x0_y0_range
-                params_query[:, i, :, :] = params_query[
-                    :, i, :, :
-                ] + rearrange(param_range, 'l -> l 1 1')
-                best_indices = self.get_best_indices(
-                    params_query,
-                    image_patches=image_patches[bidx].unsqueeze(0),
-                    num_channels=num_channels,
-                )
-                # Update parameters
-                params[bidx, i, :, :] = params_query[
-                    best_indices.unsqueeze(0),
-                    i,
-                    rearrange(torch.arange(self.h_patches), 'l -> 1 l 1'),
-                    rearrange(torch.arange(self.w_patches), 'l -> 1 1 l'),
+        self.optimizer = None
+
+    def optimize(self) -> T.Dict[str, torch.Tensor]:
+        """Optimize field of junctions."""
+        results = {}
+        for iteration in range(self.foj_args.num_iters):
+            results = self.step(
+                iteration,
+                image_patches=self.image_patches,
+                num_patches=self.num_patches,
+                **results,
+            )
+
+        return results
+
+    def step(
+        self,
+        iteration: int,
+        image_patches: torch.Tensor,
+        num_patches: torch.Tensor,
+        global_image: torch.Tensor = None,
+        global_boundaries: torch.Tensor = None,
+    ):
+        """Perform one step (either initialization's coordinate descent, or
+        refinement gradient descent)"""
+        # Linearly increase lambda from 0 to lambda_boundary_final and lambda_color_final
+        if self.foj_args.num_refinement_iters <= 1:
+            factor = 0.0
+        else:
+            factor = max(
+                [
+                    0,
+                    (iteration - self.foj_args.num_initialization_iters)
+                    / (self.foj_args.num_refinement_iters - 1),
                 ]
+            )
 
-        # Update angles and vertex position using the best values found
-        angles.data = params[:, :3, :, :].data
-        x0_y0.data = params[:, 3:, :, :].data
+        lmbda_boundary = factor * self.foj_args.lambda_boundary_final
+        lmbda_color = factor * self.foj_args.lambda_color_final
 
-        # Update global boundaries and image
-        global_boundaries = torch.zeros_like(x)
-        smoothed_image = torch.zeros_like(x)
-        for bidx in range(batch_size):
+        if (iteration < self.foj_args.num_initialization_iters) or (
+            iteration - self.foj_args.num_initialization_iters + 1
+        ) % self.foj_args.greedy_step_every_iters == 0:
+            out = self.initialization_step(
+                image_patches=image_patches,
+                num_patches=num_patches,
+                lmbda_boundary=lmbda_boundary,
+                lmbda_color=lmbda_color,
+                global_image=global_image,
+                global_boundaries=global_boundaries,
+            )
+        else:
+            if self.optimizer is None:
+                self.params = self.params_init.clone()
+                self.params.requires_grad = True
+                # Create optimizers for angles and vertices
+                self.optimizer = torch.optim.AdamW(
+                    [self.params],
+                    lr=0.001,
+                    weight_decay=0.01,
+                    eps=1e-4,
+                )
+            out = self.refinement_step(
+                image_patches=image_patches,
+                num_patches=num_patches,
+                global_image=global_image,
+                global_boundaries=global_boundaries,
+                lmbda_boundary=lmbda_boundary,
+                lmbda_color=lmbda_color,
+            )
+
+        return out
+
+    def refinement_step(
+        self,
+        image_patches: torch.Tensor,
+        num_patches: torch.Tensor,
+        global_image: torch.Tensor,
+        global_boundaries: torch.Tensor,
+        lmbda_boundary: float = 0.0,
+        lmbda_color: float = 0.0,
+    ):
+        """Perform a single refinement step."""
+        # Compute distance functions, colors, and junction patches
+        distances, colors, patches = self.get_distances_and_patches(
+            self.params,
+            num_channels=self.num_channels,
+            image_patches=image_patches,
+            lmbda_color=lmbda_color,
+            global_image=global_image,
+        )
+        # Compute loss
+        loss = self.get_loss(
+            distances,
+            colors,
+            patches,
+            num_channels=self.num_channels,
+            image_patches=image_patches,
+            lmbda_boundary=lmbda_boundary,
+            lmbda_color=lmbda_color,
+            global_image=global_image,
+            global_boundaries=global_boundaries,
+        ).mean()
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        with torch.no_grad():
+            # Update global boundaries and image
             distances, colors, patches = self.get_distances_and_patches(
-                params[bidx].unsqueeze(0),
-                image_patches=image_patches[bidx].unsqueeze(0),
-                num_channels=num_channels,
+                self.params,
+                num_channels=self.num_channels,
+                image_patches=image_patches,
+                lmbda_color=lmbda_color,
+                global_image=global_image,
             )
-            smoothed_image[bidx] = self.local_to_global(
-                patches, height, width, num_patches[bidx].unsqueeze(0)
-            )
+            global_image = self.local_to_global(patches, num_patches)
             local_boundaries = self.distances_to_boundaries(distances)
-            global_boundaries[bidx] = self.local_to_global(
-                local_boundaries,
-                height,
-                width,
-                num_patches[bidx].unsqueeze(0),
+            global_boundaries = self.local_to_global(
+                local_boundaries, num_patches
             )
-
-        global_boundaries = self.final_boundaries(global_boundaries)
-        smoothed_image = self.final_image(smoothed_image)
-
-        global_boundaries = self.up(
-            global_boundaries,
-            size=(in_height, in_width),
-            mode="bilinear",
-        )
-        smoothed_image = self.up(
-            smoothed_image,
-            size=(in_height, in_width),
-            mode="bilinear",
-        )
 
         return {
-            "boundaries": global_boundaries,
-            "image": smoothed_image,
+            'global_image': global_image,
+            'global_boundaries': global_boundaries,
+        }
+
+    def initialization_step(
+        self,
+        image_patches: torch.Tensor,
+        num_patches: torch.Tensor,
+        lmbda_boundary: float = 0.0,
+        lmbda_color: float = 0.0,
+        global_image: torch.Tensor = None,
+        global_boundaries: torch.Tensor = None,
+    ):
+        params = self.params_init
+        # Save current global image and boundary map (initially None)
+        for i in range(5):
+            # Repeat the set of parameters `nvals` times along 0th dimension
+            params_query = params.repeat(self.foj_args.nvals, 1, 1, 1)
+            param_range = self.angle_range if i < 3 else self.x0_y0_range
+            params_query[:, i, :, :] = params_query[:, i, :, :] + rearrange(
+                param_range, 'l -> l 1 1'
+            )
+            best_indices = self.get_best_indices(
+                params_query,
+                image_patches=image_patches,
+                num_channels=self.num_channels,
+                lmbda_boundary=lmbda_boundary,
+                lmbda_color=lmbda_color,
+                global_image=global_image,
+                global_boundaries=global_boundaries,
+            )
+            # Update parameters
+            params[0, i, :, :] = params_query[
+                best_indices.unsqueeze(0),
+                i,
+                rearrange(torch.arange(self.h_patches), 'l -> 1 l 1'),
+                rearrange(torch.arange(self.w_patches), 'l -> 1 1 l'),
+            ]
+
+        # Update angles and vertex position using the best values found
+        self.params_init[:, :3, ...] = params[:, :3, ...]
+        self.params_init[:, 3:, ...] = params[:, 3:, ...]
+
+        with torch.no_grad():
+            distances, colors, patches = self.get_distances_and_patches(
+                self.params_init,
+                num_channels=self.num_channels,
+                image_patches=image_patches,
+                global_image=global_image,
+            )
+            global_image = self.local_to_global(patches, num_patches)
+            local_boundaries = self.distances_to_boundaries(distances)
+            global_boundaries = self.local_to_global(
+                local_boundaries, num_patches
+            )
+
+        return {
+            'global_image': global_image,
+            'global_boundaries': global_boundaries,
         }
 
     def distances_to_boundaries(self, dists: torch.Tensor) -> torch.Tensor:
@@ -208,45 +317,62 @@ class FieldOfJunctions(nn.Module):
             torch.where(d2 < 0.0, torch.min(d1, -d2), torch.min(d1, d2)),
         )
 
-        return 1.0 / (1.0 + (minabsdist / self.delta) ** 2)
+        return 1.0 / (1.0 + (minabsdist / self.foj_args.delta) ** 2)
 
     def local_to_global(
-        self,
-        patches: torch.Tensor,
-        height: int,
-        width: int,
-        num_patches: torch.Tensor,
+        self, patches: torch.Tensor, num_patches: torch.Tensor
     ) -> torch.Tensor:
         """Compute average value for each pixel over all patches containing it.
 
         For example, this can be used to compute the global boundary maps, or
         the boundary-aware smoothed image.
         """
-        N = patches.shape[0]
-        C = patches.shape[1]
+        num_channels = patches.shape[1]
         fold = torch.nn.Fold(
-            output_size=[height, width],
-            kernel_size=self.patch_size,
-            stride=self.stride,
+            output_size=[self.height, self.width],
+            kernel_size=self.foj_args.patch_size,
+            stride=self.foj_args.stride,
+        )
+        patches = rearrange(
+            patches,
+            'b c hps wps hp wp -> b (c hps wps) (hp wp)',
+            b=self.batch_size,
+            c=num_channels,
+            hps=self.foj_args.patch_size,
+            wps=self.foj_args.patch_size,
+            hp=self.h_patches,
+            wp=self.w_patches,
         )
 
-        return fold(patches.view(N, C * self.patch_size**2, -1)).view(
-            N, C, height, width
-        ) / num_patches.unsqueeze(0).unsqueeze(0)
+        return fold(patches) / num_patches.unsqueeze(0).unsqueeze(0)
 
     def get_best_indices(
         self,
         params: torch.Tensor,
-        image_patches: torch.Tensor,
         num_channels: int,
+        image_patches: torch.Tensor,
+        lmbda_boundary: float,
+        lmbda_color: float,
+        global_image: torch.Tensor = None,
+        global_boundaries: torch.Tensor = None,
     ) -> torch.Tensor:
         distances, colors, smooth_patches = self.get_distances_and_patches(
             params,
-            image_patches=image_patches,
             num_channels=num_channels,
+            image_patches=image_patches,
+            lmbda_color=lmbda_color,
+            global_image=global_image,
         )
         loss_per_patch = self.get_loss(
-            distances, colors, smooth_patches, image_patches
+            distances,
+            colors,
+            smooth_patches,
+            num_channels=num_channels,
+            image_patches=image_patches,
+            lmbda_boundary=lmbda_boundary,
+            lmbda_color=lmbda_color,
+            global_image=global_image,
+            global_boundaries=global_boundaries,
         )
         best_indices = loss_per_patch.argmin(dim=0)
 
@@ -255,9 +381,10 @@ class FieldOfJunctions(nn.Module):
     def get_distances_and_patches(
         self,
         params: torch.Tensor,
-        image_patches: torch.Tensor,
         num_channels: int,
+        image_patches: torch.Tensor,
         lmbda_color: float = 0.0,
+        global_image: torch.Tensor = None,
     ):
         """Compute distance functions and piecewise-constant patches given
         junction parameters."""
@@ -271,20 +398,41 @@ class FieldOfJunctions(nn.Module):
             distances
         )  # shape [N, 3, R, R, H', W']
 
-        # if lmbda_color >= 0 and self.global_image is not None:
-        #     curr_global_image_patches = nn.Unfold(self.patch_size, stride=self.opts.stride)(
-        #         self.global_image.detach()).view(1, num_channels, self.patch_size, self.patch_size, self.h_patches, self.w_patches)
+        if lmbda_color >= 0 and global_image is not None:
+            unfold = nn.Unfold(
+                self.foj_args.patch_size, stride=self.foj_args.stride
+            )
+            global_image = unfold(global_image.detach())
+            curr_global_image_patches = rearrange(
+                global_image,
+                'b (c hps wps) (hp wp) -> b c hps wps hp wp',
+                c=num_channels,
+                hps=self.foj_args.patch_size,
+                wps=self.foj_args.patch_size,
+                hp=self.h_patches,
+                wp=self.w_patches,
+            )
 
-        #     numerator = ((self.img_patches + lmbda_color *
-        #                   curr_global_image_patches).unsqueeze(2) * wedges.unsqueeze(1)).sum(-3).sum(-3)
-        #     denominator = (1.0 + lmbda_color) * wedges.sum(-3).sum(-3).unsqueeze(1)
+            numerator = (
+                (
+                    (
+                        image_patches + lmbda_color * curr_global_image_patches
+                    ).unsqueeze(2)
+                    * wedges.unsqueeze(1)
+                )
+                .sum(-3)
+                .sum(-3)
+            )
+            denominator = (1.0 + lmbda_color) * wedges.sum(-3).sum(
+                -3
+            ).unsqueeze(1)
 
-        #     colors = numerator / (denominator + 1e-10)
-        # else:
-        # Get best color for each wedge and each patch
-        colors = (image_patches.unsqueeze(2) * wedges.unsqueeze(1)).sum(
-            -3
-        ).sum(-3) / (wedges.sum(-3).sum(-3).unsqueeze(1) + 1e-10)
+            colors = numerator / (denominator + 1e-10)
+        else:
+            # Get best color for each wedge and each patch
+            colors = (image_patches.unsqueeze(2) * wedges.unsqueeze(1)).sum(
+                -3
+            ).sum(-3) / (wedges.sum(-3).sum(-3).unsqueeze(1) + 1e-10)
 
         # Fill wedges with optimal colors
         patches = (
@@ -384,7 +532,9 @@ class FieldOfJunctions(nn.Module):
         """Computes the indicator functions u_1, u_2, u_3 from the distance
         functions d_{13}, d_{12}"""
         # Apply smooth Heaviside function to distance functions
-        hdists = 0.5 * (1.0 + (2.0 / np.pi) * torch.atan(dists / self.eta))
+        hdists = 0.5 * (
+            1.0 + (2.0 / np.pi) * torch.atan(dists / self.foj_args.eta)
+        )
 
         # Convert Heaviside functions into wedge indicator functions
         return torch.stack(
@@ -401,9 +551,12 @@ class FieldOfJunctions(nn.Module):
         dists: torch.Tensor,
         colors: torch.Tensor,
         patches: torch.Tensor,
+        num_channels: int,
         image_patches: torch.Tensor,
         lmbda_boundary: float = 0.0,
         lmbda_color: float = 0.0,
+        global_image: torch.Tensor = None,
+        global_boundaries: torch.Tensor = None,
     ):
         """Compute the objective of our model (see Equation 8 of the paper)."""
         # Compute negative log-likelihood for each patch (shape [N, H', W'])
@@ -415,13 +568,191 @@ class FieldOfJunctions(nn.Module):
         if lmbda_boundary > 0.0:
             loss_per_patch = (
                 loss_per_patch
-                + lmbda_boundary * self.get_boundary_consistency_term(dists)
+                + lmbda_boundary
+                * self.get_boundary_consistency_term(dists, global_boundaries)
             )
 
         if lmbda_color > 0.0:
             loss_per_patch = (
                 loss_per_patch
-                + lmbda_color * self.get_color_consistency_term(dists, colors)
+                + lmbda_color
+                * self.get_color_consistency_term(
+                    dists, colors, num_channels, global_image
+                )
             )
 
         return loss_per_patch
+
+    def get_boundary_consistency_term(
+        self, dists: torch.Tensor, global_boundaries: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute the spatial consistency term."""
+        # Split global boundaries into patches
+        unfold = nn.Unfold(
+            self.foj_args.patch_size, stride=self.foj_args.stride
+        )
+        global_boundaries = global_boundaries.detach()
+        curr_global_boundaries_patches = rearrange(
+            unfold(global_boundaries),
+            'b (hps wps) (hp wp) -> b 1 hps wps hp wp',
+            hps=self.foj_args.patch_size,
+            wps=self.foj_args.patch_size,
+            hp=self.h_patches,
+            wp=self.w_patches,
+        )
+
+        # Get local boundaries defined using the queried parameters (defined by `dists`)
+        local_boundaries = self.distances_to_boundaries(dists)
+
+        # Compute consistency term
+        consistency = (
+            ((local_boundaries - curr_global_boundaries_patches) ** 2)
+            .mean(2)
+            .mean(2)
+        )
+
+        return consistency[:, 0, :, :]
+
+    def get_color_consistency_term(
+        self,
+        dists: torch.Tensor,
+        colors: torch.Tensor,
+        num_channels: int,
+        global_image: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute the spatial consistency term."""
+        # Split into patches
+        unfold = nn.Unfold(
+            self.foj_args.patch_size, stride=self.foj_args.stride
+        )
+        global_image = unfold(global_image.detach())
+        curr_global_image_patches = rearrange(
+            global_image,
+            'b (c hps wps) (hp wp) -> b c hps wps hp wp',
+            c=num_channels,
+            hps=self.foj_args.patch_size,
+            wps=self.foj_args.patch_size,
+            hp=self.h_patches,
+            wp=self.w_patches,
+        )
+
+        wedges = self.distances_to_indicators(
+            dists
+        )  # shape [N, 3, R, R, H', W']
+
+        # Compute consistency term
+        consistency = (
+            (
+                wedges.unsqueeze(1)
+                * (
+                    colors.unsqueeze(-3).unsqueeze(-3)
+                    - curr_global_image_patches.unsqueeze(2)
+                )
+                ** 2
+            )
+            .mean(-3)
+            .mean(-3)
+            .sum(1)
+            .sum(1)
+        )
+
+        return consistency
+
+
+class FieldOfJunctions(nn.Module):
+    """
+    Source:
+        https://github.com/dorverbin/fieldofjunctions/tree/main
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        patch_size: int,
+        stride: int = 1,
+        nvals: int = 31,
+        delta: float = 0.05,
+        eta: float = 0.01,
+        lambda_boundary_final: float = 0.5,
+        lambda_color_final: float = 0.1,
+        num_initialization_iters: int = 10,
+        num_refinement_iters: int = 100,
+        greedy_step_every_iters: int = 5,
+    ):
+        super(FieldOfJunctions, self).__init__()
+
+        self.foj_args = FieldOfJunctionsArgs(
+            patch_size=patch_size,
+            stride=stride,
+            nvals=nvals,
+            delta=delta,
+            eta=eta,
+            lambda_boundary_final=lambda_boundary_final,
+            lambda_color_final=lambda_color_final,
+            num_initialization_iters=num_initialization_iters,
+            num_refinement_iters=num_refinement_iters,
+            num_iters=num_initialization_iters + num_refinement_iters,
+            greedy_step_every_iters=greedy_step_every_iters,
+            parallel_mode=True,
+        )
+
+        self.up = model_utils.UpSample()
+
+        self.reduce = nn.Sequential(
+            nn.Conv2d(in_channels, 3, kernel_size=1, padding=0, bias=False),
+            nn.BatchNorm2d(3),
+            nn.SiLU(),
+        )
+        self.final_boundaries = nn.Sequential(
+            nn.Conv2d(3, 1, kernel_size=1, padding=0, bias=False),
+            nn.BatchNorm2d(1),
+            nn.SiLU(),
+        )
+        self.final_image = nn.Sequential(
+            nn.Conv2d(3, 1, kernel_size=1, padding=0, bias=False),
+            nn.BatchNorm2d(1),
+            nn.SiLU(),
+        )
+
+    def forward(self, x: torch.Tensor) -> T.Dict[str, torch.Tensor]:
+        """Optimize field of junctions."""
+        batch_size, num_channels, in_height, in_width = x.shape
+        x = F.interpolate(
+            x,
+            size=(in_height // 2, in_width // 2),
+            mode="bilinear",
+            align_corners=True,
+        )
+        x = self.reduce(x)
+
+        global_boundaries = torch.zeros_like(x)
+        smoothed_image = torch.zeros_like(x)
+        for i, x_batch in enumerate(x):
+            foj = _FieldOfJunctions(
+                x=x_batch.unsqueeze(0),
+                in_height=in_height,
+                in_width=in_width,
+                foj_args=self.foj_args,
+            )
+            optimized = foj.optimize()
+            global_boundaries[i] = optimized['global_boundaries']
+            smoothed_image[i] = optimized['global_image']
+
+        global_boundaries = self.final_boundaries(global_boundaries)
+        smoothed_image = self.final_image(smoothed_image)
+
+        global_boundaries = self.up(
+            global_boundaries,
+            size=(in_height, in_width),
+            mode="bilinear",
+        )
+        smoothed_image = self.up(
+            smoothed_image,
+            size=(in_height, in_width),
+            mode="bilinear",
+        )
+
+        return {
+            'boundaries': global_boundaries,
+            'image': smoothed_image,
+        }
