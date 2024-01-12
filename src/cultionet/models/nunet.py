@@ -786,6 +786,16 @@ class ResELUNetPsi(nn.Module):
             activation_type=activation_type,
         )
 
+        self.foj_final_boundaries = nn.Sequential(
+            nn.Conv2d(3, 1, kernel_size=1, padding=0, bias=False),
+            nn.BatchNorm2d(1),
+            nn.SiLU(),
+        )
+        self.foj_final_image = nn.Sequential(
+            nn.Conv2d(3, 1, kernel_size=1, padding=0, bias=False),
+            nn.BatchNorm2d(1),
+            nn.SiLU(),
+        )
         self.field_of_junctions = FieldOfJunctions(
             in_channels=channels[0],
             patch_size=field_of_junctions_patch_size,
@@ -955,8 +965,21 @@ class ResELUNetPsi(nn.Module):
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
         # Inputs shape is (B x C X T|D x H x W)
         h = self.pre_unet(x, temporal_encoding=temporal_encoding)
+        height, width = h.shape[-2:]
         # h shape is (B x C x H x W)
         h_foj = self.field_of_junctions(h)
+        h_foj['boundaries'] = self.foj_final_boundaries(h_foj['boundaries'])
+        h_foj['image'] = self.foj_final_image(h_foj['image'])
+        h_foj['boundaries'] = self.up(
+            h_foj['boundaries'],
+            size=(height, width),
+            mode="bilinear",
+        )
+        h_foj['image'] = self.up(
+            h_foj['image'],
+            size=(height, width),
+            mode="bilinear",
+        )
         h = h + h_foj['boundaries'] + h_foj['image']
         # Backbone
         # 1/1

@@ -45,7 +45,6 @@ class _FieldOfJunctions:
         self.in_width = in_width
         self.foj_args = foj_args
 
-        x = x.clone().detach()
         batch_size, num_channels, height, width = x.shape
         self.batch_size = batch_size
         self.num_channels = num_channels
@@ -676,8 +675,8 @@ class FieldOfJunctions(nn.Module):
         lambda_boundary_final: float = 0.5,
         lambda_color_final: float = 0.1,
         num_initialization_iters: int = 10,
-        num_refinement_iters: int = 100,
-        greedy_step_every_iters: int = 5,
+        num_refinement_iters: int = 30,
+        greedy_step_every_iters: int = 10,
     ):
         super(FieldOfJunctions, self).__init__()
 
@@ -696,34 +695,16 @@ class FieldOfJunctions(nn.Module):
             parallel_mode=True,
         )
 
-        self.up = model_utils.UpSample()
-
-        self.reduce = nn.Sequential(
-            nn.Conv2d(in_channels, 3, kernel_size=1, padding=0, bias=False),
-            nn.BatchNorm2d(3),
-            nn.SiLU(),
-        )
-        self.final_boundaries = nn.Sequential(
-            nn.Conv2d(3, 1, kernel_size=1, padding=0, bias=False),
-            nn.BatchNorm2d(1),
-            nn.SiLU(),
-        )
-        self.final_image = nn.Sequential(
-            nn.Conv2d(3, 1, kernel_size=1, padding=0, bias=False),
-            nn.BatchNorm2d(1),
-            nn.SiLU(),
-        )
-
     def forward(self, x: torch.Tensor) -> T.Dict[str, torch.Tensor]:
         """Optimize field of junctions."""
         batch_size, num_channels, in_height, in_width = x.shape
+        x = x.clone().detach()
         x = F.interpolate(
             x,
             size=(in_height // 2, in_width // 2),
             mode="bilinear",
             align_corners=True,
         )
-        x = self.reduce(x)
 
         global_boundaries = torch.zeros_like(x)
         smoothed_image = torch.zeros_like(x)
@@ -737,20 +718,6 @@ class FieldOfJunctions(nn.Module):
             optimized = foj.optimize()
             global_boundaries[i] = optimized['global_boundaries']
             smoothed_image[i] = optimized['global_image']
-
-        global_boundaries = self.final_boundaries(global_boundaries)
-        smoothed_image = self.final_image(smoothed_image)
-
-        global_boundaries = self.up(
-            global_boundaries,
-            size=(in_height, in_width),
-            mode="bilinear",
-        )
-        smoothed_image = self.up(
-            smoothed_image,
-            size=(in_height, in_width),
-            mode="bilinear",
-        )
 
         return {
             'boundaries': global_boundaries,
