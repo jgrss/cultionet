@@ -45,6 +45,7 @@ class _FieldOfJunctions:
         self.in_width = in_width
         self.foj_args = foj_args
 
+        x = x.clone().detach()
         batch_size, num_channels, height, width = x.shape
         self.batch_size = batch_size
         self.num_channels = num_channels
@@ -698,7 +699,6 @@ class FieldOfJunctions(nn.Module):
     def forward(self, x: torch.Tensor) -> T.Dict[str, torch.Tensor]:
         """Optimize field of junctions."""
         batch_size, num_channels, in_height, in_width = x.shape
-        x = x.clone().detach()
         x = F.interpolate(
             x,
             size=(in_height // 2, in_width // 2),
