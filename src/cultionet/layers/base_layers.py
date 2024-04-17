@@ -901,8 +901,7 @@ class SpatioTemporalConv3d(nn.Module):
         self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = self.skip(x)
-        return self.seq(x) + residual
+        return self.seq(x) + self.skip(x)
 
 
 class DoubleConv(nn.Module):
