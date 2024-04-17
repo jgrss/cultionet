@@ -47,9 +47,11 @@ class ScaledDotProductAttention(nn.Module):
         scores = torch.einsum('hblk, hbtk -> hblt', [query, key]) * self.scale
         if prev_attention is not None:
             scores = scores + prev_attention
+
         attention = self.softmax(scores)
         if self.dropout is not None:
             attention = self.dropout(attention)
+
         output = torch.einsum('hblt, hbtv -> hblv', [attention, value])
 
         return output, attention
@@ -68,13 +70,14 @@ class MultiHeadAttention(nn.Module):
         d_k = d_in // num_head
         scale = 1.0 / d_k**0.5
 
-        self.proj_query = nn.Linear(d_in, d_in, bias=False)
-        self.proj_key = nn.Linear(d_in, d_in, bias=False)
-        self.proj_value = nn.Linear(d_in, d_in, bias=False)
+        self.proj_query = nn.Linear(d_in, d_in)
+        self.proj_key = nn.Linear(d_in, d_in)
+        self.proj_value = nn.Linear(d_in, d_in)
 
         self.scaled_attention = ScaledDotProductAttention(
             scale, dropout=dropout
         )
+
         self.final = nn.Sequential(
             Rearrange('head b t c -> b t (head c)'),
             nn.LayerNorm(d_in),
@@ -94,9 +97,11 @@ class MultiHeadAttention(nn.Module):
     ):
         # batch_size, num_time, n_channels = query.shape
         residual = query
+
         query = self.proj_query(query)
         key = self.proj_key(key)
         value = self.proj_value(value)
+
         # Split heads
         query = self.split(query)
         key = self.split(key)
@@ -128,15 +133,9 @@ class InLayer(nn.Module):
             nn.BatchNorm3d(out_channels),
             nn.SiLU(),
         )
-        self.skip = nn.Sequential(
-            Rearrange('b c t h w -> b t h w c'),
-            nn.Linear(in_channels, out_channels),
-            Rearrange('b t h w c -> b c t h w'),
-        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = self.skip(x)
-        return self.seq(x) + residual
+        return self.seq(x)
 
 
 class InBlock(nn.Module):
@@ -159,8 +158,7 @@ class InBlock(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = self.skip(x)
-        return self.seq(x) + residual
+        return self.seq(x) + self.skip(x)
 
 
 class TemporalAttention(nn.Module):
@@ -211,8 +209,8 @@ class TemporalAttention(nn.Module):
             ),
             freeze=True,
         )
-        # Coordinate embeddings
-        self.coordinate_encoder = nn.Linear(3, d_model)
+
+        self.layernorm = nn.LayerNorm(d_model)
 
         # Attention
         self.attention_a = MultiHeadAttention(
@@ -255,12 +253,7 @@ class TemporalAttention(nn.Module):
             w=width,
         )
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        longitude: torch.Tensor,
-        latitude: torch.Tensor,
-    ) -> tuple:
+    def forward(self, x: torch.Tensor) -> tuple:
         batch_size, num_channels, num_time, height, width = x.shape
 
         x = self.init_conv(x)
@@ -270,14 +263,9 @@ class TemporalAttention(nn.Module):
             self.positions.expand(batch_size * height * width, num_time)
         ).to(x.device)
         position_tokens = self.positional_encoder(src_pos)
-        # Coordinate embedding
-        coordinate_tokens = self.coordinate_encoder(
-            cartesian(
-                self.reshape_coordinates(longitude, batch_size, height, width),
-                self.reshape_coordinates(latitude, batch_size, height, width),
-            )
-        )
-        x = x + position_tokens + coordinate_tokens
+
+        x = x + position_tokens
+        x = self.layernorm(x)
 
         # Attention
         out_a, attention = self.attention_a(x, x, x)
