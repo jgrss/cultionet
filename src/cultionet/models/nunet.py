@@ -6,19 +6,16 @@ Copyright (c) 2018 Takato Kimura
 """
 import typing as T
 
+import einops
 import torch
 import torch.nn as nn
+from einops.layers.torch import Rearrange, Reduce
 
 from cultionet.enums import ResBlockTypes
 from cultionet.layers.weights import init_conv_weights
 from cultionet.models import model_utils
 from cultionet.layers import kernels
 from cultionet.layers.base_layers import (
-    SpatioTemporalConv3d,
-    Min,
-    Max,
-    Mean,
-    Std,
     PoolConv,
     PoolResidualConv,
     ResidualConv,
@@ -26,7 +23,6 @@ from cultionet.layers.base_layers import (
     SingleConv,
     Softmax,
     SigmoidCrisp,
-    Squeeze,
     SetActivation,
 )
 from cultionet.models.unet_parts import (
@@ -42,12 +38,35 @@ from cultionet.models.unet_parts import (
 )
 
 
+class Encoding3d(nn.Module):
+    def __init__(
+        self, in_channels: int, out_channels: int, activation_type: str
+    ):
+        super(Encoding3d, self).__init__()
+
+        self.seq = nn.Sequential(
+            nn.Conv3d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding=0,
+                dilation=1,
+                bias=False,
+            ),
+            nn.BatchNorm3d(out_channels),
+            SetActivation(activation_type),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
+
+
 class PreUnet3Psi(nn.Module):
     def __init__(
         self,
         in_channels: int,
+        in_time: int,
         channels: T.Sequence[int],
-        concat_channels: int,
         out_channels: int,
         activation_type: str,
         trend_kernel_size: int = 5,
@@ -65,69 +84,60 @@ class PreUnet3Psi(nn.Module):
         self.neg_trend_kernel = kernels.Trend(
             kernel_size=trend_kernel_size, direction="negative"
         )
-        self.reduce_trend_to_time = nn.Sequential(
-            SpatioTemporalConv3d(
-                in_channels=int(in_channels * 3),
-                out_channels=1,
-                num_layers=num_layers,
-                activation_type=activation_type,
-            ),
-            Squeeze(dim=1),
-        )
-
-        self.time_conv0 = SpatioTemporalConv3d(
+        self.time_conv0 = Encoding3d(
             in_channels=in_channels,
             out_channels=channels[0],
-            num_layers=num_layers,
             activation_type=activation_type,
         )
-        self.reduce_to_time = nn.Sequential(
-            SpatioTemporalConv3d(
-                in_channels=channels[0],
+        self.reduce_trend_to_time = nn.Sequential(
+            Encoding3d(
+                in_channels=3,
                 out_channels=1,
-                num_layers=num_layers,
                 activation_type=activation_type,
             ),
-            Squeeze(dim=1),
+            Rearrange('b c t h w -> b (c t) h w'),
         )
+        self.reduce_to_time = nn.Sequential(
+            Encoding3d(
+                in_channels=channels[0],
+                out_channels=1,
+                activation_type=activation_type,
+            ),
+            Rearrange('b c t h w -> b (c t) h w'),
+        )
+        self.time_to_hidden = nn.Conv2d(
+            in_channels=in_time,
+            out_channels=channels[0],
+            kernel_size=1,
+            padding=0,
+        )
+
         # (B x C x T|D x H x W)
         # Temporal reductions
         # Reduce to 2d (B x C x H x W)
         self.reduce_to_channels_min = nn.Sequential(
-            Min(dim=2),
+            Reduce('b c t h w -> b c h w', 'min'),
             nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type),
         )
         self.reduce_to_channels_max = nn.Sequential(
-            Max(dim=2),
+            Reduce('b c t h w -> b c h w', 'max'),
             nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type),
         )
         self.reduce_to_channels_mean = nn.Sequential(
-            Mean(dim=2),
+            Reduce('b c t h w -> b c h w', 'max'),
             nn.BatchNorm2d(channels[0]),
             SetActivation(activation_type=activation_type),
         )
-        self.reduce_to_channels_std = nn.Sequential(
-            Std(dim=2),
-            nn.BatchNorm2d(channels[0]),
-            SetActivation(activation_type=activation_type),
-        )
-        self.linear = nn.Sequential(
-            nn.Conv2d(
-                concat_channels,
-                out_channels,
-                kernel_size=1,
-                padding=0,
-                bias=False,
-            ),
-            nn.BatchNorm2d(out_channels),
-            SetActivation(activation_type=activation_type),
-        )
+        self.instance_norm = nn.InstanceNorm2d(channels[0], affine=False)
 
     def forward(
-        self, x: torch.Tensor, temporal_encoding: torch.Tensor
+        self,
+        x: torch.Tensor,
+        temporal_encoding: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+
         peak_kernels = []
         pos_trend_kernels = []
         neg_trend_kernels = []
@@ -167,36 +177,39 @@ class PreUnet3Psi(nn.Module):
                     ncols=x.shape[-1],
                 ).unsqueeze(1)
             ]
-        # Concatentate along the channels
-        trend_kernels = torch.cat(
-            peak_kernels + pos_trend_kernels + neg_trend_kernels, dim=1
+
+        # B x 3 x T x H x W
+        trend_kernels = (
+            torch.cat(peak_kernels, dim=1)
+            + torch.cat(pos_trend_kernels, dim=1)
+            + torch.cat(neg_trend_kernels, dim=1)
         )
 
         # Inputs shape is (B x C X T|D x H x W)
-        h = self.time_conv0(x)
-        h = torch.cat(
-            [
-                # B x T x H x W
-                self.reduce_to_time(h),
-                # B x (C * T) x H x W
-                self.reduce_to_channels_min(h),
-                # B x (C * T) x H x W
-                self.reduce_to_channels_max(h),
-                # B x (C * T) x H x W
-                self.reduce_to_channels_mean(h),
-                # B x (C * T) x H x W
-                self.reduce_to_channels_std(h),
-                # B x T x H x W
-                self.reduce_trend_to_time(trend_kernels),
-                # B x (C * T) x H x W
-                temporal_encoding,
-            ],
-            dim=1,
+        x = self.time_conv0(x)
+
+        # B x T x H x W
+        time_logits = self.time_to_hidden(
+            self.reduce_to_time(x) + self.reduce_trend_to_time(trend_kernels)
         )
 
-        h = self.linear(h)
+        # B x C x H x W
+        channel_logits = (
+            self.reduce_to_channels_min(x)
+            + self.reduce_to_channels_max(x)
+            + self.reduce_to_channels_mean(x)
+        )
 
-        return h
+        # B x C x T x H x W
+        encoded = time_logits + channel_logits
+
+        if temporal_encoding is not None:
+            encoded = encoded + temporal_encoding
+
+        # Normalize the channels
+        encoded = self.instance_norm(encoded)
+
+        return encoded
 
 
 class PostUNet3Psi(nn.Module):
@@ -739,7 +752,6 @@ class ResELUNetPsi(nn.Module):
 
     References:
         https://arxiv.org/ftp/arxiv/papers/2004/2004.08790.pdf
-        https://arxiv.org/abs/1902.04099
         https://github.com/Bala93/Multi-task-deep-network
         https://ieeexplore.ieee.org/document/9745574
     """
@@ -748,7 +760,6 @@ class ResELUNetPsi(nn.Module):
         self,
         in_channels: int,
         in_time: int,
-        in_encoding_channels: int,
         init_filter: int = 32,
         num_classes: int = 2,
         dilations: T.Sequence[int] = None,
@@ -777,18 +788,10 @@ class ResELUNetPsi(nn.Module):
         ]
         up_channels = int(channels[0] * 5)
 
-        pre_concat_channels = (
-            in_time
-            + int(channels[0] * 4)
-            + in_encoding_channels
-            # Peak kernels and Trend kernels
-            + in_time
-        )
-
         self.pre_unet = PreUnet3Psi(
             in_channels=in_channels,
+            in_time=in_time,
             channels=channels,
-            concat_channels=pre_concat_channels,
             out_channels=channels[0],
             activation_type=activation_type,
         )
@@ -848,14 +851,14 @@ class ResELUNetPsi(nn.Module):
         self.convs_3_1 = ResELUNetPsiBlock(
             out_channels=up_channels,
             side_in={
-                'dist': {'backbone_3_0': {'in_channels': channels[3]}},
-                'edge': {'out_dist_3_1': {'in_channels': up_channels}},
-                'mask': {'out_edge_3_1': {'in_channels': up_channels}},
+                'dist': {'backbone_3_0': channels[3]},
+                'edge': {'out_dist_3_1': up_channels},
+                'mask': {'out_edge_3_1': up_channels},
             },
             down_in={
-                'dist': {'backbone_4_0': {'in_channels': channels[4]}},
-                'edge': {'backbone_4_0': {'in_channels': channels[4]}},
-                'mask': {'backbone_4_0': {'in_channels': channels[4]}},
+                'dist': {'backbone_4_0': channels[4]},
+                'edge': {'backbone_4_0': channels[4]},
+                'mask': {'backbone_4_0': channels[4]},
             },
             dilations=dilations,
             attention_weights=attention_weights,
@@ -864,22 +867,22 @@ class ResELUNetPsi(nn.Module):
         self.convs_2_2 = ResELUNetPsiBlock(
             out_channels=up_channels,
             side_in={
-                'dist': {'backbone_2_0': {'in_channels': channels[2]}},
-                'edge': {'out_dist_2_2': {'in_channels': up_channels}},
-                'mask': {'out_edge_2_2': {'in_channels': up_channels}},
+                'dist': {'backbone_2_0': channels[2]},
+                'edge': {'out_dist_2_2': up_channels},
+                'mask': {'out_edge_2_2': up_channels},
             },
             down_in={
                 'dist': {
-                    'backbone_3_0': {'in_channels': channels[3]},
-                    'out_dist_3_1': {'in_channels': up_channels},
+                    'backbone_3_0': channels[3],
+                    'out_dist_3_1': up_channels,
                 },
                 'edge': {
-                    'out_dist_3_1': {'in_channels': up_channels},
-                    'out_edge_3_1': {'in_channels': up_channels},
+                    'out_dist_3_1': up_channels,
+                    'out_edge_3_1': up_channels,
                 },
                 'mask': {
-                    'out_edge_3_1': {'in_channels': up_channels},
-                    'out_mask_3_1': {'in_channels': up_channels},
+                    'out_edge_3_1': up_channels,
+                    'out_mask_3_1': up_channels,
                 },
             },
             dilations=dilations,
@@ -889,23 +892,23 @@ class ResELUNetPsi(nn.Module):
         self.convs_1_3 = ResELUNetPsiBlock(
             out_channels=up_channels,
             side_in={
-                'dist': {'backbone_1_0': {'in_channels': channels[1]}},
-                'edge': {'out_dist_1_3': {'in_channels': up_channels}},
-                'mask': {'out_edge_1_3': {'in_channels': up_channels}},
+                'dist': {'backbone_1_0': channels[1]},
+                'edge': {'out_dist_1_3': up_channels},
+                'mask': {'out_edge_1_3': up_channels},
             },
             down_in={
                 'dist': {
-                    'backbone_3_0': {'in_channels': channels[3]},
-                    'backbone_2_0': {'in_channels': channels[2]},
-                    'out_dist_2_2': {'in_channels': up_channels},
+                    'backbone_3_0': channels[3],
+                    'backbone_2_0': channels[2],
+                    'out_dist_2_2': up_channels,
                 },
                 'edge': {
-                    'out_dist_2_2': {'in_channels': up_channels},
-                    'out_edge_2_2': {'in_channels': up_channels},
+                    'out_dist_2_2': up_channels,
+                    'out_edge_2_2': up_channels,
                 },
                 'mask': {
-                    'out_edge_2_2': {'in_channels': up_channels},
-                    'out_mask_2_2': {'in_channels': up_channels},
+                    'out_edge_2_2': up_channels,
+                    'out_mask_2_2': up_channels,
                 },
             },
             dilations=dilations,
@@ -915,24 +918,24 @@ class ResELUNetPsi(nn.Module):
         self.convs_0_4 = ResELUNetPsiBlock(
             out_channels=up_channels,
             side_in={
-                'dist': {'backbone_0_0': {'in_channels': channels[0]}},
-                'edge': {'out_dist_0_4': {'in_channels': up_channels}},
-                'mask': {'out_edge_0_4': {'in_channels': up_channels}},
+                'dist': {'backbone_0_0': channels[0]},
+                'edge': {'out_dist_0_4': up_channels},
+                'mask': {'out_edge_0_4': up_channels},
             },
             down_in={
                 'dist': {
-                    'backbone_3_0': {'in_channels': channels[3]},
-                    'backbone_2_0': {'in_channels': channels[2]},
-                    'backbone_1_0': {'in_channels': channels[1]},
-                    'out_dist_1_3': {'in_channels': up_channels},
+                    'backbone_3_0': channels[3],
+                    'backbone_2_0': channels[2],
+                    'backbone_1_0': channels[1],
+                    'out_dist_1_3': up_channels,
                 },
                 'edge': {
-                    'out_dist_1_3': {'in_channels': up_channels},
-                    'out_edge_1_3': {'in_channels': up_channels},
+                    'out_dist_1_3': up_channels,
+                    'out_edge_1_3': up_channels,
                 },
                 'mask': {
-                    'out_edge_1_3': {'in_channels': up_channels},
-                    'out_mask_1_3': {'in_channels': up_channels},
+                    'out_edge_1_3': up_channels,
+                    'out_mask_1_3': up_channels,
                 },
             },
             dilations=dilations,
@@ -953,14 +956,17 @@ class ResELUNetPsi(nn.Module):
         self.apply(init_conv_weights)
 
     def forward(
-        self, x: torch.Tensor, temporal_encoding: torch.Tensor
+        self,
+        x: torch.Tensor,
+        temporal_encoding: T.Optional[torch.Tensor] = None,
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
         # Inputs shape is (B x C X T|D x H x W)
-        h = self.pre_unet(x, temporal_encoding=temporal_encoding)
-        # h shape is (B x C x H x W)
+        embeddings = self.pre_unet(x, temporal_encoding=temporal_encoding)
+
+        # embeddings shape is (B x C x H x W)
         # Backbone
         # 1/1
-        x0_0 = self.conv0_0(h)
+        x0_0 = self.conv0_0(embeddings)
         # 1/2
         x1_0 = self.conv1_0(x0_0)
         # 1/4
@@ -973,82 +979,82 @@ class ResELUNetPsi(nn.Module):
         # 1/8 connection
         out_3_1 = self.convs_3_1(
             side={
-                'dist': {'backbone_3_0': {'data': x3_0}},
-                'edge': {'out_dist_3_1': {'data': None}},
-                'mask': {'out_edge_3_1': {'data': None}},
+                'dist': {'backbone_3_0': x3_0},
+                'edge': {'out_dist_3_1': None},
+                'mask': {'out_edge_3_1': None},
             },
             down={
-                'dist': {'backbone_4_0': {'data': x4_0}},
-                'edge': {'backbone_4_0': {'data': x4_0}},
-                'mask': {'backbone_4_0': {'data': x4_0}},
+                'dist': {'backbone_4_0': x4_0},
+                'edge': {'backbone_4_0': x4_0},
+                'mask': {'backbone_4_0': x4_0},
             },
             shape=x3_0.shape[-2:],
         )
         out_2_2 = self.convs_2_2(
             side={
-                'dist': {'backbone_2_0': {'data': x2_0}},
-                'edge': {'out_dist_2_2': {'data': None}},
-                'mask': {'out_edge_2_2': {'data': None}},
+                'dist': {'backbone_2_0': x2_0},
+                'edge': {'out_dist_2_2': None},
+                'mask': {'out_edge_2_2': None},
             },
             down={
                 'dist': {
-                    'backbone_3_0': {'data': x3_0},
-                    'out_dist_3_1': {'data': out_3_1['dist']},
+                    'backbone_3_0': x3_0,
+                    'out_dist_3_1': out_3_1['dist'],
                 },
                 'edge': {
-                    'out_dist_3_1': {'data': out_3_1['dist']},
-                    'out_edge_3_1': {'data': out_3_1['edge']},
+                    'out_dist_3_1': out_3_1['dist'],
+                    'out_edge_3_1': out_3_1['edge'],
                 },
                 'mask': {
-                    'out_edge_3_1': {'data': out_3_1['edge']},
-                    'out_mask_3_1': {'data': out_3_1['mask']},
+                    'out_edge_3_1': out_3_1['edge'],
+                    'out_mask_3_1': out_3_1['mask'],
                 },
             },
             shape=x2_0.shape[-2:],
         )
         out_1_3 = self.convs_1_3(
             side={
-                'dist': {'backbone_1_0': {'data': x1_0}},
-                'edge': {'out_dist_1_3': {'data': None}},
-                'mask': {'out_edge_1_3': {'data': None}},
+                'dist': {'backbone_1_0': x1_0},
+                'edge': {'out_dist_1_3': None},
+                'mask': {'out_edge_1_3': None},
             },
             down={
                 'dist': {
-                    'backbone_3_0': {'data': x3_0},
-                    'backbone_2_0': {'data': x2_0},
-                    'out_dist_2_2': {'data': out_2_2['dist']},
+                    'backbone_3_0': x3_0,
+                    'backbone_2_0': x2_0,
+                    'out_dist_2_2': out_2_2['dist'],
                 },
                 'edge': {
-                    'out_dist_2_2': {'data': out_2_2['dist']},
-                    'out_edge_2_2': {'data': out_2_2['edge']},
+                    'out_dist_2_2': out_2_2['dist'],
+                    'out_edge_2_2': out_2_2['edge'],
                 },
                 'mask': {
-                    'out_edge_2_2': {'data': out_2_2['edge']},
-                    'out_mask_2_2': {'data': out_2_2['mask']},
+                    'out_edge_2_2': out_2_2['edge'],
+                    'out_mask_2_2': out_2_2['mask'],
                 },
             },
             shape=x1_0.shape[-2:],
         )
         out_0_4 = self.convs_0_4(
             side={
-                'dist': {'backbone_0_0': {'data': x0_0}},
-                'edge': {'out_dist_0_4': {'data': None}},
-                'mask': {'out_edge_0_4': {'data': None}},
+                'dist': {'backbone_0_0': x0_0},
+                'edge': {'out_dist_0_4': None},
+                'mask': {'out_edge_0_4': None},
             },
             down={
                 'dist': {
-                    'backbone_3_0': {'data': x3_0},
-                    'backbone_2_0': {'data': x2_0},
-                    'backbone_1_0': {'data': x1_0},
-                    'out_dist_1_3': {'data': out_1_3['dist']},
+                    'backbone_3_0': x3_0,
+                    'backbone_2_0': x2_0,
+                    'backbone_1_0': x1_0,
+                    'out_dist_1_3': out_1_3['dist'],
                 },
                 'edge': {
-                    'out_dist_1_3': {'data': out_1_3['dist']},
-                    'out_edge_1_3': {'data': out_1_3['edge']},
+                    'out_dist_1_3': out_1_3['dist'],
+                    'out_edge_1_3': out_1_3['edge'],
                 },
                 'mask': {
-                    'out_edge_1_3': {'data': out_1_3['edge']},
-                    'out_mask_1_3': {'data': out_1_3['mask']},
+                    'out_edge_1_3': out_1_3['edge'],
+                    'out_mask_1_3': out_1_3['mask'],
                 },
             },
             shape=x0_0.shape[-2:],
