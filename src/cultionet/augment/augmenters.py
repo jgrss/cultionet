@@ -13,6 +13,7 @@ import joblib
 
 from .augmenter_utils import augment_time, create_parcel_masks, roll_time
 from ..data.utils import create_data_object, LabeledData
+
 # from ..networks import SingleSensorNetwork
 from ..utils.reshape import nd_to_columns
 
@@ -62,7 +63,9 @@ class AugmenterModule(object):
     def file_name(self, uid: str) -> str:
         return f"{self.prefix}{uid}{self.suffix}"
 
-    def save(self, out_directory: Path, data: Data, compress: T.Union[int, str] = 5) -> None:
+    def save(
+        self, out_directory: Path, data: Data, compress: T.Union[int, str] = 5
+    ) -> None:
         out_path = out_directory / self.file_name(data.train_id)
         joblib.dump(data, out_path, compress=compress)
 
@@ -93,21 +96,6 @@ class AugmenterModule(object):
         bdist: T.Union[np.ndarray, None],
         aug_args: AugmenterArgs,
     ) -> Data:
-        # Create the network
-        # nwk = SingleSensorNetwork(
-        #     np.ascontiguousarray(x, dtype="float64"), k=aug_args.k
-        # )
-
-        # (
-        #     edge_indices_a,
-        #     edge_indices_b,
-        #     edge_attrs_diffs,
-        #     edge_attrs_dists,
-        #     __,
-        #     __,
-        # ) = nwk.create_network()
-        # edge_indices = np.c_[edge_indices_a, edge_indices_b]
-        # edge_attrs = np.c_[edge_attrs_diffs, edge_attrs_dists]
         edge_indices = None
         edge_attrs = None
 
