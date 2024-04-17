@@ -407,11 +407,7 @@ class CultioNet(torch.nn.Module):
         x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
 
         # Transformer attention encoder
-        logits_hidden, classes_l2, classes_last = self.temporal_encoder(
-            x,
-            longitude=data.left + (data.right - data.left) / 2,
-            latitude=data.top - (data.top - data.bottom) / 2,
-        )
+        logits_hidden, classes_l2, classes_last = self.temporal_encoder(x)
 
         classes_l2 = self.cg(classes_l2)
         classes_last = self.cg(classes_last)
