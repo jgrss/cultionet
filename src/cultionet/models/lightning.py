@@ -556,7 +556,7 @@ class LightningModuleMixin(LightningModule):
         )
         # Temporal encoding final loss (non-crop=0; crop=1; edge=2)
         classes_last_loss = self.classes_last_loss(
-            predictions["classes_last"], true_labels_dict["true_crop_or_edge"]
+            predictions["classes_l3"], true_labels_dict["true_crop_or_edge"]
         )
         # Main loss
         loss = (
