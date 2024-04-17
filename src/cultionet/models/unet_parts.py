@@ -1,5 +1,6 @@
 import typing as T
 import enum
+from collections import defaultdict
 
 import torch
 import torch.nn as nn
@@ -33,34 +34,32 @@ class ResELUNetPsiLayer(nn.Module):
             dilations = [2]
 
         cat_channels = 0
+
+        module_dict = {}
+
         if side_in is not None:
             for name, info in side_in.items():
-                setattr(
-                    self,
-                    name,
-                    ResidualConv(
-                        in_channels=info['in_channels'],
-                        out_channels=out_channels,
-                        dilation=dilations[0],
-                        attention_weights=attention_weights,
-                        activation_type=activation_type,
-                    ),
+                module_dict[name] = ResidualConv(
+                    in_channels=info['in_channels'],
+                    out_channels=out_channels,
+                    dilation=dilations[0],
+                    attention_weights=attention_weights,
+                    activation_type=activation_type,
                 )
                 cat_channels += out_channels
+
         if down_in is not None:
             for name, info in down_in.items():
-                setattr(
-                    self,
-                    name,
-                    ResidualConv(
-                        in_channels=info['in_channels'],
-                        out_channels=out_channels,
-                        dilation=dilations[0],
-                        attention_weights=attention_weights,
-                        activation_type=activation_type,
-                    ),
+                module_dict[name] = ResidualConv(
+                    in_channels=info['in_channels'],
+                    out_channels=out_channels,
+                    dilation=dilations[0],
+                    attention_weights=attention_weights,
+                    activation_type=activation_type,
                 )
                 cat_channels += out_channels
+
+        self.module_dict = nn.ModuleDict(module_dict)
 
         self.final = ResidualConv(
             in_channels=cat_channels,
@@ -78,12 +77,14 @@ class ResELUNetPsiLayer(nn.Module):
     ) -> torch.Tensor:
         out = []
         for name, info in side.items():
-            layer = getattr(self, name)
-            x = info['data']
+            layer = self.module_dict[name]
+            x = info.get('data')
+            assert x is not None, 'A tensor must be given.'
             out += [layer(x)]
+
         for name, info in down.items():
-            layer = getattr(self, name)
-            x = info['data']
+            layer = self.module_dict[name]
+            x = info.get('data')
             x = self.up(
                 x,
                 size=shape,
@@ -135,11 +136,12 @@ class ResELUNetPsiBlock(nn.Module):
         )
 
     def update_data(self, data_dict: dict, data: torch.Tensor) -> dict:
+        out = defaultdict(dict)
         for key, info in data_dict.items():
-            if info['data'] is None:
-                data_dict[key]['data'] = data
+            if info.get('data') is None:
+                out[key].update({'data': data})
 
-        return data_dict
+        return dict(out)
 
     def forward(
         self,
@@ -358,6 +360,7 @@ class UNet3Connector(torch.nn.Module):
                             ),
                         )
                 self.cat_channels += up_channels
+
         # Previous output, (same) downstream
         if self.n_stream_down > 0:
             for n in range(0, self.n_stream_down):
