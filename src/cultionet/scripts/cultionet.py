@@ -768,56 +768,51 @@ def create_datasets(args):
             )
 
             try:
-                tmp = int(region)
-                region = f"{tmp:06d}"
+                region = f"{int(region):06d}"
             except ValueError:
                 pass
 
             if args.destination == "predict":
                 df_grids = None
-                df_edges = None
+                df_polygons = None
             else:
                 # Read the training data
-                grids = (
-                    ppaths.edge_training_path
-                    / f"{region}_grid_{end_year}.gpkg"
+                grids_path = ppaths.edge_training_path.joinpath(
+                    ppaths.grid_format.format(region=region, end_year=end_year)
                 )
-                edges = (
-                    ppaths.edge_training_path
-                    / f"{region}_edges_{end_year}.gpkg"
-                )
-                if not grids.is_file():
+
+                if not grids_path.is_file():
                     pbar.update(1)
-                    pbar.set_description("File not exist")
+                    pbar.set_description("File does not exist")
                     continue
 
-                df_grids = gpd.read_file(grids)
+                df_grids = gpd.read_file(grids_path)
                 if not {"region", "grid"}.intersection(
                     df_grids.columns.tolist()
                 ):
                     df_grids["region"] = region
 
-                if not edges.is_file():
-                    edges = (
-                        ppaths.edge_training_path
-                        / f"{region}_poly_{end_year}.gpkg"
+                polygons_path = ppaths.edge_training_path.joinpath(
+                    ppaths.polygon_format.format(
+                        region=region, end_year=end_year
                     )
-                if not edges.is_file():
+                )
+
+                if not polygons_path.is_file():
                     # No training polygons
-                    df_edges = gpd.GeoDataFrame(
+                    df_polygons = gpd.GeoDataFrame(
                         data=[], geometry=[], crs=df_grids.crs
                     )
                 else:
-                    df_edges = gpd.read_file(edges)
+                    df_polygons = gpd.read_file(polygons_path)
 
             image_list = []
             for image_vi in model_preprocessing.VegetationIndices(
                 image_vis=config["image_vis"]
             ).image_vis:
                 # Set the full path to the images
-                vi_path = (
-                    ppaths.image_path.resolve()
-                    / args.feature_pattern.format(
+                vi_path = ppaths.image_path.resolve().joinpath(
+                    args.feature_pattern.format(
                         region=region, image_vi=image_vi
                     )
                 )
@@ -833,6 +828,7 @@ def create_datasets(args):
                     lat = get_centroid_coords(
                         df_grids.centroid, dst_crs="epsg:4326"
                     )[1]
+
                 # Get the start and end dates
                 start_date, end_date = get_start_end_dates(
                     vi_path,
@@ -842,6 +838,7 @@ def create_datasets(args):
                     date_format=args.date_format,
                     lat=lat,
                 )
+
                 # Get the requested time slice
                 ts_list = model_preprocessing.get_time_series_list(
                     vi_path,
@@ -850,6 +847,7 @@ def create_datasets(args):
                     end_date,
                     date_format=args.date_format,
                 )
+
                 if len(ts_list) <= 1:
                     pbar.update(1)
                     pbar.set_description("TS too short")
@@ -887,7 +885,7 @@ def create_datasets(args):
                     pbar = create_dataset(
                         image_list=image_list,
                         df_grids=df_grids,
-                        df_edges=df_edges,
+                        df_polygons=df_polygons,
                         max_crop_class=args.max_crop_class,
                         group_id=f"{region}_{end_year}",
                         process_path=ppaths.get_process_path(args.destination),
