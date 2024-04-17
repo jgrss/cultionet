@@ -176,16 +176,24 @@ class PreUnet3Psi(nn.Module):
         h = self.time_conv0(x)
         h = torch.cat(
             [
+                # B x T x H x W
                 self.reduce_to_time(h),
+                # B x (C * T) x H x W
                 self.reduce_to_channels_min(h),
+                # B x (C * T) x H x W
                 self.reduce_to_channels_max(h),
+                # B x (C * T) x H x W
                 self.reduce_to_channels_mean(h),
+                # B x (C * T) x H x W
                 self.reduce_to_channels_std(h),
+                # B x T x H x W
                 self.reduce_trend_to_time(trend_kernels),
+                # B x (C * T) x H x W
                 temporal_encoding,
             ],
             dim=1,
         )
+
         h = self.linear(h)
 
         return h
@@ -669,6 +677,7 @@ class ResUNet3Psi(nn.Module):
         # Inputs shape is (B x C X T|D x H x W)
         h = self.pre_unet(x, temporal_encoding=temporal_encoding)
         # h shape is (B x C x H x W)
+
         # Backbone
         # 1/1
         x0_0 = self.conv0_0(h)
