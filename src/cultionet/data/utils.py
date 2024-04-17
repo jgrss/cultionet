@@ -39,12 +39,12 @@ def get_image_list_dims(
 
 def create_data_object(
     x: np.ndarray,
-    edge_indices: np.ndarray,
-    edge_attrs: np.ndarray,
     ntime: int,
     nbands: int,
     height: int,
     width: int,
+    edge_indices: T.Optional[np.ndarray] = None,
+    edge_attrs: T.Optional[np.ndarray] = None,
     y: T.Optional[np.ndarray] = None,
     mask_y: T.Optional[np.ndarray] = None,
     bdist: T.Optional[np.ndarray] = None,
@@ -54,11 +54,14 @@ def create_data_object(
     **kwargs,
 ) -> Data:
     """Creates a training data object."""
-    # edge_indices = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
-    # edge_attrs = torch.tensor(edge_attrs, dtype=torch.float)
-    edge_indices = None
-    edge_attrs = None
-    x = torch.tensor(x, dtype=torch.float)
+
+    if edge_indices is not None:
+        edge_indices = torch.from_numpy(edge_indices).long().t().contiguous()
+
+    if edge_attrs is not None:
+        edge_attrs = torch.from_numpy(edge_attrs).float()
+
+    x = torch.from_numpy(x).float()
 
     boxes = None
     box_labels = None
@@ -84,12 +87,13 @@ def create_data_object(
             **kwargs,
         )
     else:
-        y = torch.tensor(
-            y.flatten(),
-            dtype=torch.float if "float" in y.dtype.name else torch.long,
-        )
-        bdist_ = torch.tensor(bdist.flatten(), dtype=torch.float)
-        # ori_ = torch.tensor(ori.flatten(), dtype=torch.float)
+        y = torch.from_numpy(y.flatten())
+        if "float" in y.dtype.name:
+            y = y.float()
+        else:
+            y = y.long()
+
+        bdist_ = torch.from_numpy(bdist.flatten()).float()
 
         if other is None:
             train_data = Data(
@@ -98,7 +102,6 @@ def create_data_object(
                 edge_attrs=edge_attrs,
                 y=y,
                 bdist=bdist_,
-                # ori=ori_,
                 height=height,
                 width=width,
                 ntime=ntime,
@@ -110,7 +113,7 @@ def create_data_object(
                 **kwargs,
             )
         else:
-            other_ = torch.tensor(other.flatten(), dtype=torch.float)
+            other_ = torch.from_numpy(other.flatten()).float()
 
             train_data = Data(
                 x=x,
@@ -118,7 +121,6 @@ def create_data_object(
                 edge_attrs=edge_attrs,
                 y=y,
                 bdist=bdist_,
-                # ori=ori_,
                 other=other_,
                 height=height,
                 width=width,
@@ -137,36 +139,36 @@ def create_data_object(
     return train_data
 
 
-def create_network_data(xvars: np.ndarray, ntime: int, nbands: int) -> Data:
-    # Create the network
-    nwk = SingleSensorNetwork(
-        np.ascontiguousarray(xvars, dtype="float64"), k=3
-    )
+# def create_network_data(xvars: np.ndarray, ntime: int, nbands: int) -> Data:
+#     # Create the network
+#     nwk = SingleSensorNetwork(
+#         np.ascontiguousarray(xvars, dtype="float64"), k=3
+#     )
 
-    (
-        edge_indices_a,
-        edge_indices_b,
-        edge_attrs_diffs,
-        edge_attrs_dists,
-        xpos,
-        ypos,
-    ) = nwk.create_network()
-    edge_indices = np.c_[edge_indices_a, edge_indices_b]
-    edge_attrs = np.c_[edge_attrs_diffs, edge_attrs_dists]
-    xy = np.c_[xpos, ypos]
-    nfeas, nrows, ncols = xvars.shape
-    xvars = nd_to_columns(xvars, nfeas, nrows, ncols)
+#     (
+#         edge_indices_a,
+#         edge_indices_b,
+#         edge_attrs_diffs,
+#         edge_attrs_dists,
+#         xpos,
+#         ypos,
+#     ) = nwk.create_network()
+#     edge_indices = np.c_[edge_indices_a, edge_indices_b]
+#     edge_attrs = np.c_[edge_attrs_diffs, edge_attrs_dists]
+#     xy = np.c_[xpos, ypos]
+#     nfeas, nrows, ncols = xvars.shape
+#     xvars = nd_to_columns(xvars, nfeas, nrows, ncols)
 
-    return create_data_object(
-        xvars,
-        edge_indices,
-        edge_attrs,
-        xy,
-        ntime=ntime,
-        nbands=nbands,
-        height=nrows,
-        width=ncols,
-    )
+#     return create_data_object(
+#         xvars,
+#         xy,
+#         edge_indices=edge_indices,
+#         edge_attrs=edge_attrs,
+#         ntime=ntime,
+#         nbands=nbands,
+#         height=nrows,
+#         width=ncols,
+#     )
 
 
 class NetworkDataset(object):
