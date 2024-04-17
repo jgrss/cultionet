@@ -1,6 +1,6 @@
 import torch
 
-from cultionet.models.temporal_attention import TemporalAttention
+from cultionet.models.temporal_transformer import TemporalAttention
 
 
 def test_ltae():
