@@ -2,15 +2,14 @@ import typing as T
 
 import einops
 import torch
-from torch_geometric import nn
-from torch_geometric.data import Data
+import torch.nn as nn
 
 
 def get_batch_count(batch: torch.Tensor) -> int:
     return batch.unique().size(0)
 
 
-class UpSample(torch.nn.Module):
+class UpSample(nn.Module):
     """Up-samples a tensor."""
 
     def __init__(self):
@@ -19,12 +18,12 @@ class UpSample(torch.nn.Module):
     def forward(
         self, x: torch.Tensor, size: T.Sequence[int], mode: str = "bilinear"
     ) -> torch.Tensor:
-        upsampler = torch.nn.Upsample(size=size, mode=mode, align_corners=True)
+        upsampler = nn.Upsample(size=size, mode=mode, align_corners=True)
 
         return upsampler(x)
 
 
-class GraphToConv(torch.nn.Module):
+class GraphToConv(nn.Module):
     """Reshapes a 2d tensor to a 4d tensor."""
 
     def __init__(self):
@@ -43,7 +42,7 @@ class GraphToConv(torch.nn.Module):
         )
 
 
-class ConvToGraph(torch.nn.Module):
+class ConvToGraph(nn.Module):
     """Reshapes a 4d tensor to a 2d tensor."""
 
     def __init__(self):
@@ -53,7 +52,7 @@ class ConvToGraph(torch.nn.Module):
         return einops.rearrange(x, 'b c h w -> (b h w) c')
 
 
-class ConvToTime(torch.nn.Module):
+class ConvToTime(nn.Module):
     """Reshapes a 4d tensor to a 5d tensor."""
 
     def __init__(self):
@@ -73,13 +72,3 @@ class ConvToTime(torch.nn.Module):
             h=height,
             w=width,
         )
-
-
-def max_pool_neighbor_x(
-    x: torch.Tensor, edge_index: torch.Tensor
-) -> torch.Tensor:
-    return nn.max_pool_neighbor_x(Data(x=x, edge_index=edge_index)).x
-
-
-def global_max_pool(x: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:
-    return nn.global_max_pool(x=x, batch=batch, size=x.shape[0])

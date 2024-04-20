@@ -27,6 +27,14 @@ class ProjectPaths:
     loss_file: Path
     norm_file: Path
 
+    @property
+    def grid_format(self) -> str:
+        return "{region}_grid_{end_year}.gpkg"
+
+    @property
+    def polygon_format(self) -> str:
+        return "{region}_poly_{end_year}.gpkg"
+
     def remove_train_path(self):
         if self.process_path.is_dir():
             for fn in self.process_path.glob('*.pt'):

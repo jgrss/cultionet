@@ -1,25 +1,25 @@
+import json
+import logging
 import typing as T
 from pathlib import Path
-import logging
-import json
 
 import numpy as np
-from scipy.stats import mode as sci_mode
-from rasterio.windows import Window
-import torch
-from torch_geometric.data import Data
 import pytorch_lightning as pl
+import torch
 from pytorch_lightning.callbacks import (
-    ModelCheckpoint,
     LearningRateMonitor,
-    StochasticWeightAveraging,
+    ModelCheckpoint,
     ModelPruning,
+    StochasticWeightAveraging,
 )
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from rasterio.windows import Window
+from scipy.stats import mode as sci_mode
 from torchvision import transforms
 
 from .callbacks import LightningGTiffWriter
-from .data.const import SCALE_FACTOR
+from .data.constant import SCALE_FACTOR
+from .data.data import Data
 from .data.datasets import EdgeDataset, zscores
 from .data.modules import EdgeDataModule
 from .data.samplers import EpochRandomSampler
@@ -31,9 +31,8 @@ from .models.lightning import (
     MaskRCNNLitModel,
     RefineLitModel,
 )
-from .utils.reshape import ModelOutputs
 from .utils.logging import set_color_logger
-
+from .utils.reshape import ModelOutputs
 
 logging.getLogger("lightning").addHandler(logging.NullHandler())
 logging.getLogger("lightning").propagate = False

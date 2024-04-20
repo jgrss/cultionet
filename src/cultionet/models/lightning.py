@@ -1,27 +1,26 @@
-import typing as T
-from pathlib import Path
-import warnings
 import logging
+import typing as T
+import warnings
+from pathlib import Path
 
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from torch.optim import lr_scheduler as optim_lr_scheduler
-from torch_geometric.data import Data
-from pytorch_lightning import LightningModule
-from torchvision.ops import box_iou
-from torchvision import transforms
 import torchmetrics
+from pytorch_lightning import LightningModule
+from torch.optim import lr_scheduler as optim_lr_scheduler
+from torchvision import transforms
+from torchvision.ops import box_iou
 
-from cultionet.enums import LearningRateSchedulers, ModelTypes, ResBlockTypes
-from cultionet.losses import TanimotoComplementLoss, TanimotoDistLoss
-from cultionet.layers.base_layers import FinalConv2dDropout, Softmax
-from cultionet.layers.weights import init_attention_weights
-from cultionet.models import model_utils
-from cultionet.models.cultio import CultioNet, GeoRefinement
-from cultionet.models.maskcrnn import BFasterRCNN
-from cultionet.models.nunet import PostUNet3Psi
-
+from ..data.data import Data
+from ..enums import LearningRateSchedulers, ModelTypes, ResBlockTypes
+from ..layers.base_layers import FinalConv2dDropout, Softmax
+from ..layers.weights import init_attention_weights
+from ..losses import TanimotoComplementLoss, TanimotoDistLoss
+from . import model_utils
+from .cultio import CultioNet, GeoRefinement
+from .maskcrnn import BFasterRCNN
+from .nunet import PostUNet3Psi
 
 warnings.filterwarnings("ignore")
 logging.getLogger("lightning").addHandler(logging.NullHandler())
@@ -556,7 +555,7 @@ class LightningModuleMixin(LightningModule):
         )
         # Temporal encoding final loss (non-crop=0; crop=1; edge=2)
         classes_last_loss = self.classes_last_loss(
-            predictions["classes_last"], true_labels_dict["true_crop_or_edge"]
+            predictions["classes_l3"], true_labels_dict["true_crop_or_edge"]
         )
         # Main loss
         loss = (

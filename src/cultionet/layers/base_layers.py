@@ -1,13 +1,13 @@
 import typing as T
 
+import einops
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
-from torch_geometric import nn as gnn
 
-from ..models import model_utils
 from ..enums import AttentionTypes, ResBlockTypes
+from ..models import model_utils
 
 
 class Swish(nn.Module):
@@ -360,51 +360,51 @@ class AttentionAdd(nn.Module):
         return x + g
 
 
-class AttentionGate3d(nn.Module):
-    def __init__(self, high_channels: int, low_channels: int):
-        super(AttentionGate3d, self).__init__()
+# class AttentionGate3d(nn.Module):
+#     def __init__(self, high_channels: int, low_channels: int):
+#         super(AttentionGate3d, self).__init__()
 
-        conv_x = nn.Conv3d(
-            high_channels, high_channels, kernel_size=1, padding=0
-        )
-        conv_g = nn.Conv3d(
-            low_channels,
-            high_channels,
-            kernel_size=1,
-            padding=0,
-        )
-        conv1d = nn.Conv3d(high_channels, 1, kernel_size=1, padding=0)
-        self.up = model_utils.UpSample()
+#         conv_x = nn.Conv3d(
+#             high_channels, high_channels, kernel_size=1, padding=0
+#         )
+#         conv_g = nn.Conv3d(
+#             low_channels,
+#             high_channels,
+#             kernel_size=1,
+#             padding=0,
+#         )
+#         conv1d = nn.Conv3d(high_channels, 1, kernel_size=1, padding=0)
+#         self.up = model_utils.UpSample()
 
-        self.seq = gnn.Sequential(
-            "x, g",
-            [
-                (conv_x, "x -> x"),
-                (conv_g, "g -> g"),
-                (AttentionAdd(), "x, g -> x"),
-                (SetActivation("SiLU"), 'x -> x'),
-                (conv1d, "x -> x"),
-                (nn.Sigmoid(), "x -> x"),
-            ],
-        )
-        self.final = ConvBlock3d(
-            in_channels=high_channels,
-            out_channels=high_channels,
-            kernel_size=1,
-            add_activation=False,
-        )
+#         self.seq = gnn.Sequential(
+#             "x, g",
+#             [
+#                 (conv_x, "x -> x"),
+#                 (conv_g, "g -> g"),
+#                 (AttentionAdd(), "x, g -> x"),
+#                 (SetActivation("SiLU"), 'x -> x'),
+#                 (conv1d, "x -> x"),
+#                 (nn.Sigmoid(), "x -> x"),
+#             ],
+#         )
+#         self.final = ConvBlock3d(
+#             in_channels=high_channels,
+#             out_channels=high_channels,
+#             kernel_size=1,
+#             add_activation=False,
+#         )
 
-    def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: Higher dimension
-            g: Lower dimension
-        """
-        h = self.seq(x, g)
-        if h.shape[-2:] != x.shape[-2:]:
-            h = self.up(h, size=x.shape[-2:], mode="bilinear")
+#     def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+#         """
+#         Args:
+#             x: Higher dimension
+#             g: Lower dimension
+#         """
+#         h = self.seq(x, g)
+#         if h.shape[-2:] != x.shape[-2:]:
+#             h = self.up(h, size=x.shape[-2:], mode="bilinear")
 
-        return self.final(x * h)
+#         return self.final(x * h)
 
 
 class AttentionGate(nn.Module):
@@ -734,14 +734,14 @@ class ChannelAttention(nn.Module):
         self.seq = nn.Sequential(
             nn.Conv2d(
                 in_channels=out_channels,
-                out_channels=int(out_channels / 2),
+                out_channels=out_channels // 2,
                 kernel_size=1,
                 padding=0,
                 bias=False,
             ),
             SetActivation(activation_type=activation_type),
             nn.Conv2d(
-                in_channels=int(out_channels / 2),
+                in_channels=out_channels // 2,
                 out_channels=out_channels,
                 kernel_size=1,
                 padding=0,
@@ -769,13 +769,12 @@ class SpatialAttention(nn.Module):
             padding=1,
             bias=False,
         )
-        self.channel_mean = Mean(dim=1, keepdim=True)
-        self.channel_max = Max(dim=1, keepdim=True)
+
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        avg_attention = self.channel_mean(x)
-        max_attention = self.channel_max(x)
+        avg_attention = einops.reduce(x, 'b c h w -> b 1 h w', 'mean')
+        max_attention = einops.reduce(x, 'b c h w -> b 1 h w', 'max')
         attention = torch.cat([avg_attention, max_attention], dim=1)
         attention = self.conv(attention)
         attention = self.sigmoid(attention)
@@ -901,8 +900,7 @@ class SpatioTemporalConv3d(nn.Module):
         self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = self.skip(x)
-        return self.seq(x) + residual
+        return self.seq(x) + self.skip(x)
 
 
 class DoubleConv(nn.Module):

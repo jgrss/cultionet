@@ -1,45 +1,44 @@
 #!/usr/bin/env python
 
-from abc import abstractmethod
 import argparse
-import typing as T
-import logging
-from pathlib import Path
-from datetime import datetime
-import asyncio
-import filelock
-import builtins
-import json
 import ast
+import asyncio
+import builtins
 import itertools
+import json
+import logging
+import typing as T
+from abc import abstractmethod
+from datetime import datetime
+from pathlib import Path
 
-import geowombat as gw
-from geowombat.core.windows import get_window_offsets
+import filelock
 import geopandas as gpd
+import geowombat as gw
 import pandas as pd
-import yaml
 import rasterio as rio
-from rasterio.windows import Window
+import ray
 import torch
 import xarray as xr
-import ray
+import yaml
+from geowombat.core.windows import get_window_offsets
+from pytorch_lightning import seed_everything
+from rasterio.windows import Window
 from ray.actor import ActorHandle
 from tqdm import tqdm
 from tqdm.dask import TqdmCallback
-from pytorch_lightning import seed_everything
 
 import cultionet
-from cultionet.data.const import SCALE_FACTOR
-from cultionet.data.datasets import EdgeDataset
+from cultionet.data.constant import SCALE_FACTOR
 from cultionet.data.create import create_dataset, create_predict_dataset
-from cultionet.data.utils import get_image_list_dims, create_network_data
+from cultionet.data.datasets import EdgeDataset
+from cultionet.data.utils import get_image_list_dims
 from cultionet.enums import CLISteps, ModelNames
 from cultionet.errors import TensorShapeError
 from cultionet.utils import model_preprocessing
 from cultionet.utils.logging import set_color_logger
-from cultionet.utils.project_paths import setup_paths, ProjectPaths
 from cultionet.utils.normalize import get_norm_values
-
+from cultionet.utils.project_paths import ProjectPaths, setup_paths
 
 logger = set_color_logger(__name__)
 
@@ -272,11 +271,13 @@ class BlockWriter(object):
     def predict_write_block(self, w: Window, w_pad: Window):
         slc = self._build_slice(w_pad)
         # Create the data for the chunk
-        data = create_network_data(
-            self.ts[slc].gw.compute(num_workers=1),
-            ntime=self.ntime,
-            nbands=self.nbands,
-        )
+        # FIXME: read satellite data into Data()
+        data = None
+        # data = create_network_data(
+        #     self.ts[slc].gw.compute(num_workers=1),
+        #     ntime=self.ntime,
+        #     nbands=self.nbands,
+        # )
         # Apply inference on the chunk
         stack = cultionet.predict(
             lit_model=self.lit_model,
@@ -768,56 +769,51 @@ def create_datasets(args):
             )
 
             try:
-                tmp = int(region)
-                region = f"{tmp:06d}"
+                region = f"{int(region):06d}"
             except ValueError:
                 pass
 
             if args.destination == "predict":
                 df_grids = None
-                df_edges = None
+                df_polygons = None
             else:
                 # Read the training data
-                grids = (
-                    ppaths.edge_training_path
-                    / f"{region}_grid_{end_year}.gpkg"
+                grids_path = ppaths.edge_training_path.joinpath(
+                    ppaths.grid_format.format(region=region, end_year=end_year)
                 )
-                edges = (
-                    ppaths.edge_training_path
-                    / f"{region}_edges_{end_year}.gpkg"
-                )
-                if not grids.is_file():
+
+                if not grids_path.is_file():
                     pbar.update(1)
-                    pbar.set_description("File not exist")
+                    pbar.set_description("File does not exist")
                     continue
 
-                df_grids = gpd.read_file(grids)
+                df_grids = gpd.read_file(grids_path)
                 if not {"region", "grid"}.intersection(
                     df_grids.columns.tolist()
                 ):
                     df_grids["region"] = region
 
-                if not edges.is_file():
-                    edges = (
-                        ppaths.edge_training_path
-                        / f"{region}_poly_{end_year}.gpkg"
+                polygons_path = ppaths.edge_training_path.joinpath(
+                    ppaths.polygon_format.format(
+                        region=region, end_year=end_year
                     )
-                if not edges.is_file():
+                )
+
+                if not polygons_path.is_file():
                     # No training polygons
-                    df_edges = gpd.GeoDataFrame(
+                    df_polygons = gpd.GeoDataFrame(
                         data=[], geometry=[], crs=df_grids.crs
                     )
                 else:
-                    df_edges = gpd.read_file(edges)
+                    df_polygons = gpd.read_file(polygons_path)
 
             image_list = []
             for image_vi in model_preprocessing.VegetationIndices(
                 image_vis=config["image_vis"]
             ).image_vis:
                 # Set the full path to the images
-                vi_path = (
-                    ppaths.image_path.resolve()
-                    / args.feature_pattern.format(
+                vi_path = ppaths.image_path.resolve().joinpath(
+                    args.feature_pattern.format(
                         region=region, image_vi=image_vi
                     )
                 )
@@ -833,6 +829,7 @@ def create_datasets(args):
                     lat = get_centroid_coords(
                         df_grids.centroid, dst_crs="epsg:4326"
                     )[1]
+
                 # Get the start and end dates
                 start_date, end_date = get_start_end_dates(
                     vi_path,
@@ -842,6 +839,7 @@ def create_datasets(args):
                     date_format=args.date_format,
                     lat=lat,
                 )
+
                 # Get the requested time slice
                 ts_list = model_preprocessing.get_time_series_list(
                     vi_path,
@@ -850,6 +848,7 @@ def create_datasets(args):
                     end_date,
                     date_format=args.date_format,
                 )
+
                 if len(ts_list) <= 1:
                     pbar.update(1)
                     pbar.set_description("TS too short")
@@ -887,7 +886,7 @@ def create_datasets(args):
                     pbar = create_dataset(
                         image_list=image_list,
                         df_grids=df_grids,
-                        df_edges=df_edges,
+                        df_polygons=df_polygons,
                         max_crop_class=args.max_crop_class,
                         group_id=f"{region}_{end_year}",
                         process_path=ppaths.get_process_path(args.destination),
@@ -1155,6 +1154,7 @@ def train_model(args):
             threads_per_worker=args.threads,
             random_seed=args.random_seed,
         )
+
     # Check dimensions
     if args.expected_dim is not None:
         try:
@@ -1167,6 +1167,7 @@ def train_model(args):
             )
         except TensorShapeError as e:
             raise ValueError(e)
+
         ds = EdgeDataset(
             root=ppaths.train_path,
             processes=args.processes,
@@ -1179,19 +1180,15 @@ def train_model(args):
     if ppaths.norm_file.is_file():
         if args.recalc_zscores:
             ppaths.norm_file.unlink()
+
     if not ppaths.norm_file.is_file():
         if args.spatial_partitions is not None:
-            # train_ds = ds.split_train_val_by_partition(
-            #     spatial_partitions=args.spatial_partitions,
-            #     partition_column=args.partition_column,
-            #     val_frac=args.val_frac,
-            #     partition_name=args.partition_name
-            # )[0]
             train_ds = ds.split_train_val(
                 val_frac=args.val_frac, spatial_overlap_allowed=False
             )[0]
         else:
             train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
+
         # Get means and standard deviations from the training dataset
         data_values = get_norm_values(
             dataset=train_ds,

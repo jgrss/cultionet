@@ -2,28 +2,29 @@
 Source:
     https://gist.github.com/davidbau/00a9b6763a260be8274f6ba22df9a145
 """
-import os
 import math
+import os
 import struct
 import typing as T
 from pathlib import Path
 
 import numpy as np
 import torch
-from torch_geometric.data import DataLoader
-
+from torch.utils.data import DataLoader
 
 null_numpy_value = np.array(
-    struct.unpack('>d', struct.pack('>Q', 0xfff8000000000002))[0],
-    dtype=np.float64
+    struct.unpack('>d', struct.pack('>Q', 0xFFF8000000000002))[0],
+    dtype=np.float64,
 )
 
 
 def is_null_numpy_value(v) -> bool:
     return (
-        isinstance(v, np.ndarray) and np.ndim(v) == 0
-        and v.dtype == np.float64 and np.isnan(v)
-        and 0xfff8000000000002 == struct.unpack('>Q', struct.pack('>d', v))[0]
+        isinstance(v, np.ndarray)
+        and np.ndim(v) == 0
+        and v.dtype == np.float64
+        and np.isnan(v)
+        and 0xFFF8000000000002 == struct.unpack('>Q', struct.pack('>d', v))[0]
     )
 
 
@@ -42,8 +43,7 @@ def unbox_numpy_null(d):
 
 
 def resolve_state_dict(s):
-    """Resolves a state, which can be a filename or a dict-like object.
-    """
+    """Resolves a state, which can be a filename or a dict-like object."""
     if isinstance(s, str):
         return unbox_numpy_null(np.load(s))
     return s
@@ -55,7 +55,7 @@ def save_cached_state(cachefile, obj, args):
     dat = obj.state_dict()
     for a, v in args.items():
         if a in dat:
-            assert (dat[a] == v)
+            assert dat[a] == v
         dat[a] = v
     if isinstance(cachefile, dict):
         cachefile.clear()
@@ -66,14 +66,15 @@ def save_cached_state(cachefile, obj, args):
 
 
 global_load_cache_enabled = True
+
+
 def load_cached_state(
     cachefile: T.Union[Path, str],
     args: T.Optional[dict] = None,
     quiet: T.Optional[bool] = False,
-    throw: T.Optional[bool] = False
+    throw: T.Optional[bool] = False,
 ):
-    """Resolves a state, which can be a filename or a dict-like object.
-    """
+    """Resolves a state, which can be a filename or a dict-like object."""
     if args is None:
         args = {}
     if not global_load_cache_enabled or cachefile is None:
@@ -81,7 +82,7 @@ def load_cached_state(
     try:
         if isinstance(cachefile, dict):
             dat = cachefile
-            cachefile = 'state' # for printed messages
+            cachefile = 'state'  # for printed messages
         else:
             dat = unbox_numpy_null(np.load(cachefile))
         for a, v in args.items():
@@ -101,64 +102,55 @@ def load_cached_state(
 
 
 class Stat(object):
-    """Abstract base class for a running pytorch statistic.
-    """
+    """Abstract base class for a running pytorch statistic."""
+
     def __init__(self, state):
         """By convention, all Stat subclasses can be initialized by passing
-        state=; and then they will initialize by calling load_state_dict.
-        """
+        state=; and then they will initialize by calling load_state_dict."""
         self.load_state_dict(resolve_state_dict(state))
 
     def add(self, x, *args, **kwargs):
         """Observes a batch of samples to be incorporated into the statistic.
-        Dimension 0 should be the batch dimension, and dimension 1 should
-        be the feature dimension of the pytorch tensor x.
+
+        Dimension 0 should be the batch dimension, and dimension 1 should be
+        the feature dimension of the pytorch tensor x.
         """
         pass
 
     def load_state_dict(self, d):
-        """Loads this Stat from a dictionary of numpy arrays as saved
-        by state_dict.
-        """
+        """Loads this Stat from a dictionary of numpy arrays as saved by
+        state_dict."""
         pass
 
     def state_dict(self):
-        """Saves this Stat as a dictionary of numpy arrays that can be
-        stored in an npz or reloaded later using load_state_dict.
-        """
+        """Saves this Stat as a dictionary of numpy arrays that can be stored
+        in an npz or reloaded later using load_state_dict."""
         return {}
 
     def save(self, filename):
-        """Saves this stat as an npz file containing the state_dict.
-        """
+        """Saves this stat as an npz file containing the state_dict."""
         save_cached_state(filename, self, {})
 
     def load(self, filename):
-        """
-        Loads this stat from an npz file containing a saved state_dict.
-        """
+        """Loads this stat from an npz file containing a saved state_dict."""
         self.load_state_dict(
             load_cached_state(filename, {}, quiet=True, throw=True)
         )
 
     def to_(self, device):
-        """Moves this Stat to the given device.
-        """
+        """Moves this Stat to the given device."""
         pass
 
     def cpu_(self):
-        """Moves this Stat to the cpu device.
-        """
+        """Moves this Stat to the cpu device."""
         self.to_('cpu')
 
     def cuda_(self):
-        """Moves this Stat to the default cuda device.
-        """
+        """Moves this Stat to the default cuda device."""
         self.to_('cuda')
 
     def _normalize_add_shape(self, x, attr='data_shape'):
-        """Flattens input data to 2d.
-        """
+        """Flattens input data to 2d."""
         if not torch.is_tensor(x):
             x = torch.tensor(x)
         if len(x.shape) < 1:
@@ -173,8 +165,7 @@ class Stat(object):
         return x.view(x.shape[0], int(np.prod(data_shape)))
 
     def _restore_result_shape(self, x, attr='data_shape'):
-        """Restores output data to input data shape.
-        """
+        """Restores output data to input data shape."""
         data_shape = getattr(self, attr, None)
         if data_shape is None:
             return x
@@ -183,8 +174,8 @@ class Stat(object):
 
 
 class Mean(Stat):
-    """Running mean
-    """
+    """Running mean."""
+
     def __init__(self, state=None):
         if state is not None:
             return super().__init__(state)
@@ -228,7 +219,9 @@ class Mean(Stat):
         self.count = state['count']
         self.batchcount = state['batchcount']
         self._mean = torch.from_numpy(state['mean'])
-        self.data_shape = None if state['data_shape'] is None else tuple(state['data_shape'])
+        self.data_shape = (
+            None if state['data_shape'] is None else tuple(state['data_shape'])
+        )
 
     def state_dict(self):
         return dict(
@@ -236,7 +229,7 @@ class Mean(Stat):
             count=self.count,
             data_shape=self.data_shape and tuple(self.data_shape),
             batchcount=self.batchcount,
-            mean=self._mean.cpu().numpy()
+            mean=self._mean.cpu().numpy(),
         )
 
 
@@ -256,7 +249,10 @@ class Quantile(Stat):
     Based on the optimal KLL quantile algorithm by Karnin, Lang, and Liberty
     from FOCS 2016.  http://ieee-focs.org/FOCS-2016-Papers/3933a071.pdf
     """
-    def __init__(self, r: int = 3072, buffersize: int = None, seed=None, state=None):
+
+    def __init__(
+        self, r: int = 3072, buffersize: int = None, seed=None, state=None
+    ):
         if state is not None:
             return super().__init__(state)
 
@@ -290,7 +286,7 @@ class Quantile(Stat):
                 self.depth,
                 self.resolution,
                 dtype=self.dtype,
-                device=self.device
+                device=self.device,
             )
         ]
         self.extremes = torch.zeros(
@@ -300,8 +296,7 @@ class Quantile(Stat):
         self.extremes[:, -1] = -float('inf')
 
     def to_(self, device):
-        """Switches internal storage to specified device.
-        """
+        """Switches internal storage to specified device."""
         if device != self.device:
             old_data = self.data
             old_extremes = self.extremes
@@ -326,7 +321,7 @@ class Quantile(Stat):
         self._scan_extremes(incoming)
         chunksize = int(math.ceil(self.buffersize / self.samplerate))
         for index in range(0, len(incoming), chunksize):
-            batch = incoming[index:index + chunksize]
+            batch = incoming[index : index + chunksize]
             sample = sample_portion(batch, self.samplerate)
             if len(sample):
                 self._add_every(sample)
@@ -350,8 +345,8 @@ class Quantile(Stat):
                 ff = self.firstfree[0]
                 available = self.data[0].shape[1] - ff
             copycount = min(available, supplied - index)
-            self.data[0][:, ff:ff + copycount] = torch.t(
-                incoming[index:index + copycount, :]
+            self.data[0][:, ff : ff + copycount] = torch.t(
+                incoming[index : index + copycount, :]
             )
             self.firstfree[0] += copycount
             index += copycount
@@ -373,7 +368,9 @@ class Quantile(Stat):
             offset = self._randbit()
             position = self.firstfree[index + 1]
             subset = data[:, offset::2]
-            self.data[index + 1][:, position : position + subset.shape[1]] = subset
+            self.data[index + 1][
+                :, position : position + subset.shape[1]
+            ] = subset
             self.firstfree[index] = 0
             self.firstfree[index + 1] += subset.shape[1]
             index += 1
@@ -460,9 +457,9 @@ class Quantile(Stat):
 
     def var(self, unbiased=True):
         mean = self.mean()[:, None]
-        return self.integrate(
-            lambda x: (x - mean).pow(2)
-        ) / (self.count - (1 if unbiased else 0))
+        return self.integrate(lambda x: (x - mean).pow(2)) / (
+            self.count - (1 if unbiased else 0)
+        )
 
     def std(self, unbiased=True):
         return self.var(unbiased=unbiased).sqrt()
@@ -472,7 +469,10 @@ class Quantile(Stat):
         if cap > 0:
             # First, make a new layer of the proper capacity.
             self.data.insert(
-                0, torch.zeros(self.depth, cap, dtype=self.dtype, device=self.device)
+                0,
+                torch.zeros(
+                    self.depth, cap, dtype=self.dtype, device=self.device
+                ),
             )
             self.firstfree.insert(0, 0)
         else:
@@ -491,9 +491,9 @@ class Quantile(Stat):
             if self.data[index - 1].shape[1] - (amount + position) >= (
                 -(-self.data[index - 2].shape[1] // 2) if (index - 1) else 1
             ):
-                self.data[index - 1][:, position : position + amount] = self.data[
-                    index
-                ][:, :amount]
+                self.data[index - 1][
+                    :, position : position + amount
+                ] = self.data[index][:, :amount]
                 self.firstfree[index - 1] += amount
                 self.firstfree[index] = 0
             else:
@@ -521,13 +521,15 @@ class Quantile(Stat):
             self._scan_extremes(self.data[0][:, : self.firstfree[0]].t())
         size = sum(self.firstfree)
         weights = torch.FloatTensor(size)  # Floating point
-        summary = torch.zeros(self.depth, size, dtype=self.dtype, device=self.device)
+        summary = torch.zeros(
+            self.depth, size, dtype=self.dtype, device=self.device
+        )
         index = 0
         for level, ff in enumerate(self.firstfree):
             if ff == 0:
                 continue
             summary[:, index : index + ff] = self.data[level][:, :ff]
-            weights[index : index + ff] = 2.0 ** level
+            weights[index : index + ff] = 2.0**level
             index += ff
         assert index == summary.shape[1]
         if sort:
@@ -565,7 +567,9 @@ class Quantile(Stat):
         nsm = summary.cpu().detach().numpy()
         for d in range(self.depth):
             result[d] = torch.tensor(
-                np.interp(nq, ncw[d], nsm[d]), dtype=self.dtype, device=self.device
+                np.interp(nq, ncw[d], nsm[d]),
+                dtype=self.dtype,
+                device=self.device,
             )
 
         return result.view((self.depth,) + qshape)
@@ -575,7 +579,11 @@ class Quantile(Stat):
         for level, ff in enumerate(self.firstfree):
             if ff == 0:
                 continue
-            result.append(torch.sum(fun(self.data[level][:, :ff]) * (2.0 ** level), dim=-1))
+            result.append(
+                torch.sum(
+                    fun(self.data[level][:, :ff]) * (2.0**level), dim=-1
+                )
+            )
         if len(result) == 0:
             return None
 
@@ -585,9 +593,11 @@ class Quantile(Stat):
         return self.quantiles(torch.linspace(0.0, 1.0, count))
 
     def normalize(self, data):
-        """Given input data as taken from the training distirbution,
-        normalizes every channel to reflect quantile values,
-        uniformly distributed, within [0, 1].
+        """Given input data as taken from the training distirbution, normalizes
+        every channel to reflect quantile values, uniformly distributed,
+        within.
+
+        [0, 1].
         """
         assert self.count > 0
         assert data.shape[0] == self.depth
@@ -613,9 +623,11 @@ class Quantile(Stat):
 
 
 class Variance(Stat):
-    """Running computation of mean|median and variance. Use this when you just need
-    basic stats without covariance.
+    """Running computation of mean|median and variance.
+
+    Use this when you just need basic stats without covariance.
     """
+
     def __init__(self, method: str = 'mean', state=None):
         if state is not None:
             return super().__init__(state)
@@ -681,7 +693,9 @@ class Variance(Stat):
         self.batchcount = state['batchcount']
         self._mean = torch.from_numpy(state['mean'])
         self.v_cmom2 = torch.from_numpy(state['cmom2'])
-        self.data_shape = None if state['data_shape'] is None else tuple(state['data_shape'])
+        self.data_shape = (
+            None if state['data_shape'] is None else tuple(state['data_shape'])
+        )
 
     def state_dict(self):
         return dict(
@@ -690,7 +704,7 @@ class Variance(Stat):
             data_shape=self.data_shape and tuple(self.data_shape),
             batchcount=self.batchcount,
             mean=self._mean.cpu().numpy(),
-            cmom2=self.v_cmom2.cpu().numpy()
+            cmom2=self.v_cmom2.cpu().numpy(),
         )
 
 
@@ -698,9 +712,9 @@ def tally_stats(
     stats: T.Sequence[T.Union[Mean, Variance, Quantile]],
     loader: DataLoader,
     caches: T.Sequence[T.Union[Path, str]],
-    quiet: bool = True
+    quiet: bool = True,
 ):
-    """Tally stats
+    """Tally stats.
 
     To use tally_stats, write code like the following.
         ds = EdgeDataset(
@@ -763,6 +777,7 @@ def tally_stats(
         cached_state = load_cached_state(cache, args, quiet=quiet)
         if cached_state is not None:
             stat.load_state_dict(cached_state)
+
             def empty_loader():
                 return
                 yield
@@ -780,10 +795,10 @@ def tally_stats(
     return wrapped_loader()
 
 
-class cache_load_enabled():
+class cache_load_enabled:
     """When used as a context manager, cache_load_enabled(False) will prevent
-    tally from loading cached statsitics, forcing them to be recomputed.
-    """
+    tally from loading cached statsitics, forcing them to be recomputed."""
+
     def __init__(self, enabled=True):
         self.prev = False
         self.enabled = enabled

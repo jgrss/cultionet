@@ -3,12 +3,14 @@ repos:
     rev: 22.3.0
     hooks:
     - id: black
+      exclude: src/cultionet/utils/stats.py
       language_version: python3
       args: [--skip-string-normalization]
   - repo: https://github.com/myint/docformatter
     rev: v1.4
     hooks:
     - id: docformatter
+      exclude: src/cultionet/utils/stats.py
       args: [
         --in-place,
         --wrap-summaries,
@@ -20,3 +22,11 @@ repos:
     rev: 6.0.0
     hooks:
     - id: flake8
+      exclude: src/cultionet/utils/stats.py
+  - repo: https://github.com/pycqa/isort
+    rev: 5.11.5
+    hooks:
+      - id: isort
+        exclude: src/cultionet/utils/stats.py
+        name: isort (python)
+        args: [--settings-path=pyproject.toml]
