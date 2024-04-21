@@ -49,10 +49,10 @@ def create_batch(
         y=y,
         bdist=bdist,
         batch_id=[f"data_{idx:06d}_{year}_none.pt"],
-        left=left,
-        bottom=bottom,
-        right=right,
-        top=top,
+        left=torch.from_numpy(left),
+        bottom=torch.from_numpy(bottom),
+        right=torch.from_numpy(right),
+        top=torch.from_numpy(top),
     )
 
 
