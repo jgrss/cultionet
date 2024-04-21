@@ -8,6 +8,18 @@ import xarray as xr
 from .data import Data
 
 
+def collate_fn(data_list: T.List[Data]) -> Data:
+    kwargs = {}
+    for key in data_list[0].to_dict().keys():
+        key_tensor = torch.tensor([])
+        for sample in data_list:
+            key_tensor = torch.cat((key_tensor, getattr(sample, key)))
+
+        kwargs[key] = key_tensor
+
+    return Data(**kwargs)
+
+
 def get_image_list_dims(
     image_list: T.Sequence[T.Union[Path, str]], src: xr.DataArray
 ) -> T.Tuple[int, int]:

@@ -1,23 +1,10 @@
 import typing as T
 
-import torch
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, Sampler
 
-from .data import Data
 from .datasets import EdgeDataset
-
-
-def collate_fn(data_list: T.List[Data]) -> Data:
-    kwargs = {}
-    for key in data_list[0].to_dict().keys():
-        key_tensor = torch.tensor([])
-        for sample in data_list:
-            key_tensor = torch.cat((key_tensor, getattr(sample, key)))
-
-        kwargs[key] = key_tensor
-
-    return Data(**kwargs)
+from .utils import collate_fn
 
 
 class EdgeDataModule(LightningDataModule):

@@ -2,11 +2,11 @@ import tempfile
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader
 
 from cultionet.data.data import Data
-from cultionet.data.datasets import EdgeDataset
 from cultionet.data.modules import EdgeDataModule
+
+from .conftest import temporary_dataset
 
 
 def test_assign_x():
@@ -116,42 +116,27 @@ def create_full_batch(
     return Data(x=x, y=y, bdist=bdist)
 
 
-def test_copy_data():
-    batch = create_full_batch(
-        num_channels=3,
-        num_time=10,
-        height=5,
-        width=5,
-    )
-    x_clone = batch.x.clone()
+def test_copy_data(data_batch: Data):
+    x_clone = data_batch.x.clone()
 
-    batch_copy = batch.copy()
+    batch_copy = data_batch.copy()
     batch_copy.x *= 10
 
-    assert not torch.allclose(batch.x, batch_copy.x)
-    assert torch.allclose(batch.x, x_clone)
-    assert torch.allclose(batch.y, batch_copy.y)
+    assert not torch.allclose(data_batch.x, batch_copy.x)
+    assert torch.allclose(data_batch.x, x_clone)
+    assert torch.allclose(data_batch.y, batch_copy.y)
 
 
-def test_train_dataset():
+def test_train_dataset(data_batch: Data):
     num_samples = 6
     batch_size = 2
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        train_path = Path(temp_dir)
-        processed_path = train_path / 'processed'
-
-        for i in range(num_samples):
-            temp_path = processed_path / f"data_{i:06d}_2022_0_none.pt"
-            batch = create_full_batch(
-                num_channels=3,
-                num_time=10,
-                height=5,
-                width=5,
-            )
-            batch.to_file(temp_path)
-
-        ds = EdgeDataset(train_path)
+        ds = temporary_dataset(
+            batch=data_batch,
+            temp_dir=temp_dir,
+            num_samples=num_samples,
+        )
 
         assert len(ds) == num_samples
 

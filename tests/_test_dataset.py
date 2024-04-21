@@ -1,10 +1,11 @@
 from pathlib import Path
 
-from .data import batch_file
-from cultionet.data.datasets import EdgeDataset
-from cultionet.utils.project_paths import setup_paths
 import torch
 
+from cultionet.data.datasets import EdgeDataset
+from cultionet.utils.project_paths import setup_paths
+
+from .data import batch_file
 
 project_path = Path(__file__).parent.absolute()
 ppaths = setup_paths(project_path)

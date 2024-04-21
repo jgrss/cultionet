@@ -1,7 +1,6 @@
-from cultionet.losses import TanimotoDistLoss
-
 import torch
 
+from cultionet.losses import TanimotoDistLoss
 
 torch.manual_seed(100)
 n_samples = 100

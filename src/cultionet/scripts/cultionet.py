@@ -37,7 +37,7 @@ from cultionet.enums import CLISteps, ModelNames
 from cultionet.errors import TensorShapeError
 from cultionet.utils import model_preprocessing
 from cultionet.utils.logging import set_color_logger
-from cultionet.utils.normalize import get_norm_values
+from cultionet.utils.normalize import NormValues
 from cultionet.utils.project_paths import ProjectPaths, setup_paths
 
 logger = set_color_logger(__name__)
@@ -941,22 +941,21 @@ def train_maskrcnn(args):
             ppaths.norm_file.unlink()
     if not ppaths.norm_file.is_file():
         train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
-        data_values = get_norm_values(
+        norm_values: NormValues = NormValues.from_dataset(
             dataset=train_ds,
             batch_size=args.batch_size,
             mean_color=args.mean_color,
             sse_color=args.sse_color,
         )
-        torch.save(data_values, str(ppaths.norm_file))
+        norm_values.to_file(ppaths.norm_file)
     else:
-        data_values = torch.load(str(ppaths.norm_file))
+        norm_values = NormValues.from_file(ppaths.norm_file)
 
     # Create the train data object again, this time passing
     # the means and standard deviation tensors
     ds = EdgeDataset(
         root=ppaths.train_path,
-        data_means=data_values.mean,
-        data_stds=data_values.std,
+        norm_values=norm_values,
         random_seed=args.random_seed,
     )
     # Check for a test dataset
@@ -964,8 +963,7 @@ def train_maskrcnn(args):
     if list((ppaths.test_process_path).glob("*.pt")):
         test_ds = EdgeDataset(
             root=ppaths.test_path,
-            data_means=data_values.mean,
-            data_stds=data_values.std,
+            norm_values=norm_values,
             random_seed=args.random_seed,
         )
         if args.expected_dim is not None:
@@ -1034,17 +1032,15 @@ def spatial_kfoldcv(args):
         )
         # Normalize the partition
         temp_ds = train_ds.split_train_val(val_frac=args.val_frac)[0]
-        data_values = get_norm_values(
+        norm_values = NormValues.from_dataset(
             dataset=temp_ds,
             class_info=class_info,
             batch_size=args.batch_size,
             mean_color=args.mean_color,
             sse_color=args.sse_color,
         )
-        train_ds.data_means = data_values.mean
-        train_ds.data_stds = data_values.std
-        test_ds.data_means = data_values.mean
-        test_ds.data_stds = data_values.std
+        train_ds.norm_values = norm_values
+        test_ds.norm_values = norm_values
 
         # Get balanced class weights
         # Reference: https://github.com/scikit-learn/scikit-learn/blob/f3f51f9b6/sklearn/utils/class_weight.py#L10
@@ -1052,9 +1048,9 @@ def spatial_kfoldcv(args):
         # class_weights = recip_freq[torch.arange(0, len(data_values.crop_counts)-1)]
         # class_weights = torch.tensor([0] + list(class_weights), dtype=torch.float)
         if torch.cuda.is_available():
-            class_counts = data_values.crop_counts.to("cuda")
+            class_counts = norm_values.crop_counts.to("cuda")
         else:
-            class_counts = data_values.crop_counts
+            class_counts = norm_values.crop_counts
 
         # Fit the model
         cultionet.fit(
@@ -1190,25 +1186,22 @@ def train_model(args):
             train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
 
         # Get means and standard deviations from the training dataset
-        data_values = get_norm_values(
+        norm_values: NormValues = NormValues.from_dataset(
             dataset=train_ds,
             class_info=class_info,
             batch_size=args.batch_size,
             mean_color=args.mean_color,
             sse_color=args.sse_color,
         )
-        torch.save(data_values, str(ppaths.norm_file))
+        norm_values.to_file(ppaths.norm_file)
     else:
-        data_values = torch.load(str(ppaths.norm_file))
+        norm_values = NormValues.from_file(ppaths.norm_file)
 
     # Create the train data object again, this time passing
     # the means and standard deviation tensors
     ds = EdgeDataset(
         root=ppaths.train_path,
-        data_means=data_values.mean,
-        data_stds=data_values.std,
-        crop_counts=data_values.crop_counts,
-        edge_counts=data_values.edge_counts,
+        norm_values=norm_values,
         random_seed=args.random_seed,
     )
 
@@ -1217,10 +1210,7 @@ def train_model(args):
     if list((ppaths.test_process_path).glob("*.pt")):
         test_ds = EdgeDataset(
             root=ppaths.test_path,
-            data_means=data_values.mean,
-            data_stds=data_values.std,
-            crop_counts=data_values.crop_counts,
-            edge_counts=data_values.edge_counts,
+            norm_values=norm_values,
             random_seed=args.random_seed,
         )
         if args.expected_dim is not None:
@@ -1232,17 +1222,14 @@ def train_model(args):
                 raise ValueError(e)
             test_ds = EdgeDataset(
                 root=ppaths.test_path,
-                data_means=data_values.mean,
-                data_stds=data_values.std,
-                crop_counts=data_values.crop_counts,
-                edge_counts=data_values.edge_counts,
+                norm_values=norm_values,
                 random_seed=args.random_seed,
             )
 
     if torch.cuda.is_available():
-        class_counts = data_values.crop_counts.to("cuda")
+        class_counts = norm_values.crop_counts.to("cuda")
     else:
-        class_counts = data_values.crop_counts
+        class_counts = norm_values.crop_counts
 
     train_kwargs = dict(
         dataset=ds,

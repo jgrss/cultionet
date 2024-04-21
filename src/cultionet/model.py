@@ -20,7 +20,7 @@ from torchvision import transforms
 from .callbacks import LightningGTiffWriter
 from .data.constant import SCALE_FACTOR
 from .data.data import Data
-from .data.datasets import EdgeDataset, zscores
+from .data.datasets import EdgeDataset
 from .data.modules import EdgeDataModule
 from .data.samplers import EpochRandomSampler
 from .enums import AttentionTypes, ModelNames, ModelTypes, ResBlockTypes
@@ -32,6 +32,7 @@ from .models.lightning import (
     RefineLitModel,
 )
 from .utils.logging import set_color_logger
+from .utils.normalize import NormValues
 from .utils.reshape import ModelOutputs
 
 logging.getLogger("lightning").addHandler(logging.NullHandler())
@@ -976,7 +977,7 @@ def predict(
     lit_model: CultioLitModel,
     data: Data,
     written: np.ndarray,
-    data_values: torch.Tensor,
+    norm_values: NormValues,
     w: Window = None,
     w_pad: Window = None,
     device: str = "cpu",
@@ -993,7 +994,8 @@ def predict(
         w_pad (Optional[int]): The ``rasterio.windows.Window`` to predict on.
         device (Optional[str])
     """
-    norm_batch = zscores(data, data_values.mean, data_values.std)
+    norm_batch = norm_values(data)
+
     if device == "gpu":
         norm_batch = norm_batch.to("cuda")
         lit_model = lit_model.to("cuda")

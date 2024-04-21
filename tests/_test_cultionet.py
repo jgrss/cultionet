@@ -1,7 +1,7 @@
 import torch
 
-from cultionet.models import model_utils
 from cultionet.layers.base_layers import Softmax
+from cultionet.models import model_utils
 from cultionet.models.nunet import ResUNet3Psi
 from cultionet.models.temporal_transformer import TemporalAttention
 

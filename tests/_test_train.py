@@ -2,14 +2,13 @@ import tempfile
 from pathlib import Path
 
 import joblib
-import torch
 import pytorch_lightning as pl
+import torch
 from torch_geometric.data import Data
 
 import cultionet
 from cultionet.data.datasets import EdgeDataset
 from cultionet.utils.project_paths import setup_paths
-
 
 pl.seed_everything(100)
 

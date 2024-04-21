@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 import psutil
 import pygrts
-import torch
 from joblib import delayed, parallel_backend
 from pytorch_lightning import seed_everything
 from scipy.ndimage.measurements import label as nd_label
@@ -20,9 +19,9 @@ from tqdm.auto import tqdm
 
 from ..augment.augmenters import Augmenters
 from ..errors import TensorShapeError
-from ..models import model_utils
 from ..utils.logging import set_color_logger
 from ..utils.model_preprocessing import TqdmParallel
+from ..utils.normalize import NormValues
 from .data import Data
 
 ATTRVINSTANCE = attr.validators.instance_of
@@ -30,61 +29,6 @@ ATTRVIN = attr.validators.in_
 ATTRVOPTIONAL = attr.validators.optional
 
 logger = set_color_logger(__name__)
-
-
-def add_dims(d: torch.Tensor) -> torch.Tensor:
-    return d.unsqueeze(0)
-
-
-def update_data(
-    batch: Data,
-    idx: T.Optional[int] = None,
-    x: T.Optional[torch.Tensor] = None,
-) -> Data:
-    image_id = None
-    if idx is not None:
-        if hasattr(batch, "boxes"):
-            if batch.boxes is not None:
-                image_id = (
-                    torch.zeros_like(batch.box_labels, dtype=torch.int64) + idx
-                )
-
-    if x is not None:
-        exclusion = ("x",)
-
-        return Data(
-            x=x,
-            image_id=image_id,
-            **{
-                k: getattr(batch, k)
-                for k in batch.keys()
-                if k not in exclusion
-            },
-        )
-    else:
-        return Data(
-            image_id=image_id, **{k: getattr(batch, k) for k in batch.keys()}
-        )
-
-
-def zscores(
-    batch: Data,
-    data_means: torch.Tensor,
-    data_stds: torch.Tensor,
-) -> Data:
-    """Normalizes data to z-scores.
-
-    Args:
-        batch (Data): A `torch_geometric` data object.
-        data_means (Tensor): The data feature-wise means.
-        data_stds (Tensor): The data feature-wise standard deviations.
-
-    z = (x - μ) / σ
-    """
-    x = (batch.x - add_dims(data_means)) / add_dims(data_stds)
-    batch.x = x.clone()
-
-    return batch
 
 
 def _check_shape(
@@ -104,10 +48,7 @@ class EdgeDataset(Dataset):
     def __init__(
         self,
         root: T.Union[str, Path, bytes] = ".",
-        data_means: T.Optional[torch.Tensor] = None,
-        data_stds: T.Optional[torch.Tensor] = None,
-        crop_counts: T.Optional[torch.Tensor] = None,
-        edge_counts: T.Optional[torch.Tensor] = None,
+        norm_values: T.Optional[NormValues] = None,
         pattern: str = "data*.pt",
         processes: int = psutil.cpu_count(),
         threads_per_worker: int = 1,
@@ -115,20 +56,16 @@ class EdgeDataset(Dataset):
         augment_prob: float = 0.0,
     ):
         self.root = root
-        self.data_means = data_means
-        self.data_stds = data_stds
-        self.crop_counts = crop_counts
-        self.edge_counts = edge_counts
+        self.norm_values = norm_values
         self.pattern = pattern
         self.processes = processes
         self.threads_per_worker = threads_per_worker
         self.random_seed = random_seed
-        seed_everything(self.random_seed, workers=True)
-        self.rng = np.random.default_rng(self.random_seed)
         self.augment_prob = augment_prob
 
-        self.ct = model_utils.ConvToTime()
-        self.gc = model_utils.GraphToConv()
+        seed_everything(self.random_seed, workers=True)
+        self.rng = np.random.default_rng(self.random_seed)
+
         self.augmentations_ = [
             'tswarp',
             'tsnoise',
@@ -549,7 +486,7 @@ class EdgeDataset(Dataset):
                 batch.segments = None
                 batch.props = None
 
-        if isinstance(self.data_means, torch.Tensor):
-            batch = zscores(batch, self.data_means, self.data_stds)
+        if self.norm_values is not None:
+            batch = self.norm_values(batch)
 
         return batch

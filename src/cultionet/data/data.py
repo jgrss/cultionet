@@ -49,6 +49,19 @@ class Data:
 
         return kwargs
 
+    def __add__(self, other: "Data") -> "Data":
+        out_dict = {}
+        for key, value in self.to_dict().items():
+            if isinstance(value, torch.Tensor):
+                out_dict[key] = value + getattr(other, key)
+
+        return Data(**out_dict)
+
+    def __iadd__(self, other: "Data") -> "Data":
+        self = self + other
+
+        return self
+
     def copy(self) -> "Data":
         return Data(**self.to_dict())
 
@@ -73,18 +86,18 @@ class Data:
         return self.x.shape[4]
 
     def to_file(
-        self, filename: Union[Path, str], compress: Union[int, str] = 'lz4'
+        self, filename: Union[Path, str], compress: Union[int, str] = 'zlib'
     ) -> None:
         Path(filename).parent.mkdir(parents=True, exist_ok=True)
         joblib.dump(
-            self,
+            self.to_dict(),
             filename,
             compress=compress,
         )
 
     @classmethod
     def from_file(cls, filename: Union[Path, str]) -> "Data":
-        return joblib.load(filename)
+        return Data(**joblib.load(filename))
 
     def __str__(self):
         return (
