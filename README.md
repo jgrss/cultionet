@@ -17,45 +17,33 @@ Below are highlights of **cultionet**:
 
 ## The cultionet input data
 
-The model inputs are satellite time series (e.g., bands or spectral indices). Data are stored in a [PyTorch Geometric Data object](https://pytorch-geometric.readthedocs.io/en/latest/modules/data.html#torch_geometric.data.Data). For example, **cultionet** datasets will have data
-that look something like the following.
+The model inputs are satellite time series (e.g., bands or spectral indices). Data are stored in a PyTorch Data object. For example, **cultionet** datasets will have data that look something like the following.
 
 ```python
-from torch_geometric.data import Data
+import numpy as np
+from cultionet.data.data import Data
 
 Data(
-  x=[10000, 65], y=[10000], bdist=[10000],
-  height=100, width=100, ntime=13, nbands=5,
-  zero_padding=0, start_year=2020, end_year=2021,
-  left=<longitude>, bottom=<latitude>,
-  right=<longitude>, top=<latitude>,
-  res=10.0, train_id='{site id}_2021_1_none', num_nodes=10000
+  x=[1, 3, 12, 100, 100], y=[1, 100, 100], bdist=[1, 100, 100],
+  start_year=torch.tensor([2020]), end_year=torch.tensor([2021]),
+  left=torch.tensor([<longitude>]), bottom=torch.tensor([<latitude>]),
+  right=torch.tensor([<longitude>]), top=torch.tensor([<latitude>]),
+  res=torch.tensor([10.0]), batch_id=['{site id}_2021_1_none'],
 )
 ```
 
 where
 
 ```
-x = input features = torch.Tensor of (samples x bands*time)
-y = labels = torch.Tensor of (samples,)
-bdist = distance transform = torch.Tensor of (samples,)
-height = image height/rows = int
-width = image width/columns = int
-ntime = image time dimensions/sequence length = int
-nbands = image band dimensions/channels = int
-left = image left coordinate bounds = float
-bottom = image bottom coordinate bounds = float
-right = image right coordinate bounds = float
-top = image top coordinate bounds = float
-res = image spatial resolution = float
-train_id = image id = str
-```
-
-As an example, for a time series of red, green, blue, and NIR with 25 time steps (bi-weekly + 1 additional end point),
-the data would be shaped like:
-
-```
-x = [[r_w1, ..., r_w25, g_w1, ..., g_wN, b_w1, ..., b_wN, n_w1, ..., n_wN]]
+x = input features = torch.Tensor of (batch x channels/bands x time x height x width)
+y = labels = torch.Tensor of (batch x height x width)
+bdist = distance transform = torch.Tensor of (batch x height x width)
+left = image left coordinate bounds = torch.Tensor
+bottom = image bottom coordinate bounds = torch.Tensor
+right = image right coordinate bounds = torch.Tensor
+top = image top coordinate bounds = torch.Tensor
+res = image spatial resolution = torch.Tensor
+batch_id = image id = list
 ```
 
 ## Create train dataset
