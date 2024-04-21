@@ -286,9 +286,9 @@ class CultioNet(nn.Module):
 
     def __init__(
         self,
-        ds_features: int,
-        ds_time_features: int,
-        filters: int = 32,
+        in_channels: int,
+        in_time: int,
+        hidden_channels: int = 32,
         num_classes: int = 2,
         model_type: str = ModelTypes.RESUNET3PSI,
         activation_type: str = "SiLU",
@@ -301,28 +301,20 @@ class CultioNet(nn.Module):
     ):
         super(CultioNet, self).__init__()
 
-        # Total number of features (time x bands/indices/channels)
-        self.ds_num_features = ds_features
-        # Total number of time features
-        self.ds_num_time = ds_time_features
-        # Total number of bands
-        self.ds_num_bands = int(self.ds_num_features / self.ds_num_time)
-        self.filters = filters
+        self.in_channels = in_channels
+        self.in_time = in_time
+        self.hidden_channels = hidden_channels
         self.num_classes = num_classes
 
-        self.gc = model_utils.GraphToConv()
-        self.cg = model_utils.ConvToGraph()
-        self.ct = model_utils.ConvToTime()
-
         self.temporal_encoder = TemporalTransformer(
-            in_channels=self.ds_num_bands,
-            hidden_channels=self.filters,
+            in_channels=self.in_channels,
+            hidden_channels=self.hidden_channels,
             num_head=8,
-            num_time=self.ds_num_time,
+            in_time=self.in_time,
             dropout=0.1,
-            num_layers=4,
-            d_model=self.filters,
-            time_scaler=1_000,
+            num_layers=2,
+            d_model=128,
+            time_scaler=100,
             num_classes_l2=self.num_classes,
             num_classes_last=self.num_classes + 1,
             activation_type=activation_type,
@@ -330,9 +322,9 @@ class CultioNet(nn.Module):
         )
 
         unet3_kwargs = {
-            "in_channels": self.ds_num_bands,
-            "in_time": self.ds_num_time,
-            "init_filter": self.filters,
+            "in_channels": self.in_channels,
+            "in_time": self.in_time,
+            "hidden_channels": self.hidden_channels,
             "num_classes": self.num_classes,
             "activation_type": activation_type,
             "deep_sup_dist": deep_sup_dist,
@@ -340,11 +332,11 @@ class CultioNet(nn.Module):
             "deep_sup_mask": deep_sup_mask,
             "mask_activation": Softmax(dim=1),
         }
+
         assert model_type in (
             ModelTypes.UNET3PSI,
             ModelTypes.RESUNET3PSI,
             ModelTypes.RESELUNETPSI,
-            ModelTypes.TRESAUNET,
         ), "The model type is not supported."
         if model_type == ModelTypes.UNET3PSI:
             unet3_kwargs["dilation"] = 2 if dilations is None else dilations
@@ -381,45 +373,21 @@ class CultioNet(nn.Module):
             else:
                 self.mask_model = ResELUNetPsi(**unet3_kwargs)
 
-        elif model_type == ModelTypes.TRESAUNET:
-            self.mask_model = TemporalResAUNet(
-                in_channels=self.ds_num_bands,
-                hidden_channels=self.filters,
-                out_channels=1,
-                num_time=self.ds_num_time,
-                height=100,
-                width=100,
-            )
-
     def forward(self, data: Data) -> T.Dict[str, torch.Tensor]:
-        height = (
-            int(data.height) if data.batch is None else int(data.height[0])
-        )
-        width = int(data.width) if data.batch is None else int(data.width[0])
-        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
-
-        # for attribute in ("ntime", "nbands", "height", "width"):
-        #     check_batch_dims(data, attribute)
-
-        # Reshape from ((H*W) x (C*T)) -> (B x C x H x W)
-        x = self.gc(data.x, batch_size, height, width)
-        # Reshape from (B x C x H x W) -> (B x C x T|D x H x W)
-        x = self.ct(x, nbands=self.ds_num_bands, ntime=self.ds_num_time)
-
         # Transformer attention encoder
-        transformer_outputs = self.temporal_encoder(x)
+        transformer_outputs = self.temporal_encoder(data.x)
 
         # Main stream
         logits = self.mask_model(
-            x,
+            data.x,
             temporal_encoding=transformer_outputs['encoded'],
         )
 
-        classes_l2 = self.cg(transformer_outputs['l2'])
-        classes_l3 = self.cg(transformer_outputs['l3'])
-        logits_distance = self.cg(logits["dist"])
-        logits_edges = self.cg(logits["edge"])
-        logits_crop = self.cg(logits["mask"])
+        classes_l2 = transformer_outputs['l2']
+        classes_l3 = transformer_outputs['l3']
+        logits_distance = logits["dist"]
+        logits_edges = logits["edge"]
+        logits_crop = logits["mask"]
 
         out = {
             "dist": logits_distance,
