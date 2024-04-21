@@ -1,4 +1,5 @@
 import typing as T
+from copy import deepcopy
 from functools import partial
 from pathlib import Path
 
@@ -6,7 +7,6 @@ import attr
 import geopandas as gpd
 import joblib
 import numpy as np
-import pandas as pd
 import psutil
 import pygrts
 from joblib import delayed, parallel_backend
@@ -88,12 +88,23 @@ class EdgeDataset(Dataset):
 
     def get_data_list(self):
         """Gets the list of data files."""
-        self.data_list_ = list(Path(self.processed_dir).glob(self.pattern))
+        data_list_ = list(Path(self.processed_dir).glob(self.pattern))
 
-        if not self.data_list_:
+        if not data_list_:
             logger.exception(
                 f"No .pt files were found with pattern {self.pattern}."
             )
+
+        self.data_list_ = np.array(data_list_)
+
+    @property
+    def data_list(self):
+        """Get a list of processed files."""
+        return self.data_list_
+
+    def __len__(self):
+        """Returns the dataset length."""
+        return len(self.data_list)
 
     def cleanup(self):
         for fn in self.data_list_:
@@ -112,19 +123,11 @@ class EdgeDataset(Dataset):
         data = self[0]
         return int(data.ntime)
 
-    @property
-    def raw_file_names(self):
-        """Get the raw file names."""
-        if not self.data_list_:
-            self.get_data_list()
-
-        return self.data_list_
-
     def to_frame(self) -> gpd.GeoDataFrame:
         """Converts the Dataset to a GeoDataFrame."""
 
         def get_box_id(data_id: str, *bounds):
-            return data_id, box(*bounds).centroid
+            return data_id, box(*list(map(float, bounds))).centroid
 
         with parallel_backend(backend="loky", n_jobs=self.processes):
             with TqdmParallel(
@@ -135,7 +138,7 @@ class EdgeDataset(Dataset):
             ) as pool:
                 results = pool(
                     delayed(get_box_id)(
-                        data.train_id,
+                        data.batch_id,
                         data.left,
                         data.bottom,
                         data.right,
@@ -231,10 +234,9 @@ class EdgeDataset(Dataset):
             else:
                 return self[indices]
 
-    def spatial_kfoldcv_iter(
-        self, partition_column: str
-    ) -> T.Tuple[str, "EdgeDataset", "EdgeDataset"]:
+    def spatial_kfoldcv_iter(self, partition_column: str):
         """Yield generator to iterate over spatial partitions."""
+
         for kfold in self.spatial_partitions.itertuples():
             # Bounding box and indices of the kth fold
             kfold_indices = self.query_partition_by_name(
@@ -249,19 +251,13 @@ class EdgeDataset(Dataset):
 
     def create_spatial_index(self):
         """Creates the spatial index."""
-        dataset_grid_path = (
-            Path(self.processed_dir).parent.parent / "dataset_grids.gpkg"
-        )
+        dataset_grid_path = self.root / "dataset_grids.gpkg"
+
         if dataset_grid_path.is_file():
             self.dataset_df = gpd.read_file(dataset_grid_path)
         else:
             self.dataset_df = self.to_frame()
             self.dataset_df.to_file(dataset_grid_path, driver="GPKG")
-
-    @property
-    def processed_file_names(self):
-        """Get a list of processed files."""
-        return self.data_list_
 
     def check_dims(
         self,
@@ -293,7 +289,7 @@ class EdgeDataset(Dataset):
                         self[i].height,
                         self[i].width,
                         i,
-                        self[i].train_id,
+                        self[i].batch_id,
                     )
                     for i in range(0, len(self))
                 )
@@ -315,10 +311,6 @@ class EdgeDataset(Dataset):
                     self.data_list_[i].unlink()
             else:
                 raise TensorShapeError
-
-    def __len__(self):
-        """Returns the dataset length."""
-        return len(self.processed_file_names)
 
     def split_train_val_by_partition(
         self,
@@ -374,6 +366,7 @@ class EdgeDataset(Dataset):
         """
         id_column = "common_id"
         self.shuffle_items()
+
         if spatial_overlap_allowed:
             n_train = int(len(self) * (1.0 - val_frac))
             train_ds = self[:n_train]
@@ -383,37 +376,21 @@ class EdgeDataset(Dataset):
             # the dataset.
             self.create_spatial_index()
 
-            # Create column of each site's common id
-            # (i.e., without the year and augmentation).
-            self.dataset_df[id_column] = self.dataset_df.grid_id.str.split(
-                "_", expand=True
-            ).loc[:, 0]
-
-            unique_ids = self.dataset_df.common_id.unique()
             if spatial_balance:
                 # Separate train and validation by spatial location
 
-                # Get unique site coordinates
-                # NOTE: We do this because augmentations are stacked at
-                # the same site, thus creating multiple files with the
-                # same centroid.
-                df_unique_locations = gpd.GeoDataFrame(
-                    pd.Series(unique_ids)
-                    .to_frame(name=id_column)
-                    .merge(self.dataset_df, on=id_column)
-                    .drop_duplicates(id_column)
-                    .drop(columns=["grid_id"])
-                ).to_crs("EPSG:8858")
-
                 # Setup a quad-tree using the GRTS method
                 # (see https://github.com/jgrss/pygrts for details)
-                qt = pygrts.QuadTree(df_unique_locations, force_square=False)
+                qt = pygrts.QuadTree(
+                    self.dataset_df.to_crs("EPSG:8858"),
+                    force_square=False,
+                )
 
                 # Recursively split the quad-tree until each grid has
                 # only one sample.
                 qt.split_recursive(max_samples=1)
 
-                n_val = int(val_frac * len(df_unique_locations.index))
+                n_val = int(val_frac * len(self.dataset_df.index))
                 # `qt.sample` random samples from the quad-tree in a
                 # spatially balanced manner. Thus, `df_val_sample` is
                 # a GeoDataFrame with `n_val` sites spatially balanced.
@@ -422,33 +399,49 @@ class EdgeDataset(Dataset):
                 # Since we only took one sample from each coordinate,
                 # we need to find all of the .pt files that share
                 # coordinates with the sampled sites.
-                val_mask = self.dataset_df.common_id.isin(
-                    df_val_sample.common_id
+                val_mask = self.dataset_df[self.grid_id_column].isin(
+                    df_val_sample[self.grid_id_column]
                 )
             else:
                 # Randomly sample a percentage for validation
-                df_val_ids = (
-                    pd.Series(unique_ids)
-                    .sample(frac=val_frac, random_state=self.random_seed)
-                    .to_frame(name=id_column)
-                )
+                df_val_ids = self.dataset_df.sample(
+                    frac=val_frac, random_state=self.random_seed
+                ).to_frame(name=id_column)
                 # Get all ids for validation samples
-                val_mask = self.dataset_df.common_id.isin(df_val_ids.common_id)
+                val_mask = self.dataset_df[self.grid_id_column].isin(
+                    df_val_ids[self.grid_id_column]
+                )
 
             # Get train/val indices
-            val_idx = self.dataset_df.loc[val_mask].index.tolist()
-            train_idx = self.dataset_df.loc[~val_mask].index.tolist()
+            val_idx = self.dataset_df.loc[val_mask].index.values
+            train_idx = self.dataset_df.loc[~val_mask].index.values
 
             # Slice the dataset
             train_ds = self[train_idx]
             val_ds = self[val_idx]
+
+        val_ds.augment_prob = 0.0
 
         return train_ds, val_ds
 
     def load_file(self, filename: T.Union[str, Path]) -> Data:
         return joblib.load(filename)
 
-    def __getitem__(self, idx: int) -> dict:
+    def __getitem__(
+        self, idx: T.Union[int, np.ndarray]
+    ) -> T.Union[dict, "EdgeDataset"]:
+        if isinstance(idx, (int, np.integer)):
+            return self.get(idx)
+        else:
+            return self.index_select(idx)
+
+    def index_select(self, idx: np.ndarray) -> "EdgeDataset":
+        dataset = deepcopy(self)
+        dataset.data_list_ = self.data_list_[idx]
+
+        return dataset
+
+    def get(self, idx: int) -> dict:
         """Gets an individual data object from the dataset.
 
         Args:
@@ -461,7 +454,7 @@ class EdgeDataset(Dataset):
             if self.rng.normal() > 1 - self.augment_prob:
                 # Choose one augmentation to apply
                 aug_name = self.rng.choice(self.augmentations_)
-                aug_name = 'tswarp'
+
                 if aug_name in (
                     'roll',
                     'tswarp',
