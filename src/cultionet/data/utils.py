@@ -1,4 +1,5 @@
 import typing as T
+from functools import singledispatch
 from pathlib import Path
 
 import numpy as np
@@ -8,14 +9,53 @@ import xarray as xr
 from .data import Data
 
 
+@singledispatch
+def get_empty(template: torch.Tensor) -> torch.Tensor:
+    return torch.tensor([])
+
+
+@get_empty.register
+def _(template: np.ndarray) -> np.ndarray:
+    return np.array([])
+
+
+@get_empty.register
+def _(template: list) -> list:
+    return []
+
+
+@get_empty.register
+def _(template: None) -> None:
+    return None
+
+
+@singledispatch
+def concat(value: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
+    return torch.cat((value, other))
+
+
+@concat.register
+def _(value: np.ndarray, other: np.ndarray) -> np.ndarray:
+    return np.concatenate((value, other))
+
+
+@concat.register
+def _(value: list, other: list) -> list:
+    return value + other
+
+
 def collate_fn(data_list: T.List[Data]) -> Data:
     kwargs = {}
+    # Iterate over data keys
     for key in data_list[0].to_dict().keys():
-        key_tensor = torch.tensor([])
-        for sample in data_list:
-            key_tensor = torch.cat((key_tensor, getattr(sample, key)))
+        # Get an empty container
+        key_value = get_empty(getattr(data_list[0], key))
+        if key_value is not None:
+            # Fill the container
+            for sample in data_list:
+                key_value = concat(key_value, getattr(sample, key))
 
-        kwargs[key] = key_tensor
+        kwargs[key] = key_value
 
     return Data(**kwargs)
 
