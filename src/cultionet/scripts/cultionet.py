@@ -1170,6 +1170,7 @@ def train_model(args):
             threads_per_worker=args.threads,
             random_seed=args.random_seed,
         )
+
     # Get the normalization means and std. deviations on the train data
     # Calculate the values needed to transform to z-scores, using
     # the training data
@@ -1180,7 +1181,9 @@ def train_model(args):
     if not ppaths.norm_file.is_file():
         if args.spatial_partitions is not None:
             train_ds = ds.split_train_val(
-                val_frac=args.val_frac, spatial_overlap_allowed=False
+                val_frac=args.val_frac,
+                spatial_overlap_allowed=False,
+                spatial_balance=True,
             )[0]
         else:
             train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
