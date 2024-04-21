@@ -221,7 +221,9 @@ def get_data_module(
         # TODO: We removed `dataset.split_train_val_by_partition` but
         # could make it an option in future versions.
         train_ds, val_ds = dataset.split_train_val(
-            val_frac=val_frac, spatial_overlap_allowed=False
+            val_frac=val_frac,
+            spatial_overlap_allowed=False,
+            spatial_balance=True,
         )
     else:
         train_ds, val_ds = dataset.split_train_val(val_frac=val_frac)
@@ -665,7 +667,7 @@ def fit(
     ckpt_file = Path(ckpt_file)
 
     # Split the dataset into train/validation
-    data_module = get_data_module(
+    data_module: EdgeDataModule = get_data_module(
         dataset=dataset,
         test_dataset=test_dataset,
         val_frac=val_frac,
