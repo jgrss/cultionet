@@ -10,6 +10,12 @@ import joblib
 import numpy as np
 import torch
 from skimage import util as sk_util
+from torchvision.transforms import InterpolationMode
+from torchvision.transforms.v2 import (
+    RandomHorizontalFlip,
+    RandomRotation,
+    RandomVerticalFlip,
+)
 from tsaug import AddNoise, Drift, TimeWarp
 
 from ..data.data import Data
@@ -149,13 +155,7 @@ class AugmentTimeDrift(AugmentTimeMixin):
 class Rotate(AugmenterModule):
     def __init__(self, deg: int):
         self.name_ = f"rotate-{deg}"
-
-        deg_dict = {
-            90: cv2.ROTATE_90_CLOCKWISE,
-            180: cv2.ROTATE_180,
-            270: cv2.ROTATE_90_COUNTERCLOCKWISE,
-        }
-        self.deg_func = deg_dict[deg]
+        self.deg = deg
 
     def forward(
         self,
@@ -163,46 +163,22 @@ class Rotate(AugmenterModule):
         aug_args: AugmenterArgs = None,
     ) -> Data:
 
-        stacked_x = einops.rearrange(cdata.x, '1 c t h w -> (c t) h w').numpy()
-        # Create the output array for rotated features
-        x = np.zeros(
-            (
-                cdata.num_channels * cdata.num_time,
-                *cv2.rotate(np.float32(stacked_x[0]), self.deg_func).shape,
-            ),
-            dtype='float32',
-        )
+        x = einops.rearrange(cdata.x, '1 c t h w -> 1 t c h w')
 
-        for i in range(0, stacked_x.shape[0]):
-            x[i] = cv2.rotate(np.float32(stacked_x[i]), self.deg_func)
+        x_rotation_transform = RandomRotation(
+            degrees=[self.deg, self.deg],
+            interpolation=InterpolationMode.BILINEAR,
+        )
+        y_rotation_transform = RandomRotation(
+            degrees=[self.deg, self.deg],
+            interpolation=InterpolationMode.NEAREST,
+        )
 
         cdata.x = einops.rearrange(
-            torch.from_numpy(x),
-            '(c t) h w -> 1 c t h w',
-            c=cdata.num_channels,
-            t=cdata.num_time,
+            x_rotation_transform(x),
+            '1 t c h w -> 1 c t h w',
         )
-
-        # Rotate labels
-        label_dtype = (
-            "float" if "float" in cdata.y.numpy().dtype.name else "int"
-        )
-        if label_dtype == "float":
-            y = cv2.rotate(
-                np.float32(cdata.y.squeeze(dim=0).numpy()), self.deg_func
-            )
-        else:
-            y = cv2.rotate(
-                np.uint8(cdata.y.squeeze(dim=0).numpy()), self.deg_func
-            )
-
-        cdata.y = einops.rearrange(torch.from_numpy(y), 'h w -> 1 h w')
-
-        # Rotate the distance transform
-        bdist = cv2.rotate(
-            np.float32(cdata.bdist.squeeze(dim=0).numpy()), self.deg_func
-        )
-        cdata.bdist = einops.rearrange(torch.from_numpy(y), 'h w -> 1 h w')
+        cdata.y = y_rotation_transform(cdata.y)
 
         return cdata
 
@@ -232,18 +208,20 @@ class Flip(AugmenterModule):
         cdata: Data,
         aug_args: AugmenterArgs = None,
     ) -> Data:
-        x = einops.rearrange(cdata.x, '1 c t h w -> (c t) h w').numpy()
+        x = einops.rearrange(cdata.x, '1 c t h w -> 1 t c h w')
 
-        flip_func = getattr(np, self.direction)
-        for band_idx in range(0, x.shape[0]):
-            x[band_idx] = flip_func(x[band_idx])
+        if self.direction == 'fliplr':
+            flip_transform = RandomHorizontalFlip(p=1.0)
+        elif self.direction == 'flipud':
+            flip_transform = RandomVerticalFlip(p=1.0)
+        else:
+            raise NameError("The direction is not supported.")
 
         cdata.x = einops.rearrange(
-            torch.from_numpy(x),
-            '(c t) h w',
-            c=cdata.num_channels,
-            t=cdata.num_time,
+            flip_transform(x),
+            '1 t c h w -> 1 c t h w',
         )
+        cdata.y = flip_transform(cdata.y)
 
         return cdata
 
