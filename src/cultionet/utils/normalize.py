@@ -34,6 +34,17 @@ class NormValues:
         self.dataset_edge_counts = dataset_edge_counts
         self.num_channels = num_channels
 
+    def __repr__(self):
+        return (
+            "NormValues("
+            f"  dataset_mean={self.dataset_mean},"
+            f"  dataset_std={self.dataset_std},"
+            f"  dataset_crop_counts={self.dataset_crop_counts},"
+            f"  dataset_edge_counts={self.dataset_edge_counts},"
+            f"  num_channels={self.num_channels},"
+            ")"
+        )
+
     def __call__(self, batch: Data) -> Data:
         return self.transform(batch)
 
@@ -47,19 +58,21 @@ class NormValues:
 
         z = (x - μ) / σ
         """
-        batch.x = (
-            batch.x - self.dataset_mean.to(device=batch.x.device)
-        ) / self.dataset_std.to(device=batch.x.device)
+        batch_copy = batch.copy()
+        batch_copy.x = (
+            batch_copy.x - self.dataset_mean.to(device=batch_copy.x.device)
+        ) / self.dataset_std.to(device=batch_copy.x.device)
 
-        return batch
+        return batch_copy
 
     def inverse_transform(self, batch: Data) -> Data:
         """Transforms the inverse of the z-scores."""
-        batch.x = self.dataset_std.to(
-            device=batch.x.device
-        ) * batch.x + self.dataset_mean.to(device=batch.x.device)
+        batch_copy = batch.copy()
+        batch_copy.x = self.dataset_std.to(
+            device=batch_copy.x.device
+        ) * batch_copy.x + self.dataset_mean.to(device=batch_copy.x.device)
 
-        return batch
+        return batch_copy
 
     @property
     def data_dict(self) -> dict:
