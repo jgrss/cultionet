@@ -356,7 +356,7 @@ class UNet3Psi(nn.Module):
         in_channels: int,
         in_time: int,
         in_encoding_channels: int,
-        init_filter: int = 32,
+        hidden_channels: int = 32,
         num_classes: int = 2,
         dilation: int = 2,
         activation_type: str = "SiLU",
@@ -367,13 +367,12 @@ class UNet3Psi(nn.Module):
     ):
         super(UNet3Psi, self).__init__()
 
-        init_filter = int(init_filter)
         channels = [
-            init_filter,
-            init_filter * 2,
-            init_filter * 4,
-            init_filter * 8,
-            init_filter * 16,
+            hidden_channels,
+            hidden_channels * 2,
+            hidden_channels * 4,
+            hidden_channels * 8,
+            hidden_channels * 16,
         ]
         up_channels = int(channels[0] * 5)
 
@@ -542,7 +541,7 @@ class ResUNet3Psi(nn.Module):
         in_channels: int,
         in_time: int,
         in_encoding_channels: int,
-        init_filter: int = 32,
+        hidden_channels: int = 32,
         num_classes: int = 2,
         dilations: T.Sequence[int] = None,
         activation_type: str = "SiLU",
@@ -560,13 +559,12 @@ class ResUNet3Psi(nn.Module):
         if attention_weights is None:
             attention_weights = "spatial_channel"
 
-        init_filter = int(init_filter)
         channels = [
-            init_filter,
-            init_filter * 2,
-            init_filter * 4,
-            init_filter * 8,
-            init_filter * 16,
+            hidden_channels,
+            hidden_channels * 2,
+            hidden_channels * 4,
+            hidden_channels * 8,
+            hidden_channels * 16,
         ]
         up_channels = int(channels[0] * 5)
 
@@ -760,7 +758,7 @@ class ResELUNetPsi(nn.Module):
         self,
         in_channels: int,
         in_time: int,
-        init_filter: int = 32,
+        hidden_channels: int = 32,
         num_classes: int = 2,
         dilations: T.Sequence[int] = None,
         activation_type: str = "SiLU",
@@ -778,13 +776,12 @@ class ResELUNetPsi(nn.Module):
         if attention_weights is None:
             attention_weights = "spatial_channel"
 
-        init_filter = int(init_filter)
         channels = [
-            init_filter,
-            init_filter * 2,
-            init_filter * 4,
-            init_filter * 8,
-            init_filter * 16,
+            hidden_channels,
+            hidden_channels * 2,
+            hidden_channels * 4,
+            hidden_channels * 8,
+            hidden_channels * 16,
         ]
         up_channels = int(channels[0] * 5)
 
@@ -960,7 +957,9 @@ class ResELUNetPsi(nn.Module):
         x: torch.Tensor,
         temporal_encoding: T.Optional[torch.Tensor] = None,
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
-        # Inputs shape is (B x C X T|D x H x W)
+
+        """x Shaped (B x C X T|D x H x W) temporal_encoding Shaped (B x C x H X
+        W)"""
         embeddings = self.pre_unet(x, temporal_encoding=temporal_encoding)
 
         # embeddings shape is (B x C x H x W)
