@@ -10,17 +10,55 @@ from cultionet.utils.normalize import NormValues
 
 from .conftest import temporary_dataset
 
-PROJECT_PATH = Path(__file__).parent.absolute()
-CLASS_INFO = {'max_crop_class': 1, 'edge_class': 2}
+
+def test_norm():
+    num_channels = 3
+    shape = (1, num_channels, 1, 1, 1)
+    norm_values = NormValues(
+        dataset_mean=torch.zeros(shape),
+        dataset_std=torch.ones(shape),
+        dataset_crop_counts=None,
+        dataset_edge_counts=None,
+        num_channels=num_channels,
+    )
+
+    batch = Data(x=torch.ones(shape))
+    assert torch.allclose(
+        norm_values(batch).x,
+        torch.ones(shape),
+    )
+    assert torch.allclose(batch.x, torch.ones(shape))
+
+    batch = Data(x=torch.zeros(shape))
+    assert torch.allclose(
+        norm_values(batch).x,
+        torch.zeros(shape),
+    )
+    assert torch.allclose(batch.x, torch.zeros(shape))
+
+    norm_values = NormValues(
+        dataset_mean=torch.zeros(shape) + 0.5,
+        dataset_std=torch.ones(shape) + 0.5,
+        dataset_crop_counts=None,
+        dataset_edge_counts=None,
+        num_channels=num_channels,
+    )
+
+    batch = Data(x=torch.ones(shape))
+    assert torch.allclose(
+        norm_values(batch).x,
+        torch.zeros(shape) + 0.3333,
+        rtol=0.01,
+    )
+    assert torch.allclose(batch.x, torch.ones(shape))
 
 
-def test_train_dataset(data_batch: Data):
+def test_train_dataset(class_info: dict):
     num_samples = 6
     batch_size = 2
 
     with tempfile.TemporaryDirectory() as temp_dir:
         ds = temporary_dataset(
-            batch=data_batch,
             temp_dir=temp_dir,
             num_samples=num_samples,
         )
@@ -28,7 +66,7 @@ def test_train_dataset(data_batch: Data):
         norm_values = NormValues.from_dataset(
             ds,
             batch_size=batch_size,
-            class_info=CLASS_INFO,
+            class_info=class_info,
             num_workers=0,
             centering='median',
         )
@@ -62,20 +100,19 @@ def test_train_dataset(data_batch: Data):
 
         # Apply normalization
         norm_ds = temporary_dataset(
-            batch=data_batch,
             temp_dir=temp_dir,
             num_samples=num_samples,
             norm_values=norm_values,
         )
-        norm_data_loader = DataLoader(
-            norm_ds,
+        data_loader = DataLoader(
+            ds,
             batch_size=batch_size,
             num_workers=0,
             shuffle=False,
             collate_fn=collate_fn,
         )
-        data_loader = DataLoader(
-            ds,
+        norm_data_loader = DataLoader(
+            norm_ds,
             batch_size=batch_size,
             num_workers=0,
             shuffle=False,

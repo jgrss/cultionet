@@ -1,6 +1,7 @@
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from cultionet.data.data import Data
@@ -103,23 +104,14 @@ def test_create_data():
         assert loaded_batch.num_cols == width
 
 
-def create_full_batch(
-    num_channels: int,
-    num_time: int,
-    height: int,
-    width: int,
-) -> Data:
-    x = torch.rand(1, num_channels, num_time, height, width)
-    y = torch.randint(low=0, high=2, size=(1, height, width))
-    bdist = torch.rand(1, height, width)
-
-    return Data(x=x, y=y, bdist=bdist)
-
-
 def test_copy_data(data_batch: Data):
     x_clone = data_batch.x.clone()
 
     batch_copy = data_batch.copy()
+
+    for key in batch_copy.to_dict().keys():
+        assert key in data_batch.to_dict().keys()
+
     batch_copy.x *= 10
 
     assert not torch.allclose(data_batch.x, batch_copy.x)
@@ -127,13 +119,12 @@ def test_copy_data(data_batch: Data):
     assert torch.allclose(data_batch.y, batch_copy.y)
 
 
-def test_train_dataset(data_batch: Data):
+def test_train_dataset():
     num_samples = 6
     batch_size = 2
 
     with tempfile.TemporaryDirectory() as temp_dir:
         ds = temporary_dataset(
-            batch=data_batch,
             temp_dir=temp_dir,
             num_samples=num_samples,
         )
@@ -147,3 +138,8 @@ def test_train_dataset(data_batch: Data):
         )
         for batch in data_module.train_dataloader():
             assert batch.num_samples == batch_size
+            for key, value in batch.to_dict().items():
+                if isinstance(value, (torch.Tensor, np.ndarray)):
+                    assert value.shape[0] == batch_size
+                else:
+                    assert len(value) == batch_size
