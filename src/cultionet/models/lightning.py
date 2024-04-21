@@ -32,9 +32,9 @@ class MaskRCNNLitModel(LightningModule):
     def __init__(
         self,
         cultionet_model_file: Path,
-        cultionet_num_features: int,
-        cultionet_num_time_features: int,
-        cultionet_filters: int,
+        cultionet_in_channels: int,
+        cultionet_num_time: int,
+        cultionet_hidden_channels: int,
         cultionet_num_classes: int,
         ckpt_name: str = "maskrcnn",
         model_name: str = "maskrcnn",
@@ -49,9 +49,9 @@ class MaskRCNNLitModel(LightningModule):
         """Lightning model.
 
         Args:
-            num_features
-            num_time_features
-            filters
+            in_channels
+            num_time
+            hidden_channels
             learning_rate
             weight_decay
         """
@@ -67,9 +67,9 @@ class MaskRCNNLitModel(LightningModule):
         self.resize_width = resize_width
 
         self.cultionet_model = CultioLitModel(
-            num_features=cultionet_num_features,
-            num_time_features=cultionet_num_time_features,
-            filters=cultionet_filters,
+            in_channels=cultionet_in_channels,
+            num_time=cultionet_num_time,
+            hidden_channels=cultionet_hidden_channels,
             num_classes=cultionet_num_classes,
         )
         self.cultionet_model.load_state_dict(
@@ -918,8 +918,8 @@ class CultioLitTransferModel(LightningModuleMixin):
     def __init__(
         self,
         ckpt_file: T.Union[Path, str],
-        ds_features: int,
-        ds_time_features: int,
+        in_channels: int,
+        num_time: int,
         init_filter: int = 32,
         activation_type: str = "SiLU",
         num_classes: int = 2,
@@ -959,20 +959,12 @@ class CultioLitTransferModel(LightningModuleMixin):
             self.edge_class = num_classes
 
         up_channels = int(init_filter * 5)
-        # Total number of features (time x bands/indices/channels)
-        self.ds_num_features = ds_features
-        # Total number of time features
-        self.ds_num_time = ds_time_features
-        # Total number of bands
-        self.ds_num_bands = int(self.ds_num_features / self.ds_num_time)
+        self.in_channels = in_channels
+        self.num_time = num_time
         self.deep_sup_dist = deep_sup_dist
         self.deep_sup_edge = deep_sup_edge
         self.deep_sup_mask = deep_sup_mask
         self.scale_pos_weight = scale_pos_weight
-
-        self.gc = model_utils.GraphToConv()
-        self.cg = model_utils.ConvToGraph()
-        self.ct = model_utils.ConvToTime()
 
         self.cultionet_model = CultioLitModel.load_from_checkpoint(
             checkpoint_path=str(ckpt_file)
@@ -994,19 +986,17 @@ class CultioLitTransferModel(LightningModuleMixin):
             )
             # Set new final layers to learn new weights
             # Level 2 level (non-crop; crop)
-            self.cultionet_model.temporal_encoder.final_l2 = (
-                FinalConv2dDropout(
-                    hidden_dim=self.temporal_encoder.final_l2.net[0]
-                    .seq.seq[0]
-                    .seq[0]
-                    .in_channels,
-                    dim_factor=1,
-                    activation_type=activation_type,
-                    final_activation=Softmax(dim=1),
-                    num_classes=num_classes,
-                )
+            self.cultionet_model.temporal_encoder.l2 = FinalConv2dDropout(
+                hidden_dim=self.temporal_encoder.l2.net[0]
+                .seq.seq[0]
+                .seq[0]
+                .in_channels,
+                dim_factor=1,
+                activation_type=activation_type,
+                final_activation=Softmax(dim=1),
+                num_classes=num_classes,
             )
-            self.cultionet_model.temporal_encoder.final_l2.apply(
+            self.cultionet_model.temporal_encoder.l2.apply(
                 init_attention_weights
             )
             # Last level (non-crop; crop; edges)
@@ -1059,10 +1049,10 @@ class CultioLitTransferModel(LightningModuleMixin):
 class CultioLitModel(LightningModuleMixin):
     def __init__(
         self,
-        num_features: int = None,
-        num_time_features: int = None,
+        in_channels: int = None,
+        in_time: int = None,
         num_classes: int = 2,
-        filters: int = 32,
+        hidden_channels: int = 32,
         model_type: str = ModelTypes.RESELUNETPSI,
         activation_type: str = "SiLU",
         dilations: T.Union[int, T.Sequence[int]] = None,
@@ -1086,6 +1076,7 @@ class CultioLitModel(LightningModuleMixin):
         save_batch_val_metrics: bool = False,
     ):
         """Lightning model."""
+
         super(CultioLitModel, self).__init__()
 
         self.save_hyperparameters()
@@ -1099,7 +1090,7 @@ class CultioLitModel(LightningModuleMixin):
         self.ckpt_name = ckpt_name
         self.model_name = model_name
         self.num_classes = num_classes
-        self.num_time_features = num_time_features
+        self.in_time = in_time
         self.class_counts = class_counts
         self.temperature_lit_model = temperature_lit_model
         self.scale_pos_weight = scale_pos_weight
@@ -1118,9 +1109,9 @@ class CultioLitModel(LightningModuleMixin):
             self,
             self.model_attr,
             CultioNet(
-                ds_features=num_features,
-                ds_time_features=num_time_features,
-                filters=filters,
+                in_channels=in_channels,
+                in_time=in_time,
+                hidden_channels=hidden_channels,
                 num_classes=self.num_classes,
                 model_type=model_type,
                 activation_type=activation_type,
@@ -1132,6 +1123,7 @@ class CultioLitModel(LightningModuleMixin):
                 deep_sup_mask=deep_sup_mask,
             ),
         )
+
         self.configure_loss()
         self.configure_scorer()
 
