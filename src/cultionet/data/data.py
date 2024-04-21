@@ -20,6 +20,11 @@ class Data:
         self.y = y
         if kwargs is not None:
             for k, v in kwargs.items():
+                if v is not None:
+                    assert isinstance(
+                        v, (torch.Tensor, np.ndarray, list)
+                    ), "Only tensors, arrays, and lists are supported."
+
                 setattr(self, k, v)
 
     def _get_attrs(self) -> set:
