@@ -14,7 +14,7 @@ from geowombat.core.windows import get_window_offsets
 from joblib import delayed, parallel_backend
 from rasterio.warp import calculate_default_transform
 from rasterio.windows import Window
-from scipy.ndimage.measurements import label as nd_label
+from scipy.ndimage import label as nd_label
 from skimage.measure import regionprops
 from threadpoolctl import threadpool_limits
 from tqdm.auto import tqdm
