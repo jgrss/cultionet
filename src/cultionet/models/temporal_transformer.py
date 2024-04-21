@@ -13,9 +13,9 @@ import torch
 import torch.nn as nn
 from einops.layers.torch import Rearrange
 
-from cultionet.layers.weights import init_attention_weights
-from cultionet.layers.base_layers import Softmax, FinalConv2dDropout
+from cultionet.layers.base_layers import FinalConv2dDropout, Softmax
 from cultionet.layers.encodings import get_sinusoid_encoding_table
+from cultionet.layers.weights import init_attention_weights
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -167,7 +167,7 @@ class TemporalTransformer(nn.Module):
         in_channels: int,
         hidden_channels: int = 128,
         num_head: int = 8,
-        num_time: int = 1,
+        in_time: int = 1,
         d_model: int = 256,
         dropout: float = 0.1,
         num_layers: int = 1,
@@ -201,10 +201,10 @@ class TemporalTransformer(nn.Module):
         )
 
         # Absolute positional embeddings
-        self.positions = torch.arange(0, num_time, dtype=torch.long)
+        self.positions = torch.arange(0, in_time, dtype=torch.long)
         self.positional_encoder = nn.Embedding.from_pretrained(
             get_sinusoid_encoding_table(
-                positions=num_time,
+                positions=in_time,
                 d_hid=d_model,
                 time_scaler=time_scaler,
             ),
@@ -227,6 +227,12 @@ class TemporalTransformer(nn.Module):
             encoder_layer, num_layers=num_layers, norm=nn.LayerNorm(d_model)
         )
 
+        self.final = nn.Conv2d(
+            in_channels=d_model,
+            out_channels=hidden_channels,
+            kernel_size=3,
+            padding=1,
+        )
         # Level 2 level (non-crop; crop)
         self.final_l2 = FinalConv2dDropout(
             hidden_dim=d_model,
@@ -293,6 +299,8 @@ class TemporalTransformer(nn.Module):
         l2 = self.final_l2(encoded)
         l3 = self.final_l3(torch.cat([encoded, l2], dim=1))
 
+        encoded = self.final(encoded)
+
         return {
             'encoded': encoded,
             'l2': l2,
@@ -306,12 +314,12 @@ if __name__ == '__main__':
     hidden_channels = 64
     num_head = 8
     d_model = 128
-    num_time = 12
+    in_time = 12
     height = 100
     width = 100
 
     x = torch.rand(
-        (batch_size, num_channels, num_time, height, width),
+        (batch_size, num_channels, in_time, height, width),
         dtype=torch.float32,
     )
     lon = torch.distributions.uniform.Uniform(-180, 180).sample([batch_size])
@@ -322,7 +330,7 @@ if __name__ == '__main__':
         hidden_channels=hidden_channels,
         num_head=num_head,
         d_model=d_model,
-        num_time=num_time,
+        in_time=in_time,
     )
     logits_hidden, classes_l2, classes_last = model(x, lon, lat)
 
