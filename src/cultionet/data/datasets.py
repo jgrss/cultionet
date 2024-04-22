@@ -10,13 +10,18 @@ import joblib
 from joblib import delayed, parallel_backend
 import pandas as pd
 import geopandas as gpd
+import pygrts
 from pytorch_lightning import seed_everything
-from pygrts import QuadTree
 from shapely.geometry import box
+from scipy.ndimage.measurements import label as nd_label
+from skimage.measure import regionprops
 from torch_geometric.data import Data, Dataset
 from tqdm.auto import tqdm
 
+from .utils import LabeledData
+from ..augment.augmenters import Augmenters
 from ..errors import TensorShapeError
+from ..models import model_utils
 from ..utils.logging import set_color_logger
 from ..utils.model_preprocessing import TqdmParallel
 
@@ -111,6 +116,7 @@ class EdgeDataset(Dataset):
         transform: T.Any = None,
         pre_transform: T.Any = None,
         pre_filter: T.Any = None,
+        augment_prob: float = 0.0,
     ):
         self.data_means = data_means
         self.data_stds = data_stds
@@ -122,6 +128,25 @@ class EdgeDataset(Dataset):
         self.random_seed = random_seed
         seed_everything(self.random_seed, workers=True)
         self.rng = np.random.default_rng(self.random_seed)
+        self.augment_prob = augment_prob
+
+        self.ct = model_utils.ConvToTime()
+        self.gc = model_utils.GraphToConv()
+        self.augmentations_ = [
+            'tswarp',
+            'tsnoise',
+            'tsdrift',
+            'tspeaks',
+            'rot90',
+            'rot180',
+            'rot270',
+            'roll',
+            'fliplr',
+            'flipud',
+            'gaussian',
+            'saltpepper',
+            'speckle',
+        ]
 
         super().__init__(root, transform, pre_transform, pre_filter)
 
@@ -206,7 +231,7 @@ class EdgeDataset(Dataset):
             spatial_partitions = self.to_frame()
 
         if splits > 0:
-            qt = QuadTree(spatial_partitions, force_square=False)
+            qt = pygrts.QuadTree(spatial_partitions, force_square=False)
             for __ in range(splits):
                 qt.split()
             spatial_partitions = qt.to_frame()
@@ -427,17 +452,19 @@ class EdgeDataset(Dataset):
             # Create a GeoDataFrame of every .pt file in
             # the dataset.
             self.create_spatial_index()
+
             # Create column of each site's common id
             # (i.e., without the year and augmentation).
             self.dataset_df[id_column] = self.dataset_df.grid_id.str.split(
                 "_", expand=True
             ).loc[:, 0]
+
             unique_ids = self.dataset_df.common_id.unique()
             if spatial_balance:
                 # Separate train and validation by spatial location
 
                 # Get unique site coordinates
-                # NOTE: We do this becuase augmentations are stacked at
+                # NOTE: We do this because augmentations are stacked at
                 # the same site, thus creating multiple files with the
                 # same centroid.
                 df_unique_locations = gpd.GeoDataFrame(
@@ -447,17 +474,21 @@ class EdgeDataset(Dataset):
                     .drop_duplicates(id_column)
                     .drop(columns=["grid_id"])
                 ).to_crs("EPSG:8858")
+
                 # Setup a quad-tree using the GRTS method
                 # (see https://github.com/jgrss/pygrts for details)
-                qt = QuadTree(df_unique_locations, force_square=False)
+                qt = pygrts.QuadTree(df_unique_locations, force_square=False)
+
                 # Recursively split the quad-tree until each grid has
                 # only one sample.
                 qt.split_recursive(max_samples=1)
+
                 n_val = int(val_frac * len(df_unique_locations.index))
                 # `qt.sample` random samples from the quad-tree in a
                 # spatially balanced manner. Thus, `df_val_sample` is
                 # a GeoDataFrame with `n_val` sites spatially balanced.
                 df_val_sample = qt.sample(n=n_val)
+
                 # Since we only took one sample from each coordinate,
                 # we need to find all of the .pt files that share
                 # coordinates with the sampled sites.
@@ -473,9 +504,11 @@ class EdgeDataset(Dataset):
                 )
                 # Get all ids for validation samples
                 val_mask = self.dataset_df.common_id.isin(df_val_ids.common_id)
+
             # Get train/val indices
             val_idx = self.dataset_df.loc[val_mask].index.tolist()
             train_idx = self.dataset_df.loc[~val_mask].index.tolist()
+
             # Slice the dataset
             train_ds = self[train_idx]
             val_ds = self[val_idx]
@@ -495,6 +528,47 @@ class EdgeDataset(Dataset):
             A `torch_geometric` data object.
         """
         batch = self.load_file(self.data_list_[idx])
+
+        if batch.y is not None:
+            if self.rng.normal() > 1 - self.augment_prob:
+                # TODO: get segments from crops, not edges
+                y = batch.y.reshape(batch.height, batch.width)
+                # Reshape from ((H*W) x (C*T)) -> (B x (C * T) x H x W)
+                x = self.gc(batch.x, 1, batch.height, batch.width)
+
+                # Choose one augmentation to apply
+                aug_name = self.rng.choice(self.augmentations_)
+                props = None
+                if aug_name in (
+                    'tswarp',
+                    'tsnoise',
+                    'tsdrift',
+                    'tspeaks',
+                ):
+                    # FIXME: By default, the crop value is 1 (background is 0 and edges are 2).
+                    # But, it would be better to get 1 from an argument.
+                    # Label properties are only used in 4 augmentations
+                    props = regionprops(np.uint8(nd_label(y == 1)[0]))
+
+                labeled_data = LabeledData(
+                    x=x.squeeze(dim=0),
+                    y=y,
+                    bdist=batch.bdist.reshape(batch.height, batch.width),
+                    ori=None,
+                    segments=None,
+                    props=props,
+                )
+
+                # Create the augmenter object
+                augmenters = Augmenters(
+                    augmentations=[aug_name],
+                    ntime=batch.ntime,
+                    nbands=batch.nbands,
+                )
+                # Apply the object
+                augmenter = augmenters.augmenters_[0]
+                batch = augmenter(labeled_data, aug_args=augmenters.aug_args)
+
         if isinstance(self.data_means, torch.Tensor):
             batch = zscores(batch, self.data_means, self.data_stds, idx=idx)
         else:
