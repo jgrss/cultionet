@@ -1153,6 +1153,7 @@ def train_model(args):
             threads_per_worker=args.threads,
             random_seed=args.random_seed,
         )
+
     # Check dimensions
     if args.expected_dim is not None:
         try:
@@ -1165,6 +1166,7 @@ def train_model(args):
             )
         except TensorShapeError as e:
             raise ValueError(e)
+
         ds = EdgeDataset(
             root=ppaths.train_path,
             processes=args.processes,
@@ -1177,19 +1179,15 @@ def train_model(args):
     if ppaths.norm_file.is_file():
         if args.recalc_zscores:
             ppaths.norm_file.unlink()
+
     if not ppaths.norm_file.is_file():
         if args.spatial_partitions is not None:
-            # train_ds = ds.split_train_val_by_partition(
-            #     spatial_partitions=args.spatial_partitions,
-            #     partition_column=args.partition_column,
-            #     val_frac=args.val_frac,
-            #     partition_name=args.partition_name
-            # )[0]
             train_ds = ds.split_train_val(
                 val_frac=args.val_frac, spatial_overlap_allowed=False
             )[0]
         else:
             train_ds = ds.split_train_val(val_frac=args.val_frac)[0]
+
         # Get means and standard deviations from the training dataset
         data_values = get_norm_values(
             dataset=train_ds,
