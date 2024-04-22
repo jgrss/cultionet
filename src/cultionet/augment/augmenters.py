@@ -11,7 +11,7 @@ from skimage import util as sk_util
 from torch_geometric.data import Data
 import joblib
 
-from .augmenter_utils import augment_time, create_parcel_masks, roll_time
+from .augmenter_utils import augment_time, roll_time
 from ..data.utils import create_data_object, LabeledData
 
 # from ..networks import SingleSensorNetwork
@@ -29,9 +29,6 @@ class DataCopies:
 class AugmenterArgs:
     ntime: int
     nbands: int
-    max_crop_class: int
-    k: int
-    instance_seg: bool
     zero_padding: int
     kwargs: dict
 
@@ -96,8 +93,6 @@ class AugmenterModule(object):
         bdist: T.Union[np.ndarray, None],
         aug_args: AugmenterArgs,
     ) -> Data:
-        edge_indices = None
-        edge_attrs = None
 
         # Create the node position tensor
         dims, height, width = x.shape
@@ -108,20 +103,13 @@ class AugmenterModule(object):
 
         x = nd_to_columns(x, dims, height, width)
 
-        mask_y = None
-        if aug_args.instance_seg:
-            mask_y = create_parcel_masks(y, aug_args.max_crop_class)
-
         return create_data_object(
             x,
             ntime=aug_args.ntime,
             nbands=aug_args.nbands,
             height=height,
             width=width,
-            edge_indices=edge_indices,
-            edge_attrs=edge_attrs,
             y=y,
-            mask_y=mask_y,
             bdist=bdist,
             zero_padding=aug_args.zero_padding,
             **aug_args.kwargs,
@@ -397,9 +385,6 @@ class AugmenterBase(object):
         augmentations: T.Sequence[str],
         ntime: int,
         nbands: int,
-        max_crop_class: int,
-        k: int = 3,
-        instance_seg: bool = False,
         zero_padding: int = 0,
         **kwargs,
     ):
@@ -408,9 +393,6 @@ class AugmenterBase(object):
         self.aug_args = AugmenterArgs(
             ntime=ntime,
             nbands=nbands,
-            max_crop_class=max_crop_class,
-            k=k,
-            instance_seg=instance_seg,
             zero_padding=zero_padding,
             kwargs=kwargs,
         )
@@ -451,7 +433,6 @@ class Augmenters(AugmenterBase):
         >>>     augmentations=['tswarp'],
         >>>     ntime=13,
         >>>     nbands=5,
-        >>>     max_crop_class=1
         >>> )
         >>>
         >>> for method in aug:
