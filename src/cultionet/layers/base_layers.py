@@ -1,5 +1,6 @@
 import typing as T
 
+import einops
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -734,14 +735,14 @@ class ChannelAttention(nn.Module):
         self.seq = nn.Sequential(
             nn.Conv2d(
                 in_channels=out_channels,
-                out_channels=int(out_channels / 2),
+                out_channels=out_channels // 2,
                 kernel_size=1,
                 padding=0,
                 bias=False,
             ),
             SetActivation(activation_type=activation_type),
             nn.Conv2d(
-                in_channels=int(out_channels / 2),
+                in_channels=out_channels // 2,
                 out_channels=out_channels,
                 kernel_size=1,
                 padding=0,
@@ -769,13 +770,12 @@ class SpatialAttention(nn.Module):
             padding=1,
             bias=False,
         )
-        self.channel_mean = Mean(dim=1, keepdim=True)
-        self.channel_max = Max(dim=1, keepdim=True)
+
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        avg_attention = self.channel_mean(x)
-        max_attention = self.channel_max(x)
+        avg_attention = einops.reduce(x, 'b c h w -> b 1 h w', 'mean')
+        max_attention = einops.reduce(x, 'b c h w -> b 1 h w', 'max')
         attention = torch.cat([avg_attention, max_attention], dim=1)
         attention = self.conv(attention)
         attention = self.sigmoid(attention)
