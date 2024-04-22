@@ -647,9 +647,6 @@ def create_and_save_window(
         augmentations=["none"],
         ntime=num_time,
         nbands=num_bands,
-        max_crop_class=0,
-        k=3,
-        instance_seg=False,
         zero_padding=0,
         window_row_off=w.row_off,
         window_col_off=w.col_off,
@@ -998,7 +995,10 @@ def create_dataset(
             else:
                 start_year, end_year = None, None
 
-            segments = nd_label(image_variables.labels_array)[0]
+            segments = nd_label(
+                (image_variables.labels_array > 0)
+                & (image_variables.labels_array < max_crop_class + 1)
+            )[0]
             props = regionprops(segments)
 
             labeled_data = LabeledData(
@@ -1036,9 +1036,6 @@ def create_dataset(
                 augmentations=transforms,
                 ntime=image_variables.num_time,
                 nbands=image_variables.num_bands,
-                max_crop_class=max_crop_class,
-                k=3,
-                instance_seg=instance_seg,
                 zero_padding=zero_padding,
                 start_year=start_year,
                 end_year=end_year,
