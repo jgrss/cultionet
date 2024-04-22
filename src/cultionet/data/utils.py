@@ -43,23 +43,14 @@ def create_data_object(
     nbands: int,
     height: int,
     width: int,
-    edge_indices: T.Optional[np.ndarray] = None,
-    edge_attrs: T.Optional[np.ndarray] = None,
     y: T.Optional[np.ndarray] = None,
     mask_y: T.Optional[np.ndarray] = None,
     bdist: T.Optional[np.ndarray] = None,
-    ori: T.Optional[np.ndarray] = None,
     zero_padding: T.Optional[int] = 0,
     other: T.Optional[np.ndarray] = None,
     **kwargs,
 ) -> Data:
     """Creates a training data object."""
-
-    if edge_indices is not None:
-        edge_indices = torch.from_numpy(edge_indices).long().t().contiguous()
-
-    if edge_attrs is not None:
-        edge_attrs = torch.from_numpy(edge_attrs).float()
 
     x = torch.from_numpy(x).float()
 
@@ -74,8 +65,6 @@ def create_data_object(
     if y is None:
         train_data = Data(
             x=x,
-            edge_index=edge_indices,
-            edge_attrs=edge_attrs,
             height=height,
             width=width,
             ntime=ntime,
@@ -98,8 +87,6 @@ def create_data_object(
         if other is None:
             train_data = Data(
                 x=x,
-                edge_index=edge_indices,
-                edge_attrs=edge_attrs,
                 y=y,
                 bdist=bdist_,
                 height=height,
@@ -117,8 +104,6 @@ def create_data_object(
 
             train_data = Data(
                 x=x,
-                edge_index=edge_indices,
-                edge_attrs=edge_attrs,
                 y=y,
                 bdist=bdist_,
                 other=other_,
