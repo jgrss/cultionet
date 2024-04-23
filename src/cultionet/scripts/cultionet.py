@@ -1,45 +1,44 @@
 #!/usr/bin/env python
 
-from abc import abstractmethod
 import argparse
-import typing as T
-import logging
-from pathlib import Path
-from datetime import datetime
-import asyncio
-import filelock
-import builtins
-import json
 import ast
+import asyncio
+import builtins
 import itertools
+import json
+import logging
+import typing as T
+from abc import abstractmethod
+from datetime import datetime
+from pathlib import Path
 
-import geowombat as gw
-from geowombat.core.windows import get_window_offsets
+import filelock
 import geopandas as gpd
+import geowombat as gw
 import pandas as pd
-import yaml
 import rasterio as rio
-from rasterio.windows import Window
+import ray
 import torch
 import xarray as xr
-import ray
+import yaml
+from geowombat.core.windows import get_window_offsets
+from pytorch_lightning import seed_everything
+from rasterio.windows import Window
 from ray.actor import ActorHandle
 from tqdm import tqdm
 from tqdm.dask import TqdmCallback
-from pytorch_lightning import seed_everything
 
 import cultionet
-from cultionet.data.const import SCALE_FACTOR
-from cultionet.data.datasets import EdgeDataset
+from cultionet.data.constant import SCALE_FACTOR
 from cultionet.data.create import create_dataset, create_predict_dataset
-from cultionet.data.utils import get_image_list_dims, create_network_data
+from cultionet.data.datasets import EdgeDataset
+from cultionet.data.utils import get_image_list_dims
 from cultionet.enums import CLISteps, ModelNames
 from cultionet.errors import TensorShapeError
 from cultionet.utils import model_preprocessing
 from cultionet.utils.logging import set_color_logger
-from cultionet.utils.project_paths import setup_paths, ProjectPaths
 from cultionet.utils.normalize import get_norm_values
-
+from cultionet.utils.project_paths import ProjectPaths, setup_paths
 
 logger = set_color_logger(__name__)
 
@@ -272,11 +271,13 @@ class BlockWriter(object):
     def predict_write_block(self, w: Window, w_pad: Window):
         slc = self._build_slice(w_pad)
         # Create the data for the chunk
-        data = create_network_data(
-            self.ts[slc].gw.compute(num_workers=1),
-            ntime=self.ntime,
-            nbands=self.nbands,
-        )
+        # FIXME: read satellite data into Data()
+        data = None
+        # data = create_network_data(
+        #     self.ts[slc].gw.compute(num_workers=1),
+        #     ntime=self.ntime,
+        #     nbands=self.nbands,
+        # )
         # Apply inference on the chunk
         stack = cultionet.predict(
             lit_model=self.lit_model,
