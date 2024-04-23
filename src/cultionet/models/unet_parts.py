@@ -1,11 +1,10 @@
-import typing as T
 import enum
-from collections import defaultdict
+import typing as T
 
 import torch
 import torch.nn as nn
 
-from . import model_utils
+from ..enums import AttentionTypes, ModelTypes, ResBlockTypes
 from ..layers.base_layers import (
     AttentionGate,
     DoubleConv,
@@ -14,7 +13,7 @@ from ..layers.base_layers import (
     ResidualAConv,
     ResidualConv,
 )
-from ..enums import AttentionTypes, ModelTypes, ResBlockTypes
+from . import model_utils
 
 
 class ResELUNetPsiLayer(nn.Module):
