@@ -2,14 +2,15 @@ import typing as T
 import warnings
 
 import torch
-from torch_geometric.data import Data
+import torch.nn as nn
 
-from . import model_utils
-from ..layers.base_layers import ConvBlock2d, ResidualConv, Softmax
-from .nunet import UNet3Psi, ResUNet3Psi, ResELUNetPsi
-from .time_attention import TemporalResAUNet
-from .temporal_transformer import TemporalTransformer
+from ..data.data import Data
 from ..enums import ModelTypes, ResBlockTypes
+from ..layers.base_layers import ConvBlock2d, ResidualConv, Softmax
+from . import model_utils
+from .nunet import ResELUNetPsi, ResUNet3Psi, UNet3Psi
+from .temporal_transformer import TemporalTransformer
+from .time_attention import TemporalResAUNet
 
 
 def scale_min_max(
@@ -22,7 +23,7 @@ def scale_min_max(
     return (((max_out - min_out) * (x - min_in)) / (max_in - min_in)) + min_out
 
 
-class GeoRefinement(torch.nn.Module):
+class GeoRefinement(nn.Module):
     def __init__(
         self,
         in_features: int,
@@ -41,8 +42,8 @@ class GeoRefinement(torch.nn.Module):
         self.gc = model_utils.GraphToConv()
         self.cg = model_utils.ConvToGraph()
 
-        self.gamma = torch.nn.Parameter(torch.ones((1, out_channels, 1, 1)))
-        self.geo_attention = torch.nn.Sequential(
+        self.gamma = nn.Parameter(torch.ones((1, out_channels, 1, 1)))
+        self.geo_attention = nn.Sequential(
             ConvBlock2d(
                 in_channels=2,
                 out_channels=out_channels,
@@ -50,73 +51,73 @@ class GeoRefinement(torch.nn.Module):
                 padding=0,
                 add_activation=False,
             ),
-            torch.nn.Sigmoid(),
+            nn.Sigmoid(),
         )
 
-        self.x_res_modules = torch.nn.ModuleList(
+        self.x_res_modules = nn.ModuleList(
             [
-                torch.nn.Sequential(
+                nn.Sequential(
                     ResidualConv(
                         in_channels=in_features,
                         out_channels=n_hidden,
                         dilation=2,
                         activation_type='SiLU',
                     ),
-                    torch.nn.Dropout(0.5),
+                    nn.Dropout(0.5),
                 ),
-                torch.nn.Sequential(
+                nn.Sequential(
                     ResidualConv(
                         in_channels=in_features,
                         out_channels=n_hidden,
                         dilation=3,
                         activation_type='SiLU',
                     ),
-                    torch.nn.Dropout(0.5),
+                    nn.Dropout(0.5),
                 ),
-                torch.nn.Sequential(
+                nn.Sequential(
                     ResidualConv(
                         in_channels=in_features,
                         out_channels=n_hidden,
                         dilation=4,
                         activation_type='SiLU',
                     ),
-                    torch.nn.Dropout(0.5),
+                    nn.Dropout(0.5),
                 ),
             ]
         )
-        self.crop_res_modules = torch.nn.ModuleList(
+        self.crop_res_modules = nn.ModuleList(
             [
-                torch.nn.Sequential(
+                nn.Sequential(
                     ResidualConv(
                         in_channels=in_channels,
                         out_channels=n_hidden,
                         dilation=2,
                         activation_type='SiLU',
                     ),
-                    torch.nn.Dropout(0.5),
+                    nn.Dropout(0.5),
                 ),
-                torch.nn.Sequential(
+                nn.Sequential(
                     ResidualConv(
                         in_channels=in_channels,
                         out_channels=n_hidden,
                         dilation=3,
                         activation_type='SiLU',
                     ),
-                    torch.nn.Dropout(0.5),
+                    nn.Dropout(0.5),
                 ),
-                torch.nn.Sequential(
+                nn.Sequential(
                     ResidualConv(
                         in_channels=in_channels,
                         out_channels=n_hidden,
                         dilation=4,
                         activation_type='SiLU',
                     ),
-                    torch.nn.Dropout(0.5),
+                    nn.Dropout(0.5),
                 ),
             ]
         )
 
-        self.fc = torch.nn.Sequential(
+        self.fc = nn.Sequential(
             ConvBlock2d(
                 in_channels=(
                     (n_hidden * len(self.x_res_modules))
@@ -127,7 +128,7 @@ class GeoRefinement(torch.nn.Module):
                 padding=0,
                 activation_type="SiLU",
             ),
-            torch.nn.Conv2d(
+            nn.Conv2d(
                 in_channels=n_hidden,
                 out_channels=out_channels,
                 kernel_size=1,
@@ -204,7 +205,7 @@ class GeoRefinement(torch.nn.Module):
         return predictions
 
 
-class CropTypeFinal(torch.nn.Module):
+class CropTypeFinal(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, out_classes: int):
         super(CropTypeFinal, self).__init__()
 
@@ -227,24 +228,22 @@ class CropTypeFinal(torch.nn.Module):
                 padding=1,
                 activation_type="ReLU",
             ),
-            torch.nn.Conv2d(
+            nn.Conv2d(
                 out_channels,
                 out_channels,
                 kernel_size=3,
                 padding=1,
                 bias=False,
             ),
-            torch.nn.BatchNorm2d(out_channels),
+            nn.BatchNorm2d(out_channels),
         ]
-        self.seq = torch.nn.Sequential(*layers1)
+        self.seq = nn.Sequential(*layers1)
 
         layers_final = [
-            torch.nn.ReLU(inplace=False),
-            torch.nn.Conv2d(
-                out_channels, out_classes, kernel_size=1, padding=0
-            ),
+            nn.ReLU(inplace=False),
+            nn.Conv2d(out_channels, out_classes, kernel_size=1, padding=0),
         ]
-        self.final = torch.nn.Sequential(*layers_final)
+        self.final = nn.Sequential(*layers_final)
 
     def forward(
         self, x: torch.Tensor, crop_type_star: torch.Tensor
@@ -267,7 +266,7 @@ def check_batch_dims(batch: Data, attribute: str):
         raise ValueError(f"The {attribute} dimensions do not align.")
 
 
-class CultioNet(torch.nn.Module):
+class CultioNet(nn.Module):
     """The cultionet model framework.
 
     Args:
