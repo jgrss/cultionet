@@ -1,15 +1,15 @@
 import typing as T
-import filelock
 from pathlib import Path
 
+import filelock
 import geowombat as gw
 import rasterio as rio
-from rasterio.windows import Window
 import torch
 from pytorch_lightning.callbacks import BasePredictionWriter
-from torch_geometric.data import Data
+from rasterio.windows import Window
 
-from .data.const import SCALE_FACTOR
+from .data.constant import SCALE_FACTOR
+from .data.data import Data
 from .utils.reshape import ModelOutputs
 
 
