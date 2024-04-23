@@ -1,35 +1,30 @@
-from abc import abstractmethod
-import typing as T
 import enum
+import typing as T
+from abc import abstractmethod
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from tsaug import AddNoise, Drift, TimeWarp
-import numpy as np
 import cv2
-from skimage import util as sk_util
-from torch_geometric.data import Data
+import einops
 import joblib
+import numpy as np
+import torch
+from skimage import util as sk_util
+from tsaug import AddNoise, Drift, TimeWarp
 
+from ..data.data import Data
 from .augmenter_utils import augment_time, roll_time
-from ..data.utils import create_data_object, LabeledData
-
-# from ..networks import SingleSensorNetwork
-from ..utils.reshape import nd_to_columns
 
 
 @dataclass
 class DataCopies:
-    x: np.ndarray
-    y: T.Union[np.ndarray, None]
-    bdist: T.Union[np.ndarray, None]
+    x: torch.Tensor
+    y: T.Union[torch.Tensor, None]
+    bdist: T.Union[torch.Tensor, None]
 
 
 @dataclass
 class AugmenterArgs:
-    ntime: int
-    nbands: int
-    zero_padding: int
     kwargs: dict
 
 
@@ -39,22 +34,19 @@ class AugmenterModule(object):
     prefix: str = "data_"
     suffix: str = ".pt"
 
-    def __call__(self, ldata: LabeledData, aug_args: AugmenterArgs) -> Data:
+    def __call__(self, ldata: Data, aug_args: AugmenterArgs) -> Data:
         assert hasattr(self, "name_")
         assert isinstance(self.name_, str)
 
-        cdata = self.prepare_data(ldata)
-        cdata = self.forward(cdata, ldata, aug_args)
-        data = self.finalize(
-            x=cdata.x, y=cdata.y, bdist=cdata.bdist, aug_args=aug_args
-        )
+        cdata = self.forward(ldata.copy(), aug_args)
+        cdata.x = cdata.x.float()
+        if cdata.y is not None:
+            cdata.y = cdata.y.long()
 
-        return data
+        return cdata
 
     @abstractmethod
-    def forward(
-        self, cdata: DataCopies, ldata: LabeledData, aug_args: AugmenterArgs
-    ) -> DataCopies:
+    def forward(self, cdata: Data, aug_args: AugmenterArgs) -> Data:
         raise NotImplementedError
 
     def file_name(self, uid: str) -> str:
@@ -66,75 +58,19 @@ class AugmenterModule(object):
         out_path = out_directory / self.file_name(data.train_id)
         joblib.dump(data, out_path, compress=compress)
 
-    def prepare_data(self, ldata: LabeledData) -> DataCopies:
-        x = ldata.x.copy()
-        y = ldata.y
-        bdist = ldata.bdist
-        # TODO: for orientation layer
-        # ori = ldata.ori
-        # if zero_padding > 0:
-        #     zpad = torch.nn.ZeroPad2d(zero_padding)
-        #     x = zpad(torch.tensor(x)).numpy()
-        #     y = zpad(torch.tensor(y)).numpy()
-        #     bdist = zpad(torch.tensor(bdist)).numpy()
-        #     ori = zpad(torch.tensor(ori)).numpy()
-
-        if y is not None:
-            y = y.copy()
-        if bdist is not None:
-            bdist = bdist.copy()
-
-        return DataCopies(x=x, y=y, bdist=bdist)
-
-    def finalize(
-        self,
-        x: np.ndarray,
-        y: T.Union[np.ndarray, None],
-        bdist: T.Union[np.ndarray, None],
-        aug_args: AugmenterArgs,
-    ) -> Data:
-
-        # Create the node position tensor
-        dims, height, width = x.shape
-        # pos_x = np.arange(0, width * kwargs['res'], kwargs['res'])
-        # pos_y = np.arange(height * kwargs['res'], 0, -kwargs['res'])
-        # grid_x, grid_y = np.meshgrid(pos_x, pos_y, indexing='xy')
-        # xy = np.c_[grid_x.flatten(), grid_y.flatten()]
-
-        x = nd_to_columns(x, dims, height, width)
-
-        return create_data_object(
-            x,
-            ntime=aug_args.ntime,
-            nbands=aug_args.nbands,
-            height=height,
-            width=width,
-            y=y,
-            bdist=bdist,
-            zero_padding=aug_args.zero_padding,
-            **aug_args.kwargs,
-        )
-
 
 class AugmentTimeMixin(AugmenterModule):
-    def forward(
-        self, cdata: DataCopies, ldata: LabeledData, aug_args: AugmenterArgs
-    ) -> DataCopies:
+    def forward(self, cdata: Data, aug_args: AugmenterArgs) -> Data:
         # Warp each segment
-        for p in ldata.props:
-            x = augment_time(
-                ldata,
+        for p in cdata.props:
+            cdata = augment_time(
+                cdata,
                 p=p,
-                x=cdata.x,
-                ntime=aug_args.ntime,
-                nbands=aug_args.nbands,
                 add_noise=self.add_noise_,
                 warper=self.warper,
                 aug=self.name_,
             )
-            cdata = replace(cdata, x=x)
 
-        # y and bdist are unaltered
         return cdata
 
 
@@ -223,32 +159,50 @@ class Rotate(AugmenterModule):
 
     def forward(
         self,
-        cdata: DataCopies,
-        ldata: LabeledData = None,
+        cdata: Data,
         aug_args: AugmenterArgs = None,
-    ) -> DataCopies:
+    ) -> Data:
+
+        stacked_x = einops.rearrange(cdata.x, '1 c t h w -> (c t) h w').numpy()
         # Create the output array for rotated features
         x = np.zeros(
             (
-                cdata.x.shape[0],
-                *cv2.rotate(np.float32(cdata.x[0]), self.deg_func).shape,
+                cdata.num_channels * cdata.num_time,
+                *cv2.rotate(np.float32(stacked_x[0]), self.deg_func).shape,
             ),
-            dtype=cdata.x.dtype,
+            dtype='float32',
         )
-        for i in range(0, cdata.x.shape[0]):
-            x[i] = cv2.rotate(np.float32(cdata.x[i]), self.deg_func)
+
+        for i in range(0, stacked_x.shape[0]):
+            x[i] = cv2.rotate(np.float32(stacked_x[i]), self.deg_func)
+
+        cdata.x = einops.rearrange(
+            torch.from_numpy(x),
+            '(c t) h w -> 1 c t h w',
+            c=cdata.num_channels,
+            t=cdata.num_time,
+        )
 
         # Rotate labels
-        label_dtype = "float" if "float" in cdata.y.dtype.name else "int"
+        label_dtype = (
+            "float" if "float" in cdata.y.numpy().dtype.name else "int"
+        )
         if label_dtype == "float":
-            y = cv2.rotate(np.float32(cdata.y), self.deg_func)
+            y = cv2.rotate(
+                np.float32(cdata.y.squeeze(dim=0).numpy()), self.deg_func
+            )
         else:
-            y = cv2.rotate(np.uint8(cdata.y), self.deg_func)
-        # Rotate the distance transform
-        bdist = cv2.rotate(np.float32(cdata.bdist), self.deg_func)
-        # ori_aug = cv2.rotate(np.float32(ori), self.deg_func)
+            y = cv2.rotate(
+                np.uint8(cdata.y.squeeze(dim=0).numpy()), self.deg_func
+            )
 
-        cdata = replace(cdata, x=x, y=y, bdist=bdist)
+        cdata.y = einops.rearrange(torch.from_numpy(y), 'h w -> 1 h w')
+
+        # Rotate the distance transform
+        bdist = cv2.rotate(
+            np.float32(cdata.bdist.squeeze(dim=0).numpy()), self.deg_func
+        )
+        cdata.bdist = einops.rearrange(torch.from_numpy(y), 'h w -> 1 h w')
 
         return cdata
 
@@ -259,15 +213,12 @@ class Roll(AugmenterModule):
 
     def forward(
         self,
-        cdata: DataCopies,
-        ldata: LabeledData = None,
+        cdata: Data,
         aug_args: AugmenterArgs = None,
-    ) -> DataCopies:
-        for p in ldata.props:
-            x = roll_time(ldata, p, cdata.x, aug_args.ntime)
-            cdata = replace(cdata, x=x)
+    ) -> Data:
+        for p in cdata.props:
+            cdata = roll_time(cdata, p)
 
-        # y and bdist are unaltered
         return cdata
 
 
@@ -278,28 +229,21 @@ class Flip(AugmenterModule):
 
     def forward(
         self,
-        cdata: DataCopies,
-        ldata: LabeledData = None,
+        cdata: Data,
         aug_args: AugmenterArgs = None,
-    ) -> DataCopies:
-        x = cdata.x.copy()
-        if self.direction == "flipfb":
-            # Reverse the channels
-            for b in range(0, cdata.x.shape[0], aug_args.ntime):
-                # Get the slice for the current band, n time steps
-                x[b : b + aug_args.ntime] = x[b : b + aug_args.ntime][::-1]
+    ) -> Data:
+        x = einops.rearrange(cdata.x, '1 c t h w -> (c t) h w').numpy()
 
-            # y and bdist are unaltered
-            cdata = replace(cdata)
-        else:
-            flip_func = getattr(np, self.direction)
-            for i in range(0, x.shape[0]):
-                x[i] = flip_func(x[i])
+        flip_func = getattr(np, self.direction)
+        for band_idx in range(0, x.shape[0]):
+            x[band_idx] = flip_func(x[band_idx])
 
-            y = flip_func(cdata.y)
-            bdist = flip_func(cdata.bdist)
-            # ori_aug = getattr(np, aug)(ori)
-            cdata = replace(cdata, x=x, y=y, bdist=bdist)
+        cdata.x = einops.rearrange(
+            torch.from_numpy(x),
+            '(c t) h w',
+            c=cdata.num_channels,
+            t=cdata.num_time,
+        )
 
         return cdata
 
@@ -307,18 +251,21 @@ class Flip(AugmenterModule):
 class SKLearnMixin(AugmenterModule):
     def forward(
         self,
-        cdata: DataCopies,
-        ldata: LabeledData = None,
+        cdata: Data,
         aug_args: AugmenterArgs = None,
     ) -> DataCopies:
-        x = cdata.x.copy()
+        x = einops.rearrange(cdata.x, '1 c t h w -> (c t) h w').numpy()
         for i in range(0, x.shape[0]):
             x[i] = sk_util.random_noise(
                 x[i], mode=self.name_, clip=True, **self.kwargs
             )
 
-        # y and bdist are unaltered
-        cdata = replace(cdata, x=x)
+        cdata.x = einops.rearrange(
+            torch.from_numpy(x),
+            '(c t) h w -> 1 c t h w',
+            c=cdata.num_channels,
+            t=cdata.num_time,
+        )
 
         return cdata
 
@@ -354,7 +301,7 @@ class NoAugmentation(AugmenterModule):
     def forward(
         self,
         cdata: DataCopies,
-        ldata: LabeledData = None,
+        ldata: Data = None,
         aug_args: AugmenterArgs = None,
     ) -> DataCopies:
         return cdata
@@ -383,19 +330,11 @@ class AugmenterBase(object):
     def __init__(
         self,
         augmentations: T.Sequence[str],
-        ntime: int,
-        nbands: int,
-        zero_padding: int = 0,
         **kwargs,
     ):
         self.augmentations = augmentations
         self.augmenters_ = []
-        self.aug_args = AugmenterArgs(
-            ntime=ntime,
-            nbands=nbands,
-            zero_padding=zero_padding,
-            kwargs=kwargs,
-        )
+        self.aug_args = AugmenterArgs(kwargs=kwargs)
 
         self._init_augmenters()
 
@@ -429,11 +368,7 @@ class Augmenters(AugmenterBase):
                 `torch_geometric.data.Data` object.
 
     Example:
-        >>> aug = Augmenters(
-        >>>     augmentations=['tswarp'],
-        >>>     ntime=13,
-        >>>     nbands=5,
-        >>> )
+        >>> aug = Augmenters(augmentations=['tswarp'])
         >>>
         >>> for method in aug:
         >>>     method(ldata, aug_args=aug.aug_args)
