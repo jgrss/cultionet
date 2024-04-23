@@ -1,31 +1,30 @@
 import typing as T
-from pathlib import Path
-from functools import partial
 import warnings
+from functools import partial
+from pathlib import Path
 
+import cv2
+import geopandas as gpd
 import geowombat as gw
+import joblib
+import numpy as np
+import xarray as xr
 from geowombat.core import polygon_to_array
 from geowombat.core.windows import get_window_offsets
-import numpy as np
-from scipy.ndimage.measurements import label as nd_label
-import cv2
+from joblib import delayed, parallel_backend
 from rasterio.warp import calculate_default_transform
 from rasterio.windows import Window
-import xarray as xr
-import geopandas as gpd
+from scipy.ndimage.measurements import label as nd_label
 from skimage.measure import regionprops
-from tqdm.auto import tqdm
-from torch_geometric.data import Data
-import joblib
-from joblib import delayed, parallel_backend
 from threadpoolctl import threadpool_limits
+from tqdm.auto import tqdm
 
-from .utils import LabeledData, get_image_list_dims
-from ..augment.augmenters import Augmenters, AugmenterMapping
+from ..augment.augmenters import AugmenterMapping, Augmenters
 from ..errors import TopologyClipError
 from ..utils.logging import set_color_logger
 from ..utils.model_preprocessing import TqdmParallel
-
+from .data import Data, LabeledData
+from .utils import get_image_list_dims
 
 logger = set_color_logger(__name__)
 
@@ -756,9 +755,11 @@ def create_predict_dataset(
                             ) as pool:
                                 __ = pool(
                                     delayed(partial_create_and_save_window)(
-                                        read_slice(time_series, window_pad),
-                                        window,
-                                        window_pad,
+                                        darray=read_slice(
+                                            time_series, window_pad
+                                        ),
+                                        w=window,
+                                        w_pad=window_pad,
                                     )
                                     for window, window_pad in window_chunk
                                 )
