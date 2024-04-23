@@ -5,11 +5,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.data import Data
 import torchmetrics
 
-from . import topological
+from ..data.data import Data
 from ..models import model_utils
+from . import topological
 
 
 def one_hot(targets: torch.Tensor, dims: int) -> torch.Tensor:
