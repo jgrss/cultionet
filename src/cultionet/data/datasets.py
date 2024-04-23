@@ -1,30 +1,29 @@
 import typing as T
-from pathlib import Path
 from functools import partial
+from pathlib import Path
 
-import numpy as np
 import attr
-import torch
-import psutil
-import joblib
-from joblib import delayed, parallel_backend
-import pandas as pd
 import geopandas as gpd
+import joblib
+import numpy as np
+import pandas as pd
+import psutil
 import pygrts
+import torch
+from joblib import delayed, parallel_backend
 from pytorch_lightning import seed_everything
-from shapely.geometry import box
 from scipy.ndimage.measurements import label as nd_label
+from shapely.geometry import box
 from skimage.measure import regionprops
-from torch_geometric.data import Data, Dataset
+from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 
-from .utils import LabeledData
 from ..augment.augmenters import Augmenters
 from ..errors import TensorShapeError
 from ..models import model_utils
 from ..utils.logging import set_color_logger
 from ..utils.model_preprocessing import TqdmParallel
-
+from .data import Data
 
 ATTRVINSTANCE = attr.validators.instance_of
 ATTRVIN = attr.validators.in_
@@ -72,7 +71,6 @@ def zscores(
     batch: Data,
     data_means: torch.Tensor,
     data_stds: torch.Tensor,
-    idx: T.Optional[int] = None,
 ) -> Data:
     """Normalizes data to z-scores.
 
@@ -84,8 +82,9 @@ def zscores(
     z = (x - μ) / σ
     """
     x = (batch.x - add_dims(data_means)) / add_dims(data_stds)
+    batch.x = x.clone()
 
-    return update_data(batch=batch, idx=idx, x=x)
+    return batch
 
 
 def _check_shape(
@@ -109,15 +108,13 @@ class EdgeDataset(Dataset):
         data_stds: T.Optional[torch.Tensor] = None,
         crop_counts: T.Optional[torch.Tensor] = None,
         edge_counts: T.Optional[torch.Tensor] = None,
-        pattern: T.Optional[str] = "data*.pt",
-        processes: T.Optional[int] = psutil.cpu_count(),
-        threads_per_worker: T.Optional[int] = 1,
-        random_seed: T.Optional[int] = 42,
-        transform: T.Any = None,
-        pre_transform: T.Any = None,
-        pre_filter: T.Any = None,
+        pattern: str = "data*.pt",
+        processes: int = psutil.cpu_count(),
+        threads_per_worker: int = 1,
+        random_seed: int = 42,
         augment_prob: float = 0.0,
     ):
+        self.root = root
         self.data_means = data_means
         self.data_stds = data_stds
         self.crop_counts = crop_counts
@@ -148,7 +145,9 @@ class EdgeDataset(Dataset):
             'speckle',
         ]
 
-        super().__init__(root, transform, pre_transform, pre_filter)
+        self.data_list_ = None
+        self.processed_dir = Path(self.root) / 'processed'
+        self.get_data_list()
 
     def get_data_list(self):
         """Gets the list of data files."""
@@ -322,12 +321,6 @@ class EdgeDataset(Dataset):
             self.dataset_df = self.to_frame()
             self.dataset_df.to_file(dataset_grid_path, driver="GPKG")
 
-    def download(self):
-        pass
-
-    def process(self):
-        pass
-
     @property
     def processed_file_names(self):
         """Get a list of processed files."""
@@ -386,7 +379,7 @@ class EdgeDataset(Dataset):
             else:
                 raise TensorShapeError
 
-    def len(self):
+    def __len__(self):
         """Returns the dataset length."""
         return len(self.processed_file_names)
 
@@ -518,28 +511,22 @@ class EdgeDataset(Dataset):
     def load_file(self, filename: T.Union[str, Path]) -> Data:
         return joblib.load(filename)
 
-    def get(self, idx):
+    def __getitem__(self, idx: int) -> dict:
         """Gets an individual data object from the dataset.
 
         Args:
             idx (int): The dataset index position.
-
-        Returns:
-            A `torch_geometric` data object.
         """
-        batch = self.load_file(self.data_list_[idx])
+
+        batch = Data.from_file(self.data_list_[idx])
 
         if batch.y is not None:
             if self.rng.normal() > 1 - self.augment_prob:
-                # TODO: get segments from crops, not edges
-                y = batch.y.reshape(batch.height, batch.width)
-                # Reshape from ((H*W) x (C*T)) -> (B x (C * T) x H x W)
-                x = self.gc(batch.x, 1, batch.height, batch.width)
-
                 # Choose one augmentation to apply
                 aug_name = self.rng.choice(self.augmentations_)
-                props = None
+                aug_name = 'tswarp'
                 if aug_name in (
+                    'roll',
                     'tswarp',
                     'tsnoise',
                     'tsdrift',
@@ -548,30 +535,21 @@ class EdgeDataset(Dataset):
                     # FIXME: By default, the crop value is 1 (background is 0 and edges are 2).
                     # But, it would be better to get 1 from an argument.
                     # Label properties are only used in 4 augmentations
-                    props = regionprops(np.uint8(nd_label(y == 1)[0]))
-
-                labeled_data = LabeledData(
-                    x=x.squeeze(dim=0),
-                    y=y,
-                    bdist=batch.bdist.reshape(batch.height, batch.width),
-                    ori=None,
-                    segments=None,
-                    props=props,
-                )
+                    batch.segments = np.uint8(
+                        nd_label(batch.y.squeeze().numpy() == 1)[0]
+                    )
+                    batch.props = regionprops(batch.segments)
 
                 # Create the augmenter object
-                augmenters = Augmenters(
-                    augmentations=[aug_name],
-                    ntime=batch.ntime,
-                    nbands=batch.nbands,
-                )
+                augmenters = Augmenters(augmentations=[aug_name])
+
                 # Apply the object
                 augmenter = augmenters.augmenters_[0]
-                batch = augmenter(labeled_data, aug_args=augmenters.aug_args)
+                batch = augmenter(batch, aug_args=augmenters.aug_args)
+                batch.segments = None
+                batch.props = None
 
         if isinstance(self.data_means, torch.Tensor):
-            batch = zscores(batch, self.data_means, self.data_stds, idx=idx)
-        else:
-            batch = update_data(batch=batch, idx=idx)
+            batch = zscores(batch, self.data_means, self.data_stds)
 
         return batch
