@@ -78,6 +78,7 @@ def test_cultionet(class_info: dict):
     )
 
     model = CultioNet(**kwargs)
+
     with tempfile.TemporaryDirectory() as temp_dir:
         data_module = get_train_dataset(
             class_nums=class_info,

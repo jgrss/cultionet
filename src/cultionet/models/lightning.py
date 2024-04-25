@@ -820,17 +820,19 @@ class LightningModuleMixin(LightningModule):
             )
 
     def configure_loss(self):
-        self.dist_loss = TanimotoComplementLoss()
+        self.dist_loss = TanimotoComplementLoss(one_hot_targets=False)
         if self.deep_sup_dist:
-            self.dist_loss_3_1 = TanimotoDistLoss()
-            self.dist_loss_2_2 = TanimotoDistLoss()
-            self.dist_loss_1_3 = TanimotoDistLoss()
+            self.dist_loss_3_1 = TanimotoDistLoss(one_hot_targets=False)
+            self.dist_loss_2_2 = TanimotoDistLoss(one_hot_targets=False)
+            self.dist_loss_1_3 = TanimotoDistLoss(one_hot_targets=False)
+
         # Edge losses
         self.edge_loss = TanimotoComplementLoss()
         if self.deep_sup_edge:
             self.edge_loss_3_1 = TanimotoDistLoss()
             self.edge_loss_2_2 = TanimotoDistLoss()
             self.edge_loss_1_3 = TanimotoDistLoss()
+
         # Crop mask losses
         self.crop_loss = TanimotoComplementLoss()
         if self.deep_sup_mask:
@@ -843,10 +845,10 @@ class LightningModuleMixin(LightningModule):
             self.crop_loss_1_3 = TanimotoDistLoss(
                 scale_pos_weight=self.scale_pos_weight
             )
+
         # Crop Temporal encoding losses
         self.classes_l2_loss = TanimotoComplementLoss()
         self.classes_last_loss = TanimotoComplementLoss()
-        # FIXME:
         if self.num_classes > 2:
             self.crop_type_star_loss = TanimotoDistLoss(
                 scale_pos_weight=self.scale_pos_weight
@@ -1072,7 +1074,7 @@ class CultioLitModel(LightningModuleMixin):
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         temperature_lit_model: T.Optional[GeoRefinement] = None,
-        scale_pos_weight: bool = True,
+        scale_pos_weight: bool = False,
         save_batch_val_metrics: bool = False,
     ):
         """Lightning model."""

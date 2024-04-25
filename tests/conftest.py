@@ -24,7 +24,7 @@ def create_batch(
     width: int = 20,
     rng: Optional[np.random.Generator] = None,
 ) -> Data:
-    x = torch.rand(1, num_channels, num_time, height, width)
+    x = torch.randn(1, num_channels, num_time, height, width)
     y = torch.randint(low=0, high=3, size=(1, height, width))
     bdist = torch.rand(1, height, width)
 

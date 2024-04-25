@@ -6,53 +6,53 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchmetrics
+from einops import rearrange
 
 from ..data.data import Data
 from ..models import model_utils
 from . import topological
 
 
-def one_hot(targets: torch.Tensor, dims: int) -> torch.Tensor:
-    return F.one_hot(targets.contiguous().view(-1), dims).float()
-
-
 class LossPreprocessing(nn.Module):
-    def __init__(self, inputs_are_logits: bool, apply_transform: bool):
+    def __init__(
+        self, transform_logits: bool = False, one_hot_targets: bool = True
+    ):
         super(LossPreprocessing, self).__init__()
 
-        self.inputs_are_logits = inputs_are_logits
-        self.apply_transform = apply_transform
-        self.sigmoid = nn.Sigmoid()
+        self.transform_logits = transform_logits
+        self.one_hot_targets = one_hot_targets
 
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor = None
-    ) -> T.Tuple[torch.Tensor, T.Union[torch.Tensor, None]]:
+        self, inputs: torch.Tensor, targets: torch.Tensor
+    ) -> T.Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass to transform logits.
 
         If logits are single-dimension then they are transformed by Sigmoid. If
         logits are multi-dimension then they are transformed by Softmax.
         """
-        if self.inputs_are_logits:
-            if targets is not None:
-                if (len(targets.unique()) > inputs.size(1)) or (
-                    targets.unique().max() + 1 > inputs.size(1)
-                ):
-                    raise ValueError(
-                        "The targets should be ordered values of equal length to the inputs 2nd dimension."
-                    )
-            if self.apply_transform:
-                if inputs.shape[1] == 1:
-                    inputs = self.sigmoid(inputs)
-                else:
-                    inputs = F.softmax(inputs, dim=1, dtype=inputs.dtype)
+
+        if self.transform_logits:
+            if inputs.shape[1] == 1:
+                inputs = F.sigmoid(inputs).to(dtype=inputs.dtype)
+            else:
+                inputs = F.softmax(inputs, dim=1, dtype=inputs.dtype)
 
             inputs = inputs.clip(0, 1)
-            if targets is not None:
-                targets = one_hot(targets, dims=inputs.shape[1])
 
+        targets = rearrange(targets, 'b h w -> (b h w)')
+        if self.one_hot_targets:
+            if (len(targets.unique()) > inputs.size(1)) or (
+                targets.unique().max() + 1 > inputs.size(1)
+            ):
+                raise ValueError(
+                    "The targets should be ordered values of equal length to the inputs 2nd dimension."
+                )
+
+            targets = F.one_hot(targets, num_classes=inputs.shape[1]).float()
         else:
-            inputs = inputs.unsqueeze(1)
-            targets = targets.unsqueeze(1)
+            targets = rearrange(targets, 'b -> b 1')
+
+        inputs = rearrange(inputs, 'b c h w -> (b h w) c')
 
         return inputs, targets
 
@@ -193,16 +193,17 @@ class TanimotoComplementLoss(nn.Module):
         self,
         smooth: float = 1e-5,
         depth: int = 5,
-        targets_are_labels: bool = True,
+        transform_logits: bool = False,
+        one_hot_targets: bool = True,
     ):
         super(TanimotoComplementLoss, self).__init__()
 
         self.smooth = smooth
         self.depth = depth
-        self.targets_are_labels = targets_are_labels
 
         self.preprocessor = LossPreprocessing(
-            inputs_are_logits=True, apply_transform=True
+            transform_logits=transform_logits,
+            one_hot_targets=one_hot_targets,
         )
 
     def tanimoto_distance(
@@ -222,7 +223,7 @@ class TanimotoComplementLoss(nn.Module):
                 (a * sq_sum) + (b * tpl) + self.smooth
             )
 
-        return ((numerator * denominator) * scale).mean()
+        return (numerator * denominator) * scale
 
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor
@@ -236,20 +237,13 @@ class TanimotoComplementLoss(nn.Module):
         Returns:
             Tanimoto distance loss (float)
         """
-        if len(inputs.shape) > 1:
-            if inputs.shape[1] > 1:
-                targets = one_hot(targets, dims=inputs.shape[1])
+        inputs, targets = self.preprocessor(inputs, targets)
 
-        if len(inputs.shape) == 1:
-            inputs = inputs.unsqueeze(1)
-        if len(targets.shape) == 1:
-            targets = targets.unsqueeze(1)
+        loss = 1.0 - self.tanimoto_distance(targets, inputs)
+        compl_loss = 1.0 - self.tanimoto_distance(1.0 - targets, 1.0 - inputs)
+        loss = (loss + compl_loss) * 0.5
 
-        dist1 = self.tanimoto_distance(targets, inputs)
-        dist2 = self.tanimoto_distance(1.0 - targets, 1.0 - inputs)
-        dist = (dist1 + dist2) * 0.5
-
-        return 1.0 - dist
+        return loss.mean()
 
 
 def tanimoto_dist(
@@ -262,6 +256,7 @@ def tanimoto_dist(
 ) -> torch.Tensor:
     """Tanimoto distance."""
     ytrue = ytrue.to(dtype=ypred.dtype)
+
     if scale_pos_weight:
         if class_counts is None:
             class_counts = ytrue.sum(dim=0)
@@ -274,14 +269,15 @@ def tanimoto_dist(
         weights = torch.ones(
             ytrue.shape[1], dtype=ytrue.dtype, device=ytrue.device
         )
+
     # Reduce
     tpl = (ypred * ytrue).sum(dim=0)
     sq_sum = (ypred**2 + ytrue**2).sum(dim=0)
     numerator = tpl * weights + smooth
     denominator = (sq_sum - tpl) * weights + smooth
-    tanimoto = numerator / denominator
+    distance = numerator / denominator
 
-    return tanimoto
+    return distance
 
 
 class TanimotoDistLoss(nn.Module):
@@ -327,8 +323,9 @@ class TanimotoDistLoss(nn.Module):
         smooth: float = 1e-5,
         beta: T.Optional[float] = 0.999,
         class_counts: T.Optional[torch.Tensor] = None,
-        scale_pos_weight: T.Optional[bool] = False,
-        transform_logits: T.Optional[bool] = False,
+        scale_pos_weight: bool = False,
+        transform_logits: bool = False,
+        one_hot_targets: bool = True,
     ):
         super(TanimotoDistLoss, self).__init__()
 
@@ -342,9 +339,10 @@ class TanimotoDistLoss(nn.Module):
         self.beta = beta
         self.class_counts = class_counts
         self.scale_pos_weight = scale_pos_weight
-        self.transform_logits = transform_logits
+
         self.preprocessor = LossPreprocessing(
-            inputs_are_logits=True, apply_transform=True
+            transform_logits=transform_logits,
+            one_hot_targets=one_hot_targets,
         )
 
     def forward(
@@ -359,23 +357,8 @@ class TanimotoDistLoss(nn.Module):
         Returns:
             Tanimoto distance loss (float)
         """
-        if self.transform_logits:
-            if len(inputs.shape) == 1:
-                inputs, __ = self.preprocessor(inputs)
-            else:
-                if inputs.shape[1] == 1:
-                    inputs, __ = self.preprocessor(inputs)
-                else:
-                    inputs, targets = self.preprocessor(inputs, targets)
-        else:
-            if len(inputs.shape) > 1:
-                if inputs.shape[1] > 1:
-                    targets = one_hot(targets, dims=inputs.shape[1])
 
-        if len(inputs.shape) == 1:
-            inputs = inputs.unsqueeze(1)
-        if len(targets.shape) == 1:
-            targets = targets.unsqueeze(1)
+        inputs, targets = self.preprocessor(inputs, targets)
 
         loss = 1.0 - tanimoto_dist(
             inputs,
