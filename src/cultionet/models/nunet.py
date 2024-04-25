@@ -6,36 +6,14 @@ Copyright (c) 2018 Takato Kimura
 """
 import typing as T
 
-import einops
 import torch
 import torch.nn as nn
+from einops import rearrange
 from einops.layers.torch import Rearrange, Reduce
 
-from cultionet.enums import ResBlockTypes
-from cultionet.layers import kernels
-from cultionet.layers.base_layers import (
-    PoolConv,
-    PoolResidualConv,
-    ResidualAConv,
-    ResidualConv,
-    SetActivation,
-    SigmoidCrisp,
-    SingleConv,
-    Softmax,
-)
-from cultionet.layers.weights import init_conv_weights
-from cultionet.models import model_utils
-from cultionet.models.unet_parts import (
-    ResELUNetPsiBlock,
-    ResUNet3_0_4,
-    ResUNet3_1_3,
-    ResUNet3_2_2,
-    ResUNet3_3_1,
-    UNet3_0_4,
-    UNet3_1_3,
-    UNet3_2_2,
-    UNet3_3_1,
-)
+from .. import nn as cunn
+from ..enums import ResBlockTypes
+from ..layers.weights import init_conv_weights
 
 
 class Encoding3d(nn.Module):
@@ -54,7 +32,7 @@ class Encoding3d(nn.Module):
                 bias=False,
             ),
             nn.BatchNorm3d(out_channels),
-            SetActivation(activation_type),
+            cunn.SetActivation(activation_type),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -74,14 +52,11 @@ class PreUnet3Psi(nn.Module):
     ):
         super(PreUnet3Psi, self).__init__()
 
-        self.cg = model_utils.ConvToGraph()
-        self.gc = model_utils.GraphToConv()
-
-        self.peak_kernel = kernels.Peaks(kernel_size=trend_kernel_size)
-        self.pos_trend_kernel = kernels.Trend(
+        self.peak_kernel = cunn.Peaks(kernel_size=trend_kernel_size)
+        self.pos_trend_kernel = cunn.Trend(
             kernel_size=trend_kernel_size, direction="positive"
         )
-        self.neg_trend_kernel = kernels.Trend(
+        self.neg_trend_kernel = cunn.Trend(
             kernel_size=trend_kernel_size, direction="negative"
         )
         self.time_conv0 = Encoding3d(
@@ -118,17 +93,17 @@ class PreUnet3Psi(nn.Module):
         self.reduce_to_channels_min = nn.Sequential(
             Reduce('b c t h w -> b c h w', 'min'),
             nn.BatchNorm2d(channels[0]),
-            SetActivation(activation_type=activation_type),
+            cunn.SetActivation(activation_type=activation_type),
         )
         self.reduce_to_channels_max = nn.Sequential(
             Reduce('b c t h w -> b c h w', 'max'),
             nn.BatchNorm2d(channels[0]),
-            SetActivation(activation_type=activation_type),
+            cunn.SetActivation(activation_type=activation_type),
         )
         self.reduce_to_channels_mean = nn.Sequential(
             Reduce('b c t h w -> b c h w', 'max'),
             nn.BatchNorm2d(channels[0]),
-            SetActivation(activation_type=activation_type),
+            cunn.SetActivation(activation_type=activation_type),
         )
         self.instance_norm = nn.InstanceNorm2d(channels[0], affine=False)
 
@@ -137,6 +112,7 @@ class PreUnet3Psi(nn.Module):
         x: torch.Tensor,
         temporal_encoding: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        batch_size, num_channels, num_time, height, width = x.shape
 
         peak_kernels = []
         pos_trend_kernels = []
@@ -145,37 +121,40 @@ class PreUnet3Psi(nn.Module):
             # (B x C x T x H x W) -> (B x T x H x W)
             band_input = x[:, bidx]
             # (B x T x H x W) -> (B*H*W x T) -> (B*H*W x 1(C) x T)
-            band_input = self.cg(band_input).unsqueeze(1)
+            band_input = rearrange(band_input, 'b t h w -> (b h w) 1 t')
             peak_res = self.peak_kernel(band_input)
             pos_trend_res = self.pos_trend_kernel(band_input)
             neg_trend_res = self.neg_trend_kernel(band_input)
             # Reshape (B*H*W x 1(C) x T) -> (B x C X T x H x W)
             peak_kernels += [
-                self.gc(
-                    # (B*H*W x T)
-                    peak_res.squeeze(),
-                    nbatch=x.shape[0],
-                    nrows=x.shape[-2],
-                    ncols=x.shape[-1],
-                ).unsqueeze(1)
+                rearrange(
+                    peak_res,
+                    '(b h w) 1 t -> b 1 t h w',
+                    b=batch_size,
+                    t=num_time,
+                    h=height,
+                    w=width,
+                )
             ]
             pos_trend_kernels += [
-                self.gc(
-                    # (B*H*W x T)
-                    pos_trend_res.squeeze(),
-                    nbatch=x.shape[0],
-                    nrows=x.shape[-2],
-                    ncols=x.shape[-1],
-                ).unsqueeze(1)
+                rearrange(
+                    pos_trend_res,
+                    '(b h w) 1 t -> b 1 t h w',
+                    b=batch_size,
+                    t=num_time,
+                    h=height,
+                    w=width,
+                )
             ]
             neg_trend_kernels += [
-                self.gc(
-                    # (B*H*W x T)
-                    neg_trend_res.squeeze(),
-                    nbatch=x.shape[0],
-                    nrows=x.shape[-2],
-                    ncols=x.shape[-1],
-                ).unsqueeze(1)
+                rearrange(
+                    neg_trend_res,
+                    '(b h w) 1 t -> b 1 t h w',
+                    b=batch_size,
+                    t=num_time,
+                    h=height,
+                    w=width,
+                )
             ]
 
         # B x 3 x T x H x W
@@ -228,7 +207,7 @@ class PostUNet3Psi(nn.Module):
         self.deep_sup_edge = deep_sup_edge
         self.deep_sup_mask = deep_sup_mask
 
-        self.up = model_utils.UpSample()
+        self.up = cunn.UpSample()
 
         self.final_dist = nn.Sequential(
             nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
@@ -236,7 +215,7 @@ class PostUNet3Psi(nn.Module):
         )
         self.final_edge = nn.Sequential(
             nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
-            SigmoidCrisp(),
+            cunn.SigmoidCrisp(),
         )
         self.final_mask = nn.Sequential(
             nn.Conv2d(up_channels, num_classes, kernel_size=1, padding=0),
@@ -258,15 +237,15 @@ class PostUNet3Psi(nn.Module):
         if self.deep_sup_edge:
             self.final_edge_3_1 = nn.Sequential(
                 nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
-                SigmoidCrisp(),
+                cunn.SigmoidCrisp(),
             )
             self.final_edge_2_2 = nn.Sequential(
                 nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
-                SigmoidCrisp(),
+                cunn.SigmoidCrisp(),
             )
             self.final_edge_1_3 = nn.Sequential(
                 nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
-                SigmoidCrisp(),
+                cunn.SigmoidCrisp(),
             )
         if self.deep_sup_mask:
             self.final_mask_3_1 = nn.Sequential(
@@ -363,7 +342,7 @@ class UNet3Psi(nn.Module):
         deep_sup_dist: T.Optional[bool] = False,
         deep_sup_edge: T.Optional[bool] = False,
         deep_sup_mask: T.Optional[bool] = False,
-        mask_activation: T.Union[Softmax, nn.Sigmoid] = Softmax(dim=1),
+        mask_activation: T.Union[nn.Softmax, nn.Sigmoid] = nn.Softmax(dim=1),
     ):
         super(UNet3Psi, self).__init__()
 
@@ -386,7 +365,7 @@ class UNet3Psi(nn.Module):
         # Reduced time dimensions
         # Reduced channels (x2) for mean and max
         # Input filters for transformer hidden logits
-        self.conv0_0 = SingleConv(
+        self.conv0_0 = cunn.SingleConv(
             in_channels=(
                 in_time
                 + int(channels[0] * 4)
@@ -397,25 +376,25 @@ class UNet3Psi(nn.Module):
             out_channels=channels[0],
             activation_type=activation_type,
         )
-        self.conv1_0 = PoolConv(
+        self.conv1_0 = cunn.PoolConv(
             channels[0],
             channels[1],
             double_dilation=dilation,
             activation_type=activation_type,
         )
-        self.conv2_0 = PoolConv(
+        self.conv2_0 = cunn.PoolConv(
             channels[1],
             channels[2],
             double_dilation=dilation,
             activation_type=activation_type,
         )
-        self.conv3_0 = PoolConv(
+        self.conv3_0 = cunn.PoolConv(
             channels[2],
             channels[3],
             double_dilation=dilation,
             activation_type=activation_type,
         )
-        self.conv4_0 = PoolConv(
+        self.conv4_0 = cunn.PoolConv(
             channels[3],
             channels[4],
             double_dilation=dilation,
@@ -423,25 +402,25 @@ class UNet3Psi(nn.Module):
         )
 
         # Connect 3
-        self.convs_3_1 = UNet3_3_1(
+        self.convs_3_1 = cunn.UNet3_3_1(
             channels=channels,
             up_channels=up_channels,
             dilations=[dilation],
             activation_type=activation_type,
         )
-        self.convs_2_2 = UNet3_2_2(
+        self.convs_2_2 = cunn.UNet3_2_2(
             channels=channels,
             up_channels=up_channels,
             dilations=[dilation],
             activation_type=activation_type,
         )
-        self.convs_1_3 = UNet3_1_3(
+        self.convs_1_3 = cunn.UNet3_1_3(
             channels=channels,
             up_channels=up_channels,
             dilations=[dilation],
             activation_type=activation_type,
         )
-        self.convs_0_4 = UNet3_0_4(
+        self.convs_0_4 = cunn.UNet3_0_4(
             channels=channels,
             up_channels=up_channels,
             dilations=[dilation],
@@ -550,7 +529,7 @@ class ResUNet3Psi(nn.Module):
         deep_sup_dist: T.Optional[bool] = False,
         deep_sup_edge: T.Optional[bool] = False,
         deep_sup_mask: T.Optional[bool] = False,
-        mask_activation: T.Union[Softmax, nn.Sigmoid] = Softmax(dim=1),
+        mask_activation: T.Union[nn.Softmax, nn.Sigmoid] = nn.Softmax(dim=1),
     ):
         super(ResUNet3Psi, self).__init__()
 
@@ -589,7 +568,7 @@ class ResUNet3Psi(nn.Module):
         # Reduced channels (x2) for mean and max
         # Input filters for RNN hidden logits
         if res_block_type.lower() == ResBlockTypes.RES:
-            self.conv0_0 = ResidualConv(
+            self.conv0_0 = cunn.ResidualConv(
                 in_channels=channels[0],
                 out_channels=channels[0],
                 dilation=dilations[0],
@@ -597,21 +576,21 @@ class ResUNet3Psi(nn.Module):
                 attention_weights=attention_weights,
             )
         else:
-            self.conv0_0 = ResidualAConv(
+            self.conv0_0 = cunn.ResidualAConv(
                 in_channels=channels[0],
                 out_channels=channels[0],
                 dilations=dilations,
                 activation_type=activation_type,
                 attention_weights=attention_weights,
             )
-        self.conv1_0 = PoolResidualConv(
+        self.conv1_0 = cunn.PoolResidualConv(
             channels[0],
             channels[1],
             dilations=dilations,
             attention_weights=attention_weights,
             res_block_type=res_block_type,
         )
-        self.conv2_0 = PoolResidualConv(
+        self.conv2_0 = cunn.PoolResidualConv(
             channels[1],
             channels[2],
             dilations=dilations,
@@ -619,7 +598,7 @@ class ResUNet3Psi(nn.Module):
             attention_weights=attention_weights,
             res_block_type=res_block_type,
         )
-        self.conv3_0 = PoolResidualConv(
+        self.conv3_0 = cunn.PoolResidualConv(
             channels[2],
             channels[3],
             dilations=dilations,
@@ -627,7 +606,7 @@ class ResUNet3Psi(nn.Module):
             attention_weights=attention_weights,
             res_block_type=res_block_type,
         )
-        self.conv4_0 = PoolResidualConv(
+        self.conv4_0 = cunn.PoolResidualConv(
             channels[3],
             channels[4],
             dilations=dilations,
@@ -637,7 +616,7 @@ class ResUNet3Psi(nn.Module):
         )
 
         # Connect 3
-        self.convs_3_1 = ResUNet3_3_1(
+        self.convs_3_1 = cunn.ResUNet3_3_1(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
@@ -645,7 +624,7 @@ class ResUNet3Psi(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
         )
-        self.convs_2_2 = ResUNet3_2_2(
+        self.convs_2_2 = cunn.ResUNet3_2_2(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
@@ -653,7 +632,7 @@ class ResUNet3Psi(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
         )
-        self.convs_1_3 = ResUNet3_1_3(
+        self.convs_1_3 = cunn.ResUNet3_1_3(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
@@ -661,7 +640,7 @@ class ResUNet3Psi(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
         )
-        self.convs_0_4 = ResUNet3_0_4(
+        self.convs_0_4 = cunn.ResUNet3_0_4(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
@@ -767,7 +746,7 @@ class ResELUNetPsi(nn.Module):
         deep_sup_dist: T.Optional[bool] = False,
         deep_sup_edge: T.Optional[bool] = False,
         deep_sup_mask: T.Optional[bool] = False,
-        mask_activation: T.Union[Softmax, nn.Sigmoid] = Softmax(dim=1),
+        mask_activation: T.Union[nn.Softmax, nn.Sigmoid] = nn.Softmax(dim=1),
     ):
         super(ResELUNetPsi, self).__init__()
 
@@ -798,7 +777,7 @@ class ResELUNetPsi(nn.Module):
         # Reduced channels (x2) for mean and max
         # Input filters for RNN hidden logits
         if res_block_type.lower() == ResBlockTypes.RES:
-            self.conv0_0 = ResidualConv(
+            self.conv0_0 = cunn.ResidualConv(
                 in_channels=channels[0],
                 out_channels=channels[0],
                 dilation=dilations[0],
@@ -806,21 +785,21 @@ class ResELUNetPsi(nn.Module):
                 attention_weights=attention_weights,
             )
         else:
-            self.conv0_0 = ResidualAConv(
+            self.conv0_0 = cunn.ResidualAConv(
                 in_channels=channels[0],
                 out_channels=channels[0],
                 dilations=dilations,
                 activation_type=activation_type,
                 attention_weights=attention_weights,
             )
-        self.conv1_0 = PoolResidualConv(
+        self.conv1_0 = cunn.PoolResidualConv(
             channels[0],
             channels[1],
             dilations=dilations,
             attention_weights=attention_weights,
             res_block_type=res_block_type,
         )
-        self.conv2_0 = PoolResidualConv(
+        self.conv2_0 = cunn.PoolResidualConv(
             channels[1],
             channels[2],
             dilations=dilations,
@@ -828,7 +807,7 @@ class ResELUNetPsi(nn.Module):
             attention_weights=attention_weights,
             res_block_type=res_block_type,
         )
-        self.conv3_0 = PoolResidualConv(
+        self.conv3_0 = cunn.PoolResidualConv(
             channels[2],
             channels[3],
             dilations=dilations,
@@ -836,7 +815,7 @@ class ResELUNetPsi(nn.Module):
             attention_weights=attention_weights,
             res_block_type=res_block_type,
         )
-        self.conv4_0 = PoolResidualConv(
+        self.conv4_0 = cunn.PoolResidualConv(
             channels[3],
             channels[4],
             dilations=dilations,
@@ -845,7 +824,7 @@ class ResELUNetPsi(nn.Module):
             res_block_type=res_block_type,
         )
 
-        self.convs_3_1 = ResELUNetPsiBlock(
+        self.convs_3_1 = cunn.ResELUNetPsiBlock(
             out_channels=up_channels,
             side_in={
                 'dist': {'backbone_3_0': channels[3]},
@@ -861,7 +840,7 @@ class ResELUNetPsi(nn.Module):
             attention_weights=attention_weights,
             activation_type=activation_type,
         )
-        self.convs_2_2 = ResELUNetPsiBlock(
+        self.convs_2_2 = cunn.ResELUNetPsiBlock(
             out_channels=up_channels,
             side_in={
                 'dist': {'backbone_2_0': channels[2]},
@@ -886,7 +865,7 @@ class ResELUNetPsi(nn.Module):
             attention_weights=attention_weights,
             activation_type=activation_type,
         )
-        self.convs_1_3 = ResELUNetPsiBlock(
+        self.convs_1_3 = cunn.ResELUNetPsiBlock(
             out_channels=up_channels,
             side_in={
                 'dist': {'backbone_1_0': channels[1]},
@@ -912,7 +891,7 @@ class ResELUNetPsi(nn.Module):
             attention_weights=attention_weights,
             activation_type=activation_type,
         )
-        self.convs_0_4 = ResELUNetPsiBlock(
+        self.convs_0_4 = cunn.ResELUNetPsiBlock(
             out_channels=up_channels,
             side_in={
                 'dist': {'backbone_0_0': channels[0]},

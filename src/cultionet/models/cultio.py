@@ -4,13 +4,11 @@ import warnings
 import torch
 import torch.nn as nn
 
+from .. import nn as cunn
 from ..data.data import Data
 from ..enums import ModelTypes, ResBlockTypes
-from ..layers.base_layers import ConvBlock2d, ResidualConv, Softmax
-from . import model_utils
 from .nunet import ResELUNetPsi, ResUNet3Psi, UNet3Psi
 from .temporal_transformer import TemporalTransformer
-from .time_attention import TemporalResAUNet
 
 
 def scale_min_max(
@@ -39,12 +37,9 @@ class GeoRefinement(nn.Module):
         # Edge sigmoid x4
         # Crop softmax x4
 
-        self.gc = model_utils.GraphToConv()
-        self.cg = model_utils.ConvToGraph()
-
         self.gamma = nn.Parameter(torch.ones((1, out_channels, 1, 1)))
         self.geo_attention = nn.Sequential(
-            ConvBlock2d(
+            cunn.ConvBlock2d(
                 in_channels=2,
                 out_channels=out_channels,
                 kernel_size=1,
@@ -57,7 +52,7 @@ class GeoRefinement(nn.Module):
         self.x_res_modules = nn.ModuleList(
             [
                 nn.Sequential(
-                    ResidualConv(
+                    cunn.ResidualConv(
                         in_channels=in_features,
                         out_channels=n_hidden,
                         dilation=2,
@@ -66,7 +61,7 @@ class GeoRefinement(nn.Module):
                     nn.Dropout(0.5),
                 ),
                 nn.Sequential(
-                    ResidualConv(
+                    cunn.ResidualConv(
                         in_channels=in_features,
                         out_channels=n_hidden,
                         dilation=3,
@@ -75,7 +70,7 @@ class GeoRefinement(nn.Module):
                     nn.Dropout(0.5),
                 ),
                 nn.Sequential(
-                    ResidualConv(
+                    cunn.ResidualConv(
                         in_channels=in_features,
                         out_channels=n_hidden,
                         dilation=4,
@@ -88,7 +83,7 @@ class GeoRefinement(nn.Module):
         self.crop_res_modules = nn.ModuleList(
             [
                 nn.Sequential(
-                    ResidualConv(
+                    cunn.ResidualConv(
                         in_channels=in_channels,
                         out_channels=n_hidden,
                         dilation=2,
@@ -97,7 +92,7 @@ class GeoRefinement(nn.Module):
                     nn.Dropout(0.5),
                 ),
                 nn.Sequential(
-                    ResidualConv(
+                    cunn.ResidualConv(
                         in_channels=in_channels,
                         out_channels=n_hidden,
                         dilation=3,
@@ -106,7 +101,7 @@ class GeoRefinement(nn.Module):
                     nn.Dropout(0.5),
                 ),
                 nn.Sequential(
-                    ResidualConv(
+                    cunn.ResidualConv(
                         in_channels=in_channels,
                         out_channels=n_hidden,
                         dilation=4,
@@ -118,7 +113,7 @@ class GeoRefinement(nn.Module):
         )
 
         self.fc = nn.Sequential(
-            ConvBlock2d(
+            cunn.ConvBlock2d(
                 in_channels=(
                     (n_hidden * len(self.x_res_modules))
                     + (n_hidden * len(self.crop_res_modules))
@@ -135,7 +130,7 @@ class GeoRefinement(nn.Module):
                 padding=0,
             ),
         )
-        self.softmax = Softmax(dim=1)
+        self.softmax = nn.Softmax(dim=1)
 
     def proba_to_logit(self, x: torch.Tensor) -> torch.Tensor:
         return torch.log(x / (1.0 - x))
@@ -213,7 +208,7 @@ class CropTypeFinal(nn.Module):
         self.out_channels = out_channels
         self.out_classes = out_classes
 
-        self.conv1 = ConvBlock2d(
+        self.conv1 = cunn.ConvBlock2d(
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=1,
@@ -221,7 +216,7 @@ class CropTypeFinal(nn.Module):
             activation_type="ReLU",
         )
         layers1 = [
-            ConvBlock2d(
+            cunn.ConvBlock2d(
                 in_channels=out_channels,
                 out_channels=out_channels,
                 kernel_size=3,
@@ -318,7 +313,7 @@ class CultioNet(nn.Module):
             num_classes_l2=self.num_classes,
             num_classes_last=self.num_classes + 1,
             activation_type=activation_type,
-            final_activation=Softmax(dim=1),
+            final_activation=nn.Softmax(dim=1),
         )
 
         unet3_kwargs = {
@@ -330,7 +325,7 @@ class CultioNet(nn.Module):
             "deep_sup_dist": deep_sup_dist,
             "deep_sup_edge": deep_sup_edge,
             "deep_sup_mask": deep_sup_mask,
-            "mask_activation": Softmax(dim=1),
+            "mask_activation": nn.Softmax(dim=1),
         }
 
         assert model_type in (

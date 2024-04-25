@@ -47,7 +47,7 @@ jobs:
           TORCH_CPU="https://download.pytorch.org/whl/cpu"
           TORCH_VERSION="2.2.2"
           pip install --upgrade --no-cache-dir setuptools>=0.59.5
-          pip install torch==${TORCH_VERSION} torchvision==0.16.0 torchaudio==${TORCH_VERSION} --extra-index-url $TORCH_CPU
+          pip install torch==${TORCH_VERSION} torchvision==0.17.2 torchaudio==${TORCH_VERSION} --extra-index-url $TORCH_CPU
       - name: Install cultionet
         run: |
           pip install .

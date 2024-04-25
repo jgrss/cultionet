@@ -4,16 +4,17 @@ import typing as T
 import torch
 import torch.nn as nn
 
-from ..enums import AttentionTypes, ModelTypes, ResBlockTypes
-from ..layers.base_layers import (
-    AttentionGate,
+from cultionet.enums import AttentionTypes, ModelTypes, ResBlockTypes
+
+from .attention import AttentionGate
+from .convolution import (
     DoubleConv,
     PoolConv,
     PoolResidualConv,
     ResidualAConv,
     ResidualConv,
 )
-from . import model_utils
+from .reshape import UpSample
 
 
 class ResELUNetPsiLayer(nn.Module):
@@ -28,7 +29,7 @@ class ResELUNetPsiLayer(nn.Module):
     ):
         super(ResELUNetPsiLayer, self).__init__()
 
-        self.up = model_utils.UpSample()
+        self.up = UpSample()
         if dilations is None:
             dilations = [2]
 
@@ -224,7 +225,7 @@ class UNet3Connector(torch.nn.Module):
         self.cat_channels = 0
         self.pool4_0 = None
 
-        self.up = model_utils.UpSample()
+        self.up = UpSample()
 
         if dilations is None:
             dilations = [2]
@@ -703,7 +704,7 @@ class UNet3P_0_4(torch.nn.Module):
     ):
         super(UNet3P_0_4, self).__init__()
 
-        self.up = model_utils.UpSample()
+        self.up = UpSample()
 
         self.conv = UNet3Connector(
             channels=channels,
@@ -748,7 +749,7 @@ class UNet3_3_1(torch.nn.Module):
     ):
         super(UNet3_3_1, self).__init__()
 
-        self.up = model_utils.UpSample()
+        self.up = UpSample()
 
         # Distance stream connection
         self.conv_dist = UNet3Connector(
@@ -829,7 +830,7 @@ class UNet3_2_2(torch.nn.Module):
     ):
         super(UNet3_2_2, self).__init__()
 
-        self.up = model_utils.UpSample()
+        self.up = UpSample()
 
         self.conv_dist = UNet3Connector(
             channels=channels,
@@ -912,7 +913,7 @@ class UNet3_1_3(torch.nn.Module):
     ):
         super(UNet3_1_3, self).__init__()
 
-        self.up = model_utils.UpSample()
+        self.up = UpSample()
 
         self.conv_dist = UNet3Connector(
             channels=channels,
@@ -997,7 +998,7 @@ class UNet3_0_4(torch.nn.Module):
     ):
         super(UNet3_0_4, self).__init__()
 
-        self.up = model_utils.UpSample()
+        self.up = UpSample()
 
         self.conv_dist = UNet3Connector(
             channels=channels,
@@ -1100,7 +1101,7 @@ class ResUNet3_3_1(torch.nn.Module):
         super(ResUNet3_3_1, self).__init__()
 
         self.use_backbone = use_backbone
-        self.up = model_utils.UpSample()
+        self.up = UpSample()
 
         # Distance stream connection
         self.conv_dist = UNet3Connector(
@@ -1203,7 +1204,7 @@ class ResUNet3_2_2(torch.nn.Module):
         super(ResUNet3_2_2, self).__init__()
 
         self.use_backbone = use_backbone
-        self.up = model_utils.UpSample()
+        self.up = UpSample()
 
         self.conv_dist = UNet3Connector(
             channels=channels,
@@ -1313,7 +1314,7 @@ class ResUNet3_1_3(torch.nn.Module):
         super(ResUNet3_1_3, self).__init__()
 
         self.use_backbone = use_backbone
-        self.up = model_utils.UpSample()
+        self.up = UpSample()
 
         self.conv_dist = UNet3Connector(
             channels=channels,
@@ -1422,7 +1423,7 @@ class ResUNet3_0_4(torch.nn.Module):
         super(ResUNet3_0_4, self).__init__()
 
         self.use_backbone = use_backbone
-        self.up = model_utils.UpSample()
+        self.up = UpSample()
 
         self.conv_dist = UNet3Connector(
             channels=channels,

@@ -9,7 +9,6 @@ import torchmetrics
 from einops import rearrange
 
 from ..data.data import Data
-from ..models import model_utils
 from . import topological
 
 
@@ -67,8 +66,6 @@ class TopologicalLoss(nn.Module):
 
     def __init__(self):
         super(TopologicalLoss, self).__init__()
-
-        self.gc = model_utils.GraphToConv()
 
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor, data: Data
@@ -548,8 +545,6 @@ class BoundaryLoss(nn.Module):
     def __init__(self):
         super(BoundaryLoss, self).__init__()
 
-        self.gc = model_utils.GraphToConv()
-
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor, data: Data
     ) -> torch.Tensor:
@@ -582,7 +577,6 @@ class MultiScaleSSIMLoss(nn.Module):
     def __init__(self):
         super(MultiScaleSSIMLoss, self).__init__()
 
-        self.gc = model_utils.GraphToConv()
         self.msssim = torchmetrics.MultiScaleStructuralSimilarityIndexMeasure(
             gaussian_kernel=False,
             kernel_size=3,

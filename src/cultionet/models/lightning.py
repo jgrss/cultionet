@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torchmetrics
 from pytorch_lightning import LightningModule
@@ -12,12 +13,11 @@ from torch.optim import lr_scheduler as optim_lr_scheduler
 from torchvision import transforms
 from torchvision.ops import box_iou
 
+from .. import nn as cunn
 from ..data.data import Data
 from ..enums import LearningRateSchedulers, ModelTypes, ResBlockTypes
-from ..layers.base_layers import FinalConv2dDropout, Softmax
 from ..layers.weights import init_attention_weights
 from ..losses import TanimotoComplementLoss, TanimotoDistLoss
-from . import model_utils
 from .cultio import CultioNet, GeoRefinement
 from .maskcrnn import BFasterRCNN
 from .nunet import PostUNet3Psi
@@ -114,10 +114,6 @@ class MaskRCNNLitModel(LightningModule):
             ),
             dim=1,
         )
-        # in x = (H*W x C)
-        # new x = (B x C x H x W)
-        gc = model_utils.GraphToConv()
-        x = gc(x, batch_size, height, width)
         resizer = transforms.Resize((self.resize_height, self.resize_width))
         x = [resizer(image) for image in x]
         targets = None
@@ -931,7 +927,7 @@ class CultioLitTransferModel(LightningModuleMixin):
         steplr_step_size: int = 5,
         weight_decay: float = 0.01,
         eps: float = 1e-4,
-        mask_activation: T.Callable = Softmax(dim=1),
+        mask_activation: T.Callable = nn.Softmax(dim=1),
         deep_sup_dist: bool = True,
         deep_sup_edge: bool = True,
         deep_sup_mask: bool = True,
@@ -988,14 +984,14 @@ class CultioLitTransferModel(LightningModuleMixin):
             )
             # Set new final layers to learn new weights
             # Level 2 level (non-crop; crop)
-            self.cultionet_model.temporal_encoder.l2 = FinalConv2dDropout(
+            self.cultionet_model.temporal_encoder.l2 = cunn.FinalConv2dDropout(
                 hidden_dim=self.temporal_encoder.l2.net[0]
                 .seq.seq[0]
                 .seq[0]
                 .in_channels,
                 dim_factor=1,
                 activation_type=activation_type,
-                final_activation=Softmax(dim=1),
+                final_activation=nn.Softmax(dim=1),
                 num_classes=num_classes,
             )
             self.cultionet_model.temporal_encoder.l2.apply(
@@ -1003,14 +999,14 @@ class CultioLitTransferModel(LightningModuleMixin):
             )
             # Last level (non-crop; crop; edges)
             self.cultionet_model.temporal_encoder.final_last = (
-                FinalConv2dDropout(
+                cunn.FinalConv2dDropout(
                     hidden_dim=self.temporal_encoder.final_last.net[0]
                     .seq.seq[0]
                     .seq[0]
                     .in_channels,
                     dim_factor=1,
                     activation_type=activation_type,
-                    final_activation=Softmax(dim=1),
+                    final_activation=nn.Softmax(dim=1),
                     num_classes=num_classes + 1,
                 )
             )

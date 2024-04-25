@@ -11,11 +11,12 @@ from typing import Callable, Optional
 import einops
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 
-from cultionet.layers.base_layers import FinalConv2dDropout, Softmax
-from cultionet.layers.encodings import get_sinusoid_encoding_table
-from cultionet.layers.weights import init_attention_weights
+from .. import nn as cunn
+from ..layers.encodings import get_sinusoid_encoding_table
+from ..layers.weights import init_attention_weights
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -35,7 +36,6 @@ class ScaledDotProductAttention(nn.Module):
         if dropout > 0:
             self.dropout = nn.Dropout(dropout)
         self.scale = scale
-        self.softmax = nn.Softmax(dim=-1)
 
     def forward(
         self,
@@ -48,7 +48,7 @@ class ScaledDotProductAttention(nn.Module):
         if prev_attention is not None:
             scores = scores + prev_attention
 
-        attention = self.softmax(scores)
+        attention = F.softmax(scores, dim=-1, dtype=scores.dtype)
         if self.dropout is not None:
             attention = self.dropout(attention)
 
@@ -175,7 +175,7 @@ class TemporalTransformer(nn.Module):
         num_classes_l2: int = 2,
         num_classes_last: int = 3,
         activation_type: str = "SiLU",
-        final_activation: Callable = Softmax(dim=1),
+        final_activation: Callable = nn.Softmax(dim=1),
     ):
         """Transformer Self-Attention.
 
@@ -234,7 +234,7 @@ class TemporalTransformer(nn.Module):
             padding=1,
         )
         # Level 2 level (non-crop; crop)
-        self.final_l2 = FinalConv2dDropout(
+        self.final_l2 = cunn.FinalConv2dDropout(
             hidden_dim=d_model,
             dim_factor=1,
             activation_type=activation_type,
@@ -242,11 +242,11 @@ class TemporalTransformer(nn.Module):
             num_classes=num_classes_l2,
         )
         # Last level (non-crop; crop; edges)
-        self.final_l3 = FinalConv2dDropout(
+        self.final_l3 = cunn.FinalConv2dDropout(
             hidden_dim=d_model + num_classes_l2,
             dim_factor=1,
             activation_type=activation_type,
-            final_activation=Softmax(dim=1),
+            final_activation=nn.Softmax(dim=1),
             num_classes=num_classes_last,
         )
 

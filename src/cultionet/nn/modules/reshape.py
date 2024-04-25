@@ -72,3 +72,23 @@ class ConvToTime(nn.Module):
             h=height,
             w=width,
         )
+
+
+class Squeeze(nn.Module):
+    def __init__(self, dim: T.Optional[int] = None):
+        super(Squeeze, self).__init__()
+
+        self.dim = dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.squeeze(dim=self.dim)
+
+
+class Unsqueeze(nn.Module):
+    def __init__(self, dim: int):
+        super(Unsqueeze, self).__init__()
+
+        self.dim = dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.unsqueeze(self.dim)
