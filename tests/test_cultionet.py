@@ -1,7 +1,5 @@
 import tempfile
 
-import torch
-
 from cultionet.data.modules import EdgeDataModule
 from cultionet.enums import ModelTypes, ResBlockTypes
 from cultionet.models.cultio import CultioNet

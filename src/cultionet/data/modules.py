@@ -1,5 +1,6 @@
 import typing as T
 
+import torch
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, Sampler
 
@@ -22,6 +23,7 @@ class EdgeDataModule(LightningDataModule):
         sampler: T.Optional[Sampler] = None,
         pin_memory: bool = False,
         persistent_workers: bool = False,
+        generator: T.Optional[torch.Generator] = None,
     ):
         super().__init__()
 
@@ -35,6 +37,7 @@ class EdgeDataModule(LightningDataModule):
         self.sampler = sampler
         self.pin_memory = pin_memory
         self.persistent_workers = persistent_workers
+        self.generator = generator
 
     def train_dataloader(self):
         """Returns a data loader for train data."""
@@ -47,6 +50,7 @@ class EdgeDataModule(LightningDataModule):
             pin_memory=self.pin_memory,
             collate_fn=collate_fn,
             persistent_workers=self.persistent_workers,
+            generator=self.generator,
         )
 
     def val_dataloader(self):
@@ -54,9 +58,10 @@ class EdgeDataModule(LightningDataModule):
         return DataLoader(
             self.val_ds,
             batch_size=self.batch_size,
-            shuffle=self.shuffle,
+            shuffle=False,
             num_workers=self.num_workers,
             collate_fn=collate_fn,
+            generator=self.generator,
         )
 
     def test_dataloader(self):
@@ -64,9 +69,10 @@ class EdgeDataModule(LightningDataModule):
         return DataLoader(
             self.test_ds,
             batch_size=self.batch_size,
-            shuffle=self.shuffle,
+            shuffle=False,
             num_workers=self.num_workers,
             collate_fn=collate_fn,
+            generator=self.generator,
         )
 
     def predict_dataloader(self):
@@ -74,7 +80,8 @@ class EdgeDataModule(LightningDataModule):
         return DataLoader(
             self.predict_ds,
             batch_size=self.batch_size,
-            shuffle=self.shuffle,
+            shuffle=False,
             num_workers=self.num_workers,
             collate_fn=collate_fn,
+            generator=self.generator,
         )

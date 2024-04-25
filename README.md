@@ -1,5 +1,5 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![python](https://img.shields.io/badge/Python-3.8%20%7C%203.9-3776AB.svg?style=flat&logo=python&logoColor=white)](https://www.python.org)
+[![python](https://img.shields.io/badge/Python-3.9%20%7C%203.10-3776AB.svg?style=flat&logo=python&logoColor=white)](https://www.python.org)
 [![](https://img.shields.io/github/v/release/jgrss/cultionet?display_name=release)](https://github.com/jgrss/cultionet/releases)
 [![](https://github.com/jgrss/cultionet/actions/workflows/ci.yml/badge.svg)](https://github.com/jgrss/cultionet/actions?query=workflow%3ACI)
 
@@ -265,9 +265,9 @@ pyenv virtualenv 3.8.12 venv.cnet
 pyenv activate venv.cnet
 (venv.cnet) pip install -U pip setuptools wheel numpy cython
 (venv.cnet) pip install gdal==$(gdal-config --version | awk -F'[.]' '{print $1"."$2"."$3}') --no-binary=gdal
-(venv.cnet) pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cpu
+(venv.cnet) TORCH_VERSION=2.2.2
+(venv.cnet) pip install torch==${TORCH_VERSION} torchvision==0.16.0 torchaudio==${TORCH_VERSION} --index-url https://download.pytorch.org/whl/cpu
 (venv.cnet) TORCH_VERSION=$(python -c "import torch;print(torch.__version__)")
-(venv.cnet) pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
 (venv.cnet) pip install cultionet@git+https://github.com/jgrss/cultionet.git
 ```
 

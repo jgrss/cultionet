@@ -63,7 +63,7 @@ class EdgeDataset(Dataset):
         self.random_seed = random_seed
         self.augment_prob = augment_prob
 
-        seed_everything(self.random_seed, workers=True)
+        seed_everything(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
 
         self.augmentations_ = [
@@ -88,7 +88,7 @@ class EdgeDataset(Dataset):
 
     def get_data_list(self):
         """Gets the list of data files."""
-        data_list_ = list(Path(self.processed_dir).glob(self.pattern))
+        data_list_ = sorted(list(Path(self.processed_dir).glob(self.pattern)))
 
         if not data_list_:
             logger.exception(
@@ -110,7 +110,9 @@ class EdgeDataset(Dataset):
         for fn in self.data_list_:
             fn.unlink()
 
-    def shuffle_items(self, data: T.Optional[list] = None):
+        self.data_list_ = []
+
+    def shuffle(self, data: T.Optional[list] = None):
         """Applies a random in-place shuffle to the data list."""
         if data is not None:
             self.rng.shuffle(data)
@@ -118,10 +120,10 @@ class EdgeDataset(Dataset):
             self.rng.shuffle(self.data_list_)
 
     @property
-    def num_time_features(self):
+    def num_time(self) -> int:
         """Get the number of time features."""
         data = self[0]
-        return int(data.ntime)
+        return int(data.num_time)
 
     def to_frame(self) -> gpd.GeoDataFrame:
         """Converts the Dataset to a GeoDataFrame."""
@@ -322,7 +324,7 @@ class EdgeDataset(Dataset):
         self.get_spatial_partitions(spatial_partitions=spatial_partitions)
         train_indices = []
         val_indices = []
-        self.shuffle_items()
+        self.shuffle()
         # self.spatial_partitions is a GeoDataFrame with Point geometry
         for row in tqdm(
             self.spatial_partitions.itertuples(),
@@ -364,10 +366,9 @@ class EdgeDataset(Dataset):
         Returns:
             train dataset, validation dataset
         """
-        id_column = "common_id"
-        self.shuffle_items()
 
         if spatial_overlap_allowed:
+            self.shuffle()
             n_train = int(len(self) * (1.0 - val_frac))
             train_ds = self[:n_train]
             val_ds = self[n_train:]
@@ -394,7 +395,9 @@ class EdgeDataset(Dataset):
                 # `qt.sample` random samples from the quad-tree in a
                 # spatially balanced manner. Thus, `df_val_sample` is
                 # a GeoDataFrame with `n_val` sites spatially balanced.
-                df_val_sample = qt.sample(n=n_val)
+                df_val_sample = qt.sample(
+                    n=n_val, random_state=self.random_seed
+                )
 
                 # Since we only took one sample from each coordinate,
                 # we need to find all of the .pt files that share
@@ -406,7 +409,7 @@ class EdgeDataset(Dataset):
                 # Randomly sample a percentage for validation
                 df_val_ids = self.dataset_df.sample(
                     frac=val_frac, random_state=self.random_seed
-                ).to_frame(name=id_column)
+                ).to_frame(name=self.grid_id_column)
                 # Get all ids for validation samples
                 val_mask = self.dataset_df[self.grid_id_column].isin(
                     df_val_ids[self.grid_id_column]
