@@ -224,14 +224,11 @@ class TanimotoComplementLoss(nn.Module):
         for d in range(0, self.depth):
             a = 2.0**d
             b = -(2.0 * a - 1.0)
-            import ipdb
-
-            ipdb.set_trace()
             denominator = denominator + torch.reciprocal(
                 (a * sq_sum) + (b * tpl) + self.smooth
             )
 
-        return (numerator * denominator) * scale
+        return ((numerator * denominator) * scale).sum(dim=1)
 
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor

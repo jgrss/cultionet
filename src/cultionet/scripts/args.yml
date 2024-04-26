@@ -303,7 +303,7 @@ train_predict:
     long: precision
     help: The model data precision
     kwargs:
-      default: '16'
+      default: '32'
   num_classes:
     short: ''
     long: num-classes

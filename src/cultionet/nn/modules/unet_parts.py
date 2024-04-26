@@ -156,11 +156,13 @@ class ResELUNetPsiBlock(nn.Module):
             down=down['dist'],
             shape=shape,
         )
+
         edge_out = self.edge_layer(
             side=self.update_data(side['edge'], dist_out),
             down=down['edge'],
             shape=shape,
         )
+
         mask_out = self.mask_layer(
             side=self.update_data(side['mask'], edge_out),
             down=down['mask'],
