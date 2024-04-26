@@ -138,9 +138,7 @@ class ResELUNetPsiBlock(nn.Module):
         data_dict: T.Dict[str, T.Union[None, torch.Tensor]],
         data: torch.Tensor,
     ) -> T.Dict[str, torch.Tensor]:
-        assert len(data_dict) == 1
-
-        out = {}
+        out = data_dict.copy()
         for key, x in data_dict.items():
             if x is None:
                 out[key] = data

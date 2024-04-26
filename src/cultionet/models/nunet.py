@@ -517,7 +517,6 @@ class ResUNet3Psi(nn.Module):
         self,
         in_channels: int,
         in_time: int,
-        in_encoding_channels: int,
         hidden_channels: int = 32,
         num_classes: int = 2,
         dilations: T.Sequence[int] = None,
@@ -545,19 +544,10 @@ class ResUNet3Psi(nn.Module):
         ]
         up_channels = int(channels[0] * 5)
 
-        pre_concat_channels = (
-            in_time
-            + int(channels[0] * 4)
-            + in_encoding_channels
-            # Peak kernels and Trend kernels
-            + in_time
-        )
-
         self.pre_unet = PreUnet3Psi(
             in_channels=in_channels,
+            in_time=in_time,
             channels=channels,
-            concat_channels=pre_concat_channels,
-            out_channels=channels[0],
             activation_type=activation_type,
         )
 
@@ -660,7 +650,9 @@ class ResUNet3Psi(nn.Module):
         self.apply(init_conv_weights)
 
     def forward(
-        self, x: torch.Tensor, temporal_encoding: torch.Tensor
+        self,
+        x: torch.Tensor,
+        temporal_encoding: T.Optional[torch.Tensor] = None,
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
         # Inputs shape is (B x C X T|D x H x W)
         h = self.pre_unet(x, temporal_encoding=temporal_encoding)
@@ -936,6 +928,7 @@ class ResELUNetPsi(nn.Module):
 
         """x Shaped (B x C X T|D x H x W) temporal_encoding Shaped (B x C x H X
         W)"""
+
         embeddings = self.pre_unet(x, temporal_encoding=temporal_encoding)
 
         # embeddings shape is (B x C x H x W)

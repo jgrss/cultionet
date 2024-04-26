@@ -187,15 +187,12 @@ class GeoRefinement(nn.Module):
             ],
             dim=1,
         )
-        x = self.gc(data.x, batch_size, height, width)
-        x = torch.cat([m(x) for m in self.x_res_modules], dim=1)
-
-        crop_x = self.gc(crop_x, batch_size, height, width)
+        x = torch.cat([m(crop_x) for m in self.x_res_modules], dim=1)
         crop_x = torch.cat([m(crop_x) for m in self.crop_res_modules], dim=1)
 
         x = torch.cat([x, crop_x], dim=1)
         x = self.softmax(self.fc(x) * geo_attention)
-        predictions["crop"] = self.cg(x)
+        predictions["crop"] = x
 
         return predictions
 
@@ -369,8 +366,10 @@ class CultioNet(nn.Module):
             temporal_encoding=transformer_outputs['encoded'],
         )
 
-        classes_l2 = transformer_outputs['l2']
-        classes_l3 = transformer_outputs['l3']
+        classes_l2 = None
+        classes_l3 = None
+        # classes_l2 = transformer_outputs['l2']
+        # classes_l3 = transformer_outputs['l3']
         logits_distance = logits["dist"]
         logits_edges = logits["edge"]
         logits_crop = logits["mask"]
@@ -385,16 +384,16 @@ class CultioNet(nn.Module):
         }
 
         if logits["dist_3_1"] is not None:
-            out["dist_3_1"] = self.cg(logits["dist_3_1"])
-            out["dist_2_2"] = self.cg(logits["dist_2_2"])
-            out["dist_1_3"] = self.cg(logits["dist_1_3"])
+            out["dist_3_1"] = logits["dist_3_1"]
+            out["dist_2_2"] = logits["dist_2_2"]
+            out["dist_1_3"] = logits["dist_1_3"]
         if logits["mask_3_1"] is not None:
-            out["crop_3_1"] = self.cg(logits["mask_3_1"])
-            out["crop_2_2"] = self.cg(logits["mask_2_2"])
-            out["crop_1_3"] = self.cg(logits["mask_1_3"])
+            out["crop_3_1"] = logits["mask_3_1"]
+            out["crop_2_2"] = logits["mask_2_2"]
+            out["crop_1_3"] = logits["mask_1_3"]
         if logits["edge_3_1"] is not None:
-            out["edge_3_1"] = self.cg(logits["edge_3_1"])
-            out["edge_2_2"] = self.cg(logits["edge_2_2"])
-            out["edge_1_3"] = self.cg(logits["edge_1_3"])
+            out["edge_3_1"] = logits["edge_3_1"]
+            out["edge_2_2"] = logits["edge_2_2"]
+            out["edge_1_3"] = logits["edge_1_3"]
 
         return out

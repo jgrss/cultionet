@@ -27,12 +27,16 @@ class NormValues:
         dataset_crop_counts: torch.Tensor,
         dataset_edge_counts: torch.Tensor,
         num_channels: int,
+        lower_bound: T.Optional[torch.Tensor] = None,
+        upper_bound: T.Optional[torch.Tensor] = None,
     ):
         self.dataset_mean = dataset_mean
         self.dataset_std = dataset_std
         self.dataset_crop_counts = dataset_crop_counts
         self.dataset_edge_counts = dataset_edge_counts
         self.num_channels = num_channels
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
 
     def __repr__(self):
         return (
@@ -42,6 +46,8 @@ class NormValues:
             f"  dataset_crop_counts={self.dataset_crop_counts},"
             f"  dataset_edge_counts={self.dataset_edge_counts},"
             f"  num_channels={self.num_channels},"
+            f"  lower_bound={self.lower_bound},"
+            f"  upper_bound={self.upper_bound},"
             ")"
         )
 
@@ -49,7 +55,7 @@ class NormValues:
         return self.transform(batch)
 
     def transform(self, batch: Data) -> Data:
-        r"""Normalizes data to z-scores.
+        r"""Normalizes data by the Dynamic World log method or by z-scores.
 
         Args:
             batch (Data): A `torch_geometric` data object.
@@ -59,6 +65,14 @@ class NormValues:
         z = (x - μ) / σ
         """
         batch_copy = batch.copy()
+
+        # if (self.lower_bound is not None) and (self.upper_bound is not None):
+        #     batch_copy.x = (batch_copy.x - self.lower_bound) / self.upper_bound
+        #     # Get a sigmoid transfer of the re-scaled reflectance values.
+        #     batch_copy.x = torch.exp(batch_copy.x * 5.0 - 1)
+        #     batch_copy.x = batch_copy.x / (batch_copy.x + 1.0)
+
+        # else:
         batch_copy.x = (
             batch_copy.x - self.dataset_mean.to(device=batch_copy.x.device)
         ) / self.dataset_std.to(device=batch_copy.x.device)
@@ -82,6 +96,8 @@ class NormValues:
             'dataset_crop_counts': self.dataset_crop_counts,
             'dataset_edge_counts': self.dataset_edge_counts,
             'num_channels': self.num_channels,
+            'lower_bound': self.lower_bound,
+            'upper_bound': self.upper_bound,
         }
 
     def to_file(
@@ -111,6 +127,9 @@ class NormValues:
         sse_color: str = '#ffffff',
     ) -> "NormValues":
         """Normalizes a dataset to z-scores."""
+
+        lower_bound = None
+        upper_bound = None
 
         if not isinstance(dataset, Dataset):
             data_loader = DataLoader(
@@ -215,6 +234,8 @@ class NormValues:
 
                 data_stds = stat_var.std()
                 data_means = stat_q.median()
+                lower_bound = stat_q.quantiles(0.3)
+                upper_bound = stat_q.quantiles(0.7)
 
                 var_data_cache.unlink()
                 q_data_cache.unlink()
@@ -294,6 +315,8 @@ class NormValues:
         return cls(
             dataset_mean=rearrange(data_means, 'c -> 1 c 1 1 1'),
             dataset_std=rearrange(data_stds, 'c -> 1 c 1 1 1'),
+            lower_bound=rearrange(lower_bound, 'c -> 1 c 1 1 1'),
+            upper_bound=rearrange(upper_bound, 'c -> 1 c 1 1 1'),
             dataset_crop_counts=crop_counts,
             dataset_edge_counts=edge_counts,
             num_channels=len(data_means),

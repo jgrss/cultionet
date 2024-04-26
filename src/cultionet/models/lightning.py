@@ -546,20 +546,23 @@ class LightningModuleMixin(LightningModule):
             batch, crop_type=predictions["crop_type"]
         )
 
-        # Temporal encoding level 2 loss (non-crop=0; crop|edge=1)
-        classes_l2_loss = self.classes_l2_loss(
-            predictions["classes_l2"], true_labels_dict["true_crop_and_edge"]
-        )
-        # Temporal encoding final loss (non-crop=0; crop=1; edge=2)
-        classes_last_loss = self.classes_last_loss(
-            predictions["classes_l3"], true_labels_dict["true_crop_or_edge"]
-        )
-        # Main loss
-        loss = (
-            # Temporal encoding losses
-            0.25 * classes_l2_loss
-            + 0.5 * classes_last_loss
-        )
+        loss = 0.0
+        if predictions["classes_l2"] is not None:
+            # Temporal encoding level 2 loss (non-crop=0; crop|edge=1)
+            classes_l2_loss = self.classes_l2_loss(
+                predictions["classes_l2"],
+                true_labels_dict["true_crop_and_edge"],
+            )
+            loss = loss + 0.25 * classes_l2_loss
+
+        if predictions["classes_l3"] is not None:
+            # Temporal encoding final loss (non-crop=0; crop=1; edge=2)
+            classes_last_loss = self.classes_last_loss(
+                predictions["classes_l3"],
+                true_labels_dict["true_crop_or_edge"],
+            )
+            loss = loss + 0.5 * classes_last_loss
+
         # Edge losses
         if self.deep_sup_dist:
             dist_loss_3_1 = self.dist_loss_3_1(
@@ -624,6 +627,7 @@ class LightningModuleMixin(LightningModule):
                 + 0.25 * crop_loss_2_2
                 + 0.5 * crop_loss_1_3
             )
+
         # Crop mask loss
         crop_loss = self.crop_loss(
             predictions["crop"], true_labels_dict["true_crop"]
@@ -840,7 +844,7 @@ class LightningModuleMixin(LightningModule):
             self.edge_loss_1_3 = TanimotoDistLoss()
 
         # Crop mask losses
-        self.crop_loss = TanimotoDistLoss()
+        self.crop_loss = TanimotoComplementLoss()
         if self.deep_sup_mask:
             self.crop_loss_3_1 = TanimotoDistLoss(
                 scale_pos_weight=self.scale_pos_weight

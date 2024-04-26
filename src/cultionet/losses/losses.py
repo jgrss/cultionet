@@ -38,14 +38,7 @@ class LossPreprocessing(nn.Module):
 
             inputs = inputs.clip(0, 1)
 
-        if self.one_hot_targets:
-            if (len(targets.unique()) > inputs.size(1)) or (
-                targets.unique().max() + 1 > inputs.size(1)
-            ):
-                raise ValueError(
-                    "The targets should be ordered values of equal length to the inputs 2nd dimension."
-                )
-
+        if self.one_hot_targets and (inputs.shape[1] > 1):
             targets = rearrange(
                 F.one_hot(targets, num_classes=inputs.shape[1]),
                 'b h w c -> b c h w',
@@ -219,20 +212,21 @@ class TanimotoComplementLoss(nn.Module):
             tpl = tpl * mask
             sq_sum = sq_sum * mask
 
-        tpl = tpl.sum(dim=0)
-        sq_sum = sq_sum.sum(dim=0)
+        tpl = tpl.sum(dim=(2, 3))
+        sq_sum = sq_sum.sum(dim=(2, 3))
 
         if weights is not None:
             tpl = tpl * weights
             sq_sum = sq_sum * weights
 
         numerator = tpl + self.smooth
-        denominator = torch.zeros(yhat.shape[1]).to(
-            dtype=yhat.dtype, device=yhat.device
-        )
+        denominator = 0.0
         for d in range(0, self.depth):
             a = 2.0**d
             b = -(2.0 * a - 1.0)
+            import ipdb
+
+            ipdb.set_trace()
             denominator = denominator + torch.reciprocal(
                 (a * sq_sum) + (b * tpl) + self.smooth
             )
@@ -273,6 +267,20 @@ def tanimoto_dist(
     """Tanimoto distance."""
     ytrue = ytrue.to(dtype=ypred.dtype)
 
+    # Take the batch mean of the channel sums
+    volume = ytrue.sum(dim=(2, 3)).mean(dim=0)
+    batch_weight = torch.reciprocal(torch.pow(volume, 2))
+    new_weights = torch.where(
+        torch.isinf(batch_weight),
+        torch.zeros_like(batch_weight),
+        batch_weight,
+    )
+    batch_weight = torch.where(
+        torch.isinf(batch_weight),
+        torch.ones_like(batch_weight) * torch.max(new_weights),
+        batch_weight,
+    )
+
     if scale_pos_weight:
         if class_counts is None:
             class_counts = ytrue.sum(dim=0)
@@ -289,20 +297,16 @@ def tanimoto_dist(
         tpl = tpl * mask
         sq_sum = sq_sum * mask
 
-    # Reduce
+    # Sum over rows and columns
     tpl = tpl.sum(dim=(2, 3))
     sq_sum = sq_sum.sum(dim=(2, 3))
-
-    import ipdb
-
-    ipdb.set_trace()
 
     if weights is not None:
         tpl = tpl * weights
         sq_sum = sq_sum * weights
 
-    numerator = tpl + smooth
-    denominator = (sq_sum - tpl) + smooth
+    numerator = (tpl * batch_weight + smooth).sum(dim=1)
+    denominator = ((sq_sum - tpl) * batch_weight + smooth).sum(dim=1)
     distance = numerator / denominator
 
     return distance

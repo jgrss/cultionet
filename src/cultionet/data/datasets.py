@@ -10,6 +10,7 @@ import lightning as L
 import numpy as np
 import psutil
 import pygrts
+import torch
 from joblib import delayed, parallel_backend
 from scipy.ndimage.measurements import label as nd_label
 from shapely.geometry import box
@@ -470,6 +471,9 @@ class EdgeDataset(Dataset):
 
         batch = Data.from_file(self.data_list_[idx])
 
+        # TODO: add scaling?
+        batch.x = batch.x.clip(1e-9, 1)
+
         if batch.y is not None:
             if self.rng.normal() > 1 - self.augment_prob:
                 # Choose one augmentation to apply
@@ -498,6 +502,8 @@ class EdgeDataset(Dataset):
                 batch = augmenter(batch, aug_args=augmenters.aug_args)
                 batch.segments = None
                 batch.props = None
+
+        batch.x = torch.log(batch.x * 50.0 + 1.0).clip(1e-9, float('inf'))
 
         if self.norm_values is not None:
             batch = self.norm_values(batch)
