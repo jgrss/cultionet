@@ -306,7 +306,7 @@ class WriterModule(BlockWriter):
         profile: dict,
         ntime: int,
         nbands: int,
-        filters: int,
+        hidden_channels: int,
         num_classes: int,
         ts: xr.DataArray,
         data_values: torch.Tensor,
@@ -340,7 +340,7 @@ class WriterModule(BlockWriter):
             model_file=self.ppaths.ckpt_file.parent / "cultionet.pt",
             num_features=ntime * nbands,
             num_time_features=ntime,
-            filters=filters,
+            hidden_channels=hidden_channels,
             num_classes=num_classes,
             device=self.device,
             enable_progress_bar=False,
@@ -374,7 +374,7 @@ class RemoteWriter(WriterModule):
         profile: dict,
         ntime: int,
         nbands: int,
-        filters: int,
+        hidden_channels: int,
         num_classes: int,
         ts: xr.DataArray,
         data_values: torch.Tensor,
@@ -389,7 +389,7 @@ class RemoteWriter(WriterModule):
             profile=profile,
             ntime=ntime,
             nbands=nbands,
-            filters=filters,
+            hidden_channels=hidden_channels,
             num_classes=num_classes,
             ts=ts,
             data_values=data_values,
@@ -415,7 +415,7 @@ class SerialWriter(WriterModule):
         profile: dict,
         ntime: int,
         nbands: int,
-        filters: int,
+        hidden_channels: int,
         num_classes: int,
         ts: xr.DataArray,
         data_values: torch.Tensor,
@@ -430,7 +430,7 @@ class SerialWriter(WriterModule):
             profile=profile,
             ntime=ntime,
             nbands=nbands,
-            filters=filters,
+            hidden_channels=hidden_channels,
             num_classes=num_classes,
             ts=ts,
             data_values=data_values,
@@ -583,7 +583,7 @@ def predict_image(args):
                     profile=profile,
                     ntime=ntime,
                     nbands=nbands,
-                    filters=args.filters,
+                    hidden_channels=args.hidden_channels,
                     num_classes=num_classes,
                     ts=time_series,
                     data_values=data_values,
@@ -630,7 +630,7 @@ def predict_image(args):
                     profile=profile,
                     ntime=ntime,
                     nbands=nbands,
-                    filters=args.filters,
+                    hidden_channels=args.hidden_channels,
                     num_classes=num_classes,
                     ts=ray.put(time_series),
                     data_values=data_values,
@@ -915,7 +915,7 @@ def train_maskrcnn(args):
     ppaths = setup_paths(args.project_path, ckpt_name="maskrcnn.ckpt")
 
     if (
-        (args.expected_dim is not None)
+        (args.expected_time is not None)
         or not ppaths.norm_file.is_file()
         or (ppaths.norm_file.is_file() and args.recalc_zscores)
     ):
@@ -926,10 +926,10 @@ def train_maskrcnn(args):
             random_seed=args.random_seed,
         )
     # Check dimensions
-    if args.expected_dim is not None:
+    if args.expected_time is not None:
         try:
             ds.check_dims(
-                args.expected_dim, args.delete_mismatches, args.dim_color
+                args.expected_time, args.delete_mismatches, args.dim_color
             )
         except TensorShapeError as e:
             raise ValueError(e)
@@ -966,10 +966,10 @@ def train_maskrcnn(args):
             norm_values=norm_values,
             random_seed=args.random_seed,
         )
-        if args.expected_dim is not None:
+        if args.expected_time is not None:
             try:
                 test_ds.check_dims(
-                    args.expected_dim, args.delete_mismatches, args.dim_color
+                    args.expected_time, args.delete_mismatches, args.dim_color
                 )
             except TensorShapeError as e:
                 raise ValueError(e)
@@ -985,7 +985,7 @@ def train_maskrcnn(args):
         save_top_k=args.save_top_k,
         accumulate_grad_batches=args.accumulate_grad_batches,
         learning_rate=args.learning_rate,
-        filters=args.filters,
+        hidden_channels=args.hidden_channels,
         num_classes=args.num_classes,
         reset_model=args.reset_model,
         auto_lr_find=args.auto_lr_find,
@@ -1065,7 +1065,7 @@ def spatial_kfoldcv(args):
             accumulate_grad_batches=args.accumulate_grad_batches,
             optimizer=args.optimizer,
             learning_rate=args.learning_rate,
-            filters=args.filters,
+            hidden_channels=args.hidden_channels,
             num_classes=args.num_classes
             if args.num_classes is not None
             else class_info["max_crop_class"] + 1,
@@ -1108,10 +1108,10 @@ def generate_model_graph(args):
 
     data = ds[0]
     xrnn = data.x.reshape(1, data.nbands, data.ntime, data.height, data.width)
-    filters = 32
+    hidden_channels = 32
     star_rnn_model = StarRNN(
         input_dim=data.nbands,
-        hidden_dim=filters,
+        hidden_dim=hidden_channels,
         n_layers=6,
         num_classes_last=2,
     )
@@ -1120,8 +1120,8 @@ def generate_model_graph(args):
         star_rnn_model, xrnn, ppaths.ckpt_path / "cultionet_starrnn.onnx"
     )
     resunet_model = ResUNet3Psi(
-        in_channels=int(filters * 3),
-        init_filter=filters,
+        in_channels=int(hidden_channels * 3),
+        init_filter=hidden_channels,
         num_classes=2,
         double_dilation=2,
     )
@@ -1140,7 +1140,7 @@ def train_model(args):
         class_info = json.load(f)
 
     if (
-        (args.expected_dim is not None)
+        (args.expected_time is not None)
         or not ppaths.norm_file.is_file()
         or (ppaths.norm_file.is_file() and args.recalc_zscores)
     ):
@@ -1152,10 +1152,10 @@ def train_model(args):
         )
 
     # Check dimensions
-    if args.expected_dim is not None:
+    if args.expected_time is not None:
         try:
             ds.check_dims(
-                args.expected_dim,
+                args.expected_time,
                 args.expected_height,
                 args.expected_width,
                 args.delete_mismatches,
@@ -1192,10 +1192,12 @@ def train_model(args):
         norm_values: NormValues = NormValues.from_dataset(
             dataset=train_ds,
             class_info=class_info,
-            batch_size=args.batch_size,
+            num_workers=args.load_batch_workers,
+            batch_size=args.batch_size * 2,
             mean_color=args.mean_color,
             sse_color=args.sse_color,
         )
+
         norm_values.to_file(ppaths.norm_file)
     else:
         norm_values = NormValues.from_file(ppaths.norm_file)
@@ -1205,6 +1207,7 @@ def train_model(args):
     ds = EdgeDataset(
         root=ppaths.train_path,
         norm_values=norm_values,
+        augment_prob=args.augment_prob,
         random_seed=args.random_seed,
     )
 
@@ -1216,10 +1219,10 @@ def train_model(args):
             norm_values=norm_values,
             random_seed=args.random_seed,
         )
-        if args.expected_dim is not None:
+        if args.expected_time is not None:
             try:
                 test_ds.check_dims(
-                    args.expected_dim, args.delete_mismatches, args.dim_color
+                    args.expected_time, args.delete_mismatches, args.dim_color
                 )
             except TensorShapeError as e:
                 raise ValueError(e)
@@ -1230,9 +1233,9 @@ def train_model(args):
             )
 
     if torch.cuda.is_available():
-        class_counts = norm_values.crop_counts.to("cuda")
+        class_counts = norm_values.dataset_crop_counts.to(device="cuda")
     else:
-        class_counts = norm_values.crop_counts
+        class_counts = norm_values.dataset_crop_counts
 
     train_kwargs = dict(
         dataset=ds,
@@ -1259,7 +1262,7 @@ def train_model(args):
         lr_scheduler=args.lr_scheduler,
         steplr_step_size=args.steplr_step_size,
         scale_pos_weight=args.scale_pos_weight,
-        filters=args.filters,
+        hidden_channels=args.hidden_channels,
         num_classes=args.num_classes
         if args.num_classes is not None
         else class_info["max_crop_class"] + 1,

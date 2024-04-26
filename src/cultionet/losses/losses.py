@@ -38,7 +38,6 @@ class LossPreprocessing(nn.Module):
 
             inputs = inputs.clip(0, 1)
 
-        targets = rearrange(targets, 'b h w -> (b h w)')
         if self.one_hot_targets:
             if (len(targets.unique()) > inputs.size(1)) or (
                 targets.unique().max() + 1 > inputs.size(1)
@@ -47,11 +46,12 @@ class LossPreprocessing(nn.Module):
                     "The targets should be ordered values of equal length to the inputs 2nd dimension."
                 )
 
-            targets = F.one_hot(targets, num_classes=inputs.shape[1]).float()
+            targets = rearrange(
+                F.one_hot(targets, num_classes=inputs.shape[1]),
+                'b h w c -> b c h w',
+            )
         else:
-            targets = rearrange(targets, 'b -> b 1')
-
-        inputs = rearrange(inputs, 'b c h w -> (b h w) c')
+            targets = rearrange(targets, 'b h w -> b 1 h w')
 
         return inputs, targets
 
@@ -204,12 +204,29 @@ class TanimotoComplementLoss(nn.Module):
         )
 
     def tanimoto_distance(
-        self, y: torch.Tensor, yhat: torch.Tensor
+        self,
+        y: torch.Tensor,
+        yhat: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+        weights: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         scale = 1.0 / self.depth
-        tpl = (y * yhat).sum(dim=0)
+
+        tpl = y * yhat
+        sq_sum = y**2 + yhat**2
+
+        if mask is not None:
+            tpl = tpl * mask
+            sq_sum = sq_sum * mask
+
+        tpl = tpl.sum(dim=0)
+        sq_sum = sq_sum.sum(dim=0)
+
+        if weights is not None:
+            tpl = tpl * weights
+            sq_sum = sq_sum * weights
+
         numerator = tpl + self.smooth
-        sq_sum = (y**2 + yhat**2).sum(dim=0)
         denominator = torch.zeros(yhat.shape[1]).to(
             dtype=yhat.dtype, device=yhat.device
         )
@@ -250,6 +267,8 @@ def tanimoto_dist(
     class_counts: T.Union[None, torch.Tensor],
     beta: float,
     smooth: float,
+    mask: T.Optional[torch.Tensor] = None,
+    weights: T.Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Tanimoto distance."""
     ytrue = ytrue.to(dtype=ypred.dtype)
@@ -262,16 +281,28 @@ def tanimoto_dist(
         effective_num = 1.0 - beta**class_counts
         weights = (1.0 - beta) / effective_num
         weights = weights / weights.sum() * class_counts.shape[0]
-    else:
-        weights = torch.ones(
-            ytrue.shape[1], dtype=ytrue.dtype, device=ytrue.device
-        )
+
+    tpl = ypred * ytrue
+    sq_sum = ypred**2 + ytrue**2
+
+    if mask is not None:
+        tpl = tpl * mask
+        sq_sum = sq_sum * mask
 
     # Reduce
-    tpl = (ypred * ytrue).sum(dim=0)
-    sq_sum = (ypred**2 + ytrue**2).sum(dim=0)
-    numerator = tpl * weights + smooth
-    denominator = (sq_sum - tpl) * weights + smooth
+    tpl = tpl.sum(dim=(2, 3))
+    sq_sum = sq_sum.sum(dim=(2, 3))
+
+    import ipdb
+
+    ipdb.set_trace()
+
+    if weights is not None:
+        tpl = tpl * weights
+        sq_sum = sq_sum * weights
+
+    numerator = tpl + smooth
+    denominator = (sq_sum - tpl) + smooth
     distance = numerator / denominator
 
     return distance

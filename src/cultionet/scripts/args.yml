@@ -256,10 +256,10 @@ train_predict:
     kwargs:
       default: 'spatial_channel'
       choices: ['spatial_channel', 'fractal', 'none']
-  filters:
+  hidden_channels:
     short: ''
-    long: filters
-    help: The number of model input filters
+    long: hidden-channels
+    help: The number of input hidden channels
     kwargs:
       default: 32
       type: '&int'
@@ -303,8 +303,7 @@ train_predict:
     long: precision
     help: The model data precision
     kwargs:
-      default: 16
-      type: '&int'
+      default: '16'
   num_classes:
     short: ''
     long: num-classes
@@ -381,6 +380,13 @@ train:
     kwargs:
       default: 0.2
       type: '&float'
+  augment_prob:
+    short: ''
+    long: augment-prob
+    help: The augmentation probability
+    kwargs:
+      default: 0.0
+      type: '&float'
   random_seed:
     short: ''
     long: random-seed
@@ -415,10 +421,10 @@ train:
     help: Whether to reset the model
     kwargs:
       action: store_true
-  expected_dim:
+  expected_time:
     short: ''
-    long: expected-dim
-    help: The expected X dimension (time x bands) of the training data
+    long: expected-time
+    help: The expected time dimension of the training data
     kwargs:
       default: !!null
       type: '&int'
@@ -555,7 +561,7 @@ train:
     long: weight-decay
     help: Sets the weight decay for Adam optimizer\'s regularization
     kwargs:
-      default: 0.01
+      default: 1e-4
       type: '&float'
   accumulate_grad_batches:
     short: agb

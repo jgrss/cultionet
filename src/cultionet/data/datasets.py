@@ -6,11 +6,11 @@ from pathlib import Path
 import attr
 import geopandas as gpd
 import joblib
+import lightning as L
 import numpy as np
 import psutil
 import pygrts
 from joblib import delayed, parallel_backend
-from pytorch_lightning import seed_everything
 from scipy.ndimage.measurements import label as nd_label
 from shapely.geometry import box
 from skimage.measure import regionprops
@@ -32,9 +32,20 @@ logger = set_color_logger(__name__)
 
 
 def _check_shape(
-    d1: int, h1: int, w1: int, d2: int, h2: int, w2: int, index: int, uid: str
+    expected_time: int,
+    expected_height: int,
+    expected_width: int,
+    in_time: int,
+    in_height: int,
+    in_width: int,
+    index: int,
+    uid: str,
 ) -> T.Tuple[bool, int, str]:
-    if (d1 != d2) or (h1 != h2) or (w1 != w2):
+    if (
+        (expected_time != in_time)
+        or (expected_height != in_height)
+        or (expected_width != in_width)
+    ):
         return False, index, uid
     return True, index, uid
 
@@ -63,7 +74,7 @@ class EdgeDataset(Dataset):
         self.random_seed = random_seed
         self.augment_prob = augment_prob
 
-        seed_everything(self.random_seed)
+        L.seed_everything(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
 
         self.augmentations_ = [
@@ -120,10 +131,13 @@ class EdgeDataset(Dataset):
             self.rng.shuffle(self.data_list_)
 
     @property
+    def num_channels(self) -> int:
+        return self[0].num_channels
+
+    @property
     def num_time(self) -> int:
         """Get the number of time features."""
-        data = self[0]
-        return int(data.num_time)
+        return self[0].num_time
 
     def to_frame(self) -> gpd.GeoDataFrame:
         """Converts the Dataset to a GeoDataFrame."""
@@ -263,7 +277,7 @@ class EdgeDataset(Dataset):
 
     def check_dims(
         self,
-        expected_dim: int,
+        expected_time: int,
         expected_height: int,
         expected_width: int,
         delete_mismatches: bool = False,
@@ -271,12 +285,14 @@ class EdgeDataset(Dataset):
     ):
         """Checks if all tensors in the dataset match in shape dimensions."""
         check_partial = partial(
-            _check_shape, expected_dim, expected_height, expected_width
+            _check_shape,
+            expected_time=expected_time,
+            expected_height=expected_height,
+            expected_width=expected_width,
         )
         with parallel_backend(
             backend="loky",
             n_jobs=self.processes,
-            inner_max_num_threads=self.threads_per_worker,
         ):
             with TqdmParallel(
                 tqdm_kwargs={
@@ -287,14 +303,15 @@ class EdgeDataset(Dataset):
             ) as pool:
                 results = pool(
                     delayed(check_partial)(
-                        self[i].x.shape[1],
-                        self[i].height,
-                        self[i].width,
-                        i,
-                        self[i].batch_id,
+                        in_time=self[i].num_time,
+                        in_height=self[i].height,
+                        in_width=self[i].width,
+                        index=i,
+                        uid=self[i].batch_id,
                     )
                     for i in range(0, len(self))
                 )
+
         matches, indices, ids = list(map(list, zip(*results)))
         if not all(matches):
             indices = np.array(indices)

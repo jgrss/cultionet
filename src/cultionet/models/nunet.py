@@ -45,10 +45,8 @@ class PreUnet3Psi(nn.Module):
         in_channels: int,
         in_time: int,
         channels: T.Sequence[int],
-        out_channels: int,
         activation_type: str,
         trend_kernel_size: int = 5,
-        num_layers: int = 1,
     ):
         super(PreUnet3Psi, self).__init__()
 
@@ -66,7 +64,7 @@ class PreUnet3Psi(nn.Module):
         )
         self.reduce_trend_to_time = nn.Sequential(
             Encoding3d(
-                in_channels=3,
+                in_channels=in_channels,
                 out_channels=1,
                 activation_type=activation_type,
             ),
@@ -768,7 +766,6 @@ class ResELUNetPsi(nn.Module):
             in_channels=in_channels,
             in_time=in_time,
             channels=channels,
-            out_channels=channels[0],
             activation_type=activation_type,
         )
 

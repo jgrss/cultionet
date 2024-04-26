@@ -1,7 +1,7 @@
 import typing as T
 
 import torch
-from pytorch_lightning import LightningDataModule
+from lightning import LightningDataModule
 from torch.utils.data import DataLoader, Sampler
 
 from .datasets import EdgeDataset
@@ -22,7 +22,7 @@ class EdgeDataModule(LightningDataModule):
         shuffle: bool = True,
         sampler: T.Optional[Sampler] = None,
         pin_memory: bool = False,
-        persistent_workers: bool = False,
+        persistent_workers: bool = True,
         generator: T.Optional[torch.Generator] = None,
     ):
         super().__init__()

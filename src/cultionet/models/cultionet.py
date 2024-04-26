@@ -252,15 +252,6 @@ class CropTypeFinal(nn.Module):
         return out
 
 
-def check_batch_dims(batch: Data, attribute: str):
-    batch_var = getattr(batch, attribute)
-    if not (batch_var == batch_var[0]).all():
-        invalid = batch.train_id[batch_var != torch.mode(batch_var)[0]]
-        warnings.warn("The following ids do not match the batch mode.")
-        warnings.warn(invalid)
-        raise ValueError(f"The {attribute} dimensions do not align.")
-
-
 class CultioNet(nn.Module):
     """The cultionet model framework.
 

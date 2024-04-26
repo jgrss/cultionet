@@ -35,12 +35,16 @@ class Data:
             set(self.__dict__.keys())
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(
+        self, device: Optional[str] = None, dtype: Optional[str] = None
+    ) -> dict:
         kwargs = {}
         for key in self._get_attrs():
             value = getattr(self, key)
             if isinstance(value, torch.Tensor):
                 kwargs[key] = value.clone()
+                if device is not None:
+                    kwargs[key] = kwargs[key].to(device=device, dtype=dtype)
             elif isinstance(value, np.ndarray):
                 kwargs[key] = value.copy()
             else:
@@ -53,6 +57,11 @@ class Data:
                         kwargs[key] = value
 
         return kwargs
+
+    def to(
+        self, device: Optional[str] = None, dtype: Optional[str] = None
+    ) -> "Data":
+        return Data(**self.to_dict(device=device, dtype=dtype))
 
     def __add__(self, other: "Data") -> "Data":
         out_dict = {}
@@ -83,11 +92,11 @@ class Data:
         return self.x.shape[2]
 
     @property
-    def num_rows(self) -> int:
+    def height(self) -> int:
         return self.x.shape[3]
 
     @property
-    def num_cols(self) -> int:
+    def width(self) -> int:
         return self.x.shape[4]
 
     def to_file(
@@ -105,14 +114,32 @@ class Data:
         return Data(**joblib.load(filename))
 
     def __str__(self):
-        return (
-            "\nData(\n"
-            f"   num_samples={self.num_samples}, num_channels={self.num_channels}, num_time={self.num_time}, num_rows={self.num_rows:,d}, num_cols={self.num_cols:,d}\n"
-            ")"
-        )
+        data_string = f"Data(x={tuple(self.x.shape)}"
+        if self.y is not None:
+            data_string += f", y={tuple(self.y.shape)}"
+
+        for k, v in self.to_dict().items():
+            if k not in (
+                'x',
+                'y',
+            ):
+                if isinstance(v, (np.ndarray, torch.Tensor)):
+                    if len(v.shape) == 1:
+                        data_string += f", {k}={v.numpy().tolist()}"
+                    else:
+                        data_string += f", {k}={tuple(v.shape)}"
+                elif isinstance(v, list):
+                    if len(v) == 1:
+                        data_string += f", {k}={v}"
+                    else:
+                        data_string += f", {k}={[len(v)]}"
+
+        data_string += ")"
+
+        return data_string
 
     def __repr__(self):
-        return "Data(...)"
+        return str(self)
 
 
 @dataclass

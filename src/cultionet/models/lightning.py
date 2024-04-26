@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchmetrics
-from pytorch_lightning import LightningModule
+from lightning import LightningModule
 from torch.optim import lr_scheduler as optim_lr_scheduler
 from torchvision import transforms
 from torchvision.ops import box_iou
@@ -18,7 +18,7 @@ from ..data.data import Data
 from ..enums import LearningRateSchedulers, ModelTypes, ResBlockTypes
 from ..layers.weights import init_attention_weights
 from ..losses import TanimotoComplementLoss, TanimotoDistLoss
-from .cultio import CultioNet, GeoRefinement
+from .cultionet import CultioNet, GeoRefinement
 from .maskcrnn import BFasterRCNN
 from .nunet import PostUNet3Psi
 
@@ -66,7 +66,7 @@ class MaskRCNNLitModel(LightningModule):
         self.resize_height = resize_height
         self.resize_width = resize_width
 
-        self.cultionet_model = CultioLitModel(
+        self.cultionet_model = CultionetLitModel(
             in_channels=cultionet_in_channels,
             num_time=cultionet_num_time,
             hidden_channels=cultionet_hidden_channels,
@@ -371,7 +371,7 @@ class RefineLitModel(LightningModule):
         if (self.cultionet_ckpt is not None) and (
             self.cultionet_model is None
         ):
-            self.cultionet_model = CultioLitModel.load_from_checkpoint(
+            self.cultionet_model = CultionetLitModel.load_from_checkpoint(
                 checkpoint_path=str(self.cultionet_ckpt)
             )
             self.cultionet_model.to(self.device)
@@ -541,6 +541,7 @@ class LightningModuleMixin(LightningModule):
         Returns:
             Total loss
         """
+
         true_labels_dict = self.get_true_labels(
             batch, crop_type=predictions["crop_type"]
         )
@@ -796,41 +797,50 @@ class LightningModuleMixin(LightningModule):
     def configure_scorer(self):
         self.dist_mae = torchmetrics.MeanAbsoluteError()
         self.dist_mse = torchmetrics.MeanSquaredError()
-        self.edge_f1 = torchmetrics.F1Score(num_classes=2, average="micro")
-        self.crop_f1 = torchmetrics.F1Score(num_classes=2, average="micro")
-        self.edge_mcc = torchmetrics.MatthewsCorrCoef(num_classes=2)
-        self.crop_mcc = torchmetrics.MatthewsCorrCoef(num_classes=2)
-        self.edge_dice = torchmetrics.Dice(num_classes=2, average="micro")
-        self.crop_dice = torchmetrics.Dice(num_classes=2, average="micro")
+        self.edge_f1 = torchmetrics.F1Score(
+            task="multiclass", num_classes=2, average="weighted"
+        )
+        self.crop_f1 = torchmetrics.F1Score(
+            task="multiclass", num_classes=2, average="weighted"
+        )
+        self.edge_mcc = torchmetrics.MatthewsCorrCoef(
+            task="multiclass", num_classes=2
+        )
+        self.crop_mcc = torchmetrics.MatthewsCorrCoef(
+            task="multiclass", num_classes=2
+        )
+        self.edge_dice = torchmetrics.Dice(num_classes=2, average="macro")
+        self.crop_dice = torchmetrics.Dice(num_classes=2, average="macro")
         self.edge_jaccard = torchmetrics.JaccardIndex(
-            average="micro", num_classes=2
+            task="multiclass", num_classes=2, average="weighted"
         )
         self.crop_jaccard = torchmetrics.JaccardIndex(
-            average="micro", num_classes=2
+            task="multiclass", num_classes=2, average="weighted"
         )
         if self.num_classes > 2:
             self.crop_type_f1 = torchmetrics.F1Score(
                 num_classes=self.num_classes,
+                task="multiclass",
                 average="weighted",
                 ignore_index=0,
             )
 
     def configure_loss(self):
-        self.dist_loss = TanimotoComplementLoss(one_hot_targets=False)
+        self.dist_loss = TanimotoDistLoss(one_hot_targets=False)
         if self.deep_sup_dist:
             self.dist_loss_3_1 = TanimotoDistLoss(one_hot_targets=False)
             self.dist_loss_2_2 = TanimotoDistLoss(one_hot_targets=False)
             self.dist_loss_1_3 = TanimotoDistLoss(one_hot_targets=False)
 
         # Edge losses
-        self.edge_loss = TanimotoComplementLoss()
+        self.edge_loss = TanimotoDistLoss()
         if self.deep_sup_edge:
             self.edge_loss_3_1 = TanimotoDistLoss()
             self.edge_loss_2_2 = TanimotoDistLoss()
             self.edge_loss_1_3 = TanimotoDistLoss()
 
         # Crop mask losses
-        self.crop_loss = TanimotoComplementLoss()
+        self.crop_loss = TanimotoDistLoss()
         if self.deep_sup_mask:
             self.crop_loss_3_1 = TanimotoDistLoss(
                 scale_pos_weight=self.scale_pos_weight
@@ -843,8 +853,8 @@ class LightningModuleMixin(LightningModule):
             )
 
         # Crop Temporal encoding losses
-        self.classes_l2_loss = TanimotoComplementLoss()
-        self.classes_last_loss = TanimotoComplementLoss()
+        self.classes_l2_loss = TanimotoDistLoss()
+        self.classes_last_loss = TanimotoDistLoss()
         if self.num_classes > 2:
             self.crop_type_star_loss = TanimotoDistLoss(
                 scale_pos_weight=self.scale_pos_weight
@@ -862,6 +872,7 @@ class LightningModuleMixin(LightningModule):
                 lr=self.learning_rate,
                 weight_decay=self.weight_decay,
                 eps=self.eps,
+                betas=(0.9, 0.98),
             )
         elif self.optimizer == "SGD":
             optimizer = torch.optim.SGD(
@@ -884,7 +895,7 @@ class LightningModuleMixin(LightningModule):
         elif self.lr_scheduler == LearningRateSchedulers.ONE_CYCLE_LR:
             model_lr_scheduler = optim_lr_scheduler.OneCycleLR(
                 optimizer,
-                max_lr=0.01,
+                max_lr=self.learning_rate,
                 epochs=self.trainer.max_epochs,
                 steps_per_epoch=self.trainer.estimated_stepping_batches,
             )
@@ -910,7 +921,7 @@ class LightningModuleMixin(LightningModule):
         }
 
 
-class CultioLitTransferModel(LightningModuleMixin):
+class CultionetLitTransferModel(LightningModuleMixin):
     """Transfer learning module for Cultionet."""
 
     def __init__(
@@ -937,7 +948,7 @@ class CultioLitTransferModel(LightningModuleMixin):
         save_batch_val_metrics: bool = False,
         finetune: bool = False,
     ):
-        super(CultioLitTransferModel, self).__init__()
+        super(CultionetLitTransferModel, self).__init__()
 
         self.save_hyperparameters()
 
@@ -964,7 +975,7 @@ class CultioLitTransferModel(LightningModuleMixin):
         self.deep_sup_mask = deep_sup_mask
         self.scale_pos_weight = scale_pos_weight
 
-        self.cultionet_model = CultioLitModel.load_from_checkpoint(
+        self.cultionet_model = CultionetLitModel.load_from_checkpoint(
             checkpoint_path=str(ckpt_file)
         )
 
@@ -1044,7 +1055,7 @@ class CultioLitTransferModel(LightningModuleMixin):
         return layer
 
 
-class CultioLitModel(LightningModuleMixin):
+class CultionetLitModel(LightningModuleMixin):
     def __init__(
         self,
         in_channels: int = None,
@@ -1075,7 +1086,7 @@ class CultioLitModel(LightningModuleMixin):
     ):
         """Lightning model."""
 
-        super(CultioLitModel, self).__init__()
+        super(CultionetLitModel, self).__init__()
 
         self.save_hyperparameters()
 

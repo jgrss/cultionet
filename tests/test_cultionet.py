@@ -2,7 +2,7 @@ import tempfile
 
 from cultionet.data.modules import EdgeDataModule
 from cultionet.enums import ModelTypes, ResBlockTypes
-from cultionet.models.cultio import CultioNet
+from cultionet.models.cultionet import CultioNet
 from cultionet.utils.normalize import NormValues
 
 from .conftest import temporary_dataset

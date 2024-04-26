@@ -3,16 +3,16 @@ import logging
 import typing as T
 from pathlib import Path
 
+import lightning as L
 import numpy as np
-import pytorch_lightning as pl
 import torch
-from pytorch_lightning.callbacks import (
+from lightning.pytorch.callbacks import (
+    EarlyStopping,
     LearningRateMonitor,
     ModelCheckpoint,
     ModelPruning,
     StochasticWeightAveraging,
 )
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from rasterio.windows import Window
 from scipy.stats import mode as sci_mode
 from torchvision import transforms
@@ -24,10 +24,10 @@ from .data.datasets import EdgeDataset
 from .data.modules import EdgeDataModule
 from .data.samplers import EpochRandomSampler
 from .enums import AttentionTypes, ModelNames, ModelTypes, ResBlockTypes
-from .models.cultio import GeoRefinement
+from .models.cultionet import GeoRefinement
 from .models.lightning import (
-    CultioLitModel,
-    CultioLitTransferModel,
+    CultionetLitModel,
+    CultionetLitTransferModel,
     MaskRCNNLitModel,
     RefineLitModel,
 )
@@ -173,7 +173,7 @@ def fit_maskrcnn(
     if 0 < model_pruning <= 1:
         callbacks.append(ModelPruning("l1_unstructured", amount=model_pruning))
 
-    trainer = pl.Trainer(
+    trainer = L.Trainer(
         default_root_dir=str(ckpt_file.parent),
         callbacks=callbacks,
         enable_checkpointing=True,
@@ -410,7 +410,7 @@ def fit_transfer(
     )
 
     # Setup the Lightning model
-    lit_model = CultioLitTransferModel(
+    lit_model = CultionetLitTransferModel(
         # Load the pretrained model weights
         ckpt_file=pretrained_ckpt_file,
         ds_features=data_module.train_ds.num_features,
@@ -448,7 +448,7 @@ def fit_transfer(
         model_pruning=model_pruning,
     )
 
-    trainer = pl.Trainer(
+    trainer = L.Trainer(
         default_root_dir=str(ckpt_file.parent),
         callbacks=callbacks,
         enable_checkpointing=True,
@@ -514,7 +514,7 @@ def fit_transfer(
                 refine_cb_train_loss,
                 refine_early_stop_callback,
             ]
-            refine_trainer = pl.Trainer(
+            refine_trainer = L.Trainer(
                 default_root_dir=str(refine_ckpt_file.parent),
                 callbacks=refine_callbacks,
                 enable_checkpointing=True,
@@ -572,7 +572,7 @@ def fit(
     batch_size: int = 4,
     load_batch_workers: int = 2,
     accumulate_grad_batches: int = 1,
-    filters: int = 32,
+    hidden_channels: int = 32,
     num_classes: int = 2,
     edge_class: T.Optional[int] = None,
     class_counts: T.Sequence[float] = None,
@@ -624,7 +624,7 @@ def fit(
         partition_column (Optional[str]): The spatial partition file column name.
         batch_size (Optional[int]): The data batch size.
         load_batch_workers (Optional[int]): The number of parallel batches to load.
-        filters (Optional[int]): The number of initial model filters.
+        hidden_channels (Optional[int]): The number of initial model hidden channels.
         optimizer (Optional[str]): The optimizer.
         model_type (Optional[str]): The model type.
         activation_type (Optional[str]): The activation type.
@@ -677,11 +677,11 @@ def fit(
     )
 
     # Setup the Lightning model
-    lit_model = CultioLitModel(
-        num_features=data_module.train_ds.num_features,
-        num_time_features=data_module.train_ds.num_time_features,
+    lit_model = CultionetLitModel(
+        in_channels=data_module.train_ds.num_channels,
+        in_time=data_module.train_ds.num_time,
         num_classes=num_classes,
-        filters=filters,
+        hidden_channels=hidden_channels,
         model_type=model_type,
         activation_type=activation_type,
         dilations=dilations,
@@ -718,7 +718,7 @@ def fit(
         stochastic_weight_averaging_start=stochastic_weight_averaging_start,
         model_pruning=model_pruning,
     )
-    trainer = pl.Trainer(
+    trainer = L.Trainer(
         default_root_dir=str(ckpt_file.parent),
         callbacks=callbacks,
         enable_checkpointing=True,
@@ -731,6 +731,7 @@ def fit(
         precision=precision,
         devices=devices,
         accelerator=device,
+        strategy='ddp',
         log_every_n_steps=50,
         profiler=profiler,
         deterministic=False,
@@ -784,7 +785,7 @@ def fit(
                 refine_cb_train_loss,
                 refine_early_stop_callback,
             ]
-            refine_trainer = pl.Trainer(
+            refine_trainer = L.Trainer(
                 default_root_dir=str(refine_ckpt_file.parent),
                 callbacks=refine_callbacks,
                 enable_checkpointing=True,
@@ -840,20 +841,20 @@ def load_model(
     filters: T.Optional[int] = None,
     device: T.Union[str, bytes] = "gpu",
     devices: T.Optional[int] = 1,
-    lit_model: T.Optional[CultioLitModel] = None,
+    lit_model: T.Optional[CultionetLitModel] = None,
     enable_progress_bar: T.Optional[bool] = True,
     return_trainer: T.Optional[bool] = False,
-) -> T.Tuple[T.Union[None, pl.Trainer], CultioLitModel]:
+) -> T.Tuple[T.Union[None, L.Trainer], CultionetLitModel]:
     """Loads a model from file.
 
     Args:
         ckpt_file (str | Path): The model checkpoint file.
         model_file (str | Path): The model file.
         device (str): The device to apply inference on.
-        lit_model (CultioLitModel): A model to predict with. If `None`, the model
+        lit_model (CultionetLitModel): A model to predict with. If `None`, the model
             is loaded from file.
         enable_progress_bar (Optional[bool]): Whether to use the progress bar.
-        return_trainer (Optional[bool]): Whether to return the `pytorch_lightning` `Trainer`.
+        return_trainer (Optional[bool]): Whether to return the `lightning` `Trainer`.
     """
     if ckpt_file is not None:
         ckpt_file = Path(ckpt_file)
@@ -872,7 +873,7 @@ def load_model(
             enable_progress_bar=enable_progress_bar,
         )
 
-        trainer = pl.Trainer(**trainer_kwargs)
+        trainer = L.Trainer(**trainer_kwargs)
 
     if lit_model is None:
         if model_file is not None:
@@ -883,7 +884,7 @@ def load_model(
                 raise TypeError(
                     "The features must be given to load the model file."
                 )
-            lit_model = CultioLitModel(
+            lit_model = CultionetLitModel(
                 num_features=num_features,
                 num_time_features=num_time_features,
                 filters=filters,
@@ -892,7 +893,7 @@ def load_model(
             lit_model.load_state_dict(state_dict=torch.load(model_file))
         else:
             assert ckpt_file.is_file(), "The checkpoint file does not exist."
-            lit_model = CultioLitModel.load_from_checkpoint(
+            lit_model = CultionetLitModel.load_from_checkpoint(
                 checkpoint_path=str(ckpt_file)
             )
         lit_model.eval()
@@ -947,13 +948,13 @@ def predict_lightning(
         logger=False,
     )
 
-    trainer = pl.Trainer(**trainer_kwargs)
+    trainer = L.Trainer(**trainer_kwargs)
     if is_transfer_model:
-        cultionet_lit_model = CultioLitTransferModel.load_from_checkpoint(
+        cultionet_lit_model = CultionetLitTransferModel.load_from_checkpoint(
             checkpoint_path=str(ckpt_file)
         )
     else:
-        cultionet_lit_model = CultioLitModel.load_from_checkpoint(
+        cultionet_lit_model = CultionetLitModel.load_from_checkpoint(
             checkpoint_path=str(ckpt_file)
         )
 
@@ -976,7 +977,7 @@ def predict_lightning(
 
 
 def predict(
-    lit_model: CultioLitModel,
+    lit_model: CultionetLitModel,
     data: Data,
     written: np.ndarray,
     norm_values: NormValues,
@@ -988,7 +989,7 @@ def predict(
     """Applies a model to predict image labels|values.
 
     Args:
-        lit_model (CultioLitModel): A model to predict with.
+        lit_model (CultionetLitModel): A model to predict with.
         data (Data): The data to predict on.
         written (ndarray)
         data_values (Tensor)
