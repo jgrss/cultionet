@@ -4,7 +4,6 @@ import argparse
 import ast
 import asyncio
 import builtins
-import itertools
 import json
 import logging
 import typing as T
@@ -21,6 +20,7 @@ import ray
 import torch
 import xarray as xr
 import yaml
+from geowombat.core import sort_images_by_date
 from geowombat.core.windows import get_window_offsets
 from pytorch_lightning import seed_everything
 from rasterio.windows import Window
@@ -33,7 +33,7 @@ from cultionet.data.constant import SCALE_FACTOR
 from cultionet.data.create import create_dataset, create_predict_dataset
 from cultionet.data.datasets import EdgeDataset
 from cultionet.data.utils import get_image_list_dims
-from cultionet.enums import CLISteps, ModelNames
+from cultionet.enums import CLISteps, DataColumns, ModelNames
 from cultionet.errors import TensorShapeError
 from cultionet.utils import model_preprocessing
 from cultionet.utils.logging import set_color_logger
@@ -65,9 +65,10 @@ def get_centroid_coords_from_image(
 
 def get_start_end_dates(
     feature_path: Path,
-    start_year: int,
-    start_date: str,
-    end_date: str,
+    end_year: T.Union[int, str],
+    start_mmdd: str,
+    end_mmdd: str,
+    num_months: int,
     date_format: str = "%Y%j",
     lat: T.Optional[float] = None,
 ) -> T.Tuple[str, str]:
@@ -76,37 +77,29 @@ def get_start_end_dates(
     Returns:
         str (mm-dd), str (mm-dd)
     """
-    # Get the first file for the start year
-    filename = list(feature_path.glob(f"{start_year}*.tif"))[0]
-    # Get the date from the file name
-    file_dt = datetime.strptime(filename.stem, date_format)
 
-    if start_date is not None:
-        start_date = start_date
-    else:
-        start_date = file_dt.strftime("%m-%d")
-    if end_date is not None:
-        end_date = end_date
-    else:
-        end_date = file_dt.strftime("%m-%d")
+    image_dict = sort_images_by_date(
+        feature_path,
+        '*.tif',
+        date_pos=0,
+        date_start=0,
+        date_end=8,
+        date_format=date_format,
+    )
+    image_df = pd.DataFrame(
+        data=list(image_dict.keys()),
+        columns=['filename'],
+        index=list(image_dict.values()),
+    )
 
-    month = int(start_date.split("-")[0])
+    end_date_stamp = pd.Timestamp(f"{end_year}-{end_mmdd}")
+    start_year = (end_date_stamp - pd.DateOffset(months=num_months - 1)).year
+    start_date_stamp = pd.Timestamp(f"{start_year}-{start_mmdd}")
+    image_df = image_df.loc[start_date_stamp:end_date_stamp]
 
-    if lat is not None:
-        if lat > 0:
-            # Expected time series start in northern hemisphere winter
-            if 2 < month < 11:
-                logger.warning(
-                    f"The time series start date is {start_date} but the time series is in the Northern hemisphere."
-                )
-        else:
-            # Expected time series start in northern southern winter
-            if (month < 5) or (month > 9):
-                logger.warning(
-                    f"The time series start date is {start_date} but the time series is in the Southern hemisphere."
-                )
-
-    return start_date, end_date
+    return image_df.index[0].strftime("%Y-%m-%d"), image_df.index[-1].strftime(
+        "%Y-%m-%d"
+    )
 
 
 def get_image_list(
@@ -707,21 +700,19 @@ def get_centroid_coords(
 
 def create_datasets(args):
     config = open_config(args.config_file)
-    project_path_lists = [args.project_path]
-    ref_res_lists = [args.ref_res]
+
+    ppaths = setup_paths(
+        args.project_path,
+        append_ts=True if args.append_ts == "y" else False,
+    )
 
     if hasattr(args, "max_crop_class"):
         assert isinstance(
             args.max_crop_class, int
         ), "The maximum crop class value must be given."
 
-        region_as_list = config["regions"] is not None
-        region_as_file = config["region_id_file"] is not None
-
-        assert (
-            region_as_list or region_as_file
-        ), "Only submit region as a list or as a given file"
-
+    region_df = None
+    polygon_df = None
     if hasattr(args, "time_series_path") and (
         args.time_series_path is not None
     ):
@@ -730,82 +721,51 @@ def create_datasets(args):
             years=[args.predict_year],
         )
     else:
-        if region_as_file:
-            file_path = config["region_id_file"]
-            if not Path(file_path).is_file():
-                raise IOError("The id file does not exist")
-            id_data = pd.read_csv(file_path)
-            assert (
-                "id" in id_data.columns
-            ), f"id column not found in {file_path}."
-            regions = id_data["id"].unique().tolist()
-        else:
-            regions = list(
-                range(config["regions"][0], config["regions"][1] + 1)
+        if config["region_id_file"] is None:
+            raise NameError("A region file must be given.")
+
+        region_file_path = Path(config["region_id_file"])
+        if not region_file_path.exists():
+            raise IOError("The id file does not exist")
+
+        polygon_file_path = Path(config["polygon_file"])
+        if not polygon_file_path.exists():
+            raise IOError("The polygon file does not exist")
+
+        region_df = gpd.read_file(region_file_path)
+        polygon_df = gpd.read_file(polygon_file_path)
+
+        assert (
+            region_df.crs == polygon_df.crs
+        ), "The region id CRS does not match the polygon CRS."
+
+        assert (
+            DataColumns.GEOID in region_df.columns
+        ), f"The geo_id column was not found in {region_file_path}."
+
+        assert (
+            DataColumns.YEAR in region_df.columns
+        ), f"The year column was not found in {region_file_path}."
+
+    # Get processed ids
+    processed_ids = list(ppaths.image_path.resolve().glob('*'))
+
+    with tqdm(total=len(processed_ids), position=0, leave=True) as pbar:
+        for processed_path in processed_ids:
+            row_id = processed_path.name
+
+            # FIXME:
+            # if args.destination == "predict":
+            #     df_grids = None
+            #     df_polygons = None
+            # else:
+
+            # Get the grid
+            row_region_df = region_df.query(
+                f"{DataColumns.GEOID} == '{row_id}'"
             )
-
-        inputs = model_preprocessing.TrainInputs(
-            regions=regions, years=config["years"]
-        )
-
-    total_iters = len(
-        list(
-            itertools.product(
-                list(itertools.chain.from_iterable(inputs.year_lists)),
-                list(itertools.chain.from_iterable(inputs.regions_lists)),
-            )
-        )
-    )
-    with tqdm(total=total_iters, position=0, leave=True) as pbar:
-        for region, end_year, project_path, ref_res in cycle_data(
-            inputs.year_lists,
-            inputs.regions_lists,
-            project_path_lists,
-            ref_res_lists,
-        ):
-            ppaths = setup_paths(
-                project_path,
-                append_ts=True if args.append_ts == "y" else False,
-            )
-
-            try:
-                region = f"{int(region):06d}"
-            except ValueError:
-                pass
-
-            if args.destination == "predict":
-                df_grids = None
-                df_polygons = None
-            else:
-                # Read the training data
-                grids_path = ppaths.edge_training_path.joinpath(
-                    ppaths.grid_format.format(region=region, end_year=end_year)
-                )
-
-                if not grids_path.is_file():
-                    pbar.update(1)
-                    pbar.set_description("File does not exist")
-                    continue
-
-                df_grids = gpd.read_file(grids_path)
-                if not {"region", "grid"}.intersection(
-                    df_grids.columns.tolist()
-                ):
-                    df_grids["region"] = region
-
-                polygons_path = ppaths.edge_training_path.joinpath(
-                    ppaths.polygon_format.format(
-                        region=region, end_year=end_year
-                    )
-                )
-
-                if not polygons_path.is_file():
-                    # No training polygons
-                    df_polygons = gpd.GeoDataFrame(
-                        data=[], geometry=[], crs=df_grids.crs
-                    )
-                else:
-                    df_polygons = gpd.read_file(polygons_path)
+            # Clip the polygons to the current grid
+            row_polygon_df = gpd.clip(polygon_df, row_region_df)
 
             image_list = []
             for image_vi in model_preprocessing.VegetationIndices(
@@ -814,48 +774,26 @@ def create_datasets(args):
                 # Set the full path to the images
                 vi_path = ppaths.image_path.resolve().joinpath(
                     args.feature_pattern.format(
-                        region=region, image_vi=image_vi
+                        region=row_id, image_vi=image_vi
                     )
                 )
 
-                if not vi_path.is_dir():
-                    pbar.update(1)
-                    pbar.set_description("No directory")
+                if not vi_path.exists():
                     continue
-
-                # Get the centroid coordinates of the grid
-                lat = None
-                if args.destination != "predict":
-                    lat = get_centroid_coords(
-                        df_grids.centroid, dst_crs="epsg:4326"
-                    )[1]
-
-                # Get the start and end dates
-                start_date, end_date = get_start_end_dates(
-                    vi_path,
-                    start_year=end_year - 1,
-                    start_date=args.start_date,
-                    end_date=args.end_date,
-                    date_format=args.date_format,
-                    lat=lat,
-                )
 
                 # Get the requested time slice
                 ts_list = model_preprocessing.get_time_series_list(
                     vi_path,
-                    end_year - 1,
-                    start_date,
-                    end_date,
+                    end_year=int(row_region_df[DataColumns.YEAR]),
+                    start_mmdd=config["start_mmdd"],
+                    end_mmdd=config["end_mmdd"],
+                    num_months=config["num_months"],
                     date_format=args.date_format,
                 )
 
-                if len(ts_list) <= 1:
-                    pbar.update(1)
-                    pbar.set_description("TS too short")
-                    continue
-
                 if args.skip_index > 0:
                     ts_list = ts_list[:: args.skip_index]
+
                 image_list += ts_list
 
             if args.destination != "predict":
@@ -870,12 +808,12 @@ def create_datasets(args):
                 if args.destination == "predict":
                     create_predict_dataset(
                         image_list=image_list,
-                        region=region,
-                        year=end_year,
+                        region=row_id,
+                        year=int(row_region_df[DataColumns.YEAR]),
                         process_path=ppaths.get_process_path(args.destination),
                         gain=args.gain,
                         offset=args.offset,
-                        ref_res=ref_res,
+                        ref_res=args.ref_res,
                         resampling=args.resampling,
                         window_size=args.window_size,
                         padding=args.padding,
@@ -885,15 +823,16 @@ def create_datasets(args):
                 else:
                     pbar = create_dataset(
                         image_list=image_list,
-                        df_grids=df_grids,
-                        df_polygons=df_polygons,
+                        df_grid=row_region_df,
+                        df_polygons=row_polygon_df,
                         max_crop_class=args.max_crop_class,
-                        group_id=f"{region}_{end_year}",
+                        region=row_id,
+                        year=int(row_region_df[DataColumns.YEAR]),
                         process_path=ppaths.get_process_path(args.destination),
                         transforms=args.transforms,
                         gain=args.gain,
                         offset=args.offset,
-                        ref_res=ref_res,
+                        ref_res=args.ref_res,
                         resampling=args.resampling,
                         num_workers=args.num_workers,
                         grid_size=args.grid_size,
