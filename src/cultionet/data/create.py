@@ -4,16 +4,20 @@ from functools import partial
 from pathlib import Path
 
 import cv2
+import einops
 import geopandas as gpd
 import geowombat as gw
 import joblib
 import numpy as np
+import pandas as pd
+import torch
 import xarray as xr
+from affine import Affine
 from geowombat.core import polygon_to_array
 from geowombat.core.windows import get_window_offsets
 from joblib import delayed, parallel_backend
 from rasterio.warp import calculate_default_transform
-from rasterio.windows import Window
+from rasterio.windows import Window, from_bounds
 from scipy.ndimage import label as nd_label
 from skimage.measure import regionprops
 from threadpoolctl import threadpool_limits
@@ -177,20 +181,21 @@ def cleanup_edges(
 def is_grid_processed(
     process_path: Path,
     transforms: T.List[str],
-    group_id: str,
-    grid_id: T.Union[str, int],
+    region: str,
+    year: T.Union[str, int],
     uid_format: str,
 ) -> bool:
     """Checks if a grid is already processed."""
+
     batches_stored = []
     for aug in transforms:
         aug_method = AugmenterMapping[aug].value
         train_id = uid_format.format(
-            GROUP_ID=group_id, ROW_ID=grid_id, AUGMENTER=aug_method.name_
+            REGION_ID=region, YEAR_ID=year, AUGMENTER=aug_method.name_
         )
         train_path = process_path / aug_method.file_name(train_id)
 
-        if train_path.is_file():
+        if train_path.exists():
             batch_stored = True
         else:
             batch_stored = False
@@ -443,52 +448,81 @@ class ImageVariables:
     def create_image_vars(
         cls,
         image: T.Union[str, Path, list],
+        reference_grid: gpd.GeoDataFrame,
         max_crop_class: int,
-        bounds: tuple,
         num_workers: int,
+        grid_size: T.Optional[
+            T.Union[T.Tuple[int, int], T.List[int], None]
+        ] = None,
         gain: float = 1e-4,
         offset: float = 0.0,
         df_polygons_grid: T.Optional[gpd.GeoDataFrame] = None,
-        ref_res: T.Optional[T.Union[float, T.Tuple[float, float]]] = 10.0,
-        resampling: T.Optional[str] = "nearest",
-        crop_column: T.Optional[str] = "class",
-        keep_crop_classes: T.Optional[bool] = False,
+        ref_res: float = 10.0,
+        resampling: str = "nearest",
+        crop_column: str = "class",
+        keep_crop_classes: bool = False,
         replace_dict: T.Optional[T.Dict[int, int]] = None,
     ) -> "ImageVariables":
         """Creates the initial image training data."""
 
-        edge_class = max_crop_class + 1
+        ref_bounds = reference_grid.total_bounds.tolist()
 
-        if isinstance(image, list):
-            image = [str(fn) for fn in image]
+        if grid_size is not None:
+            ref_window = from_bounds(
+                *ref_bounds,
+                Affine(
+                    ref_res, 0.0, ref_bounds[0], 0.0, -ref_res, ref_bounds[3]
+                ),
+            )
+            assert (ref_window.height == grid_size[0]) and (
+                ref_window.width == grid_size[1]
+            ), (
+                f"The reference grid size is {ref_window.height} rows x {ref_window.width} columns, but the expected "
+                f"dimensions are {grid_size[0]} rows x {grid_size[1]} columns"
+            )
 
         # Open the image variables
-        with gw.config.update(ref_bounds=bounds, ref_res=ref_res):
+        with gw.config.update(
+            ref_bounds=ref_bounds,
+            ref_crs=reference_grid.crs,
+            ref_res=ref_res,
+        ):
             with gw.open(
                 image,
                 stack_dim="band",
                 band_names=list(range(1, len(image) + 1)),
                 resampling=resampling,
             ) as src_ts:
-                # 65535 'no data' values = nan
-                mask = xr.where(src_ts > 10_000, np.nan, 1)
 
-                # X variables
-                time_series = (
+                # Get the time and band count
+                num_time, num_bands = get_image_list_dims(image, src_ts)
+
+                src_ts_stack = xr.DataArray(
+                    # Date are stored [(band x time) x height x width]
                     (
-                        src_ts.gw.set_nodata(
-                            src_ts.gw.nodataval,
-                            0,
-                            out_range=(0, 1),
-                            dtype="float64",
-                            scale_factor=gain,
-                            offset=offset,
-                        )
-                        * mask
-                    )
-                    .fillna(0)
-                    .gw.compute(num_workers=num_workers)
+                        src_ts.data.reshape(
+                            num_bands,
+                            num_time,
+                            src_ts.gw.nrows,
+                            src_ts.gw.ncols,
+                        ).transpose(1, 0, 2, 3)
+                    ).astype('float32'),
+                    dims=('time', 'band', 'y', 'x'),
+                    coords={
+                        'time': range(num_time),
+                        'band': range(num_bands),
+                        'y': src_ts.y,
+                        'x': src_ts.x,
+                    },
+                    attrs=src_ts.attrs.copy(),
                 )
+
+                with xr.set_options(keep_attrs=True):
+                    time_series = (
+                        (src_ts_stack.gw.mask_nodata() * gain + offset)
+                        .fillna(0)
+                        .data.compute(num_workers=num_workers)
+                    )
 
                 # Default outputs
                 (
@@ -500,9 +534,6 @@ class ImageVariables:
                     num_rows=src_ts.gw.nrows, num_cols=src_ts.gw.ncols
                 )
 
-                # Get the time and band count
-                num_time, num_bands = get_image_list_dims(image, src_ts)
-
                 if df_polygons_grid is not None:
                     if replace_dict is not None:
                         # Recode polygons
@@ -513,14 +544,16 @@ class ImageVariables:
                         )
 
                     if not df_polygons_grid.empty:
-                        reference_arrays = ReferenceArrays.from_polygons(
-                            df_polygons_grid=df_polygons_grid,
-                            max_crop_class=max_crop_class,
-                            edge_class=edge_class,
-                            crop_column=crop_column,
-                            keep_crop_classes=keep_crop_classes,
-                            data_array=src_ts,
-                            num_workers=num_workers,
+                        reference_arrays: ReferenceArrays = (
+                            ReferenceArrays.from_polygons(
+                                df_polygons_grid=df_polygons_grid,
+                                max_crop_class=max_crop_class,
+                                edge_class=max_crop_class + 1,
+                                crop_column=crop_column,
+                                keep_crop_classes=keep_crop_classes,
+                                data_array=src_ts,
+                                num_workers=num_workers,
+                            )
                         )
 
                         if reference_arrays.labels_array is not None:
@@ -767,22 +800,28 @@ def create_predict_dataset(
 
 
 def get_reference_bounds(
-    df_grids: gpd.GeoDataFrame,
-    int_idx: int,
+    df_grid: gpd.GeoDataFrame,
     grid_size: tuple,
-    image_crs: T.Union[int, str],
+    filename: T.Union[Path, str],
     ref_res: tuple,
 ) -> T.List[float]:
-    ref_bounds = df_grids.to_crs(image_crs).iloc[int_idx].total_bounds.tolist()
+    ref_bounds = df_grid.total_bounds.tolist()
+
     if grid_size is not None:
         # Enforce bounds given height/width dimensions
-
         height, width = grid_size
         left, bottom, right, top = ref_bounds
 
+        with gw.open(filename) as src:
+            image_crs = src.gw.crs_to_pyproj
+            if ref_res is None:
+                ref_res = (src.gw.celly, src.gw.cellx)
+            else:
+                ref_res = (ref_res, ref_res)
+
         (dst_transform, dst_width, dst_height,) = calculate_default_transform(
             src_crs=image_crs,
-            dst_crs=image_crs,
+            dst_crs=df_grid.crs,
             width=int(abs(round((right - left) / ref_res[1]))),
             height=int(abs(round((top - bottom) / ref_res[0]))),
             left=left,
@@ -803,10 +842,11 @@ def get_reference_bounds(
 
 def create_dataset(
     image_list: T.List[T.List[T.Union[str, Path]]],
-    df_grids: gpd.GeoDataFrame,
+    df_grid: gpd.GeoDataFrame,
     df_polygons: gpd.GeoDataFrame,
     max_crop_class: int,
-    group_id: str = None,
+    region: str,
+    year: T.Union[int, str],
     process_path: Path = None,
     transforms: T.List[str] = None,
     gain: float = 1e-4,
@@ -829,8 +869,8 @@ def create_dataset(
 
     Args:
         image_list: A list of images.
-        df_grids: The training grids.
-        df_polygons: The training edges.
+        df_grid: The training grid.
+        df_polygons: The training polygons.
         max_crop_class: The maximum expected crop class value.
         group_id: A group identifier, used for logging.
         process_path: The main processing path.
@@ -851,220 +891,145 @@ def create_dataset(
             non-zero classes to crop (False).
         replace_dict: A dictionary of crop class remappings.
     """
-    uid_format = "{GROUP_ID}_{ROW_ID}_{AUGMENTER}"
+    uid_format = "{REGION_ID}_{YEAR_ID}_none"
+    group_id = f"{region}_{year}_none"
 
     if transforms is None:
         transforms = ["none"]
 
-    merged_grids = []
-    sindex = df_grids.sindex
+    # Check if the grid has already been saved
+    batch_stored = is_grid_processed(
+        process_path=process_path,
+        transforms=transforms,
+        region=region,
+        year=year,
+        uid_format=uid_format,
+    )
 
-    # Get the image CRS
-    with gw.open(image_list[0]) as src:
-        image_crs = src.crs
-        if ref_res is None:
-            ref_res = (src.gw.celly, src.gw.cellx)
-        else:
-            ref_res = (ref_res, ref_res)
+    if batch_stored:
+        return pbar
 
-    input_height = None
-    input_width = None
-    unprocessed = []
-    for row in df_grids.itertuples():
-        # Check if the grid has already been saved
-        if hasattr(row, "grid"):
-            row_grid_id = row.grid
-        elif hasattr(row, "region"):
-            row_grid_id = row.region
-        else:
-            raise AttributeError(
-                "The grid id should be given as 'grid' or 'region'."
-            )
+    # # Clip the polygons to the current grid
+    # try:
+    #     df_polygons_grid = gpd.clip(df_polygons, row.geometry)
+    # except ValueError:
+    #     logger.warning(
+    #         TopologyClipError(
+    #             "The input GeoDataFrame contains topology errors."
+    #         )
+    #     )
+    #     df_polygons = gpd.GeoDataFrame(
+    #         data=df_polygons[crop_column].values,
+    #         columns=[crop_column],
+    #         geometry=df_polygons.buffer(0).geometry,
+    #     )
+    #     df_polygons_grid = gpd.clip(df_polygons, row.geometry)
 
-        batch_stored = is_grid_processed(
-            process_path=process_path,
-            transforms=transforms,
-            group_id=group_id,
-            grid_id=row_grid_id,
-            uid_format=uid_format,
+    # These are grids with no crop fields. They should still
+    # be used for training.
+    if df_polygons.loc[~df_polygons.is_empty].empty:
+        df_polygons = df_grid.copy()
+        df_polygons = df_polygons.assign(**{crop_column: 0})
+
+    # Remove empty geometry
+    df_polygons = df_polygons.loc[~df_polygons.is_empty]
+
+    if not df_polygons.empty:
+        # Get a mask of valid polygons
+        nonzero_mask = df_polygons[crop_column] != 0
+
+        # Get the reference bounding box from the grid
+        # ref_bounds = get_reference_bounds(
+        #     df_grid=df_grid,
+        #     grid_size=grid_size,
+        #     filename=image_list[0],
+        #     ref_res=ref_res,
+        # )
+
+        # Data for the model network
+        image_variables = ImageVariables.create_image_vars(
+            image=image_list,
+            reference_grid=df_grid,
+            df_polygons_grid=df_polygons if nonzero_mask.any() else None,
+            max_crop_class=max_crop_class,
+            num_workers=num_workers,
+            grid_size=grid_size,
+            gain=gain,
+            offset=offset,
+            ref_res=ref_res,
+            resampling=resampling,
+            crop_column=crop_column,
+            keep_crop_classes=keep_crop_classes,
+            replace_dict=replace_dict,
         )
-        if batch_stored:
-            pbar.set_description(f"{group_id} stored.")
-            continue
 
-        # Clip the polygons to the current grid
-        try:
-            df_polygons_grid = gpd.clip(df_polygons, row.geometry)
-        except ValueError:
-            logger.warning(
-                TopologyClipError(
-                    "The input GeoDataFrame contains topology errors."
-                )
+        if image_variables.time_series is None:
+            pbar.set_description(f"No fields in {group_id}")
+            return pbar
+
+        if (image_variables.time_series.shape[1] < 5) or (
+            image_variables.time_series.shape[2] < 5
+        ):
+            pbar.set_description(f"{group_id} too small")
+            return pbar
+
+        # Get the upper left lat/lon
+        lat_left, lat_bottom, lat_right, lat_top = df_grid.to_crs(
+            "epsg:4326"
+        ).total_bounds.tolist()
+
+        segments = nd_label(
+            (image_variables.labels_array > 0)
+            & (image_variables.labels_array < max_crop_class + 1)
+        )[0]
+        props = regionprops(segments)
+
+        labeled_data = LabeledData(
+            x=image_variables.time_series,
+            y=image_variables.labels_array,
+            bdist=image_variables.boundary_distance,
+            ori=image_variables.orientation,
+            segments=segments,
+            props=props,
+        )
+
+        batch = Data(
+            x=einops.rearrange(
+                torch.from_numpy(labeled_data.x / gain).to(dtype=torch.int32),
+                't c h w -> 1 c t h w',
+            ),
+            y=einops.rearrange(
+                torch.from_numpy(labeled_data.y).to(dtype=torch.uint8),
+                'b w -> 1 b w',
+            ),
+            bdist=einops.rearrange(
+                torch.from_numpy(labeled_data.bdist / gain).to(
+                    dtype=torch.int32
+                ),
+                'b w -> 1 b w',
+            ),
+            start_year=torch.tensor(
+                [pd.Timestamp(Path(image_list[0]).stem).year],
+                dtype=torch.int32,
+            ),
+            end_year=torch.tensor(
+                [pd.Timestamp(Path(image_list[-1]).stem).year],
+                dtype=torch.int32,
+            ),
+            left=torch.tensor([lat_left], dtype=torch.float32),
+            bottom=torch.tensor([lat_bottom], dtype=torch.float32),
+            right=torch.tensor([lat_right], dtype=torch.float32),
+            top=torch.tensor([lat_top], dtype=torch.float32),
+            batch_id=[group_id],
+        )
+
+        # FIXME: this doesn't support augmentations
+        for aug in transforms:
+            aug_method = AugmenterMapping[aug].value
+            train_id = uid_format.format(
+                REGION_ID=region, YEAR_ID=year, AUGMENTER=aug_method.name_
             )
-            df_polygons = gpd.GeoDataFrame(
-                data=df_polygons[crop_column].values,
-                columns=[crop_column],
-                geometry=df_polygons.buffer(0).geometry,
-            )
-            df_polygons_grid = gpd.clip(df_polygons, row.geometry)
-
-        # These are grids with no crop fields. They should still
-        # be used for training.
-        if df_polygons_grid.loc[~df_polygons_grid.is_empty].empty:
-            df_polygons_grid = df_grids.copy()
-            df_polygons_grid = df_polygons_grid.assign(**{crop_column: 0})
-
-        # Remove empty geometry
-        df_polygons_grid = df_polygons_grid.loc[~df_polygons_grid.is_empty]
-
-        if not df_polygons_grid.empty:
-            # Check if the edges overlap multiple grids
-            int_idx = sorted(
-                list(
-                    sindex.intersection(
-                        tuple(df_polygons_grid.total_bounds.flatten())
-                    )
-                )
-            )
-
-            if len(int_idx) > 1:
-                # Check if any of the grids have already been stored
-                if any(
-                    [
-                        rowg in merged_grids
-                        for rowg in df_grids.iloc[int_idx].grid.values.tolist()
-                    ]
-                ):
-                    pbar.set_description(f"No edges in {group_id}")
-                    continue
-
-                df_polygons_grid = gpd.clip(
-                    df_polygons, df_grids.iloc[int_idx].geometry
-                )
-                merged_grids.append(row.grid)
-
-            # Get a mask of valid polygons
-            nonzero_mask = df_polygons_grid[crop_column] != 0
-
-            # Get the reference bounding box from the grid
-            ref_bounds = get_reference_bounds(
-                df_grids=df_grids,
-                int_idx=int_idx,
-                grid_size=grid_size,
-                image_crs=image_crs,
-                ref_res=ref_res,
-            )
-
-            # Data for the model network
-            image_variables = ImageVariables.create_image_vars(
-                image=image_list,
-                max_crop_class=max_crop_class,
-                bounds=ref_bounds,
-                num_workers=num_workers,
-                gain=gain,
-                offset=offset,
-                df_polygons_grid=df_polygons_grid
-                if nonzero_mask.any()
-                else None,
-                ref_res=ref_res[0],
-                resampling=resampling,
-                crop_column=crop_column,
-                keep_crop_classes=keep_crop_classes,
-                replace_dict=replace_dict,
-            )
-
-            if image_variables.time_series is None:
-                pbar.set_description(f"No fields in {group_id}")
-                continue
-
-            if (image_variables.time_series.shape[1] < 5) or (
-                image_variables.time_series.shape[2] < 5
-            ):
-                pbar.set_description(f"{group_id} too small")
-                continue
-
-            # Get the upper left lat/lon
-            left, bottom, right, top = (
-                df_grids.iloc[int_idx]
-                .to_crs("epsg:4326")
-                .total_bounds.tolist()
-            )
-
-            if isinstance(group_id, str):
-                end_year = int(group_id.split("_")[-1])
-                start_year = end_year - 1
-            else:
-                start_year, end_year = None, None
-
-            segments = nd_label(
-                (image_variables.labels_array > 0)
-                & (image_variables.labels_array < max_crop_class + 1)
-            )[0]
-            props = regionprops(segments)
-
-            labeled_data = LabeledData(
-                x=image_variables.time_series,
-                y=image_variables.labels_array,
-                bdist=image_variables.boundary_distance,
-                ori=image_variables.orientation,
-                segments=segments,
-                props=props,
-            )
-
-            if input_height is None:
-                input_height = labeled_data.y.shape[0]
-            else:
-                if labeled_data.y.shape[0] != input_height:
-                    warnings.warn(
-                        f"{group_id}_{row_grid_id} does not have the same height as the rest of the dataset.",
-                        UserWarning,
-                    )
-                    unprocessed.append(f"{group_id}_{row_grid_id}")
-                    continue
-
-            if input_width is None:
-                input_width = labeled_data.y.shape[1]
-            else:
-                if labeled_data.y.shape[1] != input_width:
-                    warnings.warn(
-                        f"{group_id}_{row_grid_id} does not have the same width as the rest of the dataset.",
-                        UserWarning,
-                    )
-                    unprocessed.append(f"{group_id}_{row_grid_id}")
-                    continue
-
-            augmenters = Augmenters(
-                augmentations=transforms,
-                ntime=image_variables.num_time,
-                nbands=image_variables.num_bands,
-                zero_padding=zero_padding,
-                start_year=start_year,
-                end_year=end_year,
-                left=left,
-                bottom=bottom,
-                right=right,
-                top=top,
-                res=ref_res,
-            )
-            for aug_method in augmenters:
-                aug_kwargs = augmenters.aug_args.kwargs
-                aug_kwargs["train_id"] = uid_format.format(
-                    GROUP_ID=group_id,
-                    ROW_ID=row_grid_id,
-                    AUGMENTER=aug_method.name_,
-                )
-                augmenters.update_aug_args(kwargs=aug_kwargs)
-                aug_data = aug_method(
-                    labeled_data, aug_args=augmenters.aug_args
-                )
-                aug_method.save(
-                    out_directory=process_path,
-                    data=aug_data,
-                    compress=compress_method,
-                )
-
-    # if unprocessed:
-    #     logger.warning('Could not process the following grids.')
-    #     logger.info(', '.join(unprocessed))
+            train_path = process_path / aug_method.file_name(train_id)
+            batch.to_file(train_path, compress=compress_method)
 
     return pbar
