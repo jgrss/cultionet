@@ -113,20 +113,7 @@ create:
     long: transforms
     help: Augmentation transforms to apply
     kwargs:
-      default:
-        - none
-        - fliplr
-        - flipud
-        - rot90
-        - rot180
-        - rot270
-        - tswarp
-        - tsnoise
-        - tsdrift
-        - tspeaks
-        - gaussian
-        - saltpepper
-        - speckle
+      default: !!null
       choices:
         - none
         - fliplr
