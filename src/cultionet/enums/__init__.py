@@ -14,6 +14,11 @@ class StrEnum(str, enum.Enum):
         return self.value
 
 
+class DataColumns(StrEnum):
+    GEOID = "geo_id"
+    YEAR = "year"
+
+
 class AttentionTypes(StrEnum):
     FRACTAL = "fractal"
     SPATIAL_CHANNEL = "spatial_channel"
