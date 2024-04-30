@@ -393,6 +393,41 @@ class ReferenceArrays:
         )
 
 
+def reshape_and_mask_array(
+    data: xr.DataArray,
+    num_time: int,
+    num_bands: int,
+    gain: float,
+    offset: int,
+) -> xr.DataArray:
+    """Reshapes an array and masks no-data values."""
+
+    src_ts_stack = xr.DataArray(
+        # Date are stored [(band x time) x height x width]
+        (
+            data.data.reshape(
+                num_bands,
+                num_time,
+                data.gw.nrows,
+                data.gw.ncols,
+            ).transpose(1, 0, 2, 3)
+        ).astype('float32'),
+        dims=('time', 'band', 'y', 'x'),
+        coords={
+            'time': range(num_time),
+            'band': range(num_bands),
+            'y': data.y,
+            'x': data.x,
+        },
+        attrs=data.attrs.copy(),
+    )
+
+    with xr.set_options(keep_attrs=True):
+        time_series = (src_ts_stack.gw.mask_nodata() * gain + offset).fillna(0)
+
+    return time_series
+
+
 class ImageVariables:
     def __init__(
         self,
@@ -497,32 +532,13 @@ class ImageVariables:
                 # Get the time and band count
                 num_time, num_bands = get_image_list_dims(image, src_ts)
 
-                src_ts_stack = xr.DataArray(
-                    # Date are stored [(band x time) x height x width]
-                    (
-                        src_ts.data.reshape(
-                            num_bands,
-                            num_time,
-                            src_ts.gw.nrows,
-                            src_ts.gw.ncols,
-                        ).transpose(1, 0, 2, 3)
-                    ).astype('float32'),
-                    dims=('time', 'band', 'y', 'x'),
-                    coords={
-                        'time': range(num_time),
-                        'band': range(num_bands),
-                        'y': src_ts.y,
-                        'x': src_ts.x,
-                    },
-                    attrs=src_ts.attrs.copy(),
-                )
-
-                with xr.set_options(keep_attrs=True):
-                    time_series = (
-                        (src_ts_stack.gw.mask_nodata() * gain + offset)
-                        .fillna(0)
-                        .data.compute(num_workers=num_workers)
-                    )
+                time_series = reshape_and_mask_array(
+                    data=src_ts,
+                    num_time=num_time,
+                    num_bands=num_bands,
+                    gain=gain,
+                    offset=offset,
+                ).data.compute(num_workers=num_workers)
 
                 # Default outputs
                 (
@@ -629,19 +645,21 @@ def create_and_save_window(
     res: float,
     resampling: str,
     region: str,
-    year: int,
+    start_year: int,
+    end_year: int,
     window_size: int,
     padding: int,
     compress_method: T.Union[int, str],
     darray: xr.DataArray,
+    gain: float,
     w: Window,
     w_pad: Window,
 ) -> None:
     x = darray.data.compute(num_workers=1)
 
     size = window_size + padding * 2
-    x_height = x.shape[1]
-    x_width = x.shape[2]
+    x_height = darray.gw.nrows
+    x_width = darray.gw.ncols
 
     row_pad_before = 0
     col_pad_before = 0
@@ -653,6 +671,7 @@ def create_and_save_window(
             row_pad_before = padding - w.row_off
         if w.col_off < padding:
             col_pad_before = padding - w.col_off
+
         # Post-padding
         if w.row_off + window_size + padding > image_height:
             row_pad_after = size - x_height
@@ -663,23 +682,26 @@ def create_and_save_window(
             x,
             pad_width=(
                 (0, 0),
+                (0, 0),
                 (row_pad_before, row_pad_after),
                 (col_pad_before, col_pad_after),
             ),
             mode="constant",
         )
-    if x.shape[1:] != (size, size):
-        logger.warning("The array does not match the expected size.")
 
-    labeled_data = LabeledData(
-        x=x, y=None, bdist=None, ori=None, segments=None, props=None
-    )
-
-    augmenters = Augmenters(
-        augmentations=["none"],
-        ntime=num_time,
-        nbands=num_bands,
-        zero_padding=0,
+    batch = Data(
+        x=einops.rearrange(
+            torch.from_numpy(x / gain).to(dtype=torch.int32),
+            't c h w -> 1 c t h w',
+        ),
+        start_year=torch.tensor(
+            [start_year],
+            dtype=torch.int32,
+        ),
+        end_year=torch.tensor(
+            [end_year],
+            dtype=torch.int32,
+        ),
         window_row_off=w.row_off,
         window_col_off=w.col_off,
         window_height=w.height,
@@ -698,17 +720,13 @@ def create_and_save_window(
         bottom=darray.gw.bottom,
         right=darray.gw.right,
         top=darray.gw.top,
+        batch_id=[f"{region}_{start_year}_{end_year}_{w.row_off}_{w.col_off}"],
     )
-    for aug_method in augmenters:
-        aug_kwargs = augmenters.aug_args.kwargs
-        aug_kwargs["train_id"] = f"{region}_{year}_{w.row_off}_{w.col_off}"
-        augmenters.update_aug_args(kwargs=aug_kwargs)
-        predict_data = aug_method(labeled_data, aug_args=augmenters.aug_args)
-        aug_method.save(
-            out_directory=write_path,
-            data=predict_data,
-            compress=compress_method,
-        )
+
+    batch.to_file(
+        write_path
+        / f"{region}_{start_year}_{end_year}_{w.row_off}_{w.col_off}"
+    )
 
 
 def create_predict_dataset(
@@ -735,6 +753,7 @@ def create_predict_dataset(
                 resampling=resampling,
                 chunks=512,
             ) as src_ts:
+
                 windows = get_window_offsets(
                     src_ts.gw.nrows,
                     src_ts.gw.ncols,
@@ -742,15 +761,16 @@ def create_predict_dataset(
                     window_size,
                     padding=(padding, padding, padding, padding),
                 )
-                time_series = (
-                    (src_ts.astype("float64") * gain + offset)
-                    .clip(0, 1)
-                    .chunk({"band": -1, "y": window_size, "x": window_size})
-                    .transpose("band", "y", "x")
-                    .assign_attrs(**src_ts.attrs)
-                )
 
                 num_time, num_bands = get_image_list_dims(image_list, src_ts)
+
+                time_series: xr.DataArray = reshape_and_mask_array(
+                    data=src_ts,
+                    num_time=num_time,
+                    num_bands=num_bands,
+                    gain=gain,
+                    offset=offset,
+                )
 
                 partial_create_and_save_window = partial(
                     create_and_save_window,
@@ -762,10 +782,16 @@ def create_predict_dataset(
                     res=ref_res,
                     resampling=resampling,
                     region=region,
-                    year=year,
+                    start_year=pd.to_datetime(
+                        Path(image_list[0]).stem, format="%Y%j"
+                    ).year,
+                    end_year=pd.to_datetime(
+                        Path(image_list[-1]).stem, format="%Y%j"
+                    ).year,
                     window_size=window_size,
                     padding=padding,
                     compress_method=compress_method,
+                    gain=gain,
                 )
 
                 with tqdm(

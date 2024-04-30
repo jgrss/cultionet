@@ -4,19 +4,11 @@ image_vis:
   - kndvi
 
 # The regions to process (start, end)
-regions:
-  - 1
-  - 1
+regions: !!null
 
 # The region file path
 region_id_file: !!null
 
-# End years (i.e., 2020 = 2019 planting/harvest year)
-# 2019 = 2018 CDL
-# 2020 = 2019 CDL
-# 2021 = 2020 CDL
-# 2022 = 2021 CDL
-years:
-  - 2020
-  - 2021
-  - 2022
+start_mmdd: '01-01'
+end_mmdd: '12-31'
+num_months: 12

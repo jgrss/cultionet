@@ -713,14 +713,7 @@ def create_datasets(args):
 
     region_df = None
     polygon_df = None
-    if hasattr(args, "time_series_path") and (
-        args.time_series_path is not None
-    ):
-        inputs = model_preprocessing.TrainInputs(
-            regions=[Path(args.time_series_path).name],
-            years=[args.predict_year],
-        )
-    else:
+    if args.destination == "train":
         if config["region_id_file"] is None:
             raise NameError("A region file must be given.")
 
@@ -748,24 +741,26 @@ def create_datasets(args):
         ), f"The year column was not found in {region_file_path}."
 
     # Get processed ids
-    processed_ids = list(ppaths.image_path.resolve().glob('*'))
+    if args.time_series_path is not None:
+        processed_ids = [Path(args.time_series_path)]
+    else:
+        processed_ids = list(ppaths.image_path.resolve().glob('*'))
 
     with tqdm(total=len(processed_ids), position=0, leave=True) as pbar:
         for processed_path in processed_ids:
             row_id = processed_path.name
 
-            # FIXME:
-            # if args.destination == "predict":
-            #     df_grids = None
-            #     df_polygons = None
-            # else:
+            if args.destination == "predict":
+                end_year = args.predict_year
+            else:
+                # Get the grid
+                row_region_df = region_df.query(
+                    f"{DataColumns.GEOID} == '{row_id}'"
+                )
+                # Clip the polygons to the current grid
+                row_polygon_df = gpd.clip(polygon_df, row_region_df)
 
-            # Get the grid
-            row_region_df = region_df.query(
-                f"{DataColumns.GEOID} == '{row_id}'"
-            )
-            # Clip the polygons to the current grid
-            row_polygon_df = gpd.clip(polygon_df, row_region_df)
+                end_year = int(row_region_df[DataColumns.YEAR])
 
             image_list = []
             for image_vi in model_preprocessing.VegetationIndices(
@@ -784,7 +779,7 @@ def create_datasets(args):
                 # Get the requested time slice
                 ts_list = model_preprocessing.get_time_series_list(
                     vi_path,
-                    end_year=int(row_region_df[DataColumns.YEAR]),
+                    end_year=end_year,
                     start_mmdd=config["start_mmdd"],
                     end_mmdd=config["end_mmdd"],
                     num_months=config["num_months"],
@@ -796,20 +791,12 @@ def create_datasets(args):
 
                 image_list += ts_list
 
-            if args.destination != "predict":
-                class_info = {
-                    "max_crop_class": args.max_crop_class,
-                    "edge_class": args.max_crop_class + 1,
-                }
-                with open(ppaths.classes_info_path, mode="w") as f:
-                    f.write(json.dumps(class_info))
-
             if image_list:
                 if args.destination == "predict":
                     create_predict_dataset(
                         image_list=image_list,
                         region=row_id,
-                        year=int(row_region_df[DataColumns.YEAR]),
+                        year=end_year,
                         process_path=ppaths.get_process_path(args.destination),
                         gain=args.gain,
                         offset=args.offset,
@@ -821,13 +808,20 @@ def create_datasets(args):
                         chunksize=args.chunksize,
                     )
                 else:
+                    class_info = {
+                        "max_crop_class": args.max_crop_class,
+                        "edge_class": args.max_crop_class + 1,
+                    }
+                    with open(ppaths.classes_info_path, mode="w") as f:
+                        f.write(json.dumps(class_info))
+
                     pbar = create_dataset(
                         image_list=image_list,
                         df_grid=row_region_df,
                         df_polygons=row_polygon_df,
                         max_crop_class=args.max_crop_class,
                         region=row_id,
-                        year=int(row_region_df[DataColumns.YEAR]),
+                        year=end_year,
                         process_path=ppaths.get_process_path(args.destination),
                         transforms=args.transforms,
                         gain=args.gain,
