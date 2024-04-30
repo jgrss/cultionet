@@ -36,7 +36,9 @@ class EdgeDataModule(LightningDataModule):
         self.shuffle = shuffle
         self.sampler = sampler
         self.pin_memory = pin_memory
-        self.persistent_workers = persistent_workers
+        self.persistent_workers = (
+            False if num_workers == 0 else persistent_workers
+        )
         self.generator = generator
 
     def train_dataloader(self):
