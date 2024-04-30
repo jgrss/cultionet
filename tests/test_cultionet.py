@@ -54,8 +54,8 @@ def get_train_dataset(
 def test_cultionet(class_info: dict):
     num_channels = 3
     in_time = 12
-    height = 20
-    width = 20
+    height = 50
+    width = 50
     batch_size = 2
     num_samples = 12
     val_frac = 0.2
@@ -65,7 +65,7 @@ def test_cultionet(class_info: dict):
         in_time=in_time,
         hidden_channels=32,
         num_classes=2,
-        model_type=ModelTypes.RESELUNETPSI,
+        model_type=ModelTypes.TOWERUNET,
         activation_type="SiLU",
         dilations=None,
         res_block_type=ResBlockTypes.RES,

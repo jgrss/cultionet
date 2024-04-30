@@ -210,11 +210,11 @@ train_predict:
     long: model-type
     help: The model type
     kwargs:
-      default: 'ResELUNetPsi'
+      default: 'TowerUNet'
       choices:
         - 'UNet3Psi'
         - 'ResUNet3Psi'
-        - 'ResELUNetPsi'
+        - 'TowerUNet'
   activation_type:
     short: ''
     long: activation-type

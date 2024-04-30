@@ -7,7 +7,7 @@ import torch.nn as nn
 from .. import nn as cunn
 from ..data.data import Data
 from ..enums import ModelTypes, ResBlockTypes
-from .nunet import ResELUNetPsi, ResUNet3Psi, UNet3Psi
+from .nunet import ResUNet3Psi, TowerUNet, UNet3Psi
 from .temporal_transformer import TemporalTransformer
 
 
@@ -273,7 +273,7 @@ class CultioNet(nn.Module):
         in_time: int,
         hidden_channels: int = 32,
         num_classes: int = 2,
-        model_type: str = ModelTypes.RESUNET3PSI,
+        model_type: str = ModelTypes.TOWERUNET,
         activation_type: str = "SiLU",
         dilations: T.Union[int, T.Sequence[int]] = None,
         res_block_type: str = ResBlockTypes.RES,
@@ -310,16 +310,16 @@ class CultioNet(nn.Module):
             "hidden_channels": self.hidden_channels,
             "num_classes": self.num_classes,
             "activation_type": activation_type,
-            "deep_sup_dist": deep_sup_dist,
-            "deep_sup_edge": deep_sup_edge,
-            "deep_sup_mask": deep_sup_mask,
+            # "deep_sup_dist": deep_sup_dist,
+            # "deep_sup_edge": deep_sup_edge,
+            # "deep_sup_mask": deep_sup_mask,
             "mask_activation": nn.Softmax(dim=1),
         }
 
         assert model_type in (
             ModelTypes.UNET3PSI,
             ModelTypes.RESUNET3PSI,
-            ModelTypes.RESELUNETPSI,
+            ModelTypes.TOWERUNET,
         ), "The model type is not supported."
         if model_type == ModelTypes.UNET3PSI:
             unet3_kwargs["dilation"] = 2 if dilations is None else dilations
@@ -329,7 +329,7 @@ class CultioNet(nn.Module):
             self.mask_model = UNet3Psi(**unet3_kwargs)
         elif model_type in (
             ModelTypes.RESUNET3PSI,
-            ModelTypes.RESELUNETPSI,
+            ModelTypes.TOWERUNET,
         ):
             # ResUNet3Psi
             unet3_kwargs["attention_weights"] = (
@@ -354,7 +354,7 @@ class CultioNet(nn.Module):
             if model_type == ModelTypes.RESUNET3PSI:
                 self.mask_model = ResUNet3Psi(**unet3_kwargs)
             else:
-                self.mask_model = ResELUNetPsi(**unet3_kwargs)
+                self.mask_model = TowerUNet(**unet3_kwargs)
 
     def forward(self, data: Data) -> T.Dict[str, torch.Tensor]:
         # Transformer attention encoder
@@ -381,17 +381,17 @@ class CultioNet(nn.Module):
             "classes_l3": classes_l3,
         }
 
-        if logits["dist_3_1"] is not None:
+        if logits.get("dist_3_1") is not None:
             out["dist_3_1"] = logits["dist_3_1"]
             out["dist_2_2"] = logits["dist_2_2"]
             out["dist_1_3"] = logits["dist_1_3"]
 
-        if logits["mask_3_1"] is not None:
+        if logits.get("mask_3_1") is not None:
             out["crop_3_1"] = logits["mask_3_1"]
             out["crop_2_2"] = logits["mask_2_2"]
             out["crop_1_3"] = logits["mask_1_3"]
 
-        if logits["edge_3_1"] is not None:
+        if logits.get("edge_3_1") is not None:
             out["edge_3_1"] = logits["edge_3_1"]
             out["edge_2_2"] = logits["edge_2_2"]
             out["edge_1_3"] = logits["edge_1_3"]
