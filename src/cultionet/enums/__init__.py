@@ -60,7 +60,7 @@ class ModelTypes(StrEnum):
     RESUNET = 'resunet'
     UNET3PSI = 'UNet3Psi'
     RESUNET3PSI = 'ResUNet3Psi'
-    RESELUNETPSI = 'ResELUNetPsi'
+    TOWERUNET = 'TowerUNet'
     TRESAUNET = 'TemporalResAUNet'
 
 

@@ -20,33 +20,36 @@ Code:
 """
 import torch
 import torch.nn.functional as F
+from einops import rearrange
 
 
-class Trend(torch.nn.Module):
+class Trend3d(torch.nn.Module):
     def __init__(self, kernel_size: int, direction: str = "positive"):
-        super(Trend, self).__init__()
+        super(Trend3d, self).__init__()
 
         assert direction in (
             "positive",
             "negative",
         ), "The trend direction must be one of 'positive' or 'negative'."
 
-        self.padding = int(kernel_size / 2)
-        self.weights = torch.ones(kernel_size)
+        self.padding = (kernel_size // 2, 0, 0)
+        weights = torch.ones(kernel_size)
         indices_ = torch.arange(kernel_size)
         if direction == "positive":
-            self.weights[indices_ % 2 == 0] *= -1
+            weights[indices_ % 2 == 0] *= -1
         elif direction == "negative":
-            self.weights[indices_ % 2 > 0] *= -1
+            weights[indices_ % 2 > 0] *= -1
 
-        self.weights = self.weights[(None,) * 2]
+        self.weights = rearrange(weights, 'k -> 1 1 k 1 1')
+        self.weights.requires_grad = False
         self.relu = torch.nn.ReLU(inplace=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x = (B x C x T)
-        x = F.conv1d(
+        x = F.conv3d(
             x,
-            self.weights.to(dtype=x.dtype, device=x.device),
+            self.weights.expand(
+                x.shape[1], x.shape[1], self.weights.shape[2], 1, 1
+            ).to(dtype=x.dtype, device=x.device),
             bias=None,
             stride=1,
             padding=self.padding,
@@ -58,11 +61,11 @@ class Trend(torch.nn.Module):
         return x
 
 
-class Peaks(torch.nn.Module):
+class Peaks3d(torch.nn.Module):
     def __init__(self, kernel_size: int, radius: int = 9, sigma: float = 1.5):
-        super(Peaks, self).__init__()
+        super(Peaks3d, self).__init__()
 
-        self.padding = int(kernel_size / 2)
+        self.padding = (kernel_size // 2, 0, 0)
         x = torch.linspace(-radius, radius + 1, kernel_size)
         mu = 0.0
         gaussian = (
@@ -70,19 +73,21 @@ class Peaks(torch.nn.Module):
             / (torch.sqrt(torch.tensor([2.0 * torch.pi])) * sigma)
             * torch.exp(-1.0 * (x - mu) ** 2 / (2.0 * sigma**2))
         )
-        self.weights = gaussian * (x**2 / sigma**4 - 1.0) / sigma**2
-        self.weights -= self.weights.mean()
-        self.weights /= torch.sum(self.weights * x**2) / 2.0
-        self.weights *= -1.0
+        weights = gaussian * (x**2 / sigma**4 - 1.0) / sigma**2
+        weights -= weights.mean()
+        weights /= torch.sum(weights * x**2) / 2.0
+        weights *= -1.0
 
-        self.weights = self.weights[(None,) * 2]
+        self.weights = rearrange(weights, 'k -> 1 1 k 1 1')
+        self.weights.requires_grad = False
         self.relu = torch.nn.ReLU(inplace=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x = (B x C x T)
-        x = F.conv1d(
+        x = F.conv3d(
             x,
-            self.weights.to(dtype=x.dtype, device=x.device),
+            self.weights.expand(
+                x.shape[1], x.shape[1], self.weights.shape[2], 1, 1
+            ).to(dtype=x.dtype, device=x.device),
             bias=None,
             stride=1,
             padding=self.padding,

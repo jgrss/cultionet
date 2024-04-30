@@ -17,7 +17,7 @@ from .. import nn as cunn
 from ..data.data import Data
 from ..enums import LearningRateSchedulers, ModelTypes, ResBlockTypes
 from ..layers.weights import init_attention_weights
-from ..losses import TanimotoComplementLoss, TanimotoDistLoss
+from ..losses import TanimotoDistLoss
 from .cultionet import CultioNet, GeoRefinement
 from .maskcrnn import BFasterRCNN
 from .nunet import PostUNet3Psi
@@ -1099,7 +1099,7 @@ class CultionetLitModel(LightningModuleMixin):
         in_time: int = None,
         num_classes: int = 2,
         hidden_channels: int = 32,
-        model_type: str = ModelTypes.RESELUNETPSI,
+        model_type: str = ModelTypes.TOWERUNET,
         activation_type: str = "SiLU",
         dilations: T.Union[int, T.Sequence[int]] = None,
         res_block_type: str = ResBlockTypes.RES,

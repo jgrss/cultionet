@@ -17,6 +17,125 @@ from .convolution import (
 from .reshape import UpSample
 
 
+class TowerUNetUpLayer(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        dilations: T.Sequence[int] = None,
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
+        activation_type: str = "SiLU",
+    ):
+        super(TowerUNetUpLayer, self).__init__()
+
+        self.up = UpSample()
+
+        self.conv = ResidualConv(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            dilation=dilations[0],
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+        )
+
+    def forward(self, x: torch.Tensor, shape: tuple) -> torch.Tensor:
+        if x.shape[-2:] != shape:
+            x = self.up(
+                x,
+                size=shape,
+                mode="bilinear",
+            )
+
+        return self.conv(x)
+
+
+class TowerUNetBlock(nn.Module):
+    def __init__(
+        self,
+        backbone_side_channels: int,
+        backbone_down_channels: int,
+        up_channels: int,
+        out_channels: int,
+        tower: bool = False,
+        dilations: T.Sequence[int] = None,
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
+        activation_type: str = "SiLU",
+    ):
+        super(TowerUNetBlock, self).__init__()
+
+        self.up = UpSample()
+
+        in_channels = (
+            backbone_side_channels + backbone_down_channels + up_channels * 2
+        )
+
+        self.backbone_down_conv = nn.ConvTranspose2d(
+            in_channels=backbone_down_channels,
+            out_channels=backbone_down_channels,
+            kernel_size=3,
+            stride=2,
+            padding=1,
+        )
+        self.down_conv = nn.ConvTranspose2d(
+            in_channels=up_channels,
+            out_channels=up_channels,
+            kernel_size=3,
+            stride=2,
+            padding=1,
+        )
+        if tower:
+            self.tower_conv = nn.ConvTranspose2d(
+                in_channels=up_channels,
+                out_channels=up_channels,
+                kernel_size=3,
+                stride=2,
+                padding=1,
+            )
+            in_channels += up_channels
+
+        self.conv = ResidualConv(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            dilation=dilations[0],
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+        )
+
+    def forward(
+        self,
+        backbone_side: torch.Tensor,
+        backbone_down: torch.Tensor,
+        side: torch.Tensor,
+        down: torch.Tensor,
+        down_tower: T.Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        backbone_down = self.up(
+            self.backbone_down_conv(backbone_down),
+            size=side.shape[-2:],
+            mode="bilinear",
+        )
+        down = self.up(
+            self.down_conv(down),
+            size=side.shape[-2:],
+            mode="bilinear",
+        )
+
+        x = torch.cat(
+            (backbone_side, backbone_down, side, down),
+            dim=1,
+        )
+
+        if down_tower is not None:
+            down_tower = self.up(
+                self.tower_conv(down_tower),
+                size=side.shape[-2:],
+                mode="bilinear",
+            )
+            x = torch.cat((x, down_tower), dim=1)
+
+        return self.conv(x)
+
+
 class ResELUNetPsiLayer(nn.Module):
     def __init__(
         self,
