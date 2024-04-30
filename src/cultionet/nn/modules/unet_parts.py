@@ -22,7 +22,8 @@ class TowerUNetUpLayer(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        dilations: T.Sequence[int] = None,
+        kernel_size: int = 3,
+        num_blocks: int = 1,
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         activation_type: str = "SiLU",
     ):
@@ -33,7 +34,8 @@ class TowerUNetUpLayer(nn.Module):
         self.conv = ResidualConv(
             in_channels=in_channels,
             out_channels=out_channels,
-            dilation=dilations[0],
+            kernel_size=kernel_size,
+            num_blocks=num_blocks,
             attention_weights=attention_weights,
             activation_type=activation_type,
         )
@@ -57,7 +59,8 @@ class TowerUNetBlock(nn.Module):
         up_channels: int,
         out_channels: int,
         tower: bool = False,
-        dilations: T.Sequence[int] = None,
+        kernel_size: int = 3,
+        num_blocks: int = 1,
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         activation_type: str = "SiLU",
     ):
@@ -96,7 +99,8 @@ class TowerUNetBlock(nn.Module):
         self.conv = ResidualConv(
             in_channels=in_channels,
             out_channels=out_channels,
-            dilation=dilations[0],
+            kernel_size=kernel_size,
+            num_blocks=num_blocks,
             attention_weights=attention_weights,
             activation_type=activation_type,
         )

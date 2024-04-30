@@ -262,9 +262,7 @@ class CultioNet(nn.Module):
         dilations (int | list): The convolution dilation or dilations.
         res_block_type (str): The residual convolution block type.
         attention_weights (str): The attention weight type.
-        deep_sup_dist (bool): Whether to use deep supervision on the distance layer.
-        deep_sup_edge (bool): Whether to use deep supervision on the edge layer.
-        deep_sup_mask (bool): Whether to use deep supervision on the mask layer.
+        deep_supervision (bool): Whether to use deep supervision.
     """
 
     def __init__(
@@ -278,9 +276,7 @@ class CultioNet(nn.Module):
         dilations: T.Union[int, T.Sequence[int]] = None,
         res_block_type: str = ResBlockTypes.RES,
         attention_weights: str = "spatial_channel",
-        deep_sup_dist: bool = False,
-        deep_sup_edge: bool = False,
-        deep_sup_mask: bool = False,
+        deep_supervision: bool = False,
     ):
         super(CultioNet, self).__init__()
 
@@ -310,9 +306,7 @@ class CultioNet(nn.Module):
             "hidden_channels": self.hidden_channels,
             "num_classes": self.num_classes,
             "activation_type": activation_type,
-            # "deep_sup_dist": deep_sup_dist,
-            # "deep_sup_edge": deep_sup_edge,
-            # "deep_sup_mask": deep_sup_mask,
+            "deep_supervision": deep_supervision,
             "mask_activation": nn.Softmax(dim=1),
         }
 

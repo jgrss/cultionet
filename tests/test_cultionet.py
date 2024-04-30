@@ -70,9 +70,7 @@ def test_cultionet(class_info: dict):
         dilations=None,
         res_block_type=ResBlockTypes.RES,
         attention_weights="spatial_channel",
-        deep_sup_dist=False,
-        deep_sup_edge=False,
-        deep_sup_mask=False,
+        deep_supervision=False,
     )
 
     model = CultioNet(**kwargs)

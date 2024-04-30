@@ -685,11 +685,10 @@ class TowerUNet(nn.Module):
         res_block_type: str = ResBlockTypes.RES,
         attention_weights: T.Optional[str] = None,
         mask_activation: T.Union[nn.Softmax, nn.Sigmoid] = nn.Softmax(dim=1),
+        deep_supervision: bool = False,
     ):
         super(TowerUNet, self).__init__()
 
-        if dilations is None:
-            dilations = [2]
         if attention_weights is None:
             attention_weights = "spatial_channel"
 
@@ -713,7 +712,7 @@ class TowerUNet(nn.Module):
             self.down_a = cunn.ResidualConv(
                 in_channels=channels[0],
                 out_channels=channels[0],
-                dilation=dilations[0],
+                num_blocks=2,
                 activation_type=activation_type,
                 attention_weights=attention_weights,
             )
@@ -729,14 +728,14 @@ class TowerUNet(nn.Module):
         self.down_b = cunn.PoolResidualConv(
             channels[0],
             channels[1],
-            dilations=dilations,
+            num_blocks=1,
             attention_weights=attention_weights,
             res_block_type=res_block_type,
         )
         self.down_c = cunn.PoolResidualConv(
             channels[1],
             channels[2],
-            dilations=dilations,
+            num_blocks=1,
             activation_type=activation_type,
             attention_weights=attention_weights,
             res_block_type=res_block_type,
@@ -744,7 +743,8 @@ class TowerUNet(nn.Module):
         self.down_d = cunn.PoolResidualConv(
             channels[2],
             channels[3],
-            dilations=dilations,
+            num_blocks=1,
+            kernel_size=1,
             activation_type=activation_type,
             attention_weights=attention_weights,
             res_block_type=res_block_type,
@@ -754,28 +754,29 @@ class TowerUNet(nn.Module):
         self.up_e = cunn.TowerUNetUpLayer(
             in_channels=channels[3],
             out_channels=up_channels,
-            dilations=dilations,
+            num_blocks=1,
+            kernel_size=1,
             attention_weights=attention_weights,
             activation_type=activation_type,
         )
         self.up_f = cunn.TowerUNetUpLayer(
             in_channels=up_channels,
             out_channels=up_channels,
-            dilations=dilations,
+            num_blocks=1,
             attention_weights=attention_weights,
             activation_type=activation_type,
         )
         self.up_g = cunn.TowerUNetUpLayer(
             in_channels=up_channels,
             out_channels=up_channels,
-            dilations=dilations,
+            num_blocks=1,
             attention_weights=attention_weights,
             activation_type=activation_type,
         )
         self.up_h = cunn.TowerUNetUpLayer(
             in_channels=up_channels,
             out_channels=up_channels,
-            dilations=dilations,
+            num_blocks=2,
             attention_weights=attention_weights,
             activation_type=activation_type,
         )
@@ -786,7 +787,7 @@ class TowerUNet(nn.Module):
             backbone_down_channels=channels[3],
             up_channels=up_channels,
             out_channels=up_channels,
-            dilations=dilations,
+            num_blocks=1,
             attention_weights=attention_weights,
             activation_type=activation_type,
         )
@@ -797,7 +798,7 @@ class TowerUNet(nn.Module):
             up_channels=up_channels,
             out_channels=up_channels,
             tower=True,
-            dilations=dilations,
+            num_blocks=1,
             attention_weights=attention_weights,
             activation_type=activation_type,
         )
@@ -808,7 +809,7 @@ class TowerUNet(nn.Module):
             up_channels=up_channels,
             out_channels=up_channels,
             tower=True,
-            dilations=dilations,
+            num_blocks=2,
             attention_weights=attention_weights,
             activation_type=activation_type,
         )

@@ -450,59 +450,43 @@ class ResConvLayer(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        dilation: int,
+        kernel_size: int = 3,
+        dilations: T.List[int] = None,
         activation_type: str = "SiLU",
-        num_blocks: int = 2,
+        num_blocks: int = 1,
     ):
         super(ResConvLayer, self).__init__()
 
-        assert num_blocks > 0
+        assert num_blocks > 0, "There must be at least one block."
 
-        if num_blocks == 1:
-            layers = [
-                ConvBlock2d(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=3,
-                    padding=dilation,
-                    dilation=dilation,
-                    add_activation=False,
-                )
-            ]
-        else:
-            # Block 1
-            layers = [
-                ConvBlock2d(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=3,
-                    padding=1,
-                    activation_type=activation_type,
-                )
-            ]
-            if num_blocks > 2:
-                # Blocks 2:N-1
-                layers += [
-                    ConvBlock2d(
-                        in_channels=out_channels,
-                        out_channels=out_channels,
-                        kernel_size=3,
-                        padding=dilation,
-                        dilation=dilation,
-                        activation_type=activation_type,
-                    )
-                    for _ in range(num_blocks - 2)
-                ]
-            # Block N
+        if dilations is None:
+            dilations = list(range(1, num_blocks + 1))
+
+        # Block 1
+        layers = [
+            ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                padding=kernel_size // 2,
+                activation_type=activation_type,
+                add_activation=True if num_blocks > 1 else False,
+            )
+        ]
+
+        if num_blocks > 1:
+            # Blocks 2:N-1
             layers += [
                 ConvBlock2d(
                     in_channels=out_channels,
                     out_channels=out_channels,
-                    kernel_size=3,
-                    padding=dilation,
-                    dilation=dilation,
-                    add_activation=False,
+                    kernel_size=kernel_size,
+                    padding=dilations[blk_idx],
+                    dilation=dilations[blk_idx],
+                    activation_type=activation_type,
+                    add_activation=True if blk_idx + 1 < num_blocks else False,
                 )
+                for blk_idx in range(1, num_blocks)
             ]
 
         self.seq = nn.Sequential(*layers)
@@ -518,7 +502,8 @@ class ResidualConv(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        dilation: int = 2,
+        kernel_size: int = 3,
+        num_blocks: int = 1,
         attention_weights: T.Optional[AttentionTypes] = None,
         activation_type: str = "SiLU",
     ):
@@ -547,9 +532,9 @@ class ResidualConv(nn.Module):
         self.seq = ResConvLayer(
             in_channels=in_channels,
             out_channels=out_channels,
-            dilation=dilation,
+            kernel_size=kernel_size,
+            num_blocks=num_blocks,
             activation_type=activation_type,
-            num_blocks=2,
         )
         self.skip = None
         if in_channels != out_channels:
@@ -677,11 +662,11 @@ class ResidualAConv(nn.Module):
                 ResConvLayer(
                     in_channels=in_channels,
                     out_channels=out_channels,
-                    dilation=dilation,
+                    dilations=dilations,
                     activation_type=activation_type,
                     num_blocks=1,
                 )
-                for dilation in dilations
+                for _ in dilations
             ]
         )
         self.skip = None
@@ -732,7 +717,8 @@ class PoolResidualConv(nn.Module):
         out_channels: int,
         pool_size: int = 2,
         dropout: T.Optional[float] = None,
-        dilations: T.List[int] = None,
+        kernel_size: int = 3,
+        num_blocks: int = 1,
         attention_weights: T.Optional[AttentionTypes] = None,
         activation_type: str = "SiLU",
         res_block_type: ResBlockTypes = ResBlockTypes.RES,
@@ -757,8 +743,9 @@ class PoolResidualConv(nn.Module):
                 ResidualConv(
                     in_channels,
                     out_channels,
+                    kernel_size=kernel_size,
                     attention_weights=attention_weights,
-                    dilation=dilations[0],
+                    num_blocks=num_blocks,
                     activation_type=activation_type,
                 )
             ]
@@ -768,7 +755,6 @@ class PoolResidualConv(nn.Module):
                     in_channels,
                     out_channels,
                     attention_weights=attention_weights,
-                    dilations=dilations,
                     activation_type=activation_type,
                 )
             ]
@@ -872,7 +858,6 @@ class FinalConv2dDropout(nn.Module):
             ResidualConv(
                 in_channels=int(hidden_dim * dim_factor),
                 out_channels=hidden_dim,
-                dilation=2,
                 activation_type=activation_type,
             ),
             nn.Dropout(0.1),

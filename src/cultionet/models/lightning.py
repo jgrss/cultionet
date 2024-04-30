@@ -545,17 +545,8 @@ class LightningModuleMixin(LightningModule):
             "l2": 0.25,
             "l3": 0.5,
             "dist_loss": 1.0,
-            "dist_loss_3_1": 0.1,
-            "dist_loss_2_2": 0.25,
-            "dist_loss_1_3": 0.5,
             "edge_loss": 1.0,
-            "edge_loss_3_1": 0.1,
-            "edge_loss_2_2": 0.25,
-            "edge_loss_1_3": 0.5,
             "crop_loss": 1.0,
-            "crop_loss_3_1": 0.1,
-            "crop_loss_2_2": 0.25,
-            "crop_loss_1_3": 0.5,
         }
 
         true_labels_dict = self.get_true_labels(
@@ -580,77 +571,43 @@ class LightningModuleMixin(LightningModule):
             loss = loss + classes_last_loss * weights["l3"]
 
         # Edge losses
-        if self.deep_sup_dist:
-            dist_loss_3_1 = self.dist_loss_3_1(
-                predictions["dist_3_1"], batch.bdist
+        if self.deep_supervision:
+            dist_loss_deep = self.dist_loss_deep(
+                predictions["dist_deep"], batch.bdist
             )
-            dist_loss_2_2 = self.dist_loss_2_2(
-                predictions["dist_2_2"], batch.bdist
+            edge_loss_deep = self.edge_loss_deep(
+                predictions["edge_deep"], true_labels_dict["true_edge"]
             )
-            dist_loss_1_3 = self.dist_loss_1_3(
-                predictions["dist_1_3"], batch.bdist
+            crop_loss_deep = self.crop_loss_deep(
+                predictions["crop_deep"], true_labels_dict["true_crop"]
             )
+
+            weights["dist_loss_deep"] = 0.5
+            weights["edge_loss_deep"] = 0.5
+            weights["crop_loss_deep"] = 0.5
+
             # Main loss
             loss = (
                 loss
-                + dist_loss_3_1 * weights["dist_loss_3_1"]
-                + dist_loss_2_2 * weights["dist_loss_2_2"]
-                + dist_loss_1_3 * weights["dist_loss_1_3"]
+                + dist_loss_deep * weights["dist_loss_deep"]
+                + edge_loss_deep * weights["edge_loss_deep"]
+                + crop_loss_deep * weights["crop_loss_deep"]
             )
+
         # Distance transform loss
         dist_loss = self.dist_loss(predictions["dist"], batch.bdist)
-        # Main loss
         loss = loss + dist_loss * weights["dist_loss"]
 
-        # Distance transform losses
-        if self.deep_sup_edge:
-            edge_loss_3_1 = self.edge_loss_3_1(
-                predictions["edge_3_1"], true_labels_dict["true_edge"]
-            )
-            edge_loss_2_2 = self.edge_loss_2_2(
-                predictions["edge_2_2"], true_labels_dict["true_edge"]
-            )
-            edge_loss_1_3 = self.edge_loss_1_3(
-                predictions["edge_1_3"], true_labels_dict["true_edge"]
-            )
-            # Main loss
-            loss = (
-                loss
-                + edge_loss_3_1 * weights["edge_loss_3_1"]
-                + edge_loss_2_2 * weights["edge_loss_2_2"]
-                + edge_loss_1_3 * weights["edge_loss_1_3"]
-            )
         # Edge loss
         edge_loss = self.edge_loss(
             predictions["edge"], true_labels_dict["true_edge"]
         )
-        # Main loss
         loss = loss + edge_loss * weights["edge_loss"]
-
-        # Crop mask losses
-        if self.deep_sup_mask:
-            crop_loss_3_1 = self.crop_loss_3_1(
-                predictions["crop_3_1"], true_labels_dict["true_crop"]
-            )
-            crop_loss_2_2 = self.crop_loss_2_2(
-                predictions["crop_2_2"], true_labels_dict["true_crop"]
-            )
-            crop_loss_1_3 = self.crop_loss_1_3(
-                predictions["crop_1_3"], true_labels_dict["true_crop"]
-            )
-            # Main loss
-            loss = (
-                loss
-                + crop_loss_3_1 * weights["crop_loss_3_1"]
-                + crop_loss_2_2 * weights["crop_loss_2_2"]
-                + crop_loss_1_3 * weights["crop_loss_1_3"]
-            )
 
         # Crop mask loss
         crop_loss = self.crop_loss(
             predictions["crop"], true_labels_dict["true_crop"]
         )
-        # Main loss
         loss = loss + crop_loss * weights["crop_loss"]
 
         # if predictions["crop_type"] is not None:
@@ -863,31 +820,17 @@ class LightningModuleMixin(LightningModule):
             )
 
     def configure_loss(self):
+        # Distance loss
         self.dist_loss = TanimotoDistLoss(one_hot_targets=False)
-        if self.deep_sup_dist:
-            self.dist_loss_3_1 = TanimotoDistLoss(one_hot_targets=False)
-            self.dist_loss_2_2 = TanimotoDistLoss(one_hot_targets=False)
-            self.dist_loss_1_3 = TanimotoDistLoss(one_hot_targets=False)
-
-        # Edge losses
+        # Edge losse
         self.edge_loss = TanimotoDistLoss()
-        if self.deep_sup_edge:
-            self.edge_loss_3_1 = TanimotoDistLoss()
-            self.edge_loss_2_2 = TanimotoDistLoss()
-            self.edge_loss_1_3 = TanimotoDistLoss()
-
-        # Crop mask losses
+        # Crop mask losse
         self.crop_loss = TanimotoDistLoss()
-        if self.deep_sup_mask:
-            self.crop_loss_3_1 = TanimotoDistLoss(
-                scale_pos_weight=self.scale_pos_weight
-            )
-            self.crop_loss_2_2 = TanimotoDistLoss(
-                scale_pos_weight=self.scale_pos_weight
-            )
-            self.crop_loss_1_3 = TanimotoDistLoss(
-                scale_pos_weight=self.scale_pos_weight
-            )
+
+        if self.deep_supervision:
+            self.dist_loss_deep = TanimotoDistLoss(one_hot_targets=False)
+            self.edge_loss_deep = TanimotoDistLoss()
+            self.crop_loss_deep = TanimotoDistLoss()
 
         # Crop Temporal encoding losses
         self.classes_l2_loss = TanimotoDistLoss()
@@ -976,9 +919,7 @@ class CultionetLitTransferModel(LightningModuleMixin):
         weight_decay: float = 0.01,
         eps: float = 1e-4,
         mask_activation: T.Callable = nn.Softmax(dim=1),
-        deep_sup_dist: bool = True,
-        deep_sup_edge: bool = True,
-        deep_sup_mask: bool = True,
+        deep_supervision: bool = True,
         scale_pos_weight: bool = True,
         model_name: str = "cultionet_transfer",
         edge_class: T.Optional[int] = None,
@@ -1007,9 +948,7 @@ class CultionetLitTransferModel(LightningModuleMixin):
         up_channels = int(init_filter * 5)
         self.in_channels = in_channels
         self.num_time = num_time
-        self.deep_sup_dist = deep_sup_dist
-        self.deep_sup_edge = deep_sup_edge
-        self.deep_sup_mask = deep_sup_mask
+        self.deep_supervision = deep_supervision
         self.scale_pos_weight = scale_pos_weight
 
         self.cultionet_model = CultionetLitModel.load_from_checkpoint(
@@ -1070,9 +1009,7 @@ class CultionetLitTransferModel(LightningModuleMixin):
                 up_channels=up_channels,
                 num_classes=num_classes,
                 mask_activation=mask_activation,
-                deep_sup_dist=deep_sup_dist,
-                deep_sup_edge=deep_sup_edge,
-                deep_sup_mask=deep_sup_mask,
+                deep_supervision=deep_supervision,
             )
             self.cultionet_model.mask_model.post_unet = post_unet
 
@@ -1112,9 +1049,7 @@ class CultionetLitModel(LightningModuleMixin):
         eps: float = 1e-4,
         ckpt_name: str = "last",
         model_name: str = "cultionet",
-        deep_sup_dist: bool = False,
-        deep_sup_edge: bool = False,
-        deep_sup_mask: bool = False,
+        deep_supervision: bool = False,
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         temperature_lit_model: T.Optional[GeoRefinement] = None,
@@ -1141,9 +1076,7 @@ class CultionetLitModel(LightningModuleMixin):
         self.temperature_lit_model = temperature_lit_model
         self.scale_pos_weight = scale_pos_weight
         self.save_batch_val_metrics = save_batch_val_metrics
-        self.deep_sup_dist = deep_sup_dist
-        self.deep_sup_edge = deep_sup_edge
-        self.deep_sup_mask = deep_sup_mask
+        self.deep_supervision = deep_supervision
         self.sigmoid = torch.nn.Sigmoid()
         if edge_class is not None:
             self.edge_class = edge_class
@@ -1164,9 +1097,7 @@ class CultionetLitModel(LightningModuleMixin):
                 dilations=dilations,
                 res_block_type=res_block_type,
                 attention_weights=attention_weights,
-                deep_sup_dist=deep_sup_dist,
-                deep_sup_edge=deep_sup_edge,
-                deep_sup_mask=deep_sup_mask,
+                deep_supervision=deep_supervision,
             ),
         )
 
