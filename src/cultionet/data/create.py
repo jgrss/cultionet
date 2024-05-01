@@ -11,6 +11,7 @@ import joblib
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 import xarray as xr
 from affine import Affine
 from geowombat.core import polygon_to_array
@@ -182,7 +183,8 @@ def is_grid_processed(
     process_path: Path,
     transforms: T.List[str],
     region: str,
-    year: T.Union[str, int],
+    start_date: str,
+    end_date: str,
     uid_format: str,
 ) -> bool:
     """Checks if a grid is already processed."""
@@ -191,7 +193,10 @@ def is_grid_processed(
     for aug in transforms:
         aug_method = AugmenterMapping[aug].value
         train_id = uid_format.format(
-            REGION_ID=region, YEAR_ID=year, AUGMENTER=aug_method.name_
+            REGION_ID=region,
+            START_DATE=start_date,
+            END_DATE=end_date,
+            AUGMENTER=aug_method.name_,
         )
         train_path = process_path / aug_method.file_name(train_id)
 
@@ -624,6 +629,7 @@ def save_and_update(
 def read_slice(darray: xr.DataArray, w_pad: Window) -> xr.DataArray:
     slicer = (
         slice(0, None),
+        slice(0, None),
         slice(w_pad.row_off, w_pad.row_off + w_pad.height),
         slice(w_pad.col_off, w_pad.col_off + w_pad.width),
     )
@@ -638,15 +644,11 @@ def get_window_chunk(windows: T.List[T.Tuple[Window, Window]], chunksize: int):
 
 def create_and_save_window(
     write_path: Path,
-    num_time: int,
-    num_bands: int,
-    image_height: int,
-    image_width: int,
     res: float,
     resampling: str,
     region: str,
-    start_year: int,
-    end_year: int,
+    start_date: str,
+    end_date: str,
     window_size: int,
     padding: int,
     compress_method: T.Union[int, str],
@@ -657,83 +659,79 @@ def create_and_save_window(
 ) -> None:
     x = darray.data.compute(num_workers=1)
 
-    size = window_size + padding * 2
-    x_height = darray.gw.nrows
-    x_width = darray.gw.ncols
+    image_height = window_size + padding * 2
+    image_width = window_size + padding * 2
 
-    row_pad_before = 0
-    col_pad_before = 0
-    col_pad_after = 0
-    row_pad_after = 0
-    if (x_height != size) or (x_width != size):
-        # Pre-padding
-        if w.row_off < padding:
-            row_pad_before = padding - w.row_off
-        if w.col_off < padding:
-            col_pad_before = padding - w.col_off
+    # Get row adjustments
+    row_before_padded = abs(w_pad.row_off - w.row_off)
+    row_before_to_pad = padding - row_before_padded
+    row_after_to_pad = image_height - w_pad.height - row_before_to_pad
 
-        # Post-padding
-        if w.row_off + window_size + padding > image_height:
-            row_pad_after = size - x_height
-        if w.col_off + window_size + padding > image_width:
-            col_pad_after = size - x_width
+    # Get column adjustments
+    col_before_padded = abs(w_pad.col_off - w.col_off)
+    col_before_to_pad = padding - col_before_padded
+    col_after_to_pad = image_width - w_pad.width - col_before_to_pad
 
-        x = np.pad(
-            x,
-            pad_width=(
-                (0, 0),
-                (0, 0),
-                (row_pad_before, row_pad_after),
-                (col_pad_before, col_pad_after),
-            ),
-            mode="constant",
-        )
+    x = np.pad(
+        x,
+        pad_width=(
+            (0, 0),
+            (0, 0),
+            (row_before_to_pad, row_after_to_pad),
+            (col_before_to_pad, col_after_to_pad),
+        ),
+        mode="constant",
+        constant_values=0,
+    )
+
+    x = einops.rearrange(
+        torch.from_numpy(x / gain).to(dtype=torch.int32),
+        't c h w -> 1 c t h w',
+    )
+
+    assert x.shape[-2:] == (
+        image_height,
+        image_width,
+    ), "The padded array does not have the correct height/width dimensions."
+
+    batch_id = f"{region}_{start_date}_{end_date}_{w.row_off}_{w.col_off}"
 
     batch = Data(
-        x=einops.rearrange(
-            torch.from_numpy(x / gain).to(dtype=torch.int32),
-            't c h w -> 1 c t h w',
-        ),
-        start_year=torch.tensor(
-            [start_year],
-            dtype=torch.int32,
-        ),
-        end_year=torch.tensor(
-            [end_year],
-            dtype=torch.int32,
-        ),
-        window_row_off=w.row_off,
-        window_col_off=w.col_off,
-        window_height=w.height,
-        window_width=w.width,
-        window_pad_row_off=w_pad.row_off,
-        window_pad_col_off=w_pad.col_off,
-        window_pad_height=w_pad.height,
-        window_pad_width=w_pad.width,
-        row_pad_before=row_pad_before,
-        row_pad_after=row_pad_after,
-        col_pad_before=col_pad_before,
-        col_pad_after=col_pad_after,
-        res=res,
-        resampling=resampling,
-        left=darray.gw.left,
-        bottom=darray.gw.bottom,
-        right=darray.gw.right,
-        top=darray.gw.top,
-        batch_id=[f"{region}_{start_year}_{end_year}_{w.row_off}_{w.col_off}"],
+        x=x,
+        start_year=[start_date],
+        end_year=[end_date],
+        window_row_off=[w.row_off],
+        window_col_off=[w.col_off],
+        window_height=[w.height],
+        window_width=[w.width],
+        window_pad_row_off=[w_pad.row_off],
+        window_pad_col_off=[w_pad.col_off],
+        window_pad_height=[w_pad.height],
+        window_pad_width=[w_pad.width],
+        row_before_to_pad=[row_before_to_pad],
+        row_after_to_pad=[row_after_to_pad],
+        col_before_to_pad=[col_before_to_pad],
+        col_after_to_pad=[col_after_to_pad],
+        res=[res],
+        resampling=[resampling],
+        left=[darray.gw.left],
+        bottom=[darray.gw.bottom],
+        right=[darray.gw.right],
+        top=[darray.gw.top],
+        batch_id=[batch_id],
     )
 
     batch.to_file(
-        write_path
-        / f"{region}_{start_year}_{end_year}_{w.row_off}_{w.col_off}"
+        write_path / f"{batch_id}.pt",
+        compress=compress_method,
     )
 
 
 def create_predict_dataset(
     image_list: T.List[T.List[T.Union[str, Path]]],
     region: str,
-    year: int,
     process_path: Path = None,
+    date_format: str = "%Y%j",
     gain: float = 1e-4,
     offset: float = 0.0,
     ref_res: T.Union[float, T.Tuple[float, float]] = 10.0,
@@ -775,19 +773,15 @@ def create_predict_dataset(
                 partial_create_and_save_window = partial(
                     create_and_save_window,
                     write_path=process_path,
-                    num_time=num_time,
-                    num_bands=num_bands,
-                    image_height=src_ts.gw.nrows,
-                    image_width=src_ts.gw.ncols,
                     res=ref_res,
                     resampling=resampling,
                     region=region,
-                    start_year=pd.to_datetime(
-                        Path(image_list[0]).stem, format="%Y%j"
-                    ).year,
-                    end_year=pd.to_datetime(
-                        Path(image_list[-1]).stem, format="%Y%j"
-                    ).year,
+                    start_date=pd.to_datetime(
+                        Path(image_list[0]).stem, format=date_format
+                    ).strftime("%Y%m%d"),
+                    end_date=pd.to_datetime(
+                        Path(image_list[-1]).stem, format=date_format
+                    ).strftime("%Y%m%d"),
                     window_size=window_size,
                     padding=padding,
                     compress_method=compress_method,
@@ -866,14 +860,14 @@ def get_reference_bounds(
     return ref_bounds
 
 
-def create_dataset(
+def create_train_batch(
     image_list: T.List[T.List[T.Union[str, Path]]],
     df_grid: gpd.GeoDataFrame,
     df_polygons: gpd.GeoDataFrame,
     max_crop_class: int,
     region: str,
-    year: T.Union[int, str],
     process_path: Path = None,
+    date_format: str = "%Y%j",
     transforms: T.List[str] = None,
     gain: float = 1e-4,
     offset: float = 0.0,
@@ -883,15 +877,12 @@ def create_dataset(
     grid_size: T.Optional[
         T.Union[T.Tuple[int, int], T.List[int], None]
     ] = None,
-    instance_seg: T.Optional[bool] = False,
-    zero_padding: T.Optional[int] = 0,
     crop_column: T.Optional[str] = "class",
     keep_crop_classes: T.Optional[bool] = False,
     replace_dict: T.Optional[T.Dict[int, int]] = None,
-    pbar: T.Optional[object] = None,
     compress_method: T.Union[int, str] = 'zlib',
-) -> object:
-    """Creates a dataset for training.
+) -> None:
+    """Creates a batch file for training.
 
     Args:
         image_list: A list of images.
@@ -917,8 +908,15 @@ def create_dataset(
             non-zero classes to crop (False).
         replace_dict: A dictionary of crop class remappings.
     """
-    uid_format = "{REGION_ID}_{YEAR_ID}_none"
-    group_id = f"{region}_{year}_none"
+    start_date = pd.to_datetime(
+        Path(image_list[0]).stem, format=date_format
+    ).strftime("%Y%m%d")
+    end_date = pd.to_datetime(
+        Path(image_list[0]).stem, format=date_format
+    ).strftime("%Y%m%d")
+
+    uid_format = "{REGION_ID}_{START_DATE}_{END_DATE}_none"
+    group_id = f"{region}_{start_date}_{end_date}_none"
 
     if transforms is None:
         transforms = ["none"]
@@ -928,12 +926,13 @@ def create_dataset(
         process_path=process_path,
         transforms=transforms,
         region=region,
-        year=year,
+        start_date=start_date,
+        end_date=end_date,
         uid_format=uid_format,
     )
 
     if batch_stored:
-        return pbar
+        return
 
     # # Clip the polygons to the current grid
     # try:
@@ -990,14 +989,12 @@ def create_dataset(
         )
 
         if image_variables.time_series is None:
-            pbar.set_description(f"No fields in {group_id}")
-            return pbar
+            return
 
         if (image_variables.time_series.shape[1] < 5) or (
             image_variables.time_series.shape[2] < 5
         ):
-            pbar.set_description(f"{group_id} too small")
-            return pbar
+            return
 
         # Get the upper left lat/lon
         lat_left, lat_bottom, lat_right, lat_top = df_grid.to_crs(
@@ -1053,9 +1050,10 @@ def create_dataset(
         for aug in transforms:
             aug_method = AugmenterMapping[aug].value
             train_id = uid_format.format(
-                REGION_ID=region, YEAR_ID=year, AUGMENTER=aug_method.name_
+                REGION_ID=region,
+                START_DATE=start_date,
+                END_DATE=end_date,
+                AUGMENTER=aug_method.name_,
             )
             train_path = process_path / aug_method.file_name(train_id)
             batch.to_file(train_path, compress=compress_method)
-
-    return pbar

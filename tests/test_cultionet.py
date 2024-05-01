@@ -1,7 +1,7 @@
 import tempfile
 
 from cultionet.data.modules import EdgeDataModule
-from cultionet.enums import ModelTypes, ResBlockTypes
+from cultionet.enums import AttentionTypes, ModelTypes, ResBlockTypes
 from cultionet.models.cultionet import CultioNet
 from cultionet.utils.normalize import NormValues
 
@@ -67,10 +67,10 @@ def test_cultionet(class_info: dict):
         num_classes=2,
         model_type=ModelTypes.TOWERUNET,
         activation_type="SiLU",
-        dilations=None,
-        res_block_type=ResBlockTypes.RES,
-        attention_weights="spatial_channel",
-        deep_supervision=False,
+        dilations=[1, 2, 3],
+        res_block_type=ResBlockTypes.RESA,
+        attention_weights=AttentionTypes.SPATIAL_CHANNEL,
+        deep_supervision=True,
     )
 
     model = CultioNet(**kwargs)

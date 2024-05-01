@@ -5,7 +5,7 @@ import filelock
 import geowombat as gw
 import rasterio as rio
 import torch
-from pytorch_lightning.callbacks import BasePredictionWriter
+from lightning.pytorch.callbacks import BasePredictionWriter
 from rasterio.windows import Window
 
 from .data.constant import SCALE_FACTOR
@@ -25,7 +25,6 @@ class LightningGTiffWriter(BasePredictionWriter):
         reference_image: Path,
         out_path: Path,
         num_classes: int,
-        ref_res: float,
         resampling,
         compression: str,
         write_interval: str = "batch",
@@ -36,48 +35,50 @@ class LightningGTiffWriter(BasePredictionWriter):
         self.out_path = out_path
         self.out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with gw.config.update(ref_res=ref_res):
-            with gw.open(reference_image, resampling=resampling) as src:
-                rechunk = False
-                new_row_chunks = src.gw.check_chunksize(
-                    src.gw.row_chunks, src.gw.nrows
+        with gw.open(reference_image, resampling=resampling) as src:
+            rechunk = False
+            new_row_chunks = src.gw.check_chunksize(
+                src.gw.row_chunks, src.gw.nrows
+            )
+            if new_row_chunks != src.gw.row_chunks:
+                rechunk = True
+            new_col_chunks = src.gw.check_chunksize(
+                src.gw.col_chunks, src.gw.ncols
+            )
+            if new_col_chunks != src.gw.col_chunks:
+                rechunk = True
+            if rechunk:
+                src = src.chunk(
+                    chunks={
+                        'band': -1,
+                        'y': new_row_chunks,
+                        'x': new_col_chunks,
+                    }
                 )
-                if new_row_chunks != src.gw.row_chunks:
-                    rechunk = True
-                new_col_chunks = src.gw.check_chunksize(
-                    src.gw.col_chunks, src.gw.ncols
-                )
-                if new_col_chunks != src.gw.col_chunks:
-                    rechunk = True
-                if rechunk:
-                    src = src.chunk(
-                        chunks={
-                            'band': -1,
-                            'y': new_row_chunks,
-                            'x': new_col_chunks,
-                        }
-                    )
-                profile = {
-                    "crs": src.crs,
-                    "transform": src.gw.transform,
-                    "height": src.gw.nrows,
-                    "width": src.gw.ncols,
-                    # distance (+1) + edge (+1) + crop (+1) crop types (+N)
-                    # `num_classes` includes background
-                    "count": 3 + num_classes - 1,
-                    "dtype": "uint16",
-                    "blockxsize": src.gw.col_chunks,
-                    "blockysize": src.gw.row_chunks,
-                    "driver": "GTiff",
-                    "sharing": False,
-                    "compress": compression,
-                }
+
+            profile = {
+                "crs": src.crs,
+                "transform": src.gw.transform,
+                "height": src.gw.nrows,
+                "width": src.gw.ncols,
+                # distance (+1) + edge (+1) + crop (+1) crop types (+N)
+                # `num_classes` includes background
+                "count": 3 + num_classes - 1,
+                "dtype": "uint16",
+                "blockxsize": src.gw.col_chunks,
+                "blockysize": src.gw.row_chunks,
+                "driver": "GTiff",
+                "sharing": False,
+                "compress": compression,
+            }
         profile["tiled"] = tile_size_is_correct(
             profile["blockxsize"], profile["blockysize"]
         )
-        with rio.open(out_path, mode="w", **profile):
+
+        with rio.open(self.out_path, mode="w", **profile):
             pass
-        self.dst = rio.open(out_path, mode="r+")
+
+        self.dst = rio.open(self.out_path, mode="r+")
 
     def write_on_epoch_end(
         self, trainer, pl_module, predictions, batch_indices
@@ -92,69 +93,32 @@ class LightningGTiffWriter(BasePredictionWriter):
         crop_batch: torch.Tensor,
         crop_type_batch: T.Union[torch.Tensor, None],
         batch_index: int,
-    ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, T.Union[torch.Tensor, None]
-    ]:
-        pad_slice2d = (
-            slice(
-                int(batch.row_pad_before[batch_index]),
-                int(batch.height[batch_index])
-                - int(batch.row_pad_after[batch_index]),
-            ),
-            slice(
-                int(batch.col_pad_before[batch_index]),
-                int(batch.width[batch_index])
-                - int(batch.col_pad_after[batch_index]),
-            ),
-        )
-        pad_slice3d = (
+    ) -> T.Dict[str, torch.Tensor]:
+
+        slice_2d = (
             slice(0, None),
             slice(
-                int(batch.row_pad_before[batch_index]),
-                int(batch.height[batch_index])
-                - int(batch.row_pad_after[batch_index]),
+                batch.row_before_to_pad[batch_index],
+                batch.row_before_to_pad[batch_index]
+                + batch.window_height[batch_index],
             ),
             slice(
-                int(batch.col_pad_before[batch_index]),
-                int(batch.width[batch_index])
-                - int(batch.col_pad_after[batch_index]),
+                batch.col_before_to_pad[batch_index],
+                batch.col_before_to_pad[batch_index]
+                + batch.window_width[batch_index],
             ),
         )
-        rheight = pad_slice2d[0].stop - pad_slice2d[0].start
-        rwidth = pad_slice2d[1].stop - pad_slice2d[1].start
+        distance_batch = distance_batch[slice_2d]
+        edge_batch = edge_batch[slice_2d]
+        crop_batch = crop_batch[slice_2d][1].unsqueeze(0)
+        crop_type_batch = torch.zeros_like(edge_batch)
 
-        def reshaper(x: torch.Tensor, channel_dims: int) -> torch.Tensor:
-            if channel_dims == 1:
-                return (
-                    x.reshape(
-                        int(batch.height[batch_index]),
-                        int(batch.width[batch_index]),
-                    )[pad_slice2d]
-                    .contiguous()
-                    .view(-1)[:, None]
-                )
-            else:
-                return (
-                    x.t()
-                    .reshape(
-                        channel_dims,
-                        int(batch.height[batch_index]),
-                        int(batch.width[batch_index]),
-                    )[pad_slice3d]
-                    .permute(1, 2, 0)
-                    .reshape(rheight * rwidth, channel_dims)
-                )
-
-        distance_batch = reshaper(distance_batch, channel_dims=1)
-        edge_batch = reshaper(edge_batch, channel_dims=1)
-        crop_batch = reshaper(crop_batch, channel_dims=2)
-        if crop_type_batch is not None:
-            num_classes = crop_type_batch.size(1)
-            crop_type_batch = reshaper(
-                crop_type_batch, channel_dims=num_classes
-            )
-
-        return distance_batch, edge_batch, crop_batch, crop_type_batch
+        return {
+            "dist": distance_batch,
+            "edge": edge_batch,
+            "mask": crop_batch,
+            "crop_type": crop_type_batch,
+        }
 
     def write_on_batch_end(
         self,
@@ -168,10 +132,9 @@ class LightningGTiffWriter(BasePredictionWriter):
     ):
         distance = prediction["dist"]
         edge = prediction["edge"]
-        crop = prediction["crop"]
-        crop_type = prediction["crop_type"]
-        for batch_index in batch.batch.unique():
-            mask = batch.batch == batch_index
+        crop = prediction["mask"]
+        crop_type = prediction.get("crop_type")
+        for batch_index in range(batch.x.shape[0]):
             w = Window(
                 row_off=int(batch.window_row_off[batch_index]),
                 col_off=int(batch.window_col_off[batch_index]),
@@ -184,34 +147,32 @@ class LightningGTiffWriter(BasePredictionWriter):
                 height=int(batch.window_pad_height[batch_index]),
                 width=int(batch.window_pad_width[batch_index]),
             )
-            (
-                distance_batch,
-                edge_batch,
-                crop_batch,
-                crop_type_batch,
-            ) = self.reshape_predictions(
+            batch_dict = self.reshape_predictions(
                 batch=batch,
-                distance_batch=distance[mask],
-                edge_batch=edge[mask],
-                crop_batch=crop[mask],
-                crop_type_batch=crop_type[mask]
+                distance_batch=distance[batch_index],
+                edge_batch=edge[batch_index],
+                crop_batch=crop[batch_index],
+                crop_type_batch=crop_type[batch_index]
                 if crop_type is not None
                 else None,
                 batch_index=batch_index,
             )
-            if crop_type_batch is None:
-                crop_type_batch = torch.zeros(
-                    (crop_batch.size(0), 2), dtype=crop_batch.dtype
+
+            stack = (
+                torch.cat(
+                    (
+                        batch_dict["dist"],
+                        batch_dict["edge"],
+                        batch_dict["mask"],
+                        batch_dict["crop_type"],
+                    ),
+                    dim=0,
                 )
-            mo = ModelOutputs(
-                distance=distance_batch,
-                edge=edge_batch,
-                crop=crop_batch,
-                crop_type=crop_type_batch,
-                instances=None,
-                apply_softmax=False,
+                .detach()
+                .cpu()
+                .numpy()
             )
-            stack = mo.stack_outputs(w, w_pad)
+
             stack = (stack * SCALE_FACTOR).clip(0, SCALE_FACTOR)
 
             with filelock.FileLock("./dst.lock"):

@@ -471,8 +471,10 @@ class EdgeDataset(Dataset):
 
         batch = Data.from_file(self.data_list_[idx])
 
-        # TODO: add scaling?
-        batch.x = batch.x.clip(1e-9, 1)
+        batch.x = (batch.x * 1e-4).clip(1e-9, 1)
+
+        if hasattr(batch, 'bdist'):
+            batch.bdist = batch.bdist * 1e-4
 
         if batch.y is not None:
             if self.rng.normal() > 1 - self.augment_prob:

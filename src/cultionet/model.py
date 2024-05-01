@@ -265,16 +265,16 @@ def setup_callbacks(
         every_n_epochs=1,
     )
     # Early stopping
-    early_stop_callback = EarlyStopping(
-        monitor="val_score",
-        min_delta=early_stopping_min_delta,
-        patience=early_stopping_patience,
-        mode="min",
-        check_on_train_epoch_end=False,
-    )
+    # early_stop_callback = EarlyStopping(
+    #     monitor="val_score",
+    #     min_delta=early_stopping_min_delta,
+    #     patience=early_stopping_patience,
+    #     mode="min",
+    #     check_on_train_epoch_end=False,
+    # )
     # Learning rate
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
-    callbacks = [lr_monitor, cb_train_loss, cb_val_loss, early_stop_callback]
+    callbacks = [lr_monitor, cb_train_loss, cb_val_loss]
     if stochastic_weight_averaging:
         callbacks.append(
             StochasticWeightAveraging(
@@ -743,6 +743,7 @@ def fit(
                 datamodule=data_module,
                 ckpt_path=ckpt_file if ckpt_file.is_file() else None,
             )
+
         if refine_model:
             refine_data_module = EdgeDataModule(
                 train_ds=dataset,
@@ -910,7 +911,6 @@ def predict_lightning(
     precision: int,
     num_classes: int,
     resampling: str,
-    ref_res: float,
     compression: str,
     is_transfer_model: bool = False,
     refine_pt: T.Optional[Path] = None,
@@ -918,7 +918,7 @@ def predict_lightning(
     reference_image = Path(reference_image)
     out_path = Path(out_path)
     ckpt_file = Path(ckpt)
-    assert ckpt_file.is_file(), "The checkpoint file does not exist."
+    assert ckpt_file.exists(), "The checkpoint file does not exist."
 
     data_module = EdgeDataModule(
         predict_ds=dataset,
@@ -930,7 +930,6 @@ def predict_lightning(
         reference_image=reference_image,
         out_path=out_path,
         num_classes=num_classes,
-        ref_res=ref_res,
         resampling=resampling,
         compression=compression,
     )
@@ -940,6 +939,7 @@ def predict_lightning(
         precision=precision,
         devices=devices,
         accelerator=device,
+        strategy='ddp',
         log_every_n_steps=0,
         logger=False,
     )
@@ -962,6 +962,7 @@ def predict_lightning(
             )
             geo_refine_model.load_state_dict(torch.load(refine_pt))
             geo_refine_model.eval()
+
     setattr(cultionet_lit_model, "temperature_lit_model", geo_refine_model)
 
     # Make predictions

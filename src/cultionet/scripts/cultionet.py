@@ -8,7 +8,9 @@ import json
 import logging
 import typing as T
 from abc import abstractmethod
+from collections import namedtuple
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 import filelock
@@ -22,6 +24,7 @@ import xarray as xr
 import yaml
 from geowombat.core import sort_images_by_date
 from geowombat.core.windows import get_window_offsets
+from joblib import delayed, parallel_backend
 from pytorch_lightning import seed_everything
 from rasterio.windows import Window
 from ray.actor import ActorHandle
@@ -30,13 +33,13 @@ from tqdm.dask import TqdmCallback
 
 import cultionet
 from cultionet.data.constant import SCALE_FACTOR
-from cultionet.data.create import create_dataset, create_predict_dataset
+from cultionet.data.create import create_predict_dataset, create_train_batch
 from cultionet.data.datasets import EdgeDataset
 from cultionet.data.utils import get_image_list_dims
 from cultionet.enums import CLISteps, DataColumns, ModelNames
 from cultionet.errors import TensorShapeError
 from cultionet.utils import model_preprocessing
-from cultionet.utils.logging import set_color_logger
+from cultionet.utils.logging import ParallelProgress, set_color_logger
 from cultionet.utils.normalize import NormValues
 from cultionet.utils.project_paths import ProjectPaths, setup_paths
 
@@ -449,8 +452,10 @@ def predict_image(args):
     ppaths = setup_paths(
         args.project_path, append_ts=True if args.append_ts == "y" else False
     )
+
     # Load the z-score norm values
-    data_values = torch.load(ppaths.norm_file)
+    norm_values = NormValues.from_file(ppaths.norm_file)
+
     with open(ppaths.classes_info_path, mode="r") as f:
         class_info = json.load(f)
 
@@ -463,10 +468,10 @@ def predict_image(args):
     if args.data_path is not None:
         ds = EdgeDataset(
             root=ppaths.predict_path,
-            data_means=data_values.mean,
-            data_stds=data_values.std,
-            pattern=f"data_{args.region}_{args.predict_year}*.pt",
+            norm_values=norm_values,
+            pattern=f"{args.region}_{args.start_date.replace('-', '')}_{args.end_date.replace('-', '')}*.pt",
         )
+
         # FIXME: could these be loaded from the model?
         if args.process == CLISteps.PREDICT_TRANSFER:
             # Transfer learning model checkpoint
@@ -485,7 +490,6 @@ def predict_image(args):
             devices=args.devices,
             precision=args.precision,
             num_classes=num_classes,
-            ref_res=ds[0].res,
             resampling=ds[0].resampling
             if hasattr(ds[0], 'resampling')
             else 'nearest',
@@ -496,6 +500,7 @@ def predict_image(args):
 
         if args.delete_dataset:
             ds.cleanup()
+
     else:
         try:
             tmp = int(args.grid_id)
@@ -526,10 +531,9 @@ def predict_image(args):
             if args.preload_data:
                 with TqdmCallback(desc="Loading data"):
                     time_series.load(num_workers=args.processes)
+
             # Get the image dimensions
-            nvars = model_preprocessing.VegetationIndices(
-                image_vis=config["image_vis"]
-            ).n_vis
+            nvars = len(config["image_vis"])
             nfeas, height, width = time_series.shape
             ntime = int(nfeas / nvars)
             windows = get_window_offsets(
@@ -579,7 +583,7 @@ def predict_image(args):
                     hidden_channels=args.hidden_channels,
                     num_classes=num_classes,
                     ts=time_series,
-                    data_values=data_values,
+                    data_values=norm_values,
                     ppaths=ppaths,
                     device=args.device,
                     scale_factor=SCALE_FACTOR,
@@ -626,7 +630,7 @@ def predict_image(args):
                     hidden_channels=args.hidden_channels,
                     num_classes=num_classes,
                     ts=ray.put(time_series),
-                    data_values=data_values,
+                    data_values=norm_values,
                     ppaths=ppaths,
                     device=args.device,
                     devices=args.devices,
@@ -675,33 +679,105 @@ def predict_image(args):
                     logger.exception(f"The predictions failed because {e}.")
 
 
-def cycle_data(
-    year_lists: list,
-    regions_lists: list,
-    project_path_lists: list,
-    ref_res_lists: list,
-):
-    for years, regions, project_path, ref_res in zip(
-        year_lists, regions_lists, project_path_lists, ref_res_lists
-    ):
-        for region in regions:
-            for image_year in years:
-                yield region, image_year, project_path, ref_res
+def create_one_id(
+    args: namedtuple,
+    config: dict,
+    ppaths: ProjectPaths,
+    region_df: gpd.GeoDataFrame,
+    polygon_df: gpd.GeoDataFrame,
+    processed_path: Path,
+) -> None:
+    """Creates a single dataset."""
+
+    row_id = processed_path.name
+
+    if args.destination == "predict":
+        end_date = pd.to_datetime(args.end_date)
+        end_year = (end_date - pd.DateOffset(months=1)).year
+    else:
+        # Get the grid
+        row_region_df = region_df.query(f"{DataColumns.GEOID} == '{row_id}'")
+        # Clip the polygons to the current grid
+        row_polygon_df = gpd.clip(polygon_df, row_region_df)
+
+        end_year = int(row_region_df[DataColumns.YEAR])
+
+    image_list = []
+    for image_vi in config["image_vis"]:
+        # Set the full path to the images
+        vi_path = ppaths.image_path.resolve().joinpath(
+            args.feature_pattern.format(region=row_id, image_vi=image_vi)
+        )
+
+        if not vi_path.exists():
+            raise NameError(f"The {image_vi} path is missing.")
+
+        # Get the requested time slice
+        ts_list = model_preprocessing.get_time_series_list(
+            vi_path,
+            end_year=end_year,
+            start_mmdd=config["start_mmdd"],
+            end_mmdd=config["end_mmdd"],
+            num_months=config["num_months"],
+            date_format=args.date_format,
+        )
+
+        if args.skip_index > 0:
+            ts_list = ts_list[:: args.skip_index]
+
+        image_list += ts_list
+
+    if image_list:
+        if args.destination == "predict":
+            create_predict_dataset(
+                image_list=image_list,
+                region=row_id,
+                process_path=ppaths.get_process_path(args.destination),
+                date_format=args.date_format,
+                gain=args.gain,
+                offset=args.offset,
+                ref_res=args.ref_res,
+                resampling=args.resampling,
+                window_size=args.window_size,
+                padding=args.padding,
+                num_workers=args.num_workers,
+                chunksize=args.chunksize,
+            )
+        else:
+            class_info = {
+                "max_crop_class": args.max_crop_class,
+                "edge_class": args.max_crop_class + 1,
+            }
+            with open(ppaths.classes_info_path, mode="w") as f:
+                f.write(json.dumps(class_info))
+
+            create_train_batch(
+                image_list=image_list,
+                df_grid=row_region_df,
+                df_polygons=row_polygon_df,
+                max_crop_class=args.max_crop_class,
+                region=row_id,
+                process_path=ppaths.get_process_path(args.destination),
+                date_format=args.date_format,
+                transforms=args.transforms,
+                gain=args.gain,
+                offset=args.offset,
+                ref_res=args.ref_res,
+                resampling=args.resampling,
+                num_workers=args.num_workers,
+                grid_size=args.grid_size,
+                crop_column=args.crop_column,
+                keep_crop_classes=args.keep_crop_classes,
+                replace_dict=args.replace_dict,
+            )
 
 
-def get_centroid_coords(
-    df: gpd.GeoDataFrame, dst_crs: T.Optional[str] = None
-) -> T.Tuple[float, float]:
-    """Gets the lon/lat or x/y coordinates of a centroid."""
-    centroid = df.to_crs(dst_crs).centroid
+def create_dataset(args):
+    """Creates a train or predict dataset."""
 
-    return float(centroid.x), float(centroid.y)
-
-
-def create_datasets(args):
     config = open_config(args.config_file)
 
-    ppaths = setup_paths(
+    ppaths: ProjectPaths = setup_paths(
         args.project_path,
         append_ts=True if args.append_ts == "y" else False,
     )
@@ -741,104 +817,28 @@ def create_datasets(args):
         ), f"The year column was not found in {region_file_path}."
 
     # Get processed ids
-    if args.time_series_path is not None:
+    if hasattr(args, 'time_series_path') and (
+        args.time_series_path is not None
+    ):
         processed_ids = [Path(args.time_series_path)]
     else:
         processed_ids = list(ppaths.image_path.resolve().glob('*'))
 
-    with tqdm(total=len(processed_ids), position=0, leave=True) as pbar:
-        for processed_path in processed_ids:
-            row_id = processed_path.name
+    partial_create_one_id = partial(
+        create_one_id,
+        args=args,
+        config=config,
+        ppaths=ppaths,
+        region_df=region_df,
+        polygon_df=polygon_df,
+    )
 
-            if args.destination == "predict":
-                end_year = args.predict_year
-            else:
-                # Get the grid
-                row_region_df = region_df.query(
-                    f"{DataColumns.GEOID} == '{row_id}'"
-                )
-                # Clip the polygons to the current grid
-                row_polygon_df = gpd.clip(polygon_df, row_region_df)
-
-                end_year = int(row_region_df[DataColumns.YEAR])
-
-            image_list = []
-            for image_vi in model_preprocessing.VegetationIndices(
-                image_vis=config["image_vis"]
-            ).image_vis:
-                # Set the full path to the images
-                vi_path = ppaths.image_path.resolve().joinpath(
-                    args.feature_pattern.format(
-                        region=row_id, image_vi=image_vi
-                    )
-                )
-
-                if not vi_path.exists():
-                    continue
-
-                # Get the requested time slice
-                ts_list = model_preprocessing.get_time_series_list(
-                    vi_path,
-                    end_year=end_year,
-                    start_mmdd=config["start_mmdd"],
-                    end_mmdd=config["end_mmdd"],
-                    num_months=config["num_months"],
-                    date_format=args.date_format,
-                )
-
-                if args.skip_index > 0:
-                    ts_list = ts_list[:: args.skip_index]
-
-                image_list += ts_list
-
-            if image_list:
-                if args.destination == "predict":
-                    create_predict_dataset(
-                        image_list=image_list,
-                        region=row_id,
-                        year=end_year,
-                        process_path=ppaths.get_process_path(args.destination),
-                        gain=args.gain,
-                        offset=args.offset,
-                        ref_res=args.ref_res,
-                        resampling=args.resampling,
-                        window_size=args.window_size,
-                        padding=args.padding,
-                        num_workers=args.num_workers,
-                        chunksize=args.chunksize,
-                    )
-                else:
-                    class_info = {
-                        "max_crop_class": args.max_crop_class,
-                        "edge_class": args.max_crop_class + 1,
-                    }
-                    with open(ppaths.classes_info_path, mode="w") as f:
-                        f.write(json.dumps(class_info))
-
-                    pbar = create_dataset(
-                        image_list=image_list,
-                        df_grid=row_region_df,
-                        df_polygons=row_polygon_df,
-                        max_crop_class=args.max_crop_class,
-                        region=row_id,
-                        year=end_year,
-                        process_path=ppaths.get_process_path(args.destination),
-                        transforms=args.transforms,
-                        gain=args.gain,
-                        offset=args.offset,
-                        ref_res=args.ref_res,
-                        resampling=args.resampling,
-                        num_workers=args.num_workers,
-                        grid_size=args.grid_size,
-                        instance_seg=args.instance_seg,
-                        zero_padding=args.zero_padding,
-                        crop_column=args.crop_column,
-                        keep_crop_classes=args.keep_crop_classes,
-                        replace_dict=args.replace_dict,
-                        pbar=pbar,
-                    )
-
-            pbar.update(1)
+    with parallel_backend(backend="loky", n_jobs=args.num_workers):
+        with ParallelProgress(total=len(processed_ids)) as parallel_pool:
+            parallel_pool(
+                delayed(partial_create_one_id)(processed_path=processed_path)
+                for processed_path in processed_ids
+            )
 
 
 def train_maskrcnn(args):
@@ -1325,6 +1325,10 @@ def main():
             )
 
     args = parser.parse_args()
+
+    if hasattr(args, "config_file") and (args.config_file is not None):
+        args.config_file = str(args.config_file)
+
     if args.process == CLISteps.CREATE_PREDICT:
         setattr(args, "destination", "predict")
 
@@ -1338,9 +1342,12 @@ def main():
 
     project_path = Path(args.project_path) / "ckpt"
     project_path.mkdir(parents=True, exist_ok=True)
+    command_path = Path(args.project_path) / "commands"
+    command_path.mkdir(parents=True, exist_ok=True)
     now = datetime.now()
+
     with open(
-        project_path
+        command_path
         / f"{args.process}_command_{now.strftime('%Y%m%d-%H%M')}.json",
         mode="w",
     ) as f:
@@ -1350,7 +1357,7 @@ def main():
         CLISteps.CREATE,
         CLISteps.CREATE_PREDICT,
     ):
-        create_datasets(args)
+        create_dataset(args)
     elif args.process == CLISteps.SKFOLDCV:
         spatial_kfoldcv(args)
     elif args.process in (

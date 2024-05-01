@@ -350,44 +350,25 @@ class CultioNet(nn.Module):
             else:
                 self.mask_model = TowerUNet(**unet3_kwargs)
 
-    def forward(self, data: Data) -> T.Dict[str, torch.Tensor]:
+    def forward(self, batch: Data) -> T.Dict[str, torch.Tensor]:
         # Transformer attention encoder
-        transformer_outputs = self.temporal_encoder(data.x)
+        transformer_outputs = self.temporal_encoder(batch.x)
 
         # Main stream
-        logits = self.mask_model(
-            data.x,
+        out = self.mask_model(
+            batch.x,
             temporal_encoding=transformer_outputs['encoded'],
         )
 
         classes_l2 = transformer_outputs['l2']
         classes_l3 = transformer_outputs['l3']
-        logits_distance = logits["dist"]
-        logits_edges = logits["edge"]
-        logits_crop = logits["mask"]
 
-        out = {
-            "dist": logits_distance,
-            "edge": logits_edges,
-            "crop": logits_crop,
-            "crop_type": None,
-            "classes_l2": classes_l2,
-            "classes_l3": classes_l3,
-        }
-
-        if logits.get("dist_3_1") is not None:
-            out["dist_3_1"] = logits["dist_3_1"]
-            out["dist_2_2"] = logits["dist_2_2"]
-            out["dist_1_3"] = logits["dist_1_3"]
-
-        if logits.get("mask_3_1") is not None:
-            out["crop_3_1"] = logits["mask_3_1"]
-            out["crop_2_2"] = logits["mask_2_2"]
-            out["crop_1_3"] = logits["mask_1_3"]
-
-        if logits.get("edge_3_1") is not None:
-            out["edge_3_1"] = logits["edge_3_1"]
-            out["edge_2_2"] = logits["edge_2_2"]
-            out["edge_1_3"] = logits["edge_1_3"]
+        out.update(
+            {
+                "crop_type": None,
+                "classes_l2": classes_l2,
+                "classes_l3": classes_l3,
+            }
+        )
 
         return out

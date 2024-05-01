@@ -23,27 +23,49 @@ class TowerUNetUpLayer(nn.Module):
         in_channels: int,
         out_channels: int,
         kernel_size: int = 3,
-        num_blocks: int = 1,
-        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
+        num_blocks: int = 2,
+        attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
+        res_block_type: str = ResBlockTypes.RES,
+        dilations: T.Sequence[int] = None,
+        resample_up: bool = True,
     ):
         super(TowerUNetUpLayer, self).__init__()
 
         self.up = UpSample()
 
-        self.conv = ResidualConv(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            num_blocks=num_blocks,
-            attention_weights=attention_weights,
-            activation_type=activation_type,
-        )
+        if resample_up:
+            self.up_conv = nn.ConvTranspose2d(
+                in_channels=in_channels,
+                out_channels=in_channels,
+                kernel_size=3,
+                stride=2,
+                padding=1,
+            )
+
+        if res_block_type == ResBlockTypes.RES:
+            self.conv = ResidualConv(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                num_blocks=num_blocks,
+                attention_weights=attention_weights,
+                activation_type=activation_type,
+            )
+        else:
+            self.conv = ResidualAConv(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                dilations=dilations,
+                attention_weights=attention_weights,
+                activation_type=activation_type,
+            )
 
     def forward(self, x: torch.Tensor, shape: tuple) -> torch.Tensor:
         if x.shape[-2:] != shape:
             x = self.up(
-                x,
+                self.up_conv(x),
                 size=shape,
                 mode="bilinear",
             )
@@ -60,8 +82,10 @@ class TowerUNetBlock(nn.Module):
         out_channels: int,
         tower: bool = False,
         kernel_size: int = 3,
-        num_blocks: int = 1,
-        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
+        num_blocks: int = 2,
+        attention_weights: T.Optional[str] = None,
+        res_block_type: str = ResBlockTypes.RES,
+        dilations: T.Sequence[int] = None,
         activation_type: str = "SiLU",
     ):
         super(TowerUNetBlock, self).__init__()
@@ -96,14 +120,24 @@ class TowerUNetBlock(nn.Module):
             )
             in_channels += up_channels
 
-        self.conv = ResidualConv(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            num_blocks=num_blocks,
-            attention_weights=attention_weights,
-            activation_type=activation_type,
-        )
+        if res_block_type == ResBlockTypes.RES:
+            self.conv = ResidualConv(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                num_blocks=num_blocks,
+                attention_weights=attention_weights,
+                activation_type=activation_type,
+            )
+        else:
+            self.conv = ResidualAConv(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                dilations=dilations,
+                attention_weights=attention_weights,
+                activation_type=activation_type,
+            )
 
     def forward(
         self,

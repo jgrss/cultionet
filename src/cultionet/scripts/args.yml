@@ -19,16 +19,15 @@ dates:
   start_date:
     short: sd
     long: start-date
-    help: The predict start date (mm-dd)
+    help: The start date (mm-dd or yyyy-mm-dd for predictions)
     kwargs:
       default: 01-01
   end_date:
     short: ed
     long: end-date
-    help: The predict start date (mm-dd)
+    help: The end date (mm-dd or yyyy-mm-dd for predictions)
     kwargs:
       default: 01-01
-
 
 shared_image:
   gain:
@@ -172,12 +171,6 @@ create:
     help: A dictionary of crop class remappings
 
 create_predict:
-  predict_year:
-    short: 'y'
-    long: year
-    help: The predict end year (yyyy)
-    kwargs:
-      type: '&int'
   window_size:
     short: w
     long: window-size
@@ -233,7 +226,7 @@ train_predict:
     long: dilations
     help: The dilations to use
     kwargs:
-      default: [2]
+      default: [1]
       nargs: '+'
       type: '&int'
   attention_weights:
@@ -290,7 +283,7 @@ train_predict:
     long: precision
     help: The model data precision
     kwargs:
-      default: '32'
+      default: '16-mixed'
   num_classes:
     short: ''
     long: num-classes
@@ -341,6 +334,8 @@ shared_partitions:
     short: ''
     long: spatial-partitions
     help: The spatial partitions for spatial k-fold cross-validation or regional training
+    kwargs:
+      default: 'yes'
   partition_column:
     short: ''
     long: partition-column
@@ -505,7 +500,7 @@ train:
     long: learning-rate
     help: The learning rate
     kwargs:
-      default: 1e-3
+      default: 0.01
       type: '&float'
   lr_scheduler:
     short: lrs
@@ -615,12 +610,6 @@ train:
       action: store_true
 
 predict:
-  predict_year:
-    short: 'y'
-    long: year
-    help: The predict end year (yyyy)
-    kwargs:
-      type: '&int'
   out_path:
     short: 'o'
     long: out-path

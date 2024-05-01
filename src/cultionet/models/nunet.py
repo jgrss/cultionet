@@ -11,7 +11,7 @@ import torch.nn as nn
 from einops.layers.torch import Rearrange
 
 from .. import nn as cunn
-from ..enums import ResBlockTypes
+from ..enums import AttentionTypes, ResBlockTypes
 from ..layers.weights import init_conv_weights
 
 
@@ -671,6 +671,68 @@ class ResUNet3Psi(nn.Module):
         return out
 
 
+class TowerFinal(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        num_classes: int,
+        mask_activation: T.Callable,
+        resample_factor: int = 0,
+    ):
+        super(TowerFinal, self).__init__()
+
+        self.up = cunn.UpSample()
+
+        if resample_factor > 1:
+            self.up_conv = nn.ConvTranspose2d(
+                in_channels=in_channels,
+                out_channels=in_channels,
+                kernel_size=3,
+                stride=resample_factor,
+                padding=1,
+            )
+
+        self.expand = nn.Conv2d(
+            in_channels, in_channels * 3, kernel_size=1, padding=0
+        )
+        self.final_dist = nn.Sequential(
+            nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
+            nn.Sigmoid(),
+        )
+        self.final_edge = nn.Sequential(
+            nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
+            cunn.SigmoidCrisp(),
+        )
+        self.final_mask = nn.Sequential(
+            nn.Conv2d(in_channels, num_classes, kernel_size=1, padding=0),
+            mask_activation,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        shape: T.Optional[tuple] = None,
+        suffix: str = "",
+    ) -> T.Dict[str, torch.Tensor]:
+        if shape is not None:
+            x = self.up(
+                self.up_conv(x),
+                size=shape,
+                mode="bilinear",
+            )
+
+        dist, edge, mask = torch.chunk(self.expand(x), 3, dim=1)
+        dist = self.final_dist(dist)
+        edge = self.final_edge(edge)
+        mask = self.final_mask(mask)
+
+        return {
+            f"dist{suffix}": dist,
+            f"edge{suffix}": edge,
+            f"mask{suffix}": mask,
+        }
+
+
 class TowerUNet(nn.Module):
     """Tower U-Net."""
 
@@ -683,14 +745,13 @@ class TowerUNet(nn.Module):
         dilations: T.Sequence[int] = None,
         activation_type: str = "SiLU",
         res_block_type: str = ResBlockTypes.RES,
-        attention_weights: T.Optional[str] = None,
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         mask_activation: T.Union[nn.Softmax, nn.Sigmoid] = nn.Softmax(dim=1),
         deep_supervision: bool = False,
     ):
         super(TowerUNet, self).__init__()
 
-        if attention_weights is None:
-            attention_weights = "spatial_channel"
+        self.deep_supervision = deep_supervision
 
         channels = [
             hidden_channels,
@@ -728,17 +789,17 @@ class TowerUNet(nn.Module):
         self.down_b = cunn.PoolResidualConv(
             channels[0],
             channels[1],
-            num_blocks=1,
             attention_weights=attention_weights,
             res_block_type=res_block_type,
+            dilations=dilations,
         )
         self.down_c = cunn.PoolResidualConv(
             channels[1],
             channels[2],
-            num_blocks=1,
             activation_type=activation_type,
             attention_weights=attention_weights,
             res_block_type=res_block_type,
+            dilations=dilations,
         )
         self.down_d = cunn.PoolResidualConv(
             channels[2],
@@ -748,48 +809,56 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             attention_weights=attention_weights,
             res_block_type=res_block_type,
+            dilations=[1],
         )
 
         # Up layers
-        self.up_e = cunn.TowerUNetUpLayer(
+        self.up_du = cunn.TowerUNetUpLayer(
             in_channels=channels[3],
             out_channels=up_channels,
             num_blocks=1,
             kernel_size=1,
             attention_weights=attention_weights,
             activation_type=activation_type,
+            res_block_type=res_block_type,
+            dilations=[1],
+            resample_up=False,
         )
-        self.up_f = cunn.TowerUNetUpLayer(
+        self.up_cu = cunn.TowerUNetUpLayer(
             in_channels=up_channels,
             out_channels=up_channels,
-            num_blocks=1,
             attention_weights=attention_weights,
             activation_type=activation_type,
+            res_block_type=res_block_type,
+            dilations=dilations,
         )
-        self.up_g = cunn.TowerUNetUpLayer(
+        self.up_bu = cunn.TowerUNetUpLayer(
             in_channels=up_channels,
             out_channels=up_channels,
-            num_blocks=1,
             attention_weights=attention_weights,
             activation_type=activation_type,
+            res_block_type=res_block_type,
+            dilations=dilations,
         )
-        self.up_h = cunn.TowerUNetUpLayer(
+        self.up_au = cunn.TowerUNetUpLayer(
             in_channels=up_channels,
             out_channels=up_channels,
-            num_blocks=2,
             attention_weights=attention_weights,
             activation_type=activation_type,
+            res_block_type=res_block_type,
+            dilations=dilations,
         )
 
         # Towers
-        self.tower_a = cunn.TowerUNetBlock(
+        self.tower_c = cunn.TowerUNetBlock(
             backbone_side_channels=channels[2],
             backbone_down_channels=channels[3],
             up_channels=up_channels,
             out_channels=up_channels,
-            num_blocks=1,
             attention_weights=attention_weights,
             activation_type=activation_type,
+            res_block_type=res_block_type,
+            dilations=dilations,
         )
 
         self.tower_b = cunn.TowerUNetBlock(
@@ -798,37 +867,43 @@ class TowerUNet(nn.Module):
             up_channels=up_channels,
             out_channels=up_channels,
             tower=True,
-            num_blocks=1,
             attention_weights=attention_weights,
             activation_type=activation_type,
+            res_block_type=res_block_type,
+            dilations=dilations,
         )
 
-        self.tower_c = cunn.TowerUNetBlock(
+        self.tower_a = cunn.TowerUNetBlock(
             backbone_side_channels=channels[0],
             backbone_down_channels=channels[1],
             up_channels=up_channels,
             out_channels=up_channels,
             tower=True,
-            num_blocks=2,
             attention_weights=attention_weights,
             activation_type=activation_type,
+            res_block_type=res_block_type,
+            dilations=dilations,
         )
 
-        self.expand = nn.Conv2d(
-            up_channels, up_channels * 3, kernel_size=1, padding=0
+        self.final_a = TowerFinal(
+            in_channels=up_channels,
+            num_classes=num_classes,
+            mask_activation=mask_activation,
         )
-        self.final_dist = nn.Sequential(
-            nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
-            nn.Sigmoid(),
-        )
-        self.final_edge = nn.Sequential(
-            nn.Conv2d(up_channels, 1, kernel_size=1, padding=0),
-            cunn.SigmoidCrisp(),
-        )
-        self.final_mask = nn.Sequential(
-            nn.Conv2d(up_channels, num_classes, kernel_size=1, padding=0),
-            mask_activation,
-        )
+
+        if self.deep_supervision:
+            self.final_b = TowerFinal(
+                in_channels=up_channels,
+                num_classes=num_classes,
+                mask_activation=mask_activation,
+                resample_factor=2,
+            )
+            self.final_c = TowerFinal(
+                in_channels=up_channels,
+                num_classes=num_classes,
+                mask_activation=mask_activation,
+                resample_factor=4,
+            )
 
         # Initialise weights
         self.apply(init_conv_weights)
@@ -837,10 +912,15 @@ class TowerUNet(nn.Module):
         self,
         x: torch.Tensor,
         temporal_encoding: T.Optional[torch.Tensor] = None,
-    ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
+    ) -> T.Dict[str, torch.Tensor]:
 
-        """x Shaped (B x C X T|D x H x W) temporal_encoding Shaped (B x C x H X
-        W)"""
+        """Forward pass.
+
+        Parameters
+        ==========
+        x
+            Shaped (B x C X T|D x H x W) temporal_encoding Shaped (B x C x H X W)
+        """
 
         embeddings = self.pre_unet(x, temporal_encoding=temporal_encoding)
 
@@ -851,42 +931,50 @@ class TowerUNet(nn.Module):
         x_d = self.down_d(x_c)
 
         # Up
-        x_e = self.up_e(x_d, shape=x_d.shape[-2:])
-        x_f = self.up_f(x_e, shape=x_c.shape[-2:])
-        x_g = self.up_g(x_f, shape=x_b.shape[-2:])
-        x_h = self.up_h(x_g, shape=x_a.shape[-2:])
+        x_du = self.up_du(x_d, shape=x_d.shape[-2:])
+        x_cu = self.up_cu(x_du, shape=x_c.shape[-2:])
+        x_bu = self.up_bu(x_cu, shape=x_b.shape[-2:])
+        x_au = self.up_au(x_bu, shape=x_a.shape[-2:])
 
-        x_tower_a = self.tower_a(
+        x_tower_c = self.tower_c(
             backbone_side=x_c,
             backbone_down=x_d,
-            side=x_f,
-            down=x_e,
+            side=x_cu,
+            down=x_du,
         )
         x_tower_b = self.tower_b(
             backbone_side=x_b,
             backbone_down=x_c,
-            side=x_g,
-            down=x_f,
-            down_tower=x_tower_a,
+            side=x_bu,
+            down=x_cu,
+            down_tower=x_tower_c,
         )
-        x_tower_c = self.tower_c(
+        x_tower_a = self.tower_a(
             backbone_side=x_a,
             backbone_down=x_b,
-            side=x_h,
-            down=x_g,
+            side=x_au,
+            down=x_bu,
             down_tower=x_tower_b,
         )
 
-        dist, edge, mask = torch.chunk(self.expand(x_tower_c), 3, dim=1)
-        dist = self.final_dist(dist)
-        edge = self.final_edge(edge)
-        mask = self.final_mask(mask)
+        out = self.final_a(x_tower_a)
 
-        return {
-            "dist": dist,
-            "edge": edge,
-            "mask": mask,
-        }
+        if self.deep_supervision:
+            out_c = self.final_c(
+                x_tower_c,
+                shape=x_tower_a.shape[-2:],
+                suffix="_c",
+            )
+            out_b = self.final_b(
+                x_tower_b,
+                shape=x_tower_a.shape[-2:],
+                suffix="_b",
+            )
+
+            out.update(out_b)
+            out.update(out_c)
+
+        return out
 
 
 if __name__ == '__main__':

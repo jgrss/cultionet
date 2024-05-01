@@ -3,12 +3,15 @@ image_vis:
   - gcvi
   - kndvi
 
-# The regions to process (start, end)
-regions: !!null
-
 # The region file path
 region_id_file: !!null
+polygon_file: !!null
 
+# Each year in `region_id_file` should correspond to the year of harvest
+# For US harvest year 2019, an end date of 12-31 would mean 2019-01-01 to 2020-01-01
+# For Argentina harvest year 2019, an end date of 07-01 would mean 2018-07-01 to 2019-07-01
 start_mmdd: '01-01'
 end_mmdd: '12-31'
+
+# The length of the time series
 num_months: 12

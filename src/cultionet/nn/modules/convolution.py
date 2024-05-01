@@ -468,9 +468,10 @@ class ResConvLayer(nn.Module):
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=kernel_size,
-                padding=kernel_size // 2,
+                padding=0 if kernel_size == 1 else dilations[0],
+                dilation=dilations[0],
                 activation_type=activation_type,
-                add_activation=True if num_blocks > 1 else False,
+                add_activation=True,
             )
         ]
 
@@ -481,10 +482,10 @@ class ResConvLayer(nn.Module):
                     in_channels=out_channels,
                     out_channels=out_channels,
                     kernel_size=kernel_size,
-                    padding=dilations[blk_idx],
+                    padding=0 if kernel_size == 1 else dilations[blk_idx],
                     dilation=dilations[blk_idx],
                     activation_type=activation_type,
-                    add_activation=True if blk_idx + 1 < num_blocks else False,
+                    add_activation=True,
                 )
                 for blk_idx in range(1, num_blocks)
             ]
@@ -503,8 +504,8 @@ class ResidualConv(nn.Module):
         in_channels: int,
         out_channels: int,
         kernel_size: int = 3,
-        num_blocks: int = 1,
-        attention_weights: T.Optional[AttentionTypes] = None,
+        num_blocks: int = 2,
+        attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
     ):
         super(ResidualConv, self).__init__()
@@ -536,6 +537,7 @@ class ResidualConv(nn.Module):
             num_blocks=num_blocks,
             activation_type=activation_type,
         )
+
         self.skip = None
         if in_channels != out_channels:
             # Conv2d -> BatchNorm2d
@@ -546,29 +548,33 @@ class ResidualConv(nn.Module):
                 padding=0,
                 add_activation=False,
             )
-        self.final_act = SetActivation(activation_type=activation_type)
+
+        if self.attention_weights is not None:
+            self.final_act = SetActivation(activation_type=activation_type)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
         if self.skip is not None:
             # Align channels
-            residual = self.skip(x)
-        residual = residual + self.seq(x)
+            out = self.skip(x)
+        else:
+            out = x
+
+        out = out + self.seq(x)
 
         if self.attention_weights is not None:
             # Get the attention weights
             if self.attention_weights == AttentionTypes.SPATIAL_CHANNEL:
                 # Get weights from the residual
-                attention = self.attention_conv(residual)
+                attention = self.attention_conv(out)
             elif self.attention_weights == AttentionTypes.FRACTAL:
                 # Get weights from the input
                 attention = self.attention_conv(x)
 
             # 1 + γA
             attention = 1.0 + self.gamma * attention
-            residual = residual * attention
+            out = out * attention
 
-        out = self.final_act(residual)
+            out = self.final_act(out)
 
         return out
 
@@ -631,8 +637,9 @@ class ResidualAConv(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
+        kernel_size: int = 3,
         dilations: T.List[int] = None,
-        attention_weights: str = None,
+        attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
     ):
         super(ResidualAConv, self).__init__()
@@ -662,13 +669,15 @@ class ResidualAConv(nn.Module):
                 ResConvLayer(
                     in_channels=in_channels,
                     out_channels=out_channels,
-                    dilations=dilations,
+                    kernel_size=kernel_size,
+                    dilations=[dilation] * 2,
                     activation_type=activation_type,
-                    num_blocks=1,
+                    num_blocks=2,
                 )
-                for _ in dilations
+                for dilation in dilations
             ]
         )
+
         self.skip = None
         if in_channels != out_channels:
             # Conv2d -> BatchNorm2d
@@ -679,31 +688,34 @@ class ResidualAConv(nn.Module):
                 padding=0,
                 add_activation=False,
             )
-        self.final_act = SetActivation(activation_type=activation_type)
+
+        if self.attention_weights is not None:
+            self.final_act = SetActivation(activation_type=activation_type)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
         if self.skip is not None:
             # Align channels
-            residual = self.skip(x)
+            out = self.skip(x)
+        else:
+            out = x
 
         for seq in self.res_modules:
-            residual = residual + seq(x)
+            out = out + seq(x)
 
         if self.attention_weights is not None:
             # Get the attention weights
             if self.attention_weights == AttentionTypes.SPATIAL_CHANNEL:
                 # Get weights from the residual
-                attention = self.attention_conv(residual)
+                attention = self.attention_conv(out)
             elif self.attention_weights == AttentionTypes.FRACTAL:
                 # Get weights from the input
                 attention = self.attention_conv(x)
 
             # 1 + γA
             attention = 1.0 + self.gamma * attention
-            residual = residual * attention
+            out = out * attention
 
-        out = self.final_act(residual)
+            out = self.final_act(out)
 
         return out
 
@@ -718,10 +730,11 @@ class PoolResidualConv(nn.Module):
         pool_size: int = 2,
         dropout: T.Optional[float] = None,
         kernel_size: int = 3,
-        num_blocks: int = 1,
-        attention_weights: T.Optional[AttentionTypes] = None,
+        num_blocks: int = 2,
+        attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
-        res_block_type: ResBlockTypes = ResBlockTypes.RES,
+        res_block_type: str = ResBlockTypes.RES,
+        dilations: T.Sequence[int] = None,
     ):
         super(PoolResidualConv, self).__init__()
 
@@ -754,6 +767,8 @@ class PoolResidualConv(nn.Module):
                 ResidualAConv(
                     in_channels,
                     out_channels,
+                    kernel_size=kernel_size,
+                    dilations=dilations,
                     attention_weights=attention_weights,
                     activation_type=activation_type,
                 )

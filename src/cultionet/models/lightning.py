@@ -359,7 +359,7 @@ class RefineLitModel(LightningModule):
     ):
         true_crop = self.set_true_labels(batch)
         # Predicted crop values are probabilities
-        loss = self.crop_loss(predictions["crop"], true_crop)
+        loss = self.crop_loss(predictions["mask"], true_crop)
 
         return loss
 
@@ -550,7 +550,7 @@ class LightningModuleMixin(LightningModule):
         }
 
         true_labels_dict = self.get_true_labels(
-            batch, crop_type=predictions["crop_type"]
+            batch, crop_type=predictions.get("crop_type")
         )
 
         loss = 0.0
@@ -572,26 +572,41 @@ class LightningModuleMixin(LightningModule):
 
         # Edge losses
         if self.deep_supervision:
-            dist_loss_deep = self.dist_loss_deep(
+            dist_loss_deep_b = self.dist_loss_deep_b(
                 predictions["dist_deep"], batch.bdist
             )
-            edge_loss_deep = self.edge_loss_deep(
+            edge_loss_deep_b = self.edge_loss_deep_b(
                 predictions["edge_deep"], true_labels_dict["true_edge"]
             )
-            crop_loss_deep = self.crop_loss_deep(
+            crop_loss_deep_b = self.crop_loss_deep_b(
+                predictions["crop_deep"], true_labels_dict["true_crop"]
+            )
+            dist_loss_deep_c = self.dist_loss_deep_c(
+                predictions["dist_deep"], batch.bdist
+            )
+            edge_loss_deep_c = self.edge_loss_deep_c(
+                predictions["edge_deep"], true_labels_dict["true_edge"]
+            )
+            crop_loss_deep_c = self.crop_loss_deep_c(
                 predictions["crop_deep"], true_labels_dict["true_crop"]
             )
 
-            weights["dist_loss_deep"] = 0.5
-            weights["edge_loss_deep"] = 0.5
-            weights["crop_loss_deep"] = 0.5
+            weights["dist_loss_deep_b"] = 0.25
+            weights["edge_loss_deep_b"] = 0.25
+            weights["crop_loss_deep_b"] = 0.25
+            weights["dist_loss_deep_c"] = 0.1
+            weights["edge_loss_deep_c"] = 0.1
+            weights["crop_loss_deep_c"] = 0.1
 
             # Main loss
             loss = (
                 loss
-                + dist_loss_deep * weights["dist_loss_deep"]
-                + edge_loss_deep * weights["edge_loss_deep"]
-                + crop_loss_deep * weights["crop_loss_deep"]
+                + dist_loss_deep_b * weights["dist_loss_deep_b"]
+                + edge_loss_deep_b * weights["edge_loss_deep_b"]
+                + crop_loss_deep_b * weights["crop_loss_deep_b"]
+                + dist_loss_deep_c * weights["dist_loss_deep_c"]
+                + edge_loss_deep_c * weights["edge_loss_deep_c"]
+                + crop_loss_deep_c * weights["crop_loss_deep_c"]
             )
 
         # Distance transform loss
@@ -606,7 +621,7 @@ class LightningModuleMixin(LightningModule):
 
         # Crop mask loss
         crop_loss = self.crop_loss(
-            predictions["crop"], true_labels_dict["true_crop"]
+            predictions["mask"], true_labels_dict["true_crop"]
         )
         loss = loss + crop_loss * weights["crop_loss"]
 
@@ -645,16 +660,18 @@ class LightningModuleMixin(LightningModule):
         loss = self.calc_loss(batch, predictions)
 
         dist_mae = self.dist_mae(
-            predictions["dist"].contiguous().view(-1),
-            batch.bdist.contiguous().view(-1),
+            # B x 1 x H x W
+            predictions["dist"].squeeze(dim=1),
+            # B x H x W
+            batch.bdist,
         )
         dist_mse = self.dist_mse(
-            predictions["dist"].contiguous().view(-1),
-            batch.bdist.contiguous().view(-1),
+            predictions["dist"].squeeze(dim=1),
+            batch.bdist,
         )
         # Get the class labels
         edge_ypred = self.probas_to_labels(predictions["edge"])
-        crop_ypred = self.probas_to_labels(predictions["crop"])
+        crop_ypred = self.probas_to_labels(predictions["mask"])
         # Get the true edge and crop labels
         true_labels_dict = self.get_true_labels(
             batch, crop_type=predictions["crop_type"]
@@ -828,9 +845,12 @@ class LightningModuleMixin(LightningModule):
         self.crop_loss = TanimotoDistLoss()
 
         if self.deep_supervision:
-            self.dist_loss_deep = TanimotoDistLoss(one_hot_targets=False)
-            self.edge_loss_deep = TanimotoDistLoss()
-            self.crop_loss_deep = TanimotoDistLoss()
+            self.dist_loss_deep_b = TanimotoDistLoss(one_hot_targets=False)
+            self.edge_loss_deep_b = TanimotoDistLoss()
+            self.crop_loss_deep_b = TanimotoDistLoss()
+            self.dist_loss_deep_c = TanimotoDistLoss(one_hot_targets=False)
+            self.edge_loss_deep_c = TanimotoDistLoss()
+            self.crop_loss_deep_c = TanimotoDistLoss()
 
         # Crop Temporal encoding losses
         self.classes_l2_loss = TanimotoDistLoss()

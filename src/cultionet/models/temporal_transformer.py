@@ -63,16 +63,16 @@ class MultiHeadAttention(nn.Module):
     Modified from github.com/jadore801120/attention-is-all-you-need-pytorch
     """
 
-    def __init__(self, num_head: int, d_in: int, dropout: float = 0.1):
+    def __init__(self, d_model: int, num_head: int, dropout: float = 0.1):
         super(MultiHeadAttention, self).__init__()
 
         self.num_head = num_head
-        d_k = d_in // num_head
+        d_k = d_model // num_head
         scale = 1.0 / d_k**0.5
 
-        self.proj_query = nn.Linear(d_in, d_in)
-        self.proj_key = nn.Linear(d_in, d_in)
-        self.proj_value = nn.Linear(d_in, d_in)
+        self.proj_query = nn.Linear(d_model, d_model)
+        self.proj_key = nn.Linear(d_model, d_model)
+        self.proj_value = nn.Linear(d_model, d_model)
 
         self.scaled_attention = ScaledDotProductAttention(
             scale, dropout=dropout
@@ -80,7 +80,7 @@ class MultiHeadAttention(nn.Module):
 
         self.final = nn.Sequential(
             Rearrange('head b t c -> b t (head c)'),
-            nn.LayerNorm(d_in),
+            nn.LayerNorm(d_model),
         )
 
     def split(self, x: torch.Tensor) -> torch.Tensor:
@@ -113,7 +113,75 @@ class MultiHeadAttention(nn.Module):
         output = self.final(output)
         output = output + residual
 
-        return output, attention
+        return output
+
+
+class PositionWiseFeedForward(nn.Module):
+    def __init__(self, d_model: int):
+        super(PositionWiseFeedForward, self).__init__()
+
+        self.fc1 = nn.Linear(d_model, d_model)
+        self.fc2 = nn.Linear(d_model, d_model)
+        self.act = nn.GELU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.fc2(self.act(self.fc1(x)))
+
+
+class EncoderLayer(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_head: int,
+        dropout: float = 0.1,
+    ):
+        super(EncoderLayer, self).__init__()
+
+        self.self_attn = MultiHeadAttention(
+            d_model=d_model, num_head=num_head, dropout=dropout
+        )
+        self.feed_forward = PositionWiseFeedForward(d_model)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        attn_output = self.self_attn(x, x, x)
+        x = self.norm1(x + self.dropout(attn_output))
+        ff_output = self.feed_forward(x)
+        x = self.norm2(x + self.dropout(ff_output))
+
+        return x
+
+
+class Transformer(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_head: int,
+        num_layers: int,
+        dropout: float = 0.1,
+    ):
+        super(Transformer, self).__init__()
+
+        self.encoder_layers = nn.ModuleList(
+            [
+                EncoderLayer(
+                    d_model=d_model,
+                    num_head=num_head,
+                    dropout=dropout,
+                )
+                for _ in range(num_layers)
+            ]
+        )
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        output = x
+        for enc_layer in self.encoder_layers:
+            output = enc_layer(output)
+
+        return output
 
 
 class InLayer(nn.Module):
@@ -213,18 +281,25 @@ class TemporalTransformer(nn.Module):
 
         self.layernorm = nn.LayerNorm(d_model)
 
-        encoder_layer = nn.TransformerEncoderLayer(
+        # BUG: https://github.com/Lightning-AI/pytorch-lightning/issues/15006
+        # encoder_layer = nn.TransformerEncoderLayer(
+        #     d_model=d_model,
+        #     nhead=num_head,
+        #     dim_feedforward=d_model * 2,
+        #     dropout=dropout,
+        #     activation='gelu',
+        #     batch_first=True,
+        #     norm_first=False,
+        #     bias=True,
+        # )
+        # self.transformer_encoder = nn.TransformerEncoder(
+        #     encoder_layer, num_layers=num_layers, norm=nn.LayerNorm(d_model)
+        # )
+        self.transformer_encoder = Transformer(
             d_model=d_model,
-            nhead=num_head,
-            dim_feedforward=d_model * 2,
+            num_head=num_head,
+            num_layers=num_layers,
             dropout=dropout,
-            activation='gelu',
-            batch_first=True,
-            norm_first=False,
-            bias=True,
-        )
-        self.transformer_encoder = nn.TransformerEncoder(
-            encoder_layer, num_layers=num_layers, norm=nn.LayerNorm(d_model)
         )
 
         self.final = nn.Conv2d(
@@ -251,21 +326,6 @@ class TemporalTransformer(nn.Module):
         )
 
         self.apply(init_attention_weights)
-
-    def reshape_coordinates(
-        self,
-        coordinates: torch.Tensor,
-        batch_size: int,
-        height: int,
-        width: int,
-    ) -> torch.Tensor:
-        return einops.rearrange(
-            torch.tile(coordinates[:, None], (1, height * width)),
-            'b (h w) -> (b h w) 1',
-            b=batch_size,
-            h=height,
-            w=width,
-        )
 
     def forward(self, x: torch.Tensor) -> dict:
         batch_size, num_channels, num_time, height, width = x.shape
