@@ -764,7 +764,7 @@ def create_one_id(
                 offset=args.offset,
                 ref_res=args.ref_res,
                 resampling=args.resampling,
-                num_workers=args.num_workers,
+                num_workers=1,
                 grid_size=args.grid_size,
                 crop_column=args.crop_column,
                 keep_crop_classes=args.keep_crop_classes,
@@ -833,7 +833,10 @@ def create_dataset(args):
         polygon_df=polygon_df,
     )
 
-    with parallel_config(backend="loky", n_jobs=args.num_workers):
+    with parallel_config(
+        backend="loky",
+        n_jobs=1 if args.destination == "predict" else args.num_workers,
+    ):
         with ParallelProgress(
             tqdm_params={
                 "total": len(processed_ids),

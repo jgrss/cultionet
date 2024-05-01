@@ -85,32 +85,18 @@ class LightningGTiffWriter(BasePredictionWriter):
     ):
         self.dst.close()
 
-    def reshape_predictions(
+    def slice_predictions(
         self,
-        batch: Data,
+        batch_slice: tuple,
         distance_batch: torch.Tensor,
         edge_batch: torch.Tensor,
         crop_batch: torch.Tensor,
         crop_type_batch: T.Union[torch.Tensor, None],
-        batch_index: int,
     ) -> T.Dict[str, torch.Tensor]:
 
-        slice_2d = (
-            slice(0, None),
-            slice(
-                batch.row_before_to_pad[batch_index],
-                batch.row_before_to_pad[batch_index]
-                + batch.window_height[batch_index],
-            ),
-            slice(
-                batch.col_before_to_pad[batch_index],
-                batch.col_before_to_pad[batch_index]
-                + batch.window_width[batch_index],
-            ),
-        )
-        distance_batch = distance_batch[slice_2d]
-        edge_batch = edge_batch[slice_2d]
-        crop_batch = crop_batch[slice_2d][1].unsqueeze(0)
+        distance_batch = distance_batch[batch_slice]
+        edge_batch = edge_batch[batch_slice]
+        crop_batch = crop_batch[batch_slice][1].unsqueeze(0)
         crop_type_batch = torch.zeros_like(edge_batch)
 
         return {
@@ -119,6 +105,19 @@ class LightningGTiffWriter(BasePredictionWriter):
             "mask": crop_batch,
             "crop_type": crop_type_batch,
         }
+
+    def get_batch_slice(self, batch: Data, batch_index: int) -> tuple:
+        return (
+            slice(0, None),
+            slice(
+                batch.padding[batch_index],
+                batch.padding[batch_index] + batch.window_height[batch_index],
+            ),
+            slice(
+                batch.padding[batch_index],
+                batch.padding[batch_index] + batch.window_width[batch_index],
+            ),
+        )
 
     def write_on_batch_end(
         self,
@@ -135,27 +134,23 @@ class LightningGTiffWriter(BasePredictionWriter):
         crop = prediction["mask"]
         crop_type = prediction.get("crop_type")
         for batch_index in range(batch.x.shape[0]):
-            w = Window(
+            write_window = Window(
                 row_off=int(batch.window_row_off[batch_index]),
                 col_off=int(batch.window_col_off[batch_index]),
                 height=int(batch.window_height[batch_index]),
                 width=int(batch.window_width[batch_index]),
             )
-            w_pad = Window(
-                row_off=int(batch.window_pad_row_off[batch_index]),
-                col_off=int(batch.window_pad_col_off[batch_index]),
-                height=int(batch.window_pad_height[batch_index]),
-                width=int(batch.window_pad_width[batch_index]),
-            )
-            batch_dict = self.reshape_predictions(
-                batch=batch,
+
+            batch_slice = self.get_batch_slice(batch, batch_index=batch_index)
+
+            batch_dict = self.slice_predictions(
+                batch_slice=batch_slice,
                 distance_batch=distance[batch_index],
                 edge_batch=edge[batch_index],
                 crop_batch=crop[batch_index],
                 crop_type_batch=crop_type[batch_index]
                 if crop_type is not None
                 else None,
-                batch_index=batch_index,
             )
 
             stack = (
@@ -179,5 +174,5 @@ class LightningGTiffWriter(BasePredictionWriter):
                 self.dst.write(
                     stack,
                     indexes=range(1, self.dst.profile["count"] + 1),
-                    window=w,
+                    window=write_window,
                 )

@@ -1,5 +1,4 @@
 import typing as T
-import warnings
 from functools import partial
 from pathlib import Path
 
@@ -11,23 +10,19 @@ import joblib
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn.functional as F
 import xarray as xr
 from affine import Affine
 from geowombat.core import polygon_to_array
 from geowombat.core.windows import get_window_offsets
-from joblib import delayed, parallel_backend
+from joblib import Parallel, delayed, parallel_backend
 from rasterio.warp import calculate_default_transform
 from rasterio.windows import Window, from_bounds
 from scipy.ndimage import label as nd_label
 from skimage.measure import regionprops
 from threadpoolctl import threadpool_limits
-from tqdm.auto import tqdm
 
-from ..augment.augmenters import AugmenterMapping, Augmenters
-from ..errors import TopologyClipError
+from ..augment.augmenters import AugmenterMapping
 from ..utils.logging import set_color_logger
-from ..utils.model_preprocessing import TqdmParallel
 from .data import Data, LabeledData
 from .utils import get_image_list_dims
 
@@ -700,6 +695,7 @@ def create_and_save_window(
         x=x,
         start_year=[start_date],
         end_year=[end_date],
+        padding=[padding],
         window_row_off=[w.row_off],
         window_col_off=[w.col_off],
         window_height=[w.height],
@@ -727,6 +723,7 @@ def create_and_save_window(
     )
 
 
+@threadpool_limits.wrap(limits=1, user_api="blas")
 def create_predict_dataset(
     image_list: T.List[T.List[T.Union[str, Path]]],
     region: str,
@@ -742,81 +739,62 @@ def create_predict_dataset(
     chunksize: int = 100,
     compress_method: T.Union[int, str] = 'zlib',
 ):
-    with threadpool_limits(limits=1, user_api="blas"):
-        with gw.config.update(ref_res=ref_res):
-            with gw.open(
-                image_list,
-                stack_dim="band",
-                band_names=list(range(1, len(image_list) + 1)),
+    with gw.config.update(ref_res=ref_res):
+        with gw.open(
+            image_list,
+            stack_dim="band",
+            band_names=list(range(1, len(image_list) + 1)),
+            resampling=resampling,
+            chunks=512,
+        ) as src_ts:
+
+            windows = get_window_offsets(
+                src_ts.gw.nrows,
+                src_ts.gw.ncols,
+                window_size,
+                window_size,
+                padding=(padding, padding, padding, padding),
+            )
+
+            num_time, num_bands = get_image_list_dims(image_list, src_ts)
+
+            time_series: xr.DataArray = reshape_and_mask_array(
+                data=src_ts,
+                num_time=num_time,
+                num_bands=num_bands,
+                gain=gain,
+                offset=offset,
+            )
+
+            partial_create_and_save_window = partial(
+                create_and_save_window,
+                write_path=process_path,
+                res=ref_res,
                 resampling=resampling,
-                chunks=512,
-            ) as src_ts:
+                region=region,
+                start_date=pd.to_datetime(
+                    Path(image_list[0]).stem, format=date_format
+                ).strftime("%Y%m%d"),
+                end_date=pd.to_datetime(
+                    Path(image_list[-1]).stem, format=date_format
+                ).strftime("%Y%m%d"),
+                window_size=window_size,
+                padding=padding,
+                compress_method=compress_method,
+                gain=gain,
+            )
 
-                windows = get_window_offsets(
-                    src_ts.gw.nrows,
-                    src_ts.gw.ncols,
-                    window_size,
-                    window_size,
-                    padding=(padding, padding, padding, padding),
-                )
-
-                num_time, num_bands = get_image_list_dims(image_list, src_ts)
-
-                time_series: xr.DataArray = reshape_and_mask_array(
-                    data=src_ts,
-                    num_time=num_time,
-                    num_bands=num_bands,
-                    gain=gain,
-                    offset=offset,
-                )
-
-                partial_create_and_save_window = partial(
-                    create_and_save_window,
-                    write_path=process_path,
-                    res=ref_res,
-                    resampling=resampling,
-                    region=region,
-                    start_date=pd.to_datetime(
-                        Path(image_list[0]).stem, format=date_format
-                    ).strftime("%Y%m%d"),
-                    end_date=pd.to_datetime(
-                        Path(image_list[-1]).stem, format=date_format
-                    ).strftime("%Y%m%d"),
-                    window_size=window_size,
-                    padding=padding,
-                    compress_method=compress_method,
-                    gain=gain,
-                )
-
-                with tqdm(
-                    total=len(windows),
-                    desc="Creating prediction windows",
-                    position=1,
-                ) as pbar_total:
-                    with parallel_backend(backend="loky", n_jobs=num_workers):
-                        for window_chunk in get_window_chunk(
-                            windows, chunksize
-                        ):
-                            with TqdmParallel(
-                                tqdm_kwargs={
-                                    "total": len(window_chunk),
-                                    "desc": "Window chunks",
-                                    "position": 2,
-                                    "leave": False,
-                                },
-                                temp_folder="/tmp",
-                            ) as pool:
-                                __ = pool(
-                                    delayed(partial_create_and_save_window)(
-                                        darray=read_slice(
-                                            time_series, window_pad
-                                        ),
-                                        w=window,
-                                        w_pad=window_pad,
-                                    )
-                                    for window, window_pad in window_chunk
-                                )
-                            pbar_total.update(len(window_chunk))
+            with parallel_backend(backend="threading", n_jobs=num_workers):
+                for window_chunk in get_window_chunk(windows, chunksize):
+                    with Parallel(temp_folder="/tmp") as pool:
+                        __ = pool(
+                            delayed(partial_create_and_save_window)(
+                                darray=read_slice(time_series, window_pad),
+                                w=window,
+                                w_pad=window_pad,
+                            )
+                            for window, window_pad in window_chunk
+                        )
 
 
 def get_reference_bounds(
