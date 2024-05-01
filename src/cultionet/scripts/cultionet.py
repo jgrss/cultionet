@@ -24,7 +24,7 @@ import xarray as xr
 import yaml
 from geowombat.core import sort_images_by_date
 from geowombat.core.windows import get_window_offsets
-from joblib import delayed, parallel_backend
+from joblib import delayed, parallel_config
 from pytorch_lightning import seed_everything
 from rasterio.windows import Window
 from ray.actor import ActorHandle
@@ -833,8 +833,14 @@ def create_dataset(args):
         polygon_df=polygon_df,
     )
 
-    with parallel_backend(backend="loky", n_jobs=args.num_workers):
-        with ParallelProgress(total=len(processed_ids)) as parallel_pool:
+    with parallel_config(backend="loky", n_jobs=args.num_workers):
+        with ParallelProgress(
+            tqdm_params={
+                "total": len(processed_ids),
+                "desc": f"Creating {args.destination} files",
+                "colour": "green",
+            },
+        ) as parallel_pool:
             parallel_pool(
                 delayed(partial_create_one_id)(processed_path=processed_path)
                 for processed_path in processed_ids
