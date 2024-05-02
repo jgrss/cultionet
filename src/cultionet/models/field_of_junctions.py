@@ -18,7 +18,7 @@ class FieldOfJunctions(nn.Module):
         in_channels: int,
         height: int,
         width: int,
-        patch_size: int = 16,
+        patch_size: int = 8,
         stride: int = 1,
         nvals: int = 31,
         delta: float = 0.05,
@@ -64,11 +64,13 @@ class FieldOfJunctions(nn.Module):
         self.params = nn.Parameter(torch.cat([angles, x0y0], dim=1))
 
     def forward(self, x: torch.Tensor) -> T.Dict[str, torch.Tensor]:
-        batch_size, in_channels, height, width = x.shape
+        batch_size, in_channels, in_height, in_width = x.shape
 
-        if (height, width) != (self.height, self.width):
-            row_pad = (self.height - height) // 2
-            col_pad = (self.width - width) // 2
+        row_pad = 0
+        col_pad = 0
+        if (in_height, in_width) != (self.height, self.width):
+            row_pad = (self.height - in_height) // 2
+            col_pad = (self.width - in_width) // 2
             x = F.pad(
                 x,
                 (row_pad, row_pad, col_pad, col_pad),
@@ -126,7 +128,7 @@ class FieldOfJunctions(nn.Module):
         )[: self.nvals]
         x0_y0_range = torch.linspace(-3.0, 3.0, self.nvals, device=x.device)
 
-        params = self.params + 0
+        params = self.params.clone()
 
         # Run one step of Algorithm 2, sequentially improving each coordinate
         for i in range(5):
@@ -180,6 +182,8 @@ class FieldOfJunctions(nn.Module):
                     ),
                 ]
 
+        self.params.data = params
+
         # Update global boundaries and image
         distances, colors, patches = self.get_distances_and_patches(
             params,
@@ -198,6 +202,14 @@ class FieldOfJunctions(nn.Module):
         )
         global_boundaries = self.final_boundaries(global_boundaries)
         # smoothed_image = self.final_image(smoothed_image)
+
+        if row_pad > 0:
+            global_boundaries = global_boundaries[
+                :,
+                :,
+                row_pad : row_pad + in_height,
+                col_pad : col_pad + in_width,
+            ]
 
         return global_boundaries
 

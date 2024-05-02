@@ -707,7 +707,7 @@ class TowerFinal(nn.Module):
                     in_channels, 1, kernel_size=1, padding=0, bias=False
                 ),
                 nn.BatchNorm2d(1),
-                nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
+                nn.Conv2d(1, 1, kernel_size=1, padding=0),
                 cunn.SigmoidCrisp(),
             )
         else:
@@ -771,13 +771,13 @@ class TowerUNet(nn.Module):
 
         self.deep_supervision = deep_supervision
 
-        self.field_of_junctions = FieldOfJunctions(
-            in_channels=hidden_channels,
-            # NOTE: setup for padding of 5 x 5
-            # TODO: set this as a parameter
-            height=110,
-            width=110,
-        )
+        # self.field_of_junctions = FieldOfJunctions(
+        #     in_channels=hidden_channels,
+        #     # NOTE: setup for padding of 5 x 5
+        #     # TODO: set this as a parameter
+        #     height=110,
+        #     width=110,
+        # )
 
         channels = [
             hidden_channels,
@@ -915,7 +915,7 @@ class TowerUNet(nn.Module):
             in_channels=up_channels,
             num_classes=num_classes,
             mask_activation=mask_activation,
-            foj_boundaries=True,
+            foj_boundaries=False,
         )
 
         if self.deep_supervision:
