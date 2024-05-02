@@ -777,11 +777,6 @@ class TowerUNet(nn.Module):
             # TODO: set this as a parameter
             height=110,
             width=110,
-            patch_size=8,
-            stride=1,
-            nvals=31,
-            delta=0.05,
-            eta=0.01,
         )
 
         channels = [

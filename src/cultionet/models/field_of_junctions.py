@@ -16,9 +16,9 @@ class FieldOfJunctions(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        patch_size: int,
         height: int,
         width: int,
+        patch_size: int = 16,
         stride: int = 1,
         nvals: int = 31,
         delta: float = 0.05,
