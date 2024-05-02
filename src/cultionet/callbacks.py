@@ -10,7 +10,6 @@ from rasterio.windows import Window
 
 from .data.constant import SCALE_FACTOR
 from .data.data import Data
-from .utils.reshape import ModelOutputs
 
 
 def tile_size_is_correct(

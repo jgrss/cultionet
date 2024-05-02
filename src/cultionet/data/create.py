@@ -453,22 +453,14 @@ class ImageVariables:
         crop_column: str,
         replace_dict: dict,
     ) -> gpd.GeoDataFrame:
-        # Recode labels
-        for crop_class in df_polygons_grid[crop_column].unique():
-            if crop_class not in list(replace_dict.keys()):
-                df_polygons_grid[crop_column] = df_polygons_grid[
-                    crop_column
-                ].replace({crop_class: -999})
+        """Recodes polygon labels."""
 
-        replace_dict[-999] = 1
         df_polygons_grid[crop_column] = df_polygons_grid[crop_column].replace(
-            replace_dict
+            to_replace=replace_dict
         )
 
         # Remove any non-crop polygons
-        df_polygons_grid = df_polygons_grid.query(f"{crop_column} != 0")
-
-        return df_polygons_grid
+        return df_polygons_grid.query(f"{crop_column} != 0")
 
     @staticmethod
     def get_default_arrays(num_rows: int, num_cols: int) -> tuple:
@@ -890,7 +882,7 @@ def create_train_batch(
         Path(image_list[0]).stem, format=date_format
     ).strftime("%Y%m%d")
     end_date = pd.to_datetime(
-        Path(image_list[0]).stem, format=date_format
+        Path(image_list[-1]).stem, format=date_format
     ).strftime("%Y%m%d")
 
     uid_format = "{REGION_ID}_{START_DATE}_{END_DATE}_none"

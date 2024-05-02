@@ -7,25 +7,6 @@ import torch.nn.functional as F
 from rasterio.windows import Window
 
 
-def nd_to_columns(data, layers, rows, columns):
-    """Reshapes an array from nd layout to [samples (rows*columns) x
-    dimensions]"""
-    if layers == 1:
-        return np.ascontiguousarray(data.flatten()[:, np.newaxis])
-    else:
-        return np.ascontiguousarray(
-            data.transpose(1, 2, 0).reshape(rows * columns, layers)
-        )
-
-
-def columns_to_nd(data, layers, rows, columns):
-    """Reshapes an array from columns layout to [layers x rows x columns]"""
-    if layers == 1:
-        return np.ascontiguousarray(data.reshape(columns, rows).T)
-    else:
-        return np.ascontiguousarray(data.T.reshape(layers, rows, columns))
-
-
 @attr.s
 class ModelOutputs(object):
     """A class for reshaping of the model output estimates."""

@@ -13,6 +13,7 @@ from einops.layers.torch import Rearrange
 from .. import nn as cunn
 from ..enums import AttentionTypes, ResBlockTypes
 from ..layers.weights import init_conv_weights
+from .field_of_junctions import FieldOfJunctions
 
 
 class DepthwiseSeparableConv(nn.Module):
@@ -678,6 +679,7 @@ class TowerFinal(nn.Module):
         num_classes: int,
         mask_activation: T.Callable,
         resample_factor: int = 0,
+        foj_boundaries: bool = False,
     ):
         super(TowerFinal, self).__init__()
 
@@ -699,10 +701,21 @@ class TowerFinal(nn.Module):
             nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
             nn.Sigmoid(),
         )
-        self.final_edge = nn.Sequential(
-            nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
-            cunn.SigmoidCrisp(),
-        )
+        if foj_boundaries:
+            self.final_edge = nn.Sequential(
+                nn.Conv2d(
+                    in_channels, 1, kernel_size=1, padding=0, bias=False
+                ),
+                nn.BatchNorm2d(1),
+                nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
+                cunn.SigmoidCrisp(),
+            )
+        else:
+            self.final_edge = nn.Sequential(
+                nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
+                cunn.SigmoidCrisp(),
+            )
+
         self.final_mask = nn.Sequential(
             nn.Conv2d(in_channels, num_classes, kernel_size=1, padding=0),
             mask_activation,
@@ -713,6 +726,7 @@ class TowerFinal(nn.Module):
         x: torch.Tensor,
         shape: T.Optional[tuple] = None,
         suffix: str = "",
+        foj_boundaries: T.Optional[torch.Tensor] = None,
     ) -> T.Dict[str, torch.Tensor]:
         if shape is not None:
             x = self.up(
@@ -722,6 +736,10 @@ class TowerFinal(nn.Module):
             )
 
         dist, edge, mask = torch.chunk(self.expand(x), 3, dim=1)
+
+        if foj_boundaries is not None:
+            edge = edge + foj_boundaries
+
         dist = self.final_dist(dist)
         edge = self.final_edge(edge)
         mask = self.final_mask(mask)
@@ -752,6 +770,19 @@ class TowerUNet(nn.Module):
         super(TowerUNet, self).__init__()
 
         self.deep_supervision = deep_supervision
+
+        self.field_of_junctions = FieldOfJunctions(
+            in_channels=hidden_channels,
+            # NOTE: setup for padding of 5 x 5
+            # TODO: set this as a parameter
+            height=110,
+            width=110,
+            patch_size=8,
+            stride=1,
+            nvals=31,
+            delta=0.05,
+            eta=0.01,
+        )
 
         channels = [
             hidden_channels,
@@ -889,6 +920,7 @@ class TowerUNet(nn.Module):
             in_channels=up_channels,
             num_classes=num_classes,
             mask_activation=mask_activation,
+            foj_boundaries=True,
         )
 
         if self.deep_supervision:
@@ -957,7 +989,8 @@ class TowerUNet(nn.Module):
             down_tower=x_tower_b,
         )
 
-        out = self.final_a(x_tower_a)
+        foj_boundaries = self.field_of_junctions(embeddings)
+        out = self.final_a(x_tower_a, foj_boundaries=foj_boundaries)
 
         if self.deep_supervision:
             out_c = self.final_c(

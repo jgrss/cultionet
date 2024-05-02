@@ -1,16 +1,24 @@
 import typing as T
 
+import einops
 import numpy as np
 import torch
 import torch.nn as nn
-from einops import rearrange
+import torch.nn.functional as F
 
 
 class FieldOfJunctions(nn.Module):
+    """
+    Source:
+        https://github.com/dorverbin/fieldofjunctions
+    """
+
     def __init__(
         self,
         in_channels: int,
         patch_size: int,
+        height: int,
+        width: int,
         stride: int = 1,
         nvals: int = 31,
         delta: float = 0.05,
@@ -18,6 +26,8 @@ class FieldOfJunctions(nn.Module):
     ):
         super(FieldOfJunctions, self).__init__()
 
+        self.height = height
+        self.width = width
         self.patch_size = patch_size
         self.stride = stride
         self.nvals = nvals
@@ -30,49 +40,55 @@ class FieldOfJunctions(nn.Module):
             nn.SiLU(),
         )
         self.final_boundaries = nn.Sequential(
-            nn.Conv2d(3, 1, kernel_size=1, padding=0, bias=False),
+            nn.Conv2d(1, 1, kernel_size=1, padding=0, bias=False),
             nn.BatchNorm2d(1),
             nn.SiLU(),
         )
-        self.final_image = nn.Sequential(
-            nn.Conv2d(3, 1, kernel_size=1, padding=0, bias=False),
-            nn.BatchNorm2d(1),
-            nn.SiLU(),
+        # self.final_image = nn.Sequential(
+        #     nn.Conv2d(3, in_channels, kernel_size=1, padding=0, bias=False),
+        #     nn.BatchNorm2d(in_channels),
+        #     nn.SiLU(),
+        # )
+
+        # Number of patches (throughout the documentation H_patches and W_patches are denoted by H' and W' resp.)
+        self.h_patches = (height - patch_size) // stride + 1
+        self.w_patches = (width - patch_size) // stride + 1
+
+        # Create pytorch variables for angles and vertex position for each patch
+        angles = torch.zeros(
+            1, 3, self.h_patches, self.w_patches, dtype=torch.float32
         )
+        x0y0 = torch.zeros(
+            1, 2, self.h_patches, self.w_patches, dtype=torch.float32
+        )
+        self.params = nn.Parameter(torch.cat([angles, x0y0], dim=1))
 
     def forward(self, x: torch.Tensor) -> T.Dict[str, torch.Tensor]:
+        batch_size, in_channels, height, width = x.shape
+
+        if (height, width) != (self.height, self.width):
+            row_pad = (self.height - height) // 2
+            col_pad = (self.width - width) // 2
+            x = F.pad(
+                x,
+                (row_pad, row_pad, col_pad, col_pad),
+                mode='constant',
+                value=0,
+            )
+
         x = self.reduce(x)
 
         batch_size, num_channels, height, width = x.shape
 
-        self.h_patches = (height - self.patch_size) // self.stride + 1
-        self.w_patches = (width - self.patch_size) // self.stride + 1
-
         # Split image into overlapping patches, creating a tensor of shape [N, C, R, R, H', W']
         unfold = nn.Unfold(self.patch_size, stride=self.stride)
-        image_patches = rearrange(
+        image_patches = einops.rearrange(
             unfold(x),
-            'b (c hps wps) (hp wp) -> b c hps wps hp wp',
-            hps=self.patch_size,
-            wps=self.patch_size,
-            hp=self.h_patches,
-            wp=self.w_patches,
-        )
-        angles = torch.zeros(
-            batch_size,
-            3,
-            self.h_patches,
-            self.w_patches,
-            dtype=x.dtype,
-            device=x.device,
-        )
-        x0_y0 = torch.zeros(
-            batch_size,
-            2,
-            self.h_patches,
-            self.w_patches,
-            dtype=x.dtype,
-            device=x.device,
+            'b (c p k) (h w) -> b c p k h w',
+            p=self.patch_size,
+            k=self.patch_size,
+            h=self.h_patches,
+            w=self.w_patches,
         )
 
         # Compute number of patches containing each pixel: has shape [H, W]
@@ -89,7 +105,9 @@ class FieldOfJunctions(nn.Module):
                 dtype=x.dtype,
                 device=x.device,
             ),
-        ).squeeze(dim=1)
+        )
+        # Paper shape is (height x width)
+        num_patches = einops.rearrange(num_patches, 'b 1 h w -> b h w')
 
         # Create local grid within each patch
         meshy, meshx = torch.meshgrid(
@@ -97,72 +115,91 @@ class FieldOfJunctions(nn.Module):
                 torch.linspace(-1.0, 1.0, self.patch_size, device=x.device),
                 torch.linspace(-1.0, 1.0, self.patch_size, device=x.device),
             ],
+            indexing='ij',
         )
-        self.y = rearrange(meshy, 'hps wps -> 1 hps wps 1 1')
-        self.x = rearrange(meshx, 'hps wps -> 1 hps wps 1 1')
+        self.y = einops.rearrange(meshy, 'p k -> 1 p k 1 1')
+        self.x = einops.rearrange(meshx, 'p k -> 1 p k 1 1')
 
-        params = torch.cat([angles, x0_y0], dim=1).detach()
         # Values to search over in Algorithm 2: [0, 2pi) for angles, [-3, 3] for vertex position.
         angle_range = torch.linspace(
             0.0, 2 * np.pi, self.nvals + 1, device=x.device
         )[: self.nvals]
         x0_y0_range = torch.linspace(-3.0, 3.0, self.nvals, device=x.device)
 
-        # Save current global image and boundary map (initially None)
+        params = self.params + 0
+
+        # Run one step of Algorithm 2, sequentially improving each coordinate
         for i in range(5):
-            for bidx in range(batch_size):
-                # Repeat the set of parameters `nvals` times along 0th dimension
-                params_query = (
-                    params[bidx].unsqueeze(0).repeat(self.nvals, 1, 1, 1)
-                )
-                param_range = angle_range if i < 3 else x0_y0_range
-                params_query[:, i, :, :] = params_query[
-                    :, i, :, :
-                ] + rearrange(param_range, 'l -> l 1 1')
-                best_indices = self.get_best_indices(
-                    params_query,
-                    image_patches=image_patches[bidx].unsqueeze(0),
-                    num_channels=num_channels,
-                )
-                # Update parameters
-                params[bidx, i, :, :] = params_query[
-                    best_indices.unsqueeze(0),
-                    i,
-                    rearrange(torch.arange(self.h_patches), 'l -> 1 l 1'),
-                    rearrange(torch.arange(self.w_patches), 'l -> 1 1 l'),
-                ]
+            # Repeat the set of parameters `nvals` times along 0th dimension
+            params_query = params.repeat(self.nvals, 1, 1, 1)
+            param_range = angle_range if i < 3 else x0_y0_range
+            params_query[:, i, :, :] = params_query[
+                :, i, :, :
+            ] + einops.rearrange(param_range, 'l -> l 1 1')
 
-        # Update angles and vertex position using the best values found
-        angles.data = params[:, :3, :, :].data
-        x0_y0.data = params[:, 3:, :, :].data
-
-        # Update global boundaries and image
-        global_boundaries = torch.zeros_like(x)
-        smoothed_image = torch.zeros_like(x)
-        for bidx in range(batch_size):
-            distances, colors, patches = self.get_distances_and_patches(
-                params[bidx].unsqueeze(0),
-                image_patches=image_patches[bidx].unsqueeze(0),
+            best_indices = self.get_best_indices(
+                params_query,
+                image_patches=image_patches,
                 num_channels=num_channels,
             )
-            smoothed_image[bidx] = self.local_to_global(
-                patches, height, width, num_patches[bidx].unsqueeze(0)
-            )
-            local_boundaries = self.distances_to_boundaries(distances)
-            global_boundaries[bidx] = self.local_to_global(
-                local_boundaries,
-                height,
-                width,
-                num_patches[bidx].unsqueeze(0),
+
+            # Update parameters
+            params[0, i, :, :] = params_query[
+                einops.rearrange(best_indices, 'h w -> 1 h w'),
+                i,
+                einops.rearrange(torch.arange(self.h_patches), 'l -> 1 l 1'),
+                einops.rearrange(torch.arange(self.w_patches), 'l -> 1 1 l'),
+            ]
+
+        # Heuristic for accelerating convergence (not necessary but sometimes helps):
+        # Update x0 and y0 along the three optimal angles (search over a line passing through current x0, y0)
+        for i in range(3):
+            params_query = params.repeat(self.nvals, 1, 1, 1)
+            params_query[:, 3, :, :] = params[:, 3, :, :] + torch.cos(
+                params[:, i, :, :]
+            ) * x0_y0_range.view(-1, 1, 1)
+            params_query[:, 4, :, :] = params[:, 4, :, :] + torch.sin(
+                params[:, i, :, :]
+            ) * x0_y0_range.view(-1, 1, 1)
+            best_indices = self.get_best_indices(
+                params_query,
+                image_patches=image_patches,
+                num_channels=num_channels,
             )
 
+            # Update vertex positions of parameters
+            for j in range(3, 5):
+                params[:, j, :, :] = params_query[
+                    einops.rearrange(best_indices, 'h w -> 1 h w'),
+                    j,
+                    einops.rearrange(
+                        torch.arange(self.h_patches), 'l -> 1 l 1'
+                    ),
+                    einops.rearrange(
+                        torch.arange(self.w_patches), 'l -> 1 1 l'
+                    ),
+                ]
+
+        # Update global boundaries and image
+        distances, colors, patches = self.get_distances_and_patches(
+            params,
+            image_patches=image_patches,
+            num_channels=num_channels,
+        )
+        # smoothed_image = self.local_to_global(
+        #     patches, height, width, num_patches
+        # )
+        local_boundaries = self.distances_to_boundaries(distances)
+        global_boundaries = self.local_to_global(
+            einops.rearrange(local_boundaries, '1 1 p k h w -> 1 1 1 p k h w'),
+            height,
+            width,
+            num_patches,
+        )
         global_boundaries = self.final_boundaries(global_boundaries)
-        smoothed_image = self.final_image(smoothed_image)
+        # smoothed_image = self.final_image(smoothed_image)
 
-        return {
-            "boundaries": global_boundaries,
-            "image": smoothed_image,
-        }
+        return global_boundaries
 
     def distances_to_boundaries(self, dists: torch.Tensor) -> torch.Tensor:
         """Compute boundary map for each patch, given distance functions.
@@ -170,15 +207,15 @@ class FieldOfJunctions(nn.Module):
         The width of the boundary is determined by opts.delta.
         """
         # Find places where either distance transform is small, except where d1 > 0 and d2 < 0
-        d1 = dists[:, 0:1, :, :, :, :]
-        d2 = dists[:, 1:2, :, :, :, :]
-        minabsdist = torch.where(
+        d1 = dists[:, 0:1, ...]
+        d2 = dists[:, 1:2, ...]
+        min_abs_distance = torch.where(
             d1 < 0.0,
             -d1,
             torch.where(d2 < 0.0, torch.min(d1, -d2), torch.min(d1, d2)),
         )
 
-        return 1.0 / (1.0 + (minabsdist / self.delta) ** 2)
+        return 1.0 / (1.0 + (min_abs_distance / self.delta) ** 2)
 
     def local_to_global(
         self,
@@ -192,17 +229,18 @@ class FieldOfJunctions(nn.Module):
         For example, this can be used to compute the global boundary maps, or
         the boundary-aware smoothed image.
         """
-        N = patches.shape[0]
-        C = patches.shape[1]
         fold = torch.nn.Fold(
             output_size=[height, width],
             kernel_size=self.patch_size,
             stride=self.stride,
         )
 
-        return fold(patches.view(N, C * self.patch_size**2, -1)).view(
-            N, C, height, width
-        ) / num_patches.unsqueeze(0).unsqueeze(0)
+        numerator = fold(
+            einops.rearrange(patches, 'b 1 c p k h w -> b (c p k) (h w)')
+        )
+        denominator = einops.rearrange(num_patches, 'b h w -> b 1 h w')
+
+        return numerator / denominator
 
     def get_best_indices(
         self,
@@ -216,7 +254,10 @@ class FieldOfJunctions(nn.Module):
             num_channels=num_channels,
         )
         loss_per_patch = self.get_loss(
-            distances, colors, smooth_patches, image_patches
+            distances=distances,
+            colors=colors,
+            patches=smooth_patches,
+            image_patches=image_patches,
         )
         best_indices = loss_per_patch.argmin(dim=0)
 
@@ -251,15 +292,25 @@ class FieldOfJunctions(nn.Module):
 
         #     colors = numerator / (denominator + 1e-10)
         # else:
-        # Get best color for each wedge and each patch
-        colors = (image_patches.unsqueeze(2) * wedges.unsqueeze(1)).sum(
-            -3
-        ).sum(-3) / (wedges.sum(-3).sum(-3).unsqueeze(1) + 1e-10)
+
+        numerator = einops.rearrange(
+            image_patches, 'b c p k h w -> b 1 c 1 p k h w'
+        ) * einops.rearrange(wedges, 'n c p k h w -> 1 n 1 c p k h w')
+        numerator = einops.reduce(
+            numerator, 'b n c l p k h w -> b n c l h w', 'sum'
+        )
+        denominator = (
+            einops.reduce(wedges, 'n c p k h w -> 1 n 1 c h w', 'sum') + 1e-10
+        )
+        colors = numerator / denominator
 
         # Fill wedges with optimal colors
-        patches = (
-            wedges.unsqueeze(1) * colors.unsqueeze(-3).unsqueeze(-3)
-        ).sum(dim=2)
+        patches = einops.rearrange(
+            wedges, 'n c p k h w -> 1 n 1 c p k h w'
+        ) * einops.rearrange(colors, 'b n c l h w -> b n c l 1 1 h w')
+        patches = einops.reduce(
+            patches, 'b n c l p k h w -> b n c p k h w', 'sum'
+        )
 
         return distances, colors, patches
 
@@ -368,7 +419,7 @@ class FieldOfJunctions(nn.Module):
 
     def get_loss(
         self,
-        dists: torch.Tensor,
+        distances: torch.Tensor,
         colors: torch.Tensor,
         patches: torch.Tensor,
         image_patches: torch.Tensor,
@@ -376,22 +427,47 @@ class FieldOfJunctions(nn.Module):
         lmbda_color: float = 0.0,
     ):
         """Compute the objective of our model (see Equation 8 of the paper)."""
+
         # Compute negative log-likelihood for each patch (shape [N, H', W'])
-        loss_per_patch = (
-            ((image_patches - patches) ** 2).mean(-3).mean(-3).sum(1)
+        loss_per_patch = einops.reduce(
+            (
+                einops.rearrange(image_patches, 'b c p k h w -> b 1 c p k h w')
+                - patches
+            )
+            ** 2,
+            'b n c p k h w -> b n c h w',
+            'mean',
+        )
+        loss_per_patch = einops.reduce(
+            loss_per_patch, 'b n c h w -> b n h w', 'sum'
+        )
+        # Reduce to the batch mean
+        loss_per_patch = einops.reduce(
+            loss_per_patch, 'b n h w -> n h w', 'mean'
         )
 
-        # Add spatial consistency loss for each patch, if lambda > 0
-        if lmbda_boundary > 0.0:
-            loss_per_patch = (
-                loss_per_patch
-                + lmbda_boundary * self.get_boundary_consistency_term(dists)
-            )
-
-        if lmbda_color > 0.0:
-            loss_per_patch = (
-                loss_per_patch
-                + lmbda_color * self.get_color_consistency_term(dists, colors)
-            )
-
         return loss_per_patch
+
+
+if __name__ == '__main__':
+    batch_size = 2
+    num_channels = 3
+    height = 100
+    width = 100
+
+    x = torch.rand(
+        (batch_size, num_channels, height, width),
+        dtype=torch.float32,
+    )
+
+    foj = FieldOfJunctions(
+        in_channels=num_channels,
+        height=110,
+        width=110,
+        patch_size=8,
+        stride=1,
+        nvals=31,
+        delta=0.05,
+        eta=0.01,
+    )
+    foj(x)
