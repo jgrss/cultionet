@@ -1,15 +1,47 @@
 import typing as T
 import warnings
 
+import einops
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchmetrics
-from einops import rearrange
 
 from ..data.data import Data
 from . import topological
+
+
+class FieldOfJunctionsLoss(nn.Module):
+    def __init__(self):
+        super(FieldOfJunctionsLoss, self).__init__()
+
+    def forward(
+        self,
+        patches: torch.Tensor,
+        image_patches: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute the objective of our model (see Equation 8 of the paper)."""
+
+        # Compute negative log-likelihood for each patch (shape [N, H', W'])
+        loss_per_patch = einops.reduce(
+            (
+                einops.rearrange(image_patches, 'b c p k h w -> b 1 c p k h w')
+                - patches
+            )
+            ** 2,
+            'b n c p k h w -> b n c h w',
+            'mean',
+        )
+        loss_per_patch = einops.reduce(
+            loss_per_patch, 'b n c h w -> b n h w', 'sum'
+        )
+        # Reduce to the batch mean
+        loss_per_patch = einops.reduce(
+            loss_per_patch, 'b n h w -> n h w', 'mean'
+        )
+
+        return loss_per_patch.mean()
 
 
 class LossPreprocessing(nn.Module):
@@ -39,12 +71,12 @@ class LossPreprocessing(nn.Module):
             inputs = inputs.clip(0, 1)
 
         if self.one_hot_targets and (inputs.shape[1] > 1):
-            targets = rearrange(
+            targets = einops.rearrange(
                 F.one_hot(targets, num_classes=inputs.shape[1]),
                 'b h w c -> b c h w',
             )
         else:
-            targets = rearrange(targets, 'b h w -> b 1 h w')
+            targets = einops.rearrange(targets, 'b h w -> b 1 h w')
 
         return inputs, targets
 

@@ -17,7 +17,7 @@ from .. import nn as cunn
 from ..data.data import Data
 from ..enums import LearningRateSchedulers, ModelTypes, ResBlockTypes
 from ..layers.weights import init_attention_weights
-from ..losses import TanimotoDistLoss
+from ..losses import FieldOfJunctionsLoss, TanimotoDistLoss
 from .cultionet import CultioNet, GeoRefinement
 from .maskcrnn import BFasterRCNN
 from .nunet import PostUNet3Psi
@@ -625,6 +625,14 @@ class LightningModuleMixin(LightningModule):
         )
         loss = loss + crop_loss * weights["crop_loss"]
 
+        if predictions.get("foj_image_patches") is not None:
+            foj_loss = self.foj_loss(
+                patches=predictions.get("foj_patches"),
+                image_patches=predictions.get("foj_image_patches"),
+            )
+            weights["foj"] = 0.1
+            loss = loss + foj_loss
+
         # if predictions["crop_type"] is not None:
         #     # Upstream (deep) loss on crop-type
         #     crop_type_star_loss = self.crop_type_star_loss(
@@ -839,10 +847,12 @@ class LightningModuleMixin(LightningModule):
     def configure_loss(self):
         # Distance loss
         self.dist_loss = TanimotoDistLoss(one_hot_targets=False)
-        # Edge losse
+        # Edge loss
         self.edge_loss = TanimotoDistLoss()
-        # Crop mask losse
+        # Crop mask loss
         self.crop_loss = TanimotoDistLoss()
+        # Field of junctions loss
+        self.foj_loss = FieldOfJunctionsLoss()
 
         if self.deep_supervision:
             self.dist_loss_deep_b = TanimotoDistLoss(one_hot_targets=False)

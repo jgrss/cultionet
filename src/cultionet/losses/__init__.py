@@ -1,1 +1,6 @@
-from .losses import LossPreprocessing, TanimotoComplementLoss, TanimotoDistLoss
+from .losses import (
+    FieldOfJunctionsLoss,
+    LossPreprocessing,
+    TanimotoComplementLoss,
+    TanimotoDistLoss,
+)

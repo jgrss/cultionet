@@ -679,7 +679,6 @@ class TowerFinal(nn.Module):
         num_classes: int,
         mask_activation: T.Callable,
         resample_factor: int = 0,
-        foj_boundaries: bool = False,
     ):
         super(TowerFinal, self).__init__()
 
@@ -701,21 +700,10 @@ class TowerFinal(nn.Module):
             nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
             nn.Sigmoid(),
         )
-        if foj_boundaries:
-            self.final_edge = nn.Sequential(
-                nn.Conv2d(
-                    in_channels, 1, kernel_size=1, padding=0, bias=False
-                ),
-                nn.BatchNorm2d(1),
-                nn.Conv2d(1, 1, kernel_size=1, padding=0),
-                cunn.SigmoidCrisp(),
-            )
-        else:
-            self.final_edge = nn.Sequential(
-                nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
-                cunn.SigmoidCrisp(),
-            )
-
+        self.final_edge = nn.Sequential(
+            nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
+            cunn.SigmoidCrisp(),
+        )
         self.final_mask = nn.Sequential(
             nn.Conv2d(in_channels, num_classes, kernel_size=1, padding=0),
             mask_activation,
@@ -738,7 +726,7 @@ class TowerFinal(nn.Module):
         dist, edge, mask = torch.chunk(self.expand(x), 3, dim=1)
 
         if foj_boundaries is not None:
-            edge = edge + foj_boundaries
+            edge = edge * foj_boundaries
 
         dist = self.final_dist(dist)
         edge = self.final_edge(edge)
@@ -766,6 +754,7 @@ class TowerUNet(nn.Module):
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         mask_activation: T.Union[nn.Softmax, nn.Sigmoid] = nn.Softmax(dim=1),
         deep_supervision: bool = False,
+        get_junctions: bool = False,
     ):
         super(TowerUNet, self).__init__()
 
@@ -903,18 +892,20 @@ class TowerUNet(nn.Module):
             dilations=dilations,
         )
 
-        # self.field_of_junctions = FieldOfJunctions(
-        #     in_channels=hidden_channels,
-        #     # NOTE: setup for padding of 5 x 5
-        #     # TODO: set this as a parameter
-        #     height=110,
-        #     width=110,
-        # )
+        self.field_of_junctions = None
+        if get_junctions:
+            self.field_of_junctions = FieldOfJunctions(
+                in_channels=hidden_channels,
+                # NOTE: setup for padding of 5 x 5
+                # TODO: set this as a parameter
+                height=110,
+                width=110,
+            )
+
         self.final_a = TowerFinal(
             in_channels=up_channels,
             num_classes=num_classes,
             mask_activation=mask_activation,
-            foj_boundaries=False,
         )
 
         if self.deep_supervision:
@@ -983,8 +974,22 @@ class TowerUNet(nn.Module):
             down_tower=x_tower_b,
         )
 
-        # foj_boundaries = self.field_of_junctions(embeddings)
-        out = self.final_a(x_tower_a, foj_boundaries=None)
+        foj_output = {}
+        if self.field_of_junctions is not None:
+            foj_output = self.field_of_junctions(embeddings)
+
+        out = self.final_a(
+            x_tower_a,
+            foj_boundaries=foj_output.get("boundaries"),
+        )
+
+        if foj_output:
+            out.update(
+                {
+                    "foj_image_patches": foj_output["image_patches"],
+                    "foj_patches": foj_output["patches"],
+                }
+            )
 
         if self.deep_supervision:
             out_c = self.final_c(
