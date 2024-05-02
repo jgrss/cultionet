@@ -984,8 +984,8 @@ class TowerUNet(nn.Module):
             down_tower=x_tower_b,
         )
 
-        foj_boundaries = self.field_of_junctions(embeddings)
-        out = self.final_a(x_tower_a, foj_boundaries=foj_boundaries)
+        # foj_boundaries = self.field_of_junctions(embeddings)
+        out = self.final_a(x_tower_a)
 
         if self.deep_supervision:
             out_c = self.final_c(
