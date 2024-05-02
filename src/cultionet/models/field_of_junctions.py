@@ -54,6 +54,30 @@ class FieldOfJunctions(nn.Module):
         self.h_patches = (height - patch_size) // stride + 1
         self.w_patches = (width - patch_size) // stride + 1
 
+        self.unfold = nn.Unfold(self.patch_size, stride=self.stride)
+        self.fold = nn.Fold(
+            output_size=[height, width],
+            kernel_size=self.patch_size,
+            stride=self.stride,
+        )
+
+        # Create local grid within each patch
+        meshy, meshx = torch.meshgrid(
+            [
+                torch.linspace(-1.0, 1.0, self.patch_size),
+                torch.linspace(-1.0, 1.0, self.patch_size),
+            ],
+            indexing='ij',
+        )
+        self.y = einops.rearrange(meshy, 'p k -> 1 p k 1 1')
+        self.x = einops.rearrange(meshx, 'p k -> 1 p k 1 1')
+
+        # Values to search over in Algorithm 2: [0, 2pi) for angles, [-3, 3] for vertex position.
+        self.angle_range = torch.linspace(0.0, 2 * np.pi, self.nvals + 1)[
+            : self.nvals
+        ]
+        self.x0_y0_range = torch.linspace(-3.0, 3.0, self.nvals)
+
         # Create pytorch variables for angles and vertex position for each patch
         angles = torch.zeros(
             1, 3, self.h_patches, self.w_patches, dtype=torch.float32
@@ -61,7 +85,10 @@ class FieldOfJunctions(nn.Module):
         x0y0 = torch.zeros(
             1, 2, self.h_patches, self.w_patches, dtype=torch.float32
         )
-        self.params = nn.Parameter(torch.cat([angles, x0y0], dim=1))
+        # self.angles.requires_grad = True
+        # self.x0y0.requires_grad = True
+
+        self.params = torch.cat([angles, x0y0], dim=1)
 
     def forward(self, x: torch.Tensor) -> T.Dict[str, torch.Tensor]:
         batch_size, in_channels, in_height, in_width = x.shape
@@ -83,9 +110,8 @@ class FieldOfJunctions(nn.Module):
         batch_size, num_channels, height, width = x.shape
 
         # Split image into overlapping patches, creating a tensor of shape [N, C, R, R, H', W']
-        unfold = nn.Unfold(self.patch_size, stride=self.stride)
         image_patches = einops.rearrange(
-            unfold(x),
+            self.unfold(x),
             'b (c p k) (h w) -> b c p k h w',
             p=self.patch_size,
             k=self.patch_size,
@@ -94,12 +120,7 @@ class FieldOfJunctions(nn.Module):
         )
 
         # Compute number of patches containing each pixel: has shape [H, W]
-        fold = nn.Fold(
-            output_size=[height, width],
-            kernel_size=self.patch_size,
-            stride=self.stride,
-        )
-        num_patches = fold(
+        num_patches = self.fold(
             torch.ones(
                 batch_size,
                 self.patch_size**2,
@@ -111,24 +132,12 @@ class FieldOfJunctions(nn.Module):
         # Paper shape is (height x width)
         num_patches = einops.rearrange(num_patches, 'b 1 h w -> b h w')
 
-        # Create local grid within each patch
-        meshy, meshx = torch.meshgrid(
-            [
-                torch.linspace(-1.0, 1.0, self.patch_size, device=x.device),
-                torch.linspace(-1.0, 1.0, self.patch_size, device=x.device),
-            ],
-            indexing='ij',
-        )
-        self.y = einops.rearrange(meshy, 'p k -> 1 p k 1 1')
-        self.x = einops.rearrange(meshx, 'p k -> 1 p k 1 1')
+        self.y = self.y.to(device=x.device)
+        self.x = self.x.to(device=x.device)
+        angle_range = self.angle_range.to(device=x.device)
+        x0_y0_range = self.x0_y0_range.to(device=x.device)
 
-        # Values to search over in Algorithm 2: [0, 2pi) for angles, [-3, 3] for vertex position.
-        angle_range = torch.linspace(
-            0.0, 2 * np.pi, self.nvals + 1, device=x.device
-        )[: self.nvals]
-        x0_y0_range = torch.linspace(-3.0, 3.0, self.nvals, device=x.device)
-
-        params = self.params.clone()
+        params = self.params.detach()
 
         # Run one step of Algorithm 2, sequentially improving each coordinate
         for i in range(5):
@@ -182,7 +191,7 @@ class FieldOfJunctions(nn.Module):
                     ),
                 ]
 
-        self.params.data = params
+        self.params.data = params.data
 
         # Update global boundaries and image
         distances, colors, patches = self.get_distances_and_patches(
@@ -241,13 +250,7 @@ class FieldOfJunctions(nn.Module):
         For example, this can be used to compute the global boundary maps, or
         the boundary-aware smoothed image.
         """
-        fold = torch.nn.Fold(
-            output_size=[height, width],
-            kernel_size=self.patch_size,
-            stride=self.stride,
-        )
-
-        numerator = fold(
+        numerator = self.fold(
             einops.rearrange(patches, 'b 1 c p k h w -> b (c p k) (h w)')
         )
         denominator = einops.rearrange(num_patches, 'b h w -> b 1 h w')

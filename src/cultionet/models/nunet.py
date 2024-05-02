@@ -771,14 +771,6 @@ class TowerUNet(nn.Module):
 
         self.deep_supervision = deep_supervision
 
-        # self.field_of_junctions = FieldOfJunctions(
-        #     in_channels=hidden_channels,
-        #     # NOTE: setup for padding of 5 x 5
-        #     # TODO: set this as a parameter
-        #     height=110,
-        #     width=110,
-        # )
-
         channels = [
             hidden_channels,
             hidden_channels * 2,
@@ -911,6 +903,13 @@ class TowerUNet(nn.Module):
             dilations=dilations,
         )
 
+        # self.field_of_junctions = FieldOfJunctions(
+        #     in_channels=hidden_channels,
+        #     # NOTE: setup for padding of 5 x 5
+        #     # TODO: set this as a parameter
+        #     height=110,
+        #     width=110,
+        # )
         self.final_a = TowerFinal(
             in_channels=up_channels,
             num_classes=num_classes,
@@ -985,7 +984,7 @@ class TowerUNet(nn.Module):
         )
 
         # foj_boundaries = self.field_of_junctions(embeddings)
-        out = self.final_a(x_tower_a)
+        out = self.final_a(x_tower_a, foj_boundaries=None)
 
         if self.deep_supervision:
             out_c = self.final_c(
