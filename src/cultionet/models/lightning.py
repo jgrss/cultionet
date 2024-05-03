@@ -578,22 +578,22 @@ class LightningModuleMixin(LightningModule):
         # Edge losses
         if self.deep_supervision:
             dist_loss_deep_b = self.dist_loss_deep_b(
-                predictions["dist_deep"], batch.bdist
+                predictions["dist_b"], batch.bdist
             )
             edge_loss_deep_b = self.edge_loss_deep_b(
-                predictions["edge_deep"], true_labels_dict["true_edge"]
+                predictions["edge_b"], true_labels_dict["true_edge"]
             )
             crop_loss_deep_b = self.crop_loss_deep_b(
-                predictions["crop_deep"], true_labels_dict["true_crop"]
+                predictions["crop_b"], true_labels_dict["true_crop"]
             )
             dist_loss_deep_c = self.dist_loss_deep_c(
-                predictions["dist_deep"], batch.bdist
+                predictions["dist_c"], batch.bdist
             )
             edge_loss_deep_c = self.edge_loss_deep_c(
-                predictions["edge_deep"], true_labels_dict["true_edge"]
+                predictions["edge_c"], true_labels_dict["true_edge"]
             )
             crop_loss_deep_c = self.crop_loss_deep_c(
-                predictions["crop_deep"], true_labels_dict["true_crop"]
+                predictions["crop_c"], true_labels_dict["true_crop"]
             )
 
             weights["dist_loss_deep_b"] = 0.25

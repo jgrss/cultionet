@@ -174,14 +174,18 @@ class Transformer(nn.Module):
                 for _ in range(num_layers)
             ]
         )
+
+        self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        output = x
+        residual = x
         for enc_layer in self.encoder_layers:
-            output = enc_layer(output)
+            x = enc_layer(x)
 
-        return output
+        x = self.norm(residual + self.dropout(x))
+
+        return x
 
 
 class InLayer(nn.Module):
@@ -239,7 +243,7 @@ class TemporalTransformer(nn.Module):
         d_model: int = 256,
         dropout: float = 0.1,
         num_layers: int = 1,
-        time_scaler: int = 1_000,
+        time_scaler: int = 100,
         num_classes_l2: int = 2,
         num_classes_last: int = 3,
         activation_type: str = "SiLU",

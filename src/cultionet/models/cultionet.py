@@ -1,12 +1,11 @@
 import typing as T
-import warnings
 
 import torch
 import torch.nn as nn
 
 from .. import nn as cunn
 from ..data.data import Data
-from ..enums import ModelTypes, ResBlockTypes
+from ..enums import AttentionTypes, ModelTypes, ResBlockTypes
 from .nunet import ResUNet3Psi, TowerUNet, UNet3Psi
 from .temporal_transformer import TemporalTransformer
 
@@ -276,7 +275,7 @@ class CultioNet(nn.Module):
         dropout: float = 0.1,
         dilations: T.Union[int, T.Sequence[int]] = None,
         res_block_type: str = ResBlockTypes.RES,
-        attention_weights: str = "spatial_channel",
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         deep_supervision: bool = False,
     ):
         super(CultioNet, self).__init__()

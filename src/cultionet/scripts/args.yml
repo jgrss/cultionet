@@ -298,6 +298,13 @@ train_predict:
     kwargs:
       default: !!null
       type: '&int'
+  strategy:
+    short: ''
+    long: strategy
+    help: The model distribution strategy
+    kwargs:
+      default: 'ddp'
+      choices: ['ddp', 'ddp_spawn', 'fsdp']
 
 maskrcnn:
   resize_height:
@@ -489,7 +496,7 @@ train:
     kwargs:
       action: store_true
   loss_name:
-    short: loss
+    short: l
     long: loss-name
     help: The loss method name
     kwargs:
@@ -608,13 +615,6 @@ train:
     help: Whether to finetune a transfer model (otherwise, do feature extraction)
     kwargs:
       action: store_true
-  strategy:
-    short: ''
-    long: strategy
-    help: The model distribution strategy
-    kwargs:
-      default: 'ddp'
-      choices: ['ddp', 'ddp_spawn', 'fsdp']
 
 predict:
   out_path:
