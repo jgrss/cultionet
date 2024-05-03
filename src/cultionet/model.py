@@ -13,6 +13,7 @@ from lightning.pytorch.callbacks import (
     ModelPruning,
     StochasticWeightAveraging,
 )
+from lightning.pytorch.tuner import Tuner
 from rasterio.windows import Window
 from scipy.stats import mode as sci_mode
 from torchvision import transforms
@@ -243,13 +244,13 @@ def get_data_module(
 
 def setup_callbacks(
     ckpt_file: T.Union[str, Path],
-    save_top_k: T.Optional[int] = 1,
-    early_stopping_min_delta: T.Optional[float] = 0.01,
-    early_stopping_patience: T.Optional[int] = 7,
-    stochastic_weight_averaging: T.Optional[bool] = False,
-    stochastic_weight_averaging_lr: T.Optional[float] = 0.05,
-    stochastic_weight_averaging_start: T.Optional[float] = 0.8,
-    model_pruning: T.Optional[bool] = False,
+    save_top_k: int = 1,
+    early_stopping_min_delta: float = 0.01,
+    early_stopping_patience: int = 7,
+    stochastic_weight_averaging: bool = False,
+    stochastic_weight_averaging_lr: float = 0.05,
+    stochastic_weight_averaging_start: float = 0.8,
+    model_pruning: bool = False,
 ) -> T.Tuple[LearningRateMonitor, T.Sequence[T.Any]]:
     # Checkpoint
     cb_train_loss = ModelCheckpoint(monitor="loss")
@@ -257,7 +258,7 @@ def setup_callbacks(
     cb_val_loss = ModelCheckpoint(
         dirpath=ckpt_file.parent,
         filename=ckpt_file.stem,
-        save_last=True,
+        save_last=False,
         save_top_k=save_top_k,
         mode="min",
         monitor="val_score",
@@ -578,6 +579,7 @@ def fit(
     class_counts: T.Sequence[float] = None,
     model_type: str = ModelTypes.RESUNET3PSI,
     activation_type: str = "SiLU",
+    dropout: float = 0.0,
     dilations: T.Union[int, T.Sequence[int]] = None,
     res_block_type: str = ResBlockTypes.RES,
     attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
@@ -608,6 +610,7 @@ def fit(
     skip_train: bool = False,
     refine_model: bool = False,
     finetune: bool = False,
+    strategy: str = "ddp",
 ):
     """Fits a model.
 
@@ -661,6 +664,7 @@ def fit(
         skip_train (Optional[bool]): Whether to refine and calibrate a trained model.
         refine_model (Optional[bool]): Whether to skip training.
         finetune (bool): Not used. Placeholder for compatibility with transfer learning.
+        strategy (str): The model distributed strategy.
     """
     ckpt_file = Path(ckpt_file)
 
@@ -727,7 +731,7 @@ def fit(
         precision=precision,
         devices=devices,
         accelerator=device,
-        strategy='ddp',
+        strategy=strategy,
         log_every_n_steps=50,
         profiler=profiler,
         deterministic=False,
@@ -735,7 +739,10 @@ def fit(
     )
 
     if auto_lr_find:
-        trainer.tune(model=lit_model, datamodule=data_module)
+        tuner = Tuner(trainer)
+        lr_finder = tuner.lr_find(model=lit_model, datamodule=data_module)
+        opt_lr = lr_finder.suggestion()
+        logger.info(f"The suggested learning rate is {opt_lr}")
     else:
         if not skip_train:
             trainer.fit(

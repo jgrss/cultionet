@@ -221,6 +221,13 @@ train_predict:
     kwargs:
       default: 'res'
       choices: ['res', 'resa']
+  dropout:
+    short: ''
+    long: dropout
+    help: The dropout probability
+    kwargs:
+      default: 0.0
+      type: '&float'
   dilations:
     short: ''
     long: dilations
@@ -500,7 +507,7 @@ train:
     long: learning-rate
     help: The learning rate
     kwargs:
-      default: 0.01
+      default: 0.02
       type: '&float'
   lr_scheduler:
     short: lrs
@@ -531,7 +538,7 @@ train:
     long: weight-decay
     help: Sets the weight decay for Adam optimizer\'s regularization
     kwargs:
-      default: 1e-4
+      default: 2e-3
       type: '&float'
   accumulate_grad_batches:
     short: agb
@@ -608,6 +615,13 @@ train:
     help: Whether to finetune a transfer model (otherwise, do feature extraction)
     kwargs:
       action: store_true
+  strategy:
+    short: ''
+    long: strategy
+    help: The model distribution strategy
+    kwargs:
+      default: 'ddp'
+      choices: ['ddp', 'ddp_spawn', 'fsdp']
 
 predict:
   out_path:

@@ -1192,6 +1192,7 @@ def train_model(args):
         save_top_k=args.save_top_k,
         accumulate_grad_batches=args.accumulate_grad_batches,
         model_type=args.model_type,
+        dropout=args.dropout,
         dilations=args.dilations,
         res_block_type=args.res_block_type,
         attention_weights=args.attention_weights,
@@ -1228,6 +1229,7 @@ def train_model(args):
         skip_train=args.skip_train,
         refine_model=args.refine_model,
         finetune=args.finetune,
+        strategy=args.strategy,
     )
 
     # Fit the model

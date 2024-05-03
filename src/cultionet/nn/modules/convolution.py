@@ -2,6 +2,7 @@ import typing as T
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 
 from cultionet.enums import AttentionTypes, ResBlockTypes
@@ -727,8 +728,7 @@ class PoolResidualConv(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        pool_size: int = 2,
-        dropout: T.Optional[float] = None,
+        dropout: float = 0.0,
         kernel_size: int = 3,
         num_blocks: int = 2,
         attention_weights: T.Optional[str] = None,
@@ -743,41 +743,43 @@ class PoolResidualConv(nn.Module):
             ResBlockTypes.RESA,
         )
 
-        layers = [nn.MaxPool2d(pool_size)]
-
-        if dropout is not None:
-            assert isinstance(
-                dropout, float
-            ), "The dropout arg must be a float."
-            layers += [nn.Dropout(dropout)]
-
         if res_block_type == ResBlockTypes.RES:
-            layers += [
-                ResidualConv(
-                    in_channels,
-                    out_channels,
-                    kernel_size=kernel_size,
-                    attention_weights=attention_weights,
-                    num_blocks=num_blocks,
-                    activation_type=activation_type,
-                )
-            ]
+            self.conv = ResidualConv(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                attention_weights=attention_weights,
+                num_blocks=num_blocks,
+                activation_type=activation_type,
+            )
         else:
-            layers += [
-                ResidualAConv(
-                    in_channels,
-                    out_channels,
-                    kernel_size=kernel_size,
-                    dilations=dilations,
-                    attention_weights=attention_weights,
-                    activation_type=activation_type,
-                )
-            ]
+            self.conv = ResidualAConv(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                dilations=dilations,
+                attention_weights=attention_weights,
+                activation_type=activation_type,
+            )
 
-        self.seq = nn.Sequential(*layers)
+        self.dropout_layer = None
+        if dropout > 0:
+            self.dropout_layer = nn.Dropout2d(p=dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.seq(x)
+        height, width = x.shape[-2:]
+
+        # Apply convolutions
+        x = self.conv(x)
+
+        # Max pooling
+        x = F.adaptive_max_pool2d(x, output_size=(height // 2, width // 2))
+
+        # Optional dropout
+        if self.dropout_layer is not None:
+            x = self.dropout_layer(x)
+
+        return x
 
 
 class SingleConv3d(nn.Module):

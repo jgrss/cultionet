@@ -17,7 +17,7 @@ from .. import nn as cunn
 from ..data.data import Data
 from ..enums import LearningRateSchedulers, ModelTypes, ResBlockTypes
 from ..layers.weights import init_attention_weights
-from ..losses import FieldOfJunctionsLoss, TanimotoDistLoss
+from ..losses import TanimotoComplementLoss, TanimotoDistLoss
 from .cultionet import CultioNet, GeoRefinement
 from .maskcrnn import BFasterRCNN
 from .nunet import PostUNet3Psi
@@ -523,13 +523,13 @@ class LightningModuleMixin(LightningModule):
             "true_crop_type": true_crop_type,
         }
 
-    def on_validation_epoch_end(self, *args, **kwargs):
-        """Save the model on validation end."""
-        if self.logger.save_dir is not None:
-            model_file = Path(self.logger.save_dir) / f"{self.model_name}.pt"
-            if model_file.is_file():
-                model_file.unlink()
-            torch.save(self.state_dict(), model_file)
+    # def on_validation_epoch_end(self, *args, **kwargs):
+    #     """Save the model on validation end."""
+    #     if self.logger.save_dir is not None:
+    #         model_file = Path(self.logger.save_dir) / f"{self.model_name}.pt"
+    #         if model_file.is_file():
+    #             model_file.unlink()
+    #         torch.save(self.state_dict(), model_file)
 
     def calc_loss(
         self,
@@ -846,30 +846,34 @@ class LightningModuleMixin(LightningModule):
 
     def configure_loss(self):
         # Distance loss
-        self.dist_loss = TanimotoDistLoss(one_hot_targets=False)
+        self.dist_loss = TanimotoComplementLoss(one_hot_targets=False)
         # Edge loss
-        self.edge_loss = TanimotoDistLoss()
+        self.edge_loss = TanimotoComplementLoss()
         # Crop mask loss
-        self.crop_loss = TanimotoDistLoss()
+        self.crop_loss = TanimotoComplementLoss()
         # Field of junctions loss
-        self.foj_loss = FieldOfJunctionsLoss()
+        # self.foj_loss = FieldOfJunctionsLoss()
 
         if self.deep_supervision:
-            self.dist_loss_deep_b = TanimotoDistLoss(one_hot_targets=False)
-            self.edge_loss_deep_b = TanimotoDistLoss()
-            self.crop_loss_deep_b = TanimotoDistLoss()
-            self.dist_loss_deep_c = TanimotoDistLoss(one_hot_targets=False)
-            self.edge_loss_deep_c = TanimotoDistLoss()
-            self.crop_loss_deep_c = TanimotoDistLoss()
+            self.dist_loss_deep_b = TanimotoComplementLoss(
+                one_hot_targets=False
+            )
+            self.edge_loss_deep_b = TanimotoComplementLoss()
+            self.crop_loss_deep_b = TanimotoComplementLoss()
+            self.dist_loss_deep_c = TanimotoComplementLoss(
+                one_hot_targets=False
+            )
+            self.edge_loss_deep_c = TanimotoComplementLoss()
+            self.crop_loss_deep_c = TanimotoComplementLoss()
 
         # Crop Temporal encoding losses
-        self.classes_l2_loss = TanimotoDistLoss()
-        self.classes_last_loss = TanimotoDistLoss()
+        self.classes_l2_loss = TanimotoComplementLoss()
+        self.classes_last_loss = TanimotoComplementLoss()
         if self.num_classes > 2:
-            self.crop_type_star_loss = TanimotoDistLoss(
+            self.crop_type_star_loss = TanimotoComplementLoss(
                 scale_pos_weight=self.scale_pos_weight
             )
-            self.crop_type_loss = TanimotoDistLoss(
+            self.crop_type_loss = TanimotoComplementLoss(
                 scale_pos_weight=self.scale_pos_weight
             )
 

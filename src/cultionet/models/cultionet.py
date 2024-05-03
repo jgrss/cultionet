@@ -273,6 +273,7 @@ class CultioNet(nn.Module):
         num_classes: int = 2,
         model_type: str = ModelTypes.TOWERUNET,
         activation_type: str = "SiLU",
+        dropout: float = 0.1,
         dilations: T.Union[int, T.Sequence[int]] = None,
         res_block_type: str = ResBlockTypes.RES,
         attention_weights: str = "spatial_channel",
@@ -290,7 +291,7 @@ class CultioNet(nn.Module):
             hidden_channels=self.hidden_channels,
             num_head=8,
             in_time=self.in_time,
-            dropout=0.1,
+            dropout=0.2,
             num_layers=2,
             d_model=128,
             time_scaler=100,
@@ -305,6 +306,10 @@ class CultioNet(nn.Module):
             "in_time": self.in_time,
             "hidden_channels": self.hidden_channels,
             "num_classes": self.num_classes,
+            "attention_weights": attention_weights,
+            "res_block_type": res_block_type,
+            "dropout": dropout,
+            "dilations": dilations,
             "activation_type": activation_type,
             "deep_supervision": deep_supervision,
             "mask_activation": nn.Softmax(dim=1),
@@ -315,40 +320,13 @@ class CultioNet(nn.Module):
             ModelTypes.RESUNET3PSI,
             ModelTypes.TOWERUNET,
         ), "The model type is not supported."
-        if model_type == ModelTypes.UNET3PSI:
-            unet3_kwargs["dilation"] = 2 if dilations is None else dilations
-            assert isinstance(
-                unet3_kwargs["dilation"], int
-            ), f"The dilation for {ModelTypes.UNET3PSI} must be an integer."
-            self.mask_model = UNet3Psi(**unet3_kwargs)
-        elif model_type in (
-            ModelTypes.RESUNET3PSI,
-            ModelTypes.TOWERUNET,
-        ):
-            # ResUNet3Psi
-            unet3_kwargs["attention_weights"] = (
-                None if attention_weights == "none" else attention_weights
-            )
-            unet3_kwargs["res_block_type"] = res_block_type
-            if res_block_type == ResBlockTypes.RES:
-                unet3_kwargs["dilations"] = (
-                    [2] if dilations is None else dilations
-                )
-                assert (
-                    len(unet3_kwargs["dilations"]) == 1
-                ), f"The dilations for {ModelTypes.RESUNET3PSI} must be a length-1 integer sequence."
-            elif res_block_type == ResBlockTypes.RESA:
-                unet3_kwargs["dilations"] = (
-                    [1, 2] if dilations is None else dilations
-                )
-            assert isinstance(
-                unet3_kwargs["dilations"], list
-            ), f"The dilations for {ModelTypes.RESUNET3PSI} must be a sequence of integers."
 
-            if model_type == ModelTypes.RESUNET3PSI:
-                self.mask_model = ResUNet3Psi(**unet3_kwargs)
-            else:
-                self.mask_model = TowerUNet(**unet3_kwargs)
+        if model_type == ModelTypes.UNET3PSI:
+            self.mask_model = UNet3Psi(**unet3_kwargs)
+        elif model_type == ModelTypes.RESUNET3PSI:
+            self.mask_model = ResUNet3Psi(**unet3_kwargs)
+        else:
+            self.mask_model = TowerUNet(**unet3_kwargs)
 
     def forward(self, batch: Data) -> T.Dict[str, torch.Tensor]:
         # Transformer attention encoder

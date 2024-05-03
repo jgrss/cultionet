@@ -697,14 +697,38 @@ class TowerFinal(nn.Module):
             in_channels, in_channels * 3, kernel_size=1, padding=0
         )
         self.final_dist = nn.Sequential(
+            cunn.ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=in_channels,
+                kernel_size=3,
+                padding=1,
+                add_activation=True,
+                activation_type="SiLU",
+            ),
             nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
             nn.Sigmoid(),
         )
         self.final_edge = nn.Sequential(
+            cunn.ConvBlock2d(
+                in_channels=in_channels + 1,
+                out_channels=in_channels,
+                kernel_size=3,
+                padding=1,
+                add_activation=True,
+                activation_type="SiLU",
+            ),
             nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
             cunn.SigmoidCrisp(),
         )
         self.final_mask = nn.Sequential(
+            cunn.ConvBlock2d(
+                in_channels=in_channels + 2,
+                out_channels=in_channels,
+                kernel_size=3,
+                padding=1,
+                add_activation=True,
+                activation_type="SiLU",
+            ),
             nn.Conv2d(in_channels, num_classes, kernel_size=1, padding=0),
             mask_activation,
         )
@@ -723,14 +747,16 @@ class TowerFinal(nn.Module):
                 mode="bilinear",
             )
 
-        dist, edge, mask = torch.chunk(self.expand(x), 3, dim=1)
+        dist_connect, edge_connect, mask_connect = torch.chunk(
+            self.expand(x), 3, dim=1
+        )
 
-        if foj_boundaries is not None:
-            edge = edge * foj_boundaries
+        # if foj_boundaries is not None:
+        #     edge = edge * foj_boundaries
 
-        dist = self.final_dist(dist)
-        edge = self.final_edge(edge)
-        mask = self.final_mask(mask)
+        dist = self.final_dist(dist_connect)
+        edge = self.final_edge(torch.cat((edge_connect, dist), dim=1))
+        mask = self.final_mask(torch.cat((mask_connect, dist, edge), dim=1))
 
         return {
             f"dist{suffix}": dist,
@@ -750,6 +776,7 @@ class TowerUNet(nn.Module):
         num_classes: int = 2,
         dilations: T.Sequence[int] = None,
         activation_type: str = "SiLU",
+        dropout: float = 0.0,
         res_block_type: str = ResBlockTypes.RES,
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         mask_activation: T.Union[nn.Softmax, nn.Sigmoid] = nn.Softmax(dim=1),
@@ -796,6 +823,7 @@ class TowerUNet(nn.Module):
         self.down_b = cunn.PoolResidualConv(
             channels[0],
             channels[1],
+            dropout=dropout,
             attention_weights=attention_weights,
             res_block_type=res_block_type,
             dilations=dilations,
@@ -803,6 +831,7 @@ class TowerUNet(nn.Module):
         self.down_c = cunn.PoolResidualConv(
             channels[1],
             channels[2],
+            dropout=dropout,
             activation_type=activation_type,
             attention_weights=attention_weights,
             res_block_type=res_block_type,
@@ -811,8 +840,9 @@ class TowerUNet(nn.Module):
         self.down_d = cunn.PoolResidualConv(
             channels[2],
             channels[3],
-            num_blocks=1,
+            dropout=dropout,
             kernel_size=1,
+            num_blocks=1,
             activation_type=activation_type,
             attention_weights=attention_weights,
             res_block_type=res_block_type,
@@ -947,8 +977,10 @@ class TowerUNet(nn.Module):
         x_c = self.down_c(x_b)
         x_d = self.down_d(x_c)
 
-        # Up
+        # Over
         x_du = self.up_du(x_d, shape=x_d.shape[-2:])
+
+        # Up
         x_cu = self.up_cu(x_du, shape=x_c.shape[-2:])
         x_bu = self.up_bu(x_cu, shape=x_b.shape[-2:])
         x_au = self.up_au(x_bu, shape=x_a.shape[-2:])
