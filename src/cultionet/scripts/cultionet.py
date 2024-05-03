@@ -485,12 +485,13 @@ def predict_image(args):
             out_path=args.out_path,
             ckpt=ckpt_file,
             dataset=ds,
-            batch_size=args.batch_size,
-            load_batch_workers=args.load_batch_workers,
+            num_classes=num_classes,
             device=args.device,
             devices=args.devices,
+            strategy=args.strategy,
+            batch_size=args.batch_size,
+            load_batch_workers=args.load_batch_workers,
             precision=args.precision,
-            num_classes=num_classes,
             resampling=ds[0].resampling
             if hasattr(ds[0], 'resampling')
             else 'nearest',
