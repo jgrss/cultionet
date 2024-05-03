@@ -15,7 +15,12 @@ from torchvision.ops import box_iou
 
 from .. import nn as cunn
 from ..data.data import Data
-from ..enums import LearningRateSchedulers, ModelTypes, ResBlockTypes
+from ..enums import (
+    LearningRateSchedulers,
+    LossTypes,
+    ModelTypes,
+    ResBlockTypes,
+)
 from ..layers.weights import init_attention_weights
 from ..losses import TanimotoComplementLoss, TanimotoDistLoss
 from .cultionet import CultioNet, GeoRefinement
@@ -846,35 +851,47 @@ class LightningModuleMixin(LightningModule):
 
     def configure_loss(self):
         # Distance loss
-        self.dist_loss = TanimotoComplementLoss(one_hot_targets=False)
+        self.dist_loss = self.loss_dict[self.loss_name].get("regression")
         # Edge loss
-        self.edge_loss = TanimotoComplementLoss()
+        self.edge_loss = self.loss_dict[self.loss_name].get("classification")
         # Crop mask loss
-        self.crop_loss = TanimotoComplementLoss()
+        self.crop_loss = self.loss_dict[self.loss_name].get("classification")
         # Field of junctions loss
         # self.foj_loss = FieldOfJunctionsLoss()
 
         if self.deep_supervision:
-            self.dist_loss_deep_b = TanimotoComplementLoss(
-                one_hot_targets=False
+            self.dist_loss_deep_b = self.loss_dict[self.loss_name].get(
+                "regression"
             )
-            self.edge_loss_deep_b = TanimotoComplementLoss()
-            self.crop_loss_deep_b = TanimotoComplementLoss()
-            self.dist_loss_deep_c = TanimotoComplementLoss(
-                one_hot_targets=False
+            self.edge_loss_deep_b = self.loss_dict[self.loss_name].get(
+                "classification"
             )
-            self.edge_loss_deep_c = TanimotoComplementLoss()
-            self.crop_loss_deep_c = TanimotoComplementLoss()
+            self.crop_loss_deep_b = self.loss_dict[self.loss_name].get(
+                "classification"
+            )
+            self.dist_loss_deep_c = self.loss_dict[self.loss_name].get(
+                "regression"
+            )
+            self.edge_loss_deep_c = self.loss_dict[self.loss_name].get(
+                "classification"
+            )
+            self.crop_loss_deep_c = self.loss_dict[self.loss_name].get(
+                "classification"
+            )
 
         # Crop Temporal encoding losses
-        self.classes_l2_loss = TanimotoComplementLoss()
-        self.classes_last_loss = TanimotoComplementLoss()
+        self.classes_l2_loss = self.loss_dict[self.loss_name].get(
+            "classification"
+        )
+        self.classes_last_loss = self.loss_dict[self.loss_name].get(
+            "classification"
+        )
         if self.num_classes > 2:
-            self.crop_type_star_loss = TanimotoComplementLoss(
-                scale_pos_weight=self.scale_pos_weight
+            self.crop_type_star_loss = self.loss_dict[self.loss_name].get(
+                "classification"
             )
-            self.crop_type_loss = TanimotoComplementLoss(
-                scale_pos_weight=self.scale_pos_weight
+            self.crop_type_loss = self.loss_dict[self.loss_name].get(
+                "classification"
             )
 
     def configure_optimizers(self):
@@ -947,6 +964,7 @@ class CultionetLitTransferModel(LightningModuleMixin):
         activation_type: str = "SiLU",
         num_classes: int = 2,
         optimizer: str = "AdamW",
+        loss_name: str = LossTypes.TANIMOTO,
         learning_rate: float = 1e-3,
         lr_scheduler: str = LearningRateSchedulers.ONE_CYCLE_LR,
         steplr_step_size: int = 5,
@@ -966,6 +984,7 @@ class CultionetLitTransferModel(LightningModuleMixin):
 
         self.num_classes = num_classes
         self.optimizer = optimizer
+        self.loss_name = loss_name
         self.learning_rate = learning_rate
         self.lr_scheduler = lr_scheduler
         self.steplr_step_size = steplr_step_size
@@ -978,6 +997,17 @@ class CultionetLitTransferModel(LightningModuleMixin):
             self.edge_class = edge_class
         else:
             self.edge_class = num_classes
+
+        self.loss_dict = {
+            LossTypes.TANIMOTO_COMPLEMENT: {
+                "classification": TanimotoComplementLoss(),
+                "regression": TanimotoComplementLoss(one_hot_targets=False),
+            },
+            LossTypes.TANIMOTO: {
+                "classification": TanimotoDistLoss(),
+                "regression": TanimotoDistLoss(one_hot_targets=False),
+            },
+        }
 
         up_channels = int(init_filter * 5)
         self.in_channels = in_channels
@@ -1071,11 +1101,13 @@ class CultionetLitModel(LightningModuleMixin):
         num_classes: int = 2,
         hidden_channels: int = 32,
         model_type: str = ModelTypes.TOWERUNET,
+        dropout: float = 0.1,
         activation_type: str = "SiLU",
         dilations: T.Union[int, T.Sequence[int]] = None,
         res_block_type: str = ResBlockTypes.RES,
         attention_weights: str = "spatial_channel",
         optimizer: str = "AdamW",
+        loss_name: str = LossTypes.TANIMOTO,
         learning_rate: float = 1e-3,
         lr_scheduler: str = LearningRateSchedulers.ONE_CYCLE_LR,
         steplr_step_size: int = 5,
@@ -1097,6 +1129,7 @@ class CultionetLitModel(LightningModuleMixin):
         self.save_hyperparameters()
 
         self.optimizer = optimizer
+        self.loss_name = loss_name
         self.learning_rate = learning_rate
         self.lr_scheduler = lr_scheduler
         self.steplr_step_size = steplr_step_size
@@ -1117,6 +1150,17 @@ class CultionetLitModel(LightningModuleMixin):
         else:
             self.edge_class = num_classes
 
+        self.loss_dict = {
+            LossTypes.TANIMOTO_COMPLEMENT: {
+                "classification": TanimotoComplementLoss(),
+                "regression": TanimotoComplementLoss(one_hot_targets=False),
+            },
+            LossTypes.TANIMOTO: {
+                "classification": TanimotoDistLoss(),
+                "regression": TanimotoDistLoss(one_hot_targets=False),
+            },
+        }
+
         self.model_attr = f"{model_name}_{model_type}"
         setattr(
             self,
@@ -1127,6 +1171,7 @@ class CultionetLitModel(LightningModuleMixin):
                 hidden_channels=hidden_channels,
                 num_classes=self.num_classes,
                 model_type=model_type,
+                dropout=dropout,
                 activation_type=activation_type,
                 dilations=dilations,
                 res_block_type=res_block_type,

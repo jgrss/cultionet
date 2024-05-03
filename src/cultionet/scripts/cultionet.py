@@ -38,6 +38,7 @@ from cultionet.data.datasets import EdgeDataset
 from cultionet.data.utils import get_image_list_dims
 from cultionet.enums import CLISteps, DataColumns, ModelNames
 from cultionet.errors import TensorShapeError
+from cultionet.model import CultionetParams
 from cultionet.utils import model_preprocessing
 from cultionet.utils.logging import ParallelProgress, set_color_logger
 from cultionet.utils.normalize import NormValues
@@ -1179,31 +1180,14 @@ def train_model(args):
     else:
         class_counts = norm_values.dataset_crop_counts
 
-    train_kwargs = dict(
-        dataset=ds,
+    cultionet_params = CultionetParams(
         ckpt_file=ppaths.ckpt_file,
+        dataset=ds,
         test_dataset=test_ds,
         val_frac=args.val_frac,
         spatial_partitions=args.spatial_partitions,
-        partition_name=args.partition_name,
-        partition_column=args.partition_column,
         batch_size=args.batch_size,
-        epochs=args.epochs,
-        save_top_k=args.save_top_k,
-        accumulate_grad_batches=args.accumulate_grad_batches,
-        model_type=args.model_type,
-        dropout=args.dropout,
-        dilations=args.dilations,
-        res_block_type=args.res_block_type,
-        attention_weights=args.attention_weights,
-        activation_type=args.activation_type,
-        deep_supervision=args.deep_supervision,
-        optimizer=args.optimizer,
-        learning_rate=args.learning_rate,
-        lr_scheduler=args.lr_scheduler,
-        steplr_step_size=args.steplr_step_size,
-        scale_pos_weight=args.scale_pos_weight,
-        hidden_channels=args.hidden_channels,
+        load_batch_workers=args.load_batch_workers,
         num_classes=args.num_classes
         if args.num_classes is not None
         else class_info["max_crop_class"] + 1,
@@ -1211,21 +1195,34 @@ def train_model(args):
         if args.edge_class is not None
         else class_info["edge_class"],
         class_counts=class_counts,
-        reset_model=args.reset_model,
-        auto_lr_find=args.auto_lr_find,
-        device=args.device,
-        devices=args.devices,
-        profiler=args.profiler,
+        hidden_channels=args.hidden_channels,
+        model_type=args.model_type,
+        activation_type=args.activation_type,
+        dropout=args.dropout,
+        dilations=args.dilations,
+        res_block_type=args.res_block_type,
+        attention_weights=args.attention_weights,
+        optimizer=args.optimizer,
+        loss_name=args.loss_name,
+        learning_rate=args.learning_rate,
+        lr_scheduler=args.lr_scheduler,
+        steplr_step_size=args.steplr_step_size,
+        weight_decay=args.weight_decay,
+        deep_supervision=args.deep_supervision,
+        scale_pos_weight=args.scale_pos_weight,
+        save_batch_val_metrics=args.save_batch_val_metrics,
+        epochs=args.epochs,
+        accumulate_grad_batches=args.accumulate_grad_batches,
         gradient_clip_val=args.gradient_clip_val,
         gradient_clip_algorithm=args.gradient_clip_algorithm,
-        early_stopping_patience=args.patience,
-        weight_decay=args.weight_decay,
         precision=args.precision,
+        device=args.device,
+        devices=args.devices,
+        reset_model=args.reset_model,
+        auto_lr_find=args.auto_lr_find,
         stochastic_weight_averaging=args.stochastic_weight_averaging,
         stochastic_weight_averaging_lr=args.stochastic_weight_averaging_lr,
         stochastic_weight_averaging_start=args.stochastic_weight_averaging_start,
-        model_pruning=args.model_pruning,
-        save_batch_val_metrics=args.save_batch_val_metrics,
         skip_train=args.skip_train,
         refine_model=args.refine_model,
         finetune=args.finetune,
@@ -1234,9 +1231,9 @@ def train_model(args):
 
     # Fit the model
     if args.process == CLISteps.TRAIN_TRANSFER:
-        cultionet.fit_transfer(**train_kwargs)
+        cultionet.fit_transfer(cultionet_params)
     else:
-        cultionet.fit(**train_kwargs)
+        cultionet.fit(cultionet_params)
 
 
 def main():

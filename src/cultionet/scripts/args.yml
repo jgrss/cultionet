@@ -390,13 +390,6 @@ train:
     kwargs:
       default: 30
       type: '&int'
-  save_top_k:
-    short: ''
-    long: save-top-k
-    help: The number of model checkpoints to save (in addition to the last/best)
-    kwargs:
-      default: 1
-      type: '&int'
   threads:
     short: t
     long: threads
@@ -480,13 +473,6 @@ train:
     help: The gradient clip algorithm
     kwargs:
       default: 'norm'
-  patience:
-    short: ''
-    long: patience
-    help: The early stopping patience
-    kwargs:
-      default: 20
-      type: '&int'
   optimizer:
     short: ''
     long: optimizer
@@ -502,12 +488,19 @@ train:
     help: Whether to use deep supervision
     kwargs:
       action: store_true
+  loss_name:
+    short: loss
+    long: loss-name
+    help: The loss method name
+    kwargs:
+      default: 'TanimotoDistLoss'
+      choices: ['TanimotoDistLoss', 'TanimotoComplementLoss']
   learning_rate:
     short: lr
     long: learning-rate
     help: The learning rate
     kwargs:
-      default: 0.02
+      default: 0.01
       type: '&float'
   lr_scheduler:
     short: lrs
@@ -538,7 +531,7 @@ train:
     long: weight-decay
     help: Sets the weight decay for Adam optimizer\'s regularization
     kwargs:
-      default: 2e-3
+      default: 1e-3
       type: '&float'
   accumulate_grad_batches:
     short: agb

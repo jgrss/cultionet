@@ -48,6 +48,11 @@ class Destinations(StrEnum):
     USER_TRAIN = 'user_train'
 
 
+class LossTypes(StrEnum):
+    TANIMOTO_COMPLEMENT = "TanimotoComplementLoss"
+    TANIMOTO = "TanimotoDistLoss"
+
+
 class ModelNames(StrEnum):
     CLASS_INFO = "classes.info"
     CKPT_NAME = "last.ckpt"

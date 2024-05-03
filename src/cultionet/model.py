@@ -3,6 +3,7 @@ import logging
 import typing as T
 from pathlib import Path
 
+import attr
 import lightning as L
 import numpy as np
 import torch
@@ -24,7 +25,14 @@ from .data.data import Data
 from .data.datasets import EdgeDataset
 from .data.modules import EdgeDataModule
 from .data.samplers import EpochRandomSampler
-from .enums import AttentionTypes, ModelNames, ModelTypes, ResBlockTypes
+from .enums import (
+    AttentionTypes,
+    LearningRateSchedulers,
+    LossTypes,
+    ModelNames,
+    ModelTypes,
+    ResBlockTypes,
+)
 from .models.cultionet import GeoRefinement
 from .models.lightning import (
     CultionetLitModel,
@@ -40,6 +48,149 @@ logging.getLogger("lightning").addHandler(logging.NullHandler())
 logging.getLogger("lightning").propagate = False
 
 logger = set_color_logger(__name__)
+
+
+@attr.s
+class CultionetParams:
+    ckpt_file: T.Union[str, Path] = attr.ib(converter=Path, default=None)
+    spatial_partitions: str = attr.ib(default=None)
+    dataset: EdgeDataset = attr.ib(default=None)
+    test_dataset: T.Optional[EdgeDataset] = attr.ib(default=None)
+    val_frac: float = attr.ib(converter=float, default=0.2)
+    batch_size: int = attr.ib(converter=int, default=4)
+    load_batch_workers: int = attr.ib(converter=int, default=0)
+    num_classes: int = attr.ib(converter=int, default=None)
+    edge_class: int = attr.ib(converter=int, default=None)
+    class_counts: torch.Tensor = attr.ib(default=None)
+    hidden_channels: int = attr.ib(converter=int, default=64)
+    model_type: str = attr.ib(converter=str, default=ModelTypes.TOWERUNET)
+    activation_type: str = attr.ib(converter=str, default="SiLU")
+    dropout: float = attr.ib(converter=float, default=0.1)
+    dilations: T.Union[int, T.Sequence[int]] = attr.ib(
+        converter=list, default=None
+    )
+    res_block_type: str = attr.ib(converter=str, default=ResBlockTypes.RES)
+    attention_weights: str = attr.ib(
+        converter=str, default=AttentionTypes.SPATIAL_CHANNEL
+    )
+    optimizer: str = attr.ib(converter=str, default="AdamW")
+    loss_name: str = attr.ib(converter=str, default=LossTypes.TANIMOTO)
+    learning_rate: float = attr.ib(converter=float, default=0.01)
+    lr_scheduler: str = attr.ib(
+        converter=str, default=LearningRateSchedulers.ONE_CYCLE_LR
+    )
+    steplr_step_size: int = attr.ib(converter=int, default=5)
+    weight_decay: float = attr.ib(converter=float, default=1e-3)
+    eps: float = attr.ib(converter=float, default=1e-4)
+    ckpt_name: str = attr.ib(converter=str, default="last")
+    model_name: str = attr.ib(converter=str, default="cultionet")
+    deep_supervision: bool = attr.ib(default=False)
+    scale_pos_weight: bool = attr.ib(default=False)
+    save_batch_val_metrics: bool = attr.ib(default=False)
+    epochs: int = attr.ib(converter=int, default=100)
+    accumulate_grad_batches: int = attr.ib(converter=int, default=1)
+    gradient_clip_val: float = attr.ib(converter=float, default=1.0)
+    gradient_clip_algorithm: str = attr.ib(converter=str, default="norm")
+    precision: T.Union[int, str] = attr.ib(default="16-mixed")
+    device: str = attr.ib(converter=str, default="gpu")
+    devices: int = attr.ib(converter=int, default=1)
+    reset_model: bool = attr.ib(default=False)
+    auto_lr_find: bool = attr.ib(default=False)
+    stochastic_weight_averaging: bool = attr.ib(default=False)
+    stochastic_weight_averaging_lr: float = attr.ib(
+        converter=float, default=0.05
+    )
+    stochastic_weight_averaging_start: float = attr.ib(
+        converter=float, default=0.8
+    )
+    model_pruning: bool = attr.ib(default=False)
+    skip_train: bool = attr.ib(default=False)
+    refine_model: bool = attr.ib(default=False)
+    finetune: bool = attr.ib(default=False)
+    strategy: str = attr.ib(converter=str, default="ddp")
+
+    def check_checkpoint(self) -> None:
+        if self.reset_model:
+            if self.ckpt_file.is_file():
+                self.ckpt_file.unlink()
+
+            model_file = self.ckpt_file.parent / f"{self.model_name}.pt"
+            if model_file.is_file():
+                model_file.unlink()
+
+    def update_channels(
+        self, data_module: EdgeDataModule
+    ) -> "CultionetParams":
+        self.in_channels = data_module.train_ds.num_channels
+        self.in_time = data_module.train_ds.num_time
+
+        return self
+
+    def get_callback_params(self) -> dict:
+        return dict(
+            ckpt_file=self.ckpt_file,
+            stochastic_weight_averaging=self.stochastic_weight_averaging,
+            stochastic_weight_averaging_lr=self.stochastic_weight_averaging_lr,
+            stochastic_weight_averaging_start=self.stochastic_weight_averaging_start,
+            model_pruning=self.model_pruning,
+        )
+
+    def get_datamodule_params(self) -> dict:
+        return dict(
+            dataset=self.dataset,
+            test_dataset=self.test_dataset,
+            val_frac=self.val_frac,
+            spatial_partitions=self.spatial_partitions,
+            batch_size=self.batch_size,
+            load_batch_workers=self.load_batch_workers,
+        )
+
+    def get_lightning_params(self) -> dict:
+        return dict(
+            in_channels=self.in_channels,
+            in_time=self.in_time,
+            num_classes=self.num_classes,
+            hidden_channels=self.hidden_channels,
+            model_type=self.model_type,
+            dropout=self.dropout,
+            activation_type=self.activation_type,
+            dilations=self.dilations,
+            res_block_type=self.res_block_type,
+            attention_weights=self.attention_weights,
+            optimizer=self.optimizer,
+            loss_name=self.loss_name,
+            learning_rate=self.learning_rate,
+            lr_scheduler=self.lr_scheduler,
+            steplr_step_size=self.steplr_step_size,
+            weight_decay=self.weight_decay,
+            eps=self.eps,
+            ckpt_name=self.ckpt_name,
+            model_name=self.model_name,
+            deep_supervision=self.deep_supervision,
+            class_counts=self.class_counts,
+            edge_class=self.edge_class,
+            scale_pos_weight=self.scale_pos_weight,
+            save_batch_val_metrics=self.save_batch_val_metrics,
+        )
+
+    def get_trainer_params(self) -> dict:
+        return dict(
+            default_root_dir=str(self.ckpt_file.parent),
+            enable_checkpointing=True,
+            accumulate_grad_batches=self.accumulate_grad_batches,
+            gradient_clip_val=self.gradient_clip_val,
+            gradient_clip_algorithm=self.gradient_clip_algorithm,
+            check_val_every_n_epoch=1,
+            min_epochs=5 if self.epochs >= 5 else self.epochs,
+            max_epochs=self.epochs,
+            precision=self.precision,
+            devices=self.devices,
+            accelerator=self.device,
+            log_every_n_steps=50,
+            deterministic=False,
+            benchmark=False,
+            strategy=self.strategy,
+        )
 
 
 def fit_maskrcnn(
@@ -244,9 +395,6 @@ def get_data_module(
 
 def setup_callbacks(
     ckpt_file: T.Union[str, Path],
-    save_top_k: int = 1,
-    early_stopping_min_delta: float = 0.01,
-    early_stopping_patience: int = 7,
     stochastic_weight_averaging: bool = False,
     stochastic_weight_averaging_lr: float = 0.05,
     stochastic_weight_averaging_start: float = 0.8,
@@ -259,7 +407,7 @@ def setup_callbacks(
         dirpath=ckpt_file.parent,
         filename=ckpt_file.stem,
         save_last=False,
-        save_top_k=save_top_k,
+        save_top_k=1,
         mode="min",
         monitor="val_score",
         every_n_train_steps=0,
@@ -295,8 +443,6 @@ def fit_transfer(
     test_dataset: T.Optional[EdgeDataset] = None,
     val_frac: float = 0.2,
     spatial_partitions: T.Optional[T.Union[str, Path]] = None,
-    partition_name: T.Optional[str] = None,
-    partition_column: T.Optional[str] = None,
     batch_size: int = 4,
     load_batch_workers: int = 2,
     accumulate_grad_batches: int = 1,
@@ -440,9 +586,6 @@ def fit_transfer(
 
     lr_monitor, callbacks = setup_callbacks(
         ckpt_file=ckpt_file,
-        save_top_k=save_top_k,
-        early_stopping_min_delta=early_stopping_min_delta,
-        early_stopping_patience=early_stopping_patience,
         stochastic_weight_averaging=stochastic_weight_averaging,
         stochastic_weight_averaging_lr=stochastic_weight_averaging_lr,
         stochastic_weight_averaging_start=stochastic_weight_averaging_start,
@@ -562,215 +705,73 @@ def fit_transfer(
                 f.write(json.dumps(logged_metrics))
 
 
-def fit(
-    dataset: EdgeDataset,
-    ckpt_file: T.Union[str, Path],
-    test_dataset: T.Optional[EdgeDataset] = None,
-    val_frac: float = 0.2,
-    spatial_partitions: T.Optional[T.Union[str, Path]] = None,
-    partition_name: T.Optional[str] = None,
-    partition_column: T.Optional[str] = None,
-    batch_size: int = 4,
-    load_batch_workers: int = 2,
-    accumulate_grad_batches: int = 1,
-    hidden_channels: int = 32,
-    num_classes: int = 2,
-    edge_class: T.Optional[int] = None,
-    class_counts: T.Sequence[float] = None,
-    model_type: str = ModelTypes.RESUNET3PSI,
-    activation_type: str = "SiLU",
-    dropout: float = 0.0,
-    dilations: T.Union[int, T.Sequence[int]] = None,
-    res_block_type: str = ResBlockTypes.RES,
-    attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
-    deep_supervision: bool = False,
-    optimizer: str = "AdamW",
-    learning_rate: float = 1e-3,
-    lr_scheduler: str = "CosineAnnealingLR",
-    steplr_step_size: T.Optional[T.Sequence[int]] = None,
-    scale_pos_weight: bool = True,
-    epochs: int = 30,
-    save_top_k: int = 1,
-    early_stopping_patience: int = 7,
-    early_stopping_min_delta: float = 0.01,
-    gradient_clip_val: float = 1.0,
-    gradient_clip_algorithm: float = "norm",
-    reset_model: bool = False,
-    auto_lr_find: bool = False,
-    device: str = "gpu",
-    devices: int = 1,
-    profiler: T.Optional[str] = None,
-    weight_decay: float = 1e-5,
-    precision: int = 32,
-    stochastic_weight_averaging: bool = False,
-    stochastic_weight_averaging_lr: float = 0.05,
-    stochastic_weight_averaging_start: float = 0.8,
-    model_pruning: bool = False,
-    save_batch_val_metrics: bool = False,
-    skip_train: bool = False,
-    refine_model: bool = False,
-    finetune: bool = False,
-    strategy: str = "ddp",
-):
-    """Fits a model.
-
-    Args:
-        dataset (EdgeDataset): The dataset to fit on.
-        ckpt_file (str | Path): The checkpoint file path.
-        test_dataset (Optional[EdgeDataset]): A test dataset to evaluate on. If given, early stopping
-            will switch from the validation dataset to the test dataset.
-        val_frac (Optional[float]): The fraction of data to use for model validation.
-        spatial_partitions (Optional[str | Path]): A spatial partitions file.
-        partition_name (Optional[str]): The spatial partition file column query name.
-        partition_column (Optional[str]): The spatial partition file column name.
-        batch_size (Optional[int]): The data batch size.
-        load_batch_workers (Optional[int]): The number of parallel batches to load.
-        hidden_channels (Optional[int]): The number of initial model hidden channels.
-        optimizer (Optional[str]): The optimizer.
-        model_type (Optional[str]): The model type.
-        activation_type (Optional[str]): The activation type.
-        dilations (Optional[list]): The dilation size or sizes.
-        res_block_type (Optional[str]): The residual block type.
-        attention_weights (Optional[str]): The attention weights.
-        deep_sup_dist (Optional[bool]): Whether to use deep supervision for distances.
-        deep_sup_edge (Optional[bool]): Whether to use deep supervision for edges.
-        deep_sup_mask (Optional[bool]): Whether to use deep supervision for masks.
-        learning_rate (Optional[float]): The model learning rate.
-        lr_scheduler (Optional[str]): The learning rate scheduler.
-        steplr_step_size (Optional[list]): The multiplicative step size factor.
-        scale_pos_weight (Optional[bool]): Whether to scale class weights (i.e., balance classes).
-        epochs (Optional[int]): The number of epochs.
-        save_top_k (Optional[int]): The number of top-k model checkpoints to save.
-        early_stopping_patience (Optional[int]): The patience (epochs) before early stopping.
-        early_stopping_min_delta (Optional[float]): The minimum change threshold before early stopping.
-        gradient_clip_val (Optional[float]): The gradient clip limit.
-        gradient_clip_algorithm (Optional[str]): The gradient clip algorithm.
-        reset_model (Optional[bool]): Whether to reset an existing model. Otherwise, pick up from last epoch of
-            an existing model.
-        auto_lr_find (Optional[bool]): Whether to search for an optimized learning rate.
-        device (Optional[str]): The device to train on. Choices are ['cpu', 'gpu'].
-        devices (Optional[int]): The number of GPU devices to use.
-        profiler (Optional[str]): A profiler level. Choices are [None, 'simple', 'advanced'].
-        weight_decay (Optional[float]): The weight decay passed to the optimizer. Default is 1e-5.
-        precision (Optional[int]): The data precision. Default is 32.
-        stochastic_weight_averaging (Optional[bool]): Whether to use stochastic weight averaging.
-            Default is False.
-        stochastic_weight_averaging_lr (Optional[float]): The stochastic weight averaging learning rate.
-            Default is 0.05.
-        stochastic_weight_averaging_start (Optional[float]): The stochastic weight averaging epoch start.
-            Default is 0.8.
-        model_pruning (Optional[bool]): Whether to prune the model. Default is False.
-        save_batch_val_metrics (Optional[bool]): Whether to save batch validation metrics to a parquet file.
-        skip_train (Optional[bool]): Whether to refine and calibrate a trained model.
-        refine_model (Optional[bool]): Whether to skip training.
-        finetune (bool): Not used. Placeholder for compatibility with transfer learning.
-        strategy (str): The model distributed strategy.
-    """
-    ckpt_file = Path(ckpt_file)
+def fit(cultionet_params: CultionetParams) -> None:
+    """Fits a model."""
 
     # Split the dataset into train/validation
     data_module: EdgeDataModule = get_data_module(
-        dataset=dataset,
-        test_dataset=test_dataset,
-        val_frac=val_frac,
-        spatial_partitions=spatial_partitions,
-        batch_size=batch_size,
-        load_batch_workers=load_batch_workers,
+        **cultionet_params.get_datamodule_params()
     )
+
+    # Get the channel and time dimensions from the dataset
+    cultionet_params = cultionet_params.update_channels(data_module)
 
     # Setup the Lightning model
-    lit_model = CultionetLitModel(
-        in_channels=data_module.train_ds.num_channels,
-        in_time=data_module.train_ds.num_time,
-        num_classes=num_classes,
-        hidden_channels=hidden_channels,
-        model_type=model_type,
-        activation_type=activation_type,
-        dilations=dilations,
-        res_block_type=res_block_type,
-        attention_weights=attention_weights,
-        deep_supervision=deep_supervision,
-        optimizer=optimizer,
-        learning_rate=learning_rate,
-        lr_scheduler=lr_scheduler,
-        steplr_step_size=steplr_step_size,
-        weight_decay=weight_decay,
-        class_counts=class_counts,
-        edge_class=edge_class,
-        scale_pos_weight=scale_pos_weight,
-        save_batch_val_metrics=save_batch_val_metrics,
-    )
+    lit_model = CultionetLitModel(**cultionet_params.get_lightning_params())
 
-    if reset_model:
-        if ckpt_file.is_file():
-            ckpt_file.unlink()
-        model_file = ckpt_file.parent / f"{lit_model.model_name}.pt"
-        if model_file.is_file():
-            model_file.unlink()
+    # Remove the model file if requested
+    cultionet_params.check_checkpoint()
 
     lr_monitor, callbacks = setup_callbacks(
-        ckpt_file=ckpt_file,
-        save_top_k=save_top_k,
-        early_stopping_min_delta=early_stopping_min_delta,
-        early_stopping_patience=early_stopping_patience,
-        stochastic_weight_averaging=stochastic_weight_averaging,
-        stochastic_weight_averaging_lr=stochastic_weight_averaging_lr,
-        stochastic_weight_averaging_start=stochastic_weight_averaging_start,
-        model_pruning=model_pruning,
-    )
-    trainer = L.Trainer(
-        default_root_dir=str(ckpt_file.parent),
-        callbacks=callbacks,
-        enable_checkpointing=True,
-        accumulate_grad_batches=accumulate_grad_batches,
-        gradient_clip_val=gradient_clip_val,
-        gradient_clip_algorithm=gradient_clip_algorithm,
-        check_val_every_n_epoch=1,
-        min_epochs=5 if epochs >= 5 else epochs,
-        max_epochs=epochs,
-        precision=precision,
-        devices=devices,
-        accelerator=device,
-        strategy=strategy,
-        log_every_n_steps=50,
-        profiler=profiler,
-        deterministic=False,
-        benchmark=False,
+        **cultionet_params.get_callback_params()
     )
 
-    if auto_lr_find:
+    # Setup the trainer
+    trainer = L.Trainer(
+        callbacks=callbacks,
+        **cultionet_params.get_trainer_params(),
+    )
+
+    if cultionet_params.auto_lr_find:
         tuner = Tuner(trainer)
         lr_finder = tuner.lr_find(model=lit_model, datamodule=data_module)
         opt_lr = lr_finder.suggestion()
         logger.info(f"The suggested learning rate is {opt_lr}")
     else:
-        if not skip_train:
+        if not cultionet_params.skip_train:
             trainer.fit(
                 model=lit_model,
                 datamodule=data_module,
-                ckpt_path=ckpt_file if ckpt_file.is_file() else None,
+                ckpt_path=cultionet_params.ckpt_file
+                if cultionet_params.ckpt_file.is_file()
+                else None,
             )
 
-        if refine_model:
+        if cultionet_params.refine_model:
             refine_data_module = EdgeDataModule(
-                train_ds=dataset,
-                batch_size=batch_size,
-                num_workers=load_batch_workers,
+                train_ds=cultionet_params.dataset,
+                batch_size=cultionet_params.batch_size,
+                num_workers=cultionet_params.load_batch_workers,
                 shuffle=True,
                 # For each epoch, train on a random
                 # subset of 50% of the data.
                 sampler=EpochRandomSampler(
-                    dataset, num_samples=int(len(dataset) * 0.5)
+                    cultionet_params.dataset,
+                    num_samples=int(len(cultionet_params.dataset) * 0.5),
                 ),
             )
-            refine_ckpt_file = ckpt_file.parent / "refine" / ckpt_file.name
+            refine_ckpt_file = (
+                cultionet_params.ckpt_file.parent
+                / "refine"
+                / cultionet_params.ckpt_file.name
+            )
             refine_ckpt_file.parent.mkdir(parents=True, exist_ok=True)
             # refine checkpoints
             refine_cb_train_loss = ModelCheckpoint(
                 dirpath=refine_ckpt_file.parent,
                 filename=refine_ckpt_file.stem,
                 save_last=True,
-                save_top_k=save_top_k,
+                save_top_k=1,
                 mode="min",
                 monitor="loss",
                 every_n_train_steps=0,
@@ -779,7 +780,7 @@ def fit(
             # Early stopping
             refine_early_stop_callback = EarlyStopping(
                 monitor="loss",
-                min_delta=early_stopping_min_delta,
+                min_delta=0.1,
                 patience=5,
                 mode="min",
                 check_on_train_epoch_end=False,
@@ -793,26 +794,27 @@ def fit(
                 default_root_dir=str(refine_ckpt_file.parent),
                 callbacks=refine_callbacks,
                 enable_checkpointing=True,
-                gradient_clip_val=gradient_clip_val,
+                gradient_clip_val=cultionet_params.gradient_clip_val,
                 gradient_clip_algorithm="value",
                 check_val_every_n_epoch=1,
-                min_epochs=1 if epochs >= 1 else epochs,
+                min_epochs=1
+                if cultionet_params.epochs >= 1
+                else cultionet_params.epochs,
                 max_epochs=10,
                 precision=32,
-                devices=devices,
-                accelerator=device,
+                devices=cultionet_params.devices,
+                accelerator=cultionet_params.device,
                 log_every_n_steps=50,
-                profiler=profiler,
                 deterministic=False,
                 benchmark=False,
             )
             # Calibrate the logits
             refine_model = RefineLitModel(
                 in_features=data_module.train_ds.num_features,
-                num_classes=num_classes,
-                edge_class=edge_class,
-                class_counts=class_counts,
-                cultionet_ckpt=ckpt_file,
+                num_classes=cultionet_params.num_classes,
+                edge_class=cultionet_params.edge_class,
+                class_counts=cultionet_params.class_counts,
+                cultionet_ckpt=cultionet_params.ckpt_file,
             )
             refine_trainer.fit(
                 model=refine_model,
@@ -821,7 +823,7 @@ def fit(
                 if refine_ckpt_file.is_file()
                 else None,
             )
-        if test_dataset is not None:
+        if cultionet_params.test_dataset is not None:
             trainer.test(
                 model=lit_model,
                 dataloaders=data_module.test_dataloader(),
