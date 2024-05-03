@@ -1118,11 +1118,14 @@ def train_model(args):
     # Get the normalization means and std. deviations on the train data
     # Calculate the values needed to transform to z-scores, using
     # the training data
-    if ppaths.norm_file.is_file():
+    if ppaths.norm_file.exists():
         if args.recalc_zscores:
             ppaths.norm_file.unlink()
 
-    if not ppaths.norm_file.is_file():
+    if not ppaths.norm_file.exists():
+        if ds.grid_gpkg_path.exists():
+            ds.grid_gpkg_path.unlink()
+
         if args.spatial_partitions is not None:
             train_ds = ds.split_train_val(
                 val_frac=args.val_frac,

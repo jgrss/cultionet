@@ -266,9 +266,13 @@ class EdgeDataset(Dataset):
 
             yield str(getattr(kfold, partition_column)), train_ds, test_ds
 
+    @property
+    def grid_gpkg_path(self) -> Path:
+        return self.root / "dataset_grids.gpkg"
+
     def create_spatial_index(self):
         """Creates the spatial index."""
-        dataset_grid_path = self.root / "dataset_grids.gpkg"
+        dataset_grid_path = self.grid_gpkg_path
 
         if dataset_grid_path.is_file():
             self.dataset_df = gpd.read_file(dataset_grid_path)
