@@ -18,6 +18,7 @@ from joblib import Parallel, delayed, parallel_backend
 from rasterio.warp import calculate_default_transform
 from rasterio.windows import Window, from_bounds
 from scipy.ndimage import label as nd_label
+from scipy.ndimage import uniform_filter
 from skimage.measure import regionprops
 from threadpoolctl import threadpool_limits
 
@@ -428,6 +429,14 @@ def reshape_and_mask_array(
     return time_series
 
 
+def fillz(x: np.ndarray) -> np.ndarray:
+    """Fills zeros with the focal mean value."""
+
+    focal_mean = uniform_filter(x, size=(0, 0, 3, 3), mode='reflect')
+
+    return np.where(x == 0, focal_mean, x)
+
+
 class ImageVariables:
     def __init__(
         self,
@@ -474,6 +483,7 @@ class ImageVariables:
     @classmethod
     def create_image_vars(
         cls,
+        region: str,
         image: T.Union[str, Path, list],
         reference_grid: gpd.GeoDataFrame,
         max_crop_class: int,
@@ -501,8 +511,9 @@ class ImageVariables:
                     ref_res, 0.0, ref_bounds[0], 0.0, -ref_res, ref_bounds[3]
                 ),
             )
-            assert (ref_window.height == grid_size[0]) and (
-                ref_window.width == grid_size[1]
+
+            assert (int(ref_window.height) == grid_size[0]) and (
+                int(ref_window.width) == grid_size[1]
             ), (
                 f"The reference grid size is {ref_window.height} rows x {ref_window.width} columns, but the expected "
                 f"dimensions are {grid_size[0]} rows x {grid_size[1]} columns"
@@ -531,6 +542,16 @@ class ImageVariables:
                     gain=gain,
                     offset=offset,
                 ).data.compute(num_workers=num_workers)
+
+                # Fill isolated zeros
+                time_series = fillz(time_series)
+
+                # NaNs are filled with 0 in reshape_and_mask_array()
+                zero_mask = time_series.sum(axis=0) == 0
+                if zero_mask.all():
+                    raise ValueError(
+                        f"The {region} time series contains all NaNs."
+                    )
 
                 # Default outputs
                 (
@@ -838,7 +859,6 @@ def create_train_batch(
     region: str,
     process_path: Path = None,
     date_format: str = "%Y%j",
-    transforms: T.List[str] = None,
     gain: float = 1e-4,
     offset: float = 0.0,
     ref_res: float = 10.0,
@@ -861,7 +881,6 @@ def create_train_batch(
         max_crop_class: The maximum expected crop class value.
         group_id: A group identifier, used for logging.
         process_path: The main processing path.
-        transforms: A list of augmentation transforms to apply.
         gain: A gain factor to apply to the images.
         offset: An offset factor to apply to the images.
         ref_res: The reference cell resolution to resample the images to.
@@ -888,8 +907,7 @@ def create_train_batch(
     uid_format = "{REGION_ID}_{START_DATE}_{END_DATE}_none"
     group_id = f"{region}_{start_date}_{end_date}_none"
 
-    if transforms is None:
-        transforms = ["none"]
+    transforms = ["none"]
 
     # Check if the grid has already been saved
     batch_stored = is_grid_processed(
@@ -904,22 +922,6 @@ def create_train_batch(
     if batch_stored:
         return
 
-    # # Clip the polygons to the current grid
-    # try:
-    #     df_polygons_grid = gpd.clip(df_polygons, row.geometry)
-    # except ValueError:
-    #     logger.warning(
-    #         TopologyClipError(
-    #             "The input GeoDataFrame contains topology errors."
-    #         )
-    #     )
-    #     df_polygons = gpd.GeoDataFrame(
-    #         data=df_polygons[crop_column].values,
-    #         columns=[crop_column],
-    #         geometry=df_polygons.buffer(0).geometry,
-    #     )
-    #     df_polygons_grid = gpd.clip(df_polygons, row.geometry)
-
     # These are grids with no crop fields. They should still
     # be used for training.
     if df_polygons.loc[~df_polygons.is_empty].empty:
@@ -933,16 +935,9 @@ def create_train_batch(
         # Get a mask of valid polygons
         nonzero_mask = df_polygons[crop_column] != 0
 
-        # Get the reference bounding box from the grid
-        # ref_bounds = get_reference_bounds(
-        #     df_grid=df_grid,
-        #     grid_size=grid_size,
-        #     filename=image_list[0],
-        #     ref_res=ref_res,
-        # )
-
         # Data for the model network
         image_variables = ImageVariables.create_image_vars(
+            region=region,
             image=image_list,
             reference_grid=df_grid,
             df_polygons_grid=df_polygons if nonzero_mask.any() else None,
