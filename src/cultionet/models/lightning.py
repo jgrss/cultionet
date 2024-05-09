@@ -430,6 +430,8 @@ class LightningModuleMixin(LightningModule):
     def __init__(self):
         super(LightningModuleMixin, self).__init__()
 
+        torch.set_float32_matmul_precision("high")
+
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
@@ -1116,6 +1118,7 @@ class CultionetLitModel(LightningModuleMixin):
         ckpt_name: str = "last",
         model_name: str = "cultionet",
         deep_supervision: bool = False,
+        pool_first: bool = False,
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         temperature_lit_model: T.Optional[GeoRefinement] = None,
@@ -1144,6 +1147,7 @@ class CultionetLitModel(LightningModuleMixin):
         self.scale_pos_weight = scale_pos_weight
         self.save_batch_val_metrics = save_batch_val_metrics
         self.deep_supervision = deep_supervision
+        self.pool_first = pool_first
         self.sigmoid = torch.nn.Sigmoid()
         if edge_class is not None:
             self.edge_class = edge_class
@@ -1177,6 +1181,7 @@ class CultionetLitModel(LightningModuleMixin):
                 res_block_type=res_block_type,
                 attention_weights=attention_weights,
                 deep_supervision=deep_supervision,
+                pool_first=pool_first,
             ),
         )
 
