@@ -1,20 +1,3 @@
-epilog: |
-  ########
-  Examples
-  ########
-
-  # Create training data
-  cultionet create --project-path /projects/data
-
-  # Spatial k-fold cross-validation using quadrant partitions on the dataset
-  cultionet skfoldcv -p . --splits 2 --val-frac 0.5 --processes 8 --epochs 1 --batch-size 4 --precision 16
-
-  # Train a model
-  cultionet train --project-path /projects/data
-
-  # Apply inference over an image
-  cultionet predict --project-path /projects/data -o estimates.tif
-
 dates:
   start_date:
     short: sd
@@ -107,29 +90,6 @@ shared_create:
       action: store_true
 
 create:
-  transforms:
-    short: tr
-    long: transforms
-    help: Augmentation transforms to apply
-    kwargs:
-      default: !!null
-      choices:
-        - none
-        - fliplr
-        - flipud
-        - flipfb
-        - rot90
-        - rot180
-        - rot270
-        - tswarp
-        - tsnoise
-        - tsdrift
-        - tspeaks
-        - roll
-        - gaussian
-        - saltpepper
-        - speckle
-      nargs: '+'
   grid_size:
     short: gs
     long: grid-size
@@ -219,21 +179,21 @@ train_predict:
     long: res-block-type
     help: The residual block type (only relevant when --model-type=ResUNet3Psi)
     kwargs:
-      default: 'res'
+      default: 'resa'
       choices: ['res', 'resa']
   dropout:
     short: ''
     long: dropout
     help: The dropout probability
     kwargs:
-      default: 0.0
+      default: 0.2
       type: '&float'
   dilations:
     short: ''
     long: dilations
     help: The dilations to use
     kwargs:
-      default: [1]
+      default: [1, 2]
       nargs: '+'
       type: '&int'
   attention_weights:
@@ -248,7 +208,7 @@ train_predict:
     long: hidden-channels
     help: The number of input hidden channels
     kwargs:
-      default: 32
+      default: 64
       type: '&int'
   device:
     short: ''
@@ -276,14 +236,14 @@ train_predict:
     long: batch-size
     help: The batch size
     kwargs:
-      default: 8
+      default: 4
       type: '&int'
   load_batch_workers:
     short: ''
     long: load-batch-workers
     help: The number of parallel batches to load
     kwargs:
-      default: 2
+      default: 0
       type: '&int'
   precision:
     short: ''
@@ -374,14 +334,14 @@ train:
     long: val-frac
     help: the validation fraction
     kwargs:
-      default: 0.2
+      default: 0.1
       type: '&float'
   augment_prob:
     short: ''
     long: augment-prob
     help: The augmentation probability
     kwargs:
-      default: 0.0
+      default: 0.5
       type: '&float'
   random_seed:
     short: ''
@@ -395,7 +355,7 @@ train:
     long: epochs
     help: The number of training epochs
     kwargs:
-      default: 30
+      default: 100
       type: '&int'
   threads:
     short: t
@@ -495,12 +455,18 @@ train:
     help: Whether to use deep supervision
     kwargs:
       action: store_true
+  pool_first:
+    short: ''
+    long: pool-first
+    help: Whether to apply max pooling before convolution
+    kwargs:
+      action: store_true
   loss_name:
     short: l
     long: loss-name
     help: The loss method name
     kwargs:
-      default: 'TanimotoDistLoss'
+      default: 'TanimotoComplementLoss'
       choices: ['TanimotoDistLoss', 'TanimotoComplementLoss']
   learning_rate:
     short: lr
