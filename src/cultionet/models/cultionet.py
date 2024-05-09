@@ -252,16 +252,17 @@ class CultioNet(nn.Module):
     """The cultionet model framework.
 
     Args:
-        ds_features (int): The total number of dataset features (bands x time).
-        ds_time_features (int): The number of dataset time features in each band/channel.
-        filters (int): The number of output filters for each stream.
-        num_classes (int): The number of output mask/crop classes.
+        in_channels (int): The total number of dataset features (bands x time).
+        in_time (int): The number of dataset time features in each band/channel.
+        hidden_channels (int): The number of hidden channels.
         model_type (str): The model architecture type.
         activation_type (str): The nonlinear activation.
+        dropout (float): The dropout fraction / probability.
         dilations (int | list): The convolution dilation or dilations.
         res_block_type (str): The residual convolution block type.
         attention_weights (str): The attention weight type.
         deep_supervision (bool): Whether to use deep supervision.
+        pool_first (bool): Whethe to apply max pooling before convolution.
     """
 
     def __init__(
@@ -277,6 +278,7 @@ class CultioNet(nn.Module):
         res_block_type: str = ResBlockTypes.RES,
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         deep_supervision: bool = False,
+        pool_first: bool = False,
     ):
         super(CultioNet, self).__init__()
 
@@ -312,6 +314,7 @@ class CultioNet(nn.Module):
             "activation_type": activation_type,
             "deep_supervision": deep_supervision,
             "mask_activation": nn.Softmax(dim=1),
+            "pool_first": pool_first,
         }
 
         assert model_type in (
