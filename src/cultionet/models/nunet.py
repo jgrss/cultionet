@@ -772,18 +772,22 @@ class TowerUNet(nn.Module):
         self,
         in_channels: int,
         in_time: int,
-        hidden_channels: int = 32,
+        hidden_channels: int = 64,
         num_classes: int = 2,
         dilations: T.Sequence[int] = None,
         activation_type: str = "SiLU",
         dropout: float = 0.0,
-        res_block_type: str = ResBlockTypes.RES,
+        res_block_type: str = ResBlockTypes.RESA,
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         mask_activation: T.Union[nn.Softmax, nn.Sigmoid] = nn.Softmax(dim=1),
         deep_supervision: bool = False,
         get_junctions: bool = False,
+        pool_first: bool = False,
     ):
         super(TowerUNet, self).__init__()
+
+        if dilations is None:
+            dilations = [1, 2]
 
         self.deep_supervision = deep_supervision
 
@@ -827,6 +831,7 @@ class TowerUNet(nn.Module):
             attention_weights=attention_weights,
             res_block_type=res_block_type,
             dilations=dilations,
+            pool_first=pool_first,
         )
         self.down_c = cunn.PoolResidualConv(
             channels[1],
@@ -836,6 +841,7 @@ class TowerUNet(nn.Module):
             attention_weights=attention_weights,
             res_block_type=res_block_type,
             dilations=dilations,
+            pool_first=pool_first,
         )
         self.down_d = cunn.PoolResidualConv(
             channels[2],
@@ -847,6 +853,7 @@ class TowerUNet(nn.Module):
             attention_weights=attention_weights,
             res_block_type=res_block_type,
             dilations=[1],
+            pool_first=pool_first,
         )
 
         # Up layers
