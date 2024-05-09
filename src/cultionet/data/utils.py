@@ -2,7 +2,9 @@ import typing as T
 from functools import singledispatch
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
+import pandas as pd
 import torch
 import xarray as xr
 
@@ -157,3 +159,33 @@ def create_data_object(
     train_data.num_nodes = x.shape[0]
 
     return train_data
+
+
+def split_multipolygons(df: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Splits a MultiPolygon into a Polygon."""
+
+    # Check for multi-polygons
+    multi_polygon_mask = df.geom_type == "MultiPolygon"
+
+    if multi_polygon_mask.any():
+        new_polygons = []
+        for _, multi_polygon_df in df.loc[multi_polygon_mask].iterrows():
+            # Split the multi-polygon into a list of polygons
+            polygon_list = list(multi_polygon_df.geometry.geoms)
+            # Duplicate the row, replacing the geometry
+            for split_polygon in polygon_list:
+                new_polygons.append(
+                    multi_polygon_df.to_frame().T.assign(
+                        geometry=[split_polygon]
+                    )
+                )
+
+        # Stack and replace
+        df = pd.concat(
+            (
+                df.loc[~multi_polygon_mask],
+                pd.concat(new_polygons),
+            )
+        )
+
+    return df
