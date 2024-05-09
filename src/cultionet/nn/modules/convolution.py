@@ -735,6 +735,7 @@ class PoolResidualConv(nn.Module):
         activation_type: str = "SiLU",
         res_block_type: str = ResBlockTypes.RES,
         dilations: T.Sequence[int] = None,
+        pool_first: bool = False,
     ):
         super(PoolResidualConv, self).__init__()
 
@@ -742,6 +743,8 @@ class PoolResidualConv(nn.Module):
             ResBlockTypes.RES,
             ResBlockTypes.RESA,
         )
+
+        self.pool_first = pool_first
 
         if res_block_type == ResBlockTypes.RES:
             self.conv = ResidualConv(
@@ -769,11 +772,15 @@ class PoolResidualConv(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         height, width = x.shape[-2:]
 
+        if self.pool_first:
+            # Max pooling
+            x = F.adaptive_max_pool2d(x, output_size=(height // 2, width // 2))
+
         # Apply convolutions
         x = self.conv(x)
 
-        # Max pooling
-        x = F.adaptive_max_pool2d(x, output_size=(height // 2, width // 2))
+        if not self.pool_first:
+            x = F.adaptive_max_pool2d(x, output_size=(height // 2, width // 2))
 
         # Optional dropout
         if self.dropout_layer is not None:
