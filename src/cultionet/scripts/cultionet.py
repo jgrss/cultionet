@@ -28,6 +28,9 @@ from joblib import delayed, parallel_config
 from pytorch_lightning import seed_everything
 from rasterio.windows import Window
 from ray.actor import ActorHandle
+from rich.markdown import Markdown
+from rich_argparse import RichHelpFormatter
+from shapely.errors import GEOSException
 from tqdm import tqdm
 from tqdm.dask import TqdmCallback
 
@@ -35,7 +38,7 @@ import cultionet
 from cultionet.data.constant import SCALE_FACTOR
 from cultionet.data.create import create_predict_dataset, create_train_batch
 from cultionet.data.datasets import EdgeDataset
-from cultionet.data.utils import get_image_list_dims
+from cultionet.data.utils import get_image_list_dims, split_multipolygons
 from cultionet.enums import CLISteps, DataColumns, ModelNames
 from cultionet.errors import TensorShapeError
 from cultionet.model import CultionetParams
@@ -699,8 +702,47 @@ def create_one_id(
     else:
         # Get the grid
         row_region_df = region_df.query(f"{DataColumns.GEOID} == '{row_id}'")
+
+        if row_region_df.empty:
+            return
+
         # Clip the polygons to the current grid
-        row_polygon_df = gpd.clip(polygon_df, row_region_df)
+        left, bottom, right, top = row_region_df.total_bounds
+        # NOTE: .cx gets all intersecting polygons and reduces the problem size for clip()
+        polygon_df_intersection = polygon_df.cx[left:right, bottom:top]
+
+        # Clip the polygons to the grid edges
+        try:
+            row_polygon_df = gpd.clip(
+                polygon_df_intersection,
+                row_region_df,
+            )
+        except GEOSException:
+            try:
+                # Try clipping with any MultiPolygon split
+                row_polygon_df = gpd.clip(
+                    split_multipolygons(polygon_df_intersection),
+                    row_region_df,
+                )
+            except GEOSException:
+                try:
+                    # Try clipping with a ghost buffer
+                    row_polygon_df = gpd.clip(
+                        split_multipolygons(polygon_df_intersection).assign(
+                            geometry=polygon_df_intersection.geometry.buffer(0)
+                        ),
+                        row_region_df,
+                    )
+                except GEOSException:
+                    logger.warning(
+                        f"Could not create a dataset file for {row_id}."
+                    )
+                    return
+
+        # Check for multi-polygons
+        row_polygon_df = split_multipolygons(row_polygon_df)
+        # Rather than check for a None CRS, just set it
+        row_polygon_df.crs = polygon_df_intersection.crs
 
         end_year = int(row_region_df[DataColumns.YEAR])
 
@@ -761,7 +803,6 @@ def create_one_id(
                 region=row_id,
                 process_path=ppaths.get_process_path(args.destination),
                 date_format=args.date_format,
-                transforms=args.transforms,
                 gain=args.gain,
                 offset=args.offset,
                 ref_res=args.ref_res,
@@ -818,13 +859,21 @@ def create_dataset(args):
             DataColumns.YEAR in region_df.columns
         ), f"The year column was not found in {region_file_path}."
 
+        if 0 in polygon_df[args.crop_column].unique():
+            raise ValueError("The field crop values should not have zeros.")
+
     # Get processed ids
     if hasattr(args, 'time_series_path') and (
         args.time_series_path is not None
     ):
         processed_ids = [Path(args.time_series_path)]
     else:
-        processed_ids = list(ppaths.image_path.resolve().glob('*'))
+        if 'data_pattern' in config:
+            processed_ids = list(
+                ppaths.image_path.resolve().glob(config['data_pattern'])
+            )
+        else:
+            processed_ids = list(ppaths.image_path.resolve().glob('*'))
 
     partial_create_one_id = partial(
         create_one_id,
@@ -1213,6 +1262,7 @@ def train_model(args):
         steplr_step_size=args.steplr_step_size,
         weight_decay=args.weight_decay,
         deep_supervision=args.deep_supervision,
+        pool_first=args.pool_first,
         scale_pos_weight=args.scale_pos_weight,
         save_batch_val_metrics=args.save_batch_val_metrics,
         epochs=args.epochs,
@@ -1241,14 +1291,44 @@ def train_model(args):
 
 
 def main():
-    # torch.set_float32_matmul_precision("high")
-
     args_config = open_config((Path(__file__).parent / "args.yml").absolute())
 
+    RichHelpFormatter.styles["argparse.groups"] = "#ACFCD6"
+    RichHelpFormatter.styles["argparse.args"] = "#FCADED"
+    RichHelpFormatter.styles["argparse.prog"] = "#AA9439"
+    RichHelpFormatter.styles["argparse.help"] = "#cacaca"
+
+    description = "# Cultionet: deep learning network for agricultural field boundary detection"
+
+    epilog = """
+# Examples
+---
+
+## Create training data
+```commandline
+cultionet create --project-path /projects/data -gs 100 100 -r 10.0 --max-crop-class 1 --crop-column crop_col --num-workers 8 --config-file config.yml
+```
+
+## View training help
+```commandline
+cultionet train --help
+```
+
+## Train a model
+```commandline
+cultionet train -p . --val-frac 0.1 --epochs 100 --processes 8 --load-batch-workers 8 --batch-size 4 --accumulate-grad-batches 4 --deep-sup
+```
+
+## Apply inference over an image
+```commandline
+cultionet predict --project-path /projects/data -o estimates.tif --region imageid --ref-image time_series_vars/imageid/brdf_ts/ms/evi2/20200101.tif --batch-size 4 --load-batch-workers 8 --start-date 2020-01-01 --end-date 2021-01-01 --config-file config.yml
+```
+    """
+
     parser = argparse.ArgumentParser(
-        description="Cultionet models",
-        formatter_class=argparse.RawTextHelpFormatter,
-        epilog=args_config["epilog"],
+        description=Markdown(description, style="argparse.text"),
+        formatter_class=RichHelpFormatter,
+        epilog=Markdown(epilog, style="argparse.text"),
     )
 
     subparsers = parser.add_subparsers(dest="process")
@@ -1263,7 +1343,9 @@ def main():
         CLISteps.VERSION,
     ]
     for process in available_processes:
-        subparser = subparsers.add_parser(process)
+        subparser = subparsers.add_parser(
+            process, formatter_class=parser.formatter_class
+        )
 
         if process == CLISteps.VERSION:
             continue
