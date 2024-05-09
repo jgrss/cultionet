@@ -86,6 +86,7 @@ class CultionetParams:
     model_name: str = attr.ib(converter=str, default="cultionet")
     deep_supervision: bool = attr.ib(default=False)
     pool_first: bool = attr.ib(default=False)
+    std_conv: bool = attr.ib(default=False)
     scale_pos_weight: bool = attr.ib(default=False)
     save_batch_val_metrics: bool = attr.ib(default=False)
     epochs: int = attr.ib(converter=int, default=100)
@@ -169,6 +170,7 @@ class CultionetParams:
             model_name=self.model_name,
             deep_supervision=self.deep_supervision,
             pool_first=self.pool_first,
+            std_conv=self.std_conv,
             class_counts=self.class_counts,
             edge_class=self.edge_class,
             scale_pos_weight=self.scale_pos_weight,

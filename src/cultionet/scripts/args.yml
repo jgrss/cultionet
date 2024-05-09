@@ -461,6 +461,12 @@ train:
     help: Whether to apply max pooling before convolution
     kwargs:
       action: store_true
+  std_conv:
+    short: ''
+    long: std-conv
+    help: Whether to apply convolutions with standarized weights
+    kwargs:
+      action: store_true
   loss_name:
     short: l
     long: loss-name

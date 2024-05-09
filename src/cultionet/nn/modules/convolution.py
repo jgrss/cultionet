@@ -12,6 +12,25 @@ from .attention import FractalAttention, SpatialChannelAttention
 from .reshape import Squeeze, UpSample
 
 
+class StdConv2d(nn.Conv2d):
+    """Convolution with standarized weights."""
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        w = self.weight
+        v, m = torch.var_mean(w, dim=[1, 2, 3], keepdim=True, unbiased=False)
+        w = (w - m) / torch.sqrt(v + 1e-5)
+
+        return F.conv2d(
+            x,
+            w,
+            self.bias,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.groups,
+        )
+
+
 class ConvBlock2d(nn.Module):
     def __init__(
         self,
@@ -22,11 +41,14 @@ class ConvBlock2d(nn.Module):
         dilation: int = 1,
         add_activation: bool = True,
         activation_type: str = "SiLU",
+        std_conv: bool = False,
     ):
         super(ConvBlock2d, self).__init__()
 
+        conv = StdConv2d if std_conv else nn.Conv2d
+
         layers = [
-            nn.Conv2d(
+            conv(
                 in_channels,
                 out_channels,
                 kernel_size=kernel_size,
@@ -455,6 +477,7 @@ class ResConvLayer(nn.Module):
         dilations: T.List[int] = None,
         activation_type: str = "SiLU",
         num_blocks: int = 1,
+        std_conv: bool = False,
     ):
         super(ResConvLayer, self).__init__()
 
@@ -473,6 +496,7 @@ class ResConvLayer(nn.Module):
                 dilation=dilations[0],
                 activation_type=activation_type,
                 add_activation=True,
+                std_conv=std_conv,
             )
         ]
 
@@ -487,6 +511,7 @@ class ResConvLayer(nn.Module):
                     dilation=dilations[blk_idx],
                     activation_type=activation_type,
                     add_activation=True,
+                    std_conv=std_conv,
                 )
                 for blk_idx in range(1, num_blocks)
             ]
@@ -508,6 +533,7 @@ class ResidualConv(nn.Module):
         num_blocks: int = 2,
         attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
+        std_conv: bool = False,
     ):
         super(ResidualConv, self).__init__()
 
@@ -537,6 +563,7 @@ class ResidualConv(nn.Module):
             kernel_size=kernel_size,
             num_blocks=num_blocks,
             activation_type=activation_type,
+            std_conv=std_conv,
         )
 
         self.skip = None
@@ -548,6 +575,7 @@ class ResidualConv(nn.Module):
                 kernel_size=1,
                 padding=0,
                 add_activation=False,
+                std_conv=std_conv,
             )
 
         if self.attention_weights is not None:
@@ -642,6 +670,7 @@ class ResidualAConv(nn.Module):
         dilations: T.List[int] = None,
         attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
+        std_conv: bool = False,
     ):
         super(ResidualAConv, self).__init__()
 
@@ -674,6 +703,7 @@ class ResidualAConv(nn.Module):
                     dilations=[dilation] * 2,
                     activation_type=activation_type,
                     num_blocks=2,
+                    std_conv=std_conv,
                 )
                 for dilation in dilations
             ]
@@ -688,6 +718,7 @@ class ResidualAConv(nn.Module):
                 kernel_size=1,
                 padding=0,
                 add_activation=False,
+                std_conv=std_conv,
             )
 
         if self.attention_weights is not None:
@@ -736,6 +767,7 @@ class PoolResidualConv(nn.Module):
         res_block_type: str = ResBlockTypes.RES,
         dilations: T.Sequence[int] = None,
         pool_first: bool = False,
+        std_conv: bool = False,
     ):
         super(PoolResidualConv, self).__init__()
 
@@ -754,6 +786,7 @@ class PoolResidualConv(nn.Module):
                 attention_weights=attention_weights,
                 num_blocks=num_blocks,
                 activation_type=activation_type,
+                std_conv=std_conv,
             )
         else:
             self.conv = ResidualAConv(
@@ -763,6 +796,7 @@ class PoolResidualConv(nn.Module):
                 dilations=dilations,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
+                std_conv=std_conv,
             )
 
         self.dropout_layer = None

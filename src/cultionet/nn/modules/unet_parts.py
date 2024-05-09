@@ -29,6 +29,7 @@ class TowerUNetUpLayer(nn.Module):
         res_block_type: str = ResBlockTypes.RES,
         dilations: T.Sequence[int] = None,
         resample_up: bool = True,
+        std_conv: bool = False,
     ):
         super(TowerUNetUpLayer, self).__init__()
 
@@ -51,6 +52,7 @@ class TowerUNetUpLayer(nn.Module):
                 num_blocks=num_blocks,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
+                std_conv=std_conv,
             )
         else:
             self.conv = ResidualAConv(
@@ -60,6 +62,7 @@ class TowerUNetUpLayer(nn.Module):
                 dilations=dilations,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
+                std_conv=std_conv,
             )
 
     def forward(self, x: torch.Tensor, shape: tuple) -> torch.Tensor:
@@ -87,6 +90,7 @@ class TowerUNetBlock(nn.Module):
         res_block_type: str = ResBlockTypes.RES,
         dilations: T.Sequence[int] = None,
         activation_type: str = "SiLU",
+        std_conv: bool = False,
     ):
         super(TowerUNetBlock, self).__init__()
 
@@ -128,6 +132,7 @@ class TowerUNetBlock(nn.Module):
                 num_blocks=num_blocks,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
+                std_conv=std_conv,
             )
         else:
             self.conv = ResidualAConv(
@@ -137,6 +142,7 @@ class TowerUNetBlock(nn.Module):
                 dilations=dilations,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
+                std_conv=std_conv,
             )
 
     def forward(

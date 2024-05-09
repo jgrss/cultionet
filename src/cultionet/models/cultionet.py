@@ -279,6 +279,7 @@ class CultioNet(nn.Module):
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         deep_supervision: bool = False,
         pool_first: bool = False,
+        std_conv: bool = False,
     ):
         super(CultioNet, self).__init__()
 
@@ -315,6 +316,7 @@ class CultioNet(nn.Module):
             "deep_supervision": deep_supervision,
             "mask_activation": nn.Softmax(dim=1),
             "pool_first": pool_first,
+            "std_conv": std_conv,
         }
 
         assert model_type in (

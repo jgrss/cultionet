@@ -13,7 +13,8 @@ from einops.layers.torch import Rearrange
 from .. import nn as cunn
 from ..enums import AttentionTypes, ResBlockTypes
 from ..layers.weights import init_conv_weights
-from .field_of_junctions import FieldOfJunctions
+
+# from .field_of_junctions import FieldOfJunctions
 
 
 class DepthwiseSeparableConv(nn.Module):
@@ -781,8 +782,8 @@ class TowerUNet(nn.Module):
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         mask_activation: T.Union[nn.Softmax, nn.Sigmoid] = nn.Softmax(dim=1),
         deep_supervision: bool = False,
-        get_junctions: bool = False,
         pool_first: bool = False,
+        std_conv: bool = False,
     ):
         super(TowerUNet, self).__init__()
 
@@ -814,6 +815,7 @@ class TowerUNet(nn.Module):
                 num_blocks=2,
                 activation_type=activation_type,
                 attention_weights=attention_weights,
+                std_conv=std_conv,
             )
         else:
             self.down_a = cunn.ResidualAConv(
@@ -822,6 +824,7 @@ class TowerUNet(nn.Module):
                 dilations=dilations,
                 activation_type=activation_type,
                 attention_weights=attention_weights,
+                std_conv=std_conv,
             )
 
         self.down_b = cunn.PoolResidualConv(
@@ -832,6 +835,7 @@ class TowerUNet(nn.Module):
             res_block_type=res_block_type,
             dilations=dilations,
             pool_first=pool_first,
+            std_conv=std_conv,
         )
         self.down_c = cunn.PoolResidualConv(
             channels[1],
@@ -842,6 +846,7 @@ class TowerUNet(nn.Module):
             res_block_type=res_block_type,
             dilations=dilations,
             pool_first=pool_first,
+            std_conv=std_conv,
         )
         self.down_d = cunn.PoolResidualConv(
             channels[2],
@@ -854,6 +859,7 @@ class TowerUNet(nn.Module):
             res_block_type=res_block_type,
             dilations=[1],
             pool_first=pool_first,
+            std_conv=std_conv,
         )
 
         # Up layers
@@ -867,6 +873,7 @@ class TowerUNet(nn.Module):
             res_block_type=res_block_type,
             dilations=[1],
             resample_up=False,
+            std_conv=std_conv,
         )
         self.up_cu = cunn.TowerUNetUpLayer(
             in_channels=up_channels,
@@ -875,6 +882,7 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
             dilations=dilations,
+            std_conv=std_conv,
         )
         self.up_bu = cunn.TowerUNetUpLayer(
             in_channels=up_channels,
@@ -883,6 +891,7 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
             dilations=dilations,
+            std_conv=std_conv,
         )
         self.up_au = cunn.TowerUNetUpLayer(
             in_channels=up_channels,
@@ -891,6 +900,7 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
             dilations=dilations,
+            std_conv=std_conv,
         )
 
         # Towers
@@ -903,6 +913,7 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
             dilations=dilations,
+            std_conv=std_conv,
         )
 
         self.tower_b = cunn.TowerUNetBlock(
@@ -915,6 +926,7 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
             dilations=dilations,
+            std_conv=std_conv,
         )
 
         self.tower_a = cunn.TowerUNetBlock(
@@ -927,17 +939,18 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
             dilations=dilations,
+            std_conv=std_conv,
         )
 
-        self.field_of_junctions = None
-        if get_junctions:
-            self.field_of_junctions = FieldOfJunctions(
-                in_channels=hidden_channels,
-                # NOTE: setup for padding of 5 x 5
-                # TODO: set this as a parameter
-                height=110,
-                width=110,
-            )
+        # self.field_of_junctions = None
+        # if get_junctions:
+        #     self.field_of_junctions = FieldOfJunctions(
+        #         in_channels=hidden_channels,
+        #         # NOTE: setup for padding of 5 x 5
+        #         # TODO: set this as a parameter
+        #         height=110,
+        #         width=110,
+        #     )
 
         self.final_a = TowerFinal(
             in_channels=up_channels,
@@ -1013,22 +1026,22 @@ class TowerUNet(nn.Module):
             down_tower=x_tower_b,
         )
 
-        foj_output = {}
-        if self.field_of_junctions is not None:
-            foj_output = self.field_of_junctions(embeddings)
+        # foj_output = {}
+        # if self.field_of_junctions is not None:
+        #     foj_output = self.field_of_junctions(embeddings)
 
         out = self.final_a(
             x_tower_a,
-            foj_boundaries=foj_output.get("boundaries"),
+            # foj_boundaries=foj_output.get("boundaries"),
         )
 
-        if foj_output:
-            out.update(
-                {
-                    "foj_image_patches": foj_output["image_patches"],
-                    "foj_patches": foj_output["patches"],
-                }
-            )
+        # if foj_output:
+        #     out.update(
+        #         {
+        #             "foj_image_patches": foj_output["image_patches"],
+        #             "foj_patches": foj_output["patches"],
+        #         }
+        #     )
 
         if self.deep_supervision:
             out_c = self.final_c(

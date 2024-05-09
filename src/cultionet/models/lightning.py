@@ -1119,6 +1119,7 @@ class CultionetLitModel(LightningModuleMixin):
         model_name: str = "cultionet",
         deep_supervision: bool = False,
         pool_first: bool = False,
+        std_conv: bool = False,
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         temperature_lit_model: T.Optional[GeoRefinement] = None,
@@ -1148,6 +1149,7 @@ class CultionetLitModel(LightningModuleMixin):
         self.save_batch_val_metrics = save_batch_val_metrics
         self.deep_supervision = deep_supervision
         self.pool_first = pool_first
+        self.std_conv = std_conv
         self.sigmoid = torch.nn.Sigmoid()
         if edge_class is not None:
             self.edge_class = edge_class
@@ -1182,6 +1184,7 @@ class CultionetLitModel(LightningModuleMixin):
                 attention_weights=attention_weights,
                 deep_supervision=deep_supervision,
                 pool_first=pool_first,
+                std_conv=std_conv,
             ),
         )
 
