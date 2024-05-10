@@ -12,9 +12,10 @@ import pandas as pd
 import torch
 import xarray as xr
 from affine import Affine
-from geowombat.core import polygon_to_array
 from geowombat.core.windows import get_window_offsets
 from joblib import Parallel, delayed, parallel_backend
+from rasterio.dtypes import get_minimum_dtype
+from rasterio.features import rasterize as rio_rasterize
 from rasterio.warp import calculate_default_transform
 from rasterio.windows import Window, from_bounds
 from scipy.ndimage import label as nd_label
@@ -135,7 +136,9 @@ def get_non_count(array: np.ndarray) -> np.ndarray:
 
 
 def cleanup_edges(
-    array: np.ndarray, original: np.ndarray, edge_class: int
+    array: np.ndarray,
+    original: np.ndarray,
+    edge_class: int,
 ) -> np.ndarray:
     """Removes crop pixels that border non-crop pixels."""
     array_pad = np.pad(original, pad_width=((1, 1), (1, 1)), mode="edge")
@@ -273,6 +276,52 @@ def edge_gradient(array: np.ndarray) -> np.ndarray:
     return array
 
 
+def polygon_to_array(
+    df: gpd.GeoDataFrame,
+    reference_data: xr.DataArray,
+    column: str,
+    fill_value: int = 0,
+    default_value: int = 1,
+    all_touched: bool = False,
+    dtype: str = "uint8",
+) -> np.ndarray:
+    """Converts a polygon, or polygons, to an array."""
+
+    df = df.copy()
+
+    if df.crs != reference_data.crs:
+        # Transform the geometry
+        df = df.to_crs(reference_data.crs)
+
+    # Get the reference bounds
+    left, bottom, right, top = reference_data.gw.bounds
+    # Get intersecting polygons
+    df = df.cx[left:right, bottom:top]
+    # Clip the polygons to the reference bounds
+    df = gpd.clip(df, reference_data.gw.geodataframe)
+
+    # Get the output dimensions
+    dst_transform = Affine(
+        reference_data.gw.cellx, 0.0, left, 0.0, -reference_data.gw.celly, top
+    )
+
+    # Get the shape geometry and encoding value
+    shapes = list(zip(df.geometry, df[column]))
+
+    # Convert the polygon(s) to an array
+    polygon_array = rio_rasterize(
+        shapes,
+        out_shape=(reference_data.gw.nrows, reference_data.gw.ncols),
+        fill=fill_value,
+        transform=dst_transform,
+        all_touched=all_touched,
+        default_value=default_value,
+        dtype=dtype,
+    )
+
+    return polygon_array
+
+
 class ReferenceArrays:
     def __init__(
         self,
@@ -295,59 +344,50 @@ class ReferenceArrays:
         crop_column: str,
         keep_crop_classes: bool,
         data_array: xr.DataArray,
-        num_workers: int,
+        nonag_is_unknown: bool = False,
     ) -> "ReferenceArrays":
         # Polygon label array, where each polygon has a
         # unique raster value.
-        labels_array_unique = (
-            polygon_to_array(
-                df_polygons_grid.copy().assign(
-                    **{crop_column: range(1, len(df_polygons_grid.index) + 1)}
-                ),
-                col=crop_column,
-                data=data_array,
-                all_touched=False,
-            )
-            .squeeze()
-            .gw.compute(num_workers=num_workers)
+        labels_array_unique = polygon_to_array(
+            df=df_polygons_grid.assign(
+                **{crop_column: range(1, len(df_polygons_grid.index) + 1)}
+            ),
+            reference_data=data_array,
+            column=crop_column,
         )
 
         # Polygon label array, where each polygon has a value
         # equal to the GeoDataFrame `crop_column`.
-        labels_array = (
-            polygon_to_array(
-                df_polygons_grid.copy(),
-                col=crop_column,
-                data=data_array,
-                all_touched=False,
-            )
-            .squeeze()
-            .gw.compute(num_workers=num_workers)
+        fill_value = 0
+        dtype = "uint8"
+        if nonag_is_unknown:
+            # Background values are unknown, so they need to be
+            # filled with -1
+            fill_value = -1
+            dtype = "int16"
+
+        labels_array = polygon_to_array(
+            df=df_polygons_grid,
+            reference_data=data_array,
+            column=crop_column,
+            fill_value=fill_value,
+            dtype=dtype,
         )
 
         # Get the polygon edges as an array
-        edge_array = (
-            polygon_to_array(
-                (
-                    df_polygons_grid.copy()
-                    .boundary.to_frame(name="geometry")
-                    .reset_index()
-                    .rename(columns={"index": crop_column})
-                    .assign(
-                        **{
-                            crop_column: range(
-                                1, len(df_polygons_grid.index) + 1
-                            )
-                        }
-                    )
-                ),
-                col=crop_column,
-                data=data_array,
-                all_touched=False,
-            )
-            .squeeze()
-            .gw.compute(num_workers=num_workers)
+        edge_array = polygon_to_array(
+            df=(
+                df_polygons_grid.boundary.to_frame(name="geometry")
+                .reset_index()
+                .rename(columns={"index": crop_column})
+                .assign(
+                    **{crop_column: range(1, len(df_polygons_grid.index) + 1)}
+                )
+            ),
+            reference_data=data_array,
+            column=crop_column,
         )
+
         if not edge_array.flags["WRITEABLE"]:
             edge_array = edge_array.copy()
 
@@ -362,7 +402,9 @@ class ReferenceArrays:
 
         if not keep_crop_classes:
             # Recode all crop polygons to a single class
-            labels_array = np.where(labels_array > 0, max_crop_class, 0)
+            labels_array = np.where(
+                labels_array > 0, max_crop_class, fill_value
+            )
 
         # Set edges within the labels array
         # E.g.,
@@ -372,8 +414,11 @@ class ReferenceArrays:
         labels_array[edge_array == 1] = edge_class
         # No crop pixel should border non-crop
         labels_array = cleanup_edges(
-            labels_array, labels_array_unique, edge_class
+            np.where(labels_array == fill_value, 0, labels_array),
+            labels_array_unique,
+            edge_class,
         )
+        labels_array = np.where(labels_array == 0, fill_value, labels_array)
 
         assert (
             labels_array.max() <= edge_class
@@ -487,7 +532,6 @@ class ImageVariables:
         image: T.Union[str, Path, list],
         reference_grid: gpd.GeoDataFrame,
         max_crop_class: int,
-        num_workers: int,
         grid_size: T.Optional[
             T.Union[T.Tuple[int, int], T.List[int], None]
         ] = None,
@@ -499,6 +543,7 @@ class ImageVariables:
         crop_column: str = "class",
         keep_crop_classes: bool = False,
         replace_dict: T.Optional[T.Dict[int, int]] = None,
+        nonag_is_unknown: bool = False,
     ) -> "ImageVariables":
         """Creates the initial image training data."""
 
@@ -541,7 +586,7 @@ class ImageVariables:
                     num_bands=num_bands,
                     gain=gain,
                     offset=offset,
-                ).data.compute(num_workers=num_workers)
+                ).data.compute(num_workers=1)
 
                 # Fill isolated zeros
                 time_series = fillz(time_series)
@@ -581,7 +626,7 @@ class ImageVariables:
                                 crop_column=crop_column,
                                 keep_crop_classes=keep_crop_classes,
                                 data_array=src_ts,
-                                num_workers=num_workers,
+                                nonag_is_unknown=nonag_is_unknown,
                             )
                         )
 
@@ -851,6 +896,7 @@ def get_reference_bounds(
     return ref_bounds
 
 
+@threadpool_limits.wrap(limits=1, user_api="blas")
 def create_train_batch(
     image_list: T.List[T.List[T.Union[str, Path]]],
     df_grid: gpd.GeoDataFrame,
@@ -863,13 +909,13 @@ def create_train_batch(
     offset: float = 0.0,
     ref_res: float = 10.0,
     resampling: str = "nearest",
-    num_workers: int = 1,
     grid_size: T.Optional[
         T.Union[T.Tuple[int, int], T.List[int], None]
     ] = None,
     crop_column: T.Optional[str] = "class",
     keep_crop_classes: T.Optional[bool] = False,
     replace_dict: T.Optional[T.Dict[int, int]] = None,
+    nonag_is_unknown: bool = False,
     compress_method: T.Union[int, str] = 'zlib',
 ) -> None:
     """Creates a batch file for training.
@@ -885,7 +931,6 @@ def create_train_batch(
         offset: An offset factor to apply to the images.
         ref_res: The reference cell resolution to resample the images to.
         resampling: The image resampling method.
-        num_workers: The number of dask workers.
         grid_size: The requested grid size, in (rows, columns) or (height, width).
         lc_path: The land cover image path.
         n_ts: The number of temporal augmentations.
@@ -896,6 +941,7 @@ def create_train_batch(
         keep_crop_classes: Whether to keep the crop classes as they are (True) or recode all
             non-zero classes to crop (False).
         replace_dict: A dictionary of crop class remappings.
+        nonag_is_unknown: Whether the non-agricultural background is unknown.
     """
     start_date = pd.to_datetime(
         Path(image_list[0]).stem, format=date_format
@@ -942,7 +988,6 @@ def create_train_batch(
             reference_grid=df_grid,
             df_polygons_grid=df_polygons if nonzero_mask.any() else None,
             max_crop_class=max_crop_class,
-            num_workers=num_workers,
             grid_size=grid_size,
             gain=gain,
             offset=offset,
@@ -951,6 +996,7 @@ def create_train_batch(
             crop_column=crop_column,
             keep_crop_classes=keep_crop_classes,
             replace_dict=replace_dict,
+            nonag_is_unknown=nonag_is_unknown,
         )
 
         if image_variables.time_series is None:
@@ -987,7 +1033,9 @@ def create_train_batch(
                 't c h w -> 1 c t h w',
             ),
             y=einops.rearrange(
-                torch.from_numpy(labeled_data.y).to(dtype=torch.uint8),
+                torch.from_numpy(labeled_data.y).to(
+                    dtype=torch.int16 if nonag_is_unknown else torch.uint8
+                ),
                 'b w -> 1 b w',
             ),
             bdist=einops.rearrange(
