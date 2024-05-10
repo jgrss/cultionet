@@ -22,6 +22,7 @@ import ray
 import torch
 import xarray as xr
 import yaml
+from fiona.errors import DriverError
 from geowombat.core import sort_images_by_date
 from geowombat.core.windows import get_window_offsets
 from joblib import delayed, parallel_config
@@ -754,7 +755,8 @@ def create_one_id(
         )
 
         if not vi_path.exists():
-            raise NameError(f"The {image_vi} path is missing.")
+            # logger.warning(f"The {image_vi} path is missing for {str(ppaths.image_path)}.")
+            return
 
         # Get the requested time slice
         ts_list = model_preprocessing.get_time_series_list(
@@ -807,12 +809,41 @@ def create_one_id(
                 offset=args.offset,
                 ref_res=args.ref_res,
                 resampling=args.resampling,
-                num_workers=1,
                 grid_size=args.grid_size,
                 crop_column=args.crop_column,
                 keep_crop_classes=args.keep_crop_classes,
                 replace_dict=args.replace_dict,
+                nonag_is_unknown=args.nonag_is_unknown,
             )
+
+
+def read_training(
+    filename: T.Union[list, tuple, str, Path], columns: list
+) -> gpd.GeoDataFrame:
+    if isinstance(filename, (list, tuple)):
+        try:
+            df = pd.concat(
+                [
+                    gpd.read_file(
+                        fn,
+                        columns=columns,
+                        engine="pyogrio",
+                    )
+                    for fn in filename
+                ]
+            ).reset_index(drop=True)
+
+        except DriverError:
+            raise IOError("The id file does not exist")
+
+    else:
+        filename = Path(filename)
+        if not filename.exists():
+            raise IOError("The id file does not exist")
+
+        df = gpd.read_file(filename)
+
+    return df
 
 
 def create_dataset(args):
@@ -833,19 +864,28 @@ def create_dataset(args):
     region_df = None
     polygon_df = None
     if args.destination == "train":
-        if config["region_id_file"] is None:
-            raise NameError("A region file must be given.")
+        region_id_file = config.get("region_id_file")
+        polygon_file = config.get("polygon_file")
 
-        region_file_path = Path(config["region_id_file"])
-        if not region_file_path.exists():
-            raise IOError("The id file does not exist")
+        if region_id_file is None:
+            raise NameError("A region file or file list must be given.")
 
-        polygon_file_path = Path(config["polygon_file"])
-        if not polygon_file_path.exists():
-            raise IOError("The polygon file does not exist")
+        if polygon_file is None:
+            raise NameError("A polygon file or file list must be given.")
 
-        region_df = gpd.read_file(region_file_path)
-        polygon_df = gpd.read_file(polygon_file_path)
+        # Read the training grids
+        region_df = read_training(
+            region_id_file,
+            columns=[DataColumns.GEOID, DataColumns.YEAR, "geometry"],
+        )
+
+        # Read the training polygons
+        polygon_df = read_training(
+            polygon_file,
+            columns=[args.crop_column, "geometry"],
+        )
+        polygon_df[args.crop_column]
+        polygon_df = polygon_df.astype({args.crop_column: int})
 
         assert (
             region_df.crs == polygon_df.crs
@@ -853,11 +893,11 @@ def create_dataset(args):
 
         assert (
             DataColumns.GEOID in region_df.columns
-        ), f"The geo_id column was not found in {region_file_path}."
+        ), "The geo_id column was not found in the grid region file."
 
         assert (
             DataColumns.YEAR in region_df.columns
-        ), f"The year column was not found in {region_file_path}."
+        ), "The year column was not found in the grid region file."
 
         if 0 in polygon_df[args.crop_column].unique():
             raise ValueError("The field crop values should not have zeros.")
