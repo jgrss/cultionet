@@ -129,6 +129,12 @@ create:
     short: ''
     long: replace-dict
     help: A dictionary of crop class remappings
+  nonag_is_unknown:
+    short: ''
+    long: nonag-is-unknown
+    help: Whether the non-agricultural background is unknown
+    kwargs:
+      action: store_true
 
 create_predict:
   window_size:
