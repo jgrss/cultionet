@@ -4,18 +4,11 @@ from abc import abstractmethod
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-import cv2
 import einops
 import joblib
 import numpy as np
 import torch
-from skimage import util as sk_util
-from torchvision.transforms import InterpolationMode
-from torchvision.transforms.v2 import (
-    RandomHorizontalFlip,
-    RandomRotation,
-    RandomVerticalFlip,
-)
+from torchvision.transforms import InterpolationMode, v2
 from tsaug import AddNoise, Drift, TimeWarp
 
 from ..data.data import Data
@@ -152,6 +145,21 @@ class AugmentTimeDrift(AugmentTimeMixin):
         )
 
 
+class Roll(AugmenterModule):
+    def __init__(self):
+        self.name_ = "roll"
+
+    def forward(
+        self,
+        cdata: Data,
+        aug_args: AugmenterArgs = None,
+    ) -> Data:
+        for p in cdata.props:
+            cdata = roll_time(cdata, p)
+
+        return cdata
+
+
 class Rotate(AugmenterModule):
     def __init__(self, deg: int):
         self.name_ = f"rotate-{deg}"
@@ -165,11 +173,11 @@ class Rotate(AugmenterModule):
 
         x = einops.rearrange(cdata.x, '1 c t h w -> 1 t c h w')
 
-        x_rotation_transform = RandomRotation(
+        x_rotation_transform = v2.RandomRotation(
             degrees=[self.deg, self.deg],
             interpolation=InterpolationMode.BILINEAR,
         )
-        y_rotation_transform = RandomRotation(
+        y_rotation_transform = v2.RandomRotation(
             degrees=[self.deg, self.deg],
             interpolation=InterpolationMode.NEAREST,
         )
@@ -178,22 +186,8 @@ class Rotate(AugmenterModule):
             x_rotation_transform(x),
             '1 t c h w -> 1 c t h w',
         )
+        cdata.bdist = x_rotation_transform(cdata.bdist)
         cdata.y = y_rotation_transform(cdata.y)
-
-        return cdata
-
-
-class Roll(AugmenterModule):
-    def __init__(self):
-        self.name_ = "roll"
-
-    def forward(
-        self,
-        cdata: Data,
-        aug_args: AugmenterArgs = None,
-    ) -> Data:
-        for p in cdata.props:
-            cdata = roll_time(cdata, p)
 
         return cdata
 
@@ -211,9 +205,9 @@ class Flip(AugmenterModule):
         x = einops.rearrange(cdata.x, '1 c t h w -> 1 t c h w')
 
         if self.direction == 'fliplr':
-            flip_transform = RandomHorizontalFlip(p=1.0)
+            flip_transform = v2.RandomHorizontalFlip(p=1.0)
         elif self.direction == 'flipud':
-            flip_transform = RandomVerticalFlip(p=1.0)
+            flip_transform = v2.RandomVerticalFlip(p=1.0)
         else:
             raise NameError("The direction is not supported.")
 
@@ -221,55 +215,106 @@ class Flip(AugmenterModule):
             flip_transform(x),
             '1 t c h w -> 1 c t h w',
         )
+        cdata.bdist = flip_transform(cdata.bdist)
         cdata.y = flip_transform(cdata.y)
 
         return cdata
 
 
-class SKLearnMixin(AugmenterModule):
+class RandomCropResize(AugmenterModule):
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.name_ = "cropresize"
+
     def forward(
         self,
         cdata: Data,
         aug_args: AugmenterArgs = None,
     ) -> DataCopies:
-        x = einops.rearrange(cdata.x, '1 c t h w -> (c t) h w').numpy()
-        for i in range(0, x.shape[0]):
-            x[i] = sk_util.random_noise(
-                x[i], mode=self.name_, clip=True, **self.kwargs
-            )
 
-        cdata.x = einops.rearrange(
-            torch.from_numpy(x),
-            '(c t) h w -> 1 c t h w',
-            c=cdata.num_channels,
-            t=cdata.num_time,
+        div = np.random.choice([2, 4])
+        size = (cdata.y.shape[-2] // div, cdata.y.shape[-1] // div)
+
+        random_seed = np.random.randint(2147483647)
+
+        x = einops.rearrange(cdata.x, 'b c t h w -> b t c h w')
+        x = self.random_crop(
+            x,
+            interpolation=InterpolationMode.BILINEAR,
+            size=size,
+            random_seed=random_seed,
+        )
+        cdata.x = einops.rearrange(x, 'b t c h w -> b c t h w')
+        cdata.bdist = self.random_crop(
+            cdata.bdist,
+            interpolation=InterpolationMode.BILINEAR,
+            size=size,
+            random_seed=random_seed,
+        )
+        cdata.y = self.random_crop(
+            cdata.y,
+            interpolation=InterpolationMode.NEAREST,
+            size=size,
+            random_seed=random_seed,
         )
 
         return cdata
 
+    def random_crop(
+        self,
+        x: torch.Tensor,
+        size: tuple,
+        interpolation: str,
+        random_seed: int,
+    ) -> torch.Tensor:
+        np.random.seed(random_seed)
+        torch.manual_seed(random_seed)
 
-class GaussianNoise(SKLearnMixin):
+        transform = v2.RandomCrop(
+            size=size,
+        )
+        resize = v2.Resize(
+            size=x.shape[-2:],
+            interpolation=interpolation,
+        )
+
+        return resize(transform(x))
+
+
+class GaussianBlur(AugmenterModule):
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.name_ = "gaussian"
 
+    def forward(
+        self,
+        cdata: Data,
+        aug_args: AugmenterArgs = None,
+    ) -> DataCopies:
+        transform = v2.GaussianBlur(kernel_size=3, **self.kwargs)
+        cdata.x = transform(cdata.x)
 
-class SaltAndPepperNoise(SKLearnMixin):
+        return cdata
+
+
+class SaltAndPepperNoise(AugmenterModule):
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.name_ = "s&p"
 
+    def forward(
+        self,
+        cdata: Data,
+        aug_args: AugmenterArgs = None,
+    ) -> DataCopies:
+        cdata.x = self.gaussian_noise(cdata.x, **self.kwargs)
 
-class SpeckleNoise(SKLearnMixin):
-    """
-    Example:
-        >>> augmenter = SpeckleNoise()
-        >>> data = augmenter(labeled_data, **kwargs)
-    """
+        return cdata
 
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-        self.name_ = "speckle"
+    def gaussian_noise(
+        self, x: torch.Tensor, sigma: float = 0.01
+    ) -> torch.Tensor:
+        return x + sigma * torch.randn_like(x)
 
 
 class NoAugmentation(AugmenterModule):
@@ -298,9 +343,9 @@ class AugmenterMapping(enum.Enum):
     roll = Roll()
     fliplr = Flip(direction="fliplr")
     flipud = Flip(direction="flipud")
-    gaussian = GaussianNoise(mean=0.0, var=0.005)
-    saltpepper = SaltAndPepperNoise(amount=0.01)
-    speckle = SpeckleNoise(mean=0.0, var=0.05)
+    gaussian = GaussianBlur(sigma=(0.2, 0.5))
+    saltpepper = SaltAndPepperNoise(sigma=0.05)
+    cropresize = RandomCropResize()
     none = NoAugmentation()
 
 

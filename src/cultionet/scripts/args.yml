@@ -106,7 +106,7 @@ create:
     help: The data destination
     kwargs:
       default: train
-      choices: ['train', 'test']
+      choices: ['train', 'test', 'predict']
   crop_column:
     short: ''
     long: crop-column
@@ -128,7 +128,15 @@ create:
   replace_dict:
     short: ''
     long: replace-dict
-    help: A dictionary of crop class remappings
+    help: Crop class recodings (e.g., 61:0 141:0)
+    kwargs:
+      nargs: '+'
+  bbox_offsets:
+    short: ''
+    long: bbox_offsets
+    help: Additional grid bounding box offsets (e.g., 0,0 1000,0)
+    kwargs:
+      nargs: '+'
   nonag_is_unknown:
     short: ''
     long: nonag-is-unknown

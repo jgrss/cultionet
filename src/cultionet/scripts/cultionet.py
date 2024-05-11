@@ -33,6 +33,7 @@ from ray.actor import ActorHandle
 from rich.markdown import Markdown
 from rich_argparse import RichHelpFormatter
 from shapely.errors import GEOSException
+from shapely.geometry import box
 from tqdm import tqdm
 from tqdm.dask import TqdmCallback
 
@@ -693,133 +694,176 @@ def create_one_id(
     region_df: gpd.GeoDataFrame,
     polygon_df: gpd.GeoDataFrame,
     processed_path: Path,
+    bbox_offsets: T.Optional[T.Sequence[T.Tuple[int, int]]] = None,
 ) -> None:
-    """Creates a single dataset."""
+    """Creates a single dataset.
+
+    Args:
+        args: An ``argparse`` ``namedtuple`` of CLI arguments.
+        config: The configuration.
+        ppaths: The project path object.
+        region_df: The region grid ``geopandas.GeoDataFrame``.
+        polygon_df: The region polygon ``geopandas.GeoDataFrame``.
+        processed_path: The time series path.
+        bbox_offsets: Bounding box (x, y) offsets as [(x, y)]. E.g., shifts of
+            [(-1000, 0), (0, 1000)] would shift the grid left by 1,000 meters and
+            then right by 1,000 meters.
+
+            Note that the ``polygon_df`` should support the shifts outside of the grid.
+    """
 
     row_id = processed_path.name
 
-    if args.destination == "predict":
-        end_date = pd.to_datetime(args.end_date)
-        end_year = (end_date - pd.DateOffset(months=1)).year
-    else:
-        # Get the grid
-        row_region_df = region_df.query(f"{DataColumns.GEOID} == '{row_id}'")
+    bbox_offset_list = [(0, 0)]
+    if bbox_offsets is None:
+        bbox_offset_list.extend(bbox_offsets)
 
-        if row_region_df.empty:
-            return
+    for grid_offset in bbox_offset_list:
 
-        # Clip the polygons to the current grid
-        left, bottom, right, top = row_region_df.total_bounds
-        # NOTE: .cx gets all intersecting polygons and reduces the problem size for clip()
-        polygon_df_intersection = polygon_df.cx[left:right, bottom:top]
-
-        # Clip the polygons to the grid edges
-        try:
-            row_polygon_df = gpd.clip(
-                polygon_df_intersection,
-                row_region_df,
+        if args.destination == "predict":
+            end_date = pd.to_datetime(args.end_date)
+            end_year = (end_date - pd.DateOffset(months=1)).year
+        else:
+            # Get the grid
+            row_region_df = region_df.query(
+                f"{DataColumns.GEOID} == '{row_id}'"
             )
-        except GEOSException:
+
+            if row_region_df.empty:
+                return
+
+            left, bottom, right, top = row_region_df.total_bounds
+
+            if grid_offset != (0, 0):
+                # Create a new, shifted grid
+                row_region_df = gpd.GeoDataFrame(
+                    geometry=[
+                        box(
+                            left + grid_offset[1],
+                            bottom + grid_offset[0],
+                            right + grid_offset[1],
+                            top + grid_offset[0],
+                        ),
+                    ],
+                    crs=row_region_df.crs,
+                )
+                left, bottom, right, top = row_region_df.total_bounds
+
+            # Clip the polygons to the current grid
+            # NOTE: .cx gets all intersecting polygons and reduces the problem size for clip()
+            polygon_df_intersection = polygon_df.cx[left:right, bottom:top]
+
+            # Clip the polygons to the grid edges
             try:
-                # Try clipping with any MultiPolygon split
                 row_polygon_df = gpd.clip(
-                    split_multipolygons(polygon_df_intersection),
+                    polygon_df_intersection,
                     row_region_df,
                 )
             except GEOSException:
                 try:
-                    # Try clipping with a ghost buffer
+                    # Try clipping with any MultiPolygon split
                     row_polygon_df = gpd.clip(
-                        split_multipolygons(polygon_df_intersection).assign(
-                            geometry=polygon_df_intersection.geometry.buffer(0)
-                        ),
+                        split_multipolygons(polygon_df_intersection),
                         row_region_df,
                     )
                 except GEOSException:
-                    logger.warning(
-                        f"Could not create a dataset file for {row_id}."
-                    )
-                    return
+                    try:
+                        # Try clipping with a ghost buffer
+                        row_polygon_df = gpd.clip(
+                            split_multipolygons(
+                                polygon_df_intersection
+                            ).assign(
+                                geometry=polygon_df_intersection.geometry.buffer(
+                                    0
+                                )
+                            ),
+                            row_region_df,
+                        )
+                    except GEOSException:
+                        logger.warning(
+                            f"Could not create a dataset file for {row_id}."
+                        )
+                        return
 
-        # Check for multi-polygons
-        row_polygon_df = split_multipolygons(row_polygon_df)
-        # Rather than check for a None CRS, just set it
-        row_polygon_df = row_polygon_df.set_crs(
-            polygon_df_intersection.crs, allow_override=True
-        )
-
-        end_year = int(row_region_df[DataColumns.YEAR])
-
-    image_list = []
-    for image_vi in config["image_vis"]:
-        # Set the full path to the images
-        vi_path = ppaths.image_path.resolve().joinpath(
-            args.feature_pattern.format(region=row_id, image_vi=image_vi)
-        )
-
-        if not vi_path.exists():
-            logger.warning(
-                f"The {image_vi} path is missing for {str(vi_path)}."
+            # Check for multi-polygons
+            row_polygon_df = split_multipolygons(row_polygon_df)
+            # Rather than check for a None CRS, just set it
+            row_polygon_df = row_polygon_df.set_crs(
+                polygon_df_intersection.crs, allow_override=True
             )
-            return
 
-        # Get the requested time slice
-        ts_list = model_preprocessing.get_time_series_list(
-            vi_path,
-            end_year=end_year,
-            start_mmdd=config["start_mmdd"],
-            end_mmdd=config["end_mmdd"],
-            num_months=config["num_months"],
-            date_format=args.date_format,
-        )
+            end_year = int(row_region_df[DataColumns.YEAR])
 
-        if args.skip_index > 0:
-            ts_list = ts_list[:: args.skip_index]
+        image_list = []
+        for image_vi in config["image_vis"]:
+            # Set the full path to the images
+            vi_path = ppaths.image_path.resolve().joinpath(
+                args.feature_pattern.format(region=row_id, image_vi=image_vi)
+            )
 
-        image_list += ts_list
+            if not vi_path.exists():
+                logger.warning(
+                    f"The {image_vi} path is missing for {str(vi_path)}."
+                )
+                return
 
-    if image_list:
-        if args.destination == "predict":
-            create_predict_dataset(
-                image_list=image_list,
-                region=row_id,
-                process_path=ppaths.get_process_path(args.destination),
+            # Get the requested time slice
+            ts_list = model_preprocessing.get_time_series_list(
+                vi_path,
+                end_year=end_year,
+                start_mmdd=config["start_mmdd"],
+                end_mmdd=config["end_mmdd"],
+                num_months=config["num_months"],
                 date_format=args.date_format,
-                gain=args.gain,
-                offset=args.offset,
-                ref_res=args.ref_res,
-                resampling=args.resampling,
-                window_size=args.window_size,
-                padding=args.padding,
-                num_workers=args.num_workers,
-                chunksize=args.chunksize,
             )
-        else:
-            class_info = {
-                "max_crop_class": args.max_crop_class,
-                "edge_class": args.max_crop_class + 1,
-            }
-            with open(ppaths.classes_info_path, mode="w") as f:
-                f.write(json.dumps(class_info))
 
-            create_train_batch(
-                image_list=image_list,
-                df_grid=row_region_df,
-                df_polygons=row_polygon_df,
-                max_crop_class=args.max_crop_class,
-                region=row_id,
-                process_path=ppaths.get_process_path(args.destination),
-                date_format=args.date_format,
-                gain=args.gain,
-                offset=args.offset,
-                ref_res=args.ref_res,
-                resampling=args.resampling,
-                grid_size=args.grid_size,
-                crop_column=args.crop_column,
-                keep_crop_classes=args.keep_crop_classes,
-                replace_dict=args.replace_dict,
-                nonag_is_unknown=args.nonag_is_unknown,
-            )
+            if args.skip_index > 0:
+                ts_list = ts_list[:: args.skip_index]
+
+            image_list += ts_list
+
+        if image_list:
+            if args.destination == "predict":
+                create_predict_dataset(
+                    image_list=image_list,
+                    region=row_id,
+                    process_path=ppaths.get_process_path(args.destination),
+                    date_format=args.date_format,
+                    gain=args.gain,
+                    offset=args.offset,
+                    ref_res=args.ref_res,
+                    resampling=args.resampling,
+                    window_size=args.window_size,
+                    padding=args.padding,
+                    num_workers=args.num_workers,
+                    chunksize=args.chunksize,
+                )
+            else:
+                class_info = {
+                    "max_crop_class": args.max_crop_class,
+                    "edge_class": args.max_crop_class + 1,
+                }
+                with open(ppaths.classes_info_path, mode="w") as f:
+                    f.write(json.dumps(class_info))
+
+                create_train_batch(
+                    image_list=image_list,
+                    df_grid=row_region_df,
+                    df_polygons=row_polygon_df,
+                    max_crop_class=args.max_crop_class,
+                    region=row_id,
+                    process_path=ppaths.get_process_path(args.destination),
+                    date_format=args.date_format,
+                    gain=args.gain,
+                    offset=args.offset,
+                    ref_res=args.ref_res,
+                    resampling=args.resampling,
+                    grid_size=args.grid_size,
+                    crop_column=args.crop_column,
+                    keep_crop_classes=args.keep_crop_classes,
+                    replace_dict=args.replace_dict,
+                    nonag_is_unknown=args.nonag_is_unknown,
+                )
 
 
 def read_training(
@@ -934,6 +978,7 @@ def create_dataset(args):
         ppaths=ppaths,
         region_df=region_df,
         polygon_df=polygon_df,
+        bbox_offsets=args.bbox_offsets,
     )
 
     with parallel_config(
@@ -1485,7 +1530,22 @@ cultionet predict --project-path /projects/data -o estimates.tif --region imagei
 
     if hasattr(args, "replace_dict"):
         if args.replace_dict is not None:
-            setattr(args, "replace_dict", ast.literal_eval(args.replace_dict))
+            replace_dict = dict(
+                list(
+                    map(
+                        lambda x: list(map(int, x.split(":"))),
+                        args.replace_dict,
+                    )
+                )
+            )
+            setattr(args, "replace_dict", replace_dict)
+
+    if hasattr(args, "bbox_offsets"):
+        if args.bbox_offsets is not None:
+            bbox_offsets = list(
+                map(lambda x: tuple(map(int, x.split(","))), args.bbox_offsets)
+            )
+            setattr(args, "bbox_offsets", bbox_offsets)
 
     project_path = Path(args.project_path) / "ckpt"
     project_path.mkdir(parents=True, exist_ok=True)

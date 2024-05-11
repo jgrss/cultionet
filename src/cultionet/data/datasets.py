@@ -91,7 +91,7 @@ class EdgeDataset(Dataset):
             'flipud',
             'gaussian',
             'saltpepper',
-            'speckle',
+            'cropresize',
         ]
 
         self.data_list_ = None

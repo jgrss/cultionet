@@ -547,6 +547,7 @@ class ImageVariables:
     ) -> "ImageVariables":
         """Creates the initial image training data."""
 
+        # Get the reference bounds from the grid geometry
         ref_bounds = reference_grid.total_bounds.tolist()
 
         if grid_size is not None:

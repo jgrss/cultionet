@@ -58,7 +58,6 @@ def test_augmenter_loading():
         'gaussian',
         'saltpepper',
         'tsdrift',
-        'speckle',
     ]
     aug = Augmenters(augmentations=augmentations, max_crop_class=1)
     for i, method in enumerate(aug):
@@ -75,6 +74,7 @@ def test_augmenter_loading():
 
         assert not torch.allclose(aug_batch.x, batch.x)
         assert torch.allclose(aug_batch.y, batch.y)
+        assert torch.allclose(aug_batch.bdist, batch.bdist)
 
     augmentations = [
         'rot90',
@@ -82,6 +82,7 @@ def test_augmenter_loading():
         'rot270',
         'fliplr',
         'flipud',
+        'cropresize',
     ]
     aug = Augmenters(augmentations=augmentations, max_crop_class=1)
     for i, method in enumerate(aug):
@@ -113,6 +114,14 @@ def test_augmenter_loading():
                 batch.y[0, 0, -1],
                 aug_batch.y[0, 0, 0],
             )
+            assert torch.allclose(
+                batch.bdist[0, 0, 0],
+                aug_batch.bdist[0, -1, 0],
+            )
+            assert torch.allclose(
+                batch.bdist[0, 0, -1],
+                aug_batch.bdist[0, 0, 0],
+            )
         elif method.name_ == 'fliplr':
             assert torch.allclose(
                 batch.x[0, 0, :, 0, 0],
@@ -131,6 +140,14 @@ def test_augmenter_loading():
             assert torch.allclose(
                 batch.y[0, -1, 0],
                 aug_batch.y[0, -1, -1],
+            )
+            assert torch.allclose(
+                batch.bdist[0, 0, 0],
+                aug_batch.bdist[0, 0, -1],
+            )
+            assert torch.allclose(
+                batch.bdist[0, -1, 0],
+                aug_batch.bdist[0, -1, -1],
             )
         elif method.name_ == 'flipud':
             assert torch.allclose(
@@ -151,9 +168,18 @@ def test_augmenter_loading():
                 batch.y[0, 0, -1],
                 aug_batch.y[0, -1, -1],
             )
+            assert torch.allclose(
+                batch.bdist[0, 0, 0],
+                aug_batch.bdist[0, -1, 0],
+            )
+            assert torch.allclose(
+                batch.bdist[0, 0, -1],
+                aug_batch.bdist[0, -1, -1],
+            )
 
         assert not torch.allclose(aug_batch.x, batch.x)
         assert not torch.allclose(aug_batch.y, batch.y)
+        assert not torch.allclose(aug_batch.bdist, batch.bdist)
 
     augmentations = ['none']
     aug = Augmenters(augmentations=augmentations, max_crop_class=1)
@@ -169,3 +195,4 @@ def test_augmenter_loading():
 
         assert torch.allclose(aug_batch.x, batch.x)
         assert torch.allclose(aug_batch.y, batch.y)
+        assert torch.allclose(aug_batch.bdist, batch.bdist)
