@@ -152,6 +152,7 @@ class EdgeDataset(Dataset):
                     "total": len(self),
                     "desc": "Building GeoDataFrame",
                     "ascii": "\u2015\u25E4\u25E5\u25E2\u25E3\u25AA",
+                    "colour": "green",
                 }
             ) as pool:
                 results = pool(
@@ -479,10 +480,10 @@ class EdgeDataset(Dataset):
         batch.x = (batch.x * 1e-4).clip(1e-9, 1)
 
         if hasattr(batch, 'bdist'):
-            batch.bdist = batch.bdist * 1e-4
+            batch.bdist = (batch.bdist * 1e-4).clip(0, 1)
 
         if batch.y is not None:
-            if self.rng.normal() > 1 - self.augment_prob:
+            if self.rng.random() > (1 - self.augment_prob):
                 # Choose one augmentation to apply
                 aug_name = self.rng.choice(self.augmentations_)
 
@@ -495,7 +496,7 @@ class EdgeDataset(Dataset):
                 ):
                     # FIXME: By default, the crop value is 1 (background is 0 and edges are 2).
                     # But, it would be better to get 1 from an argument.
-                    # Label properties are only used in 4 augmentations
+                    # Label properties are only used in 5 augmentations
                     batch.segments = np.uint8(
                         nd_label(batch.y.squeeze().numpy() == 1)[0]
                     )

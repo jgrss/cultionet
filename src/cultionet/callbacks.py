@@ -21,6 +21,22 @@ from rasterio.windows import Window
 from .data.constant import SCALE_FACTOR
 from .data.data import Data
 
+PROGRESS_BAR_CALLBACK = RichProgressBar(
+    refresh_rate=1,
+    theme=RichProgressBarTheme(
+        description="#cacaca",
+        progress_bar="#ACFCD6",
+        progress_bar_finished="#ACFCD6",
+        progress_bar_pulse="#FCADED",
+        batch_progress="#AA9439",
+        time="grey54",
+        processing_speed="grey70",
+        metrics="#cacaca",
+        metrics_text_delimiter=" • ",
+        metrics_format=".3f",
+    ),
+)
+
 
 def tile_size_is_correct(
     blockxsize: int, blockysize: int, tile_limit: int = 16
@@ -227,22 +243,5 @@ def setup_callbacks(
         )
     if 0 < model_pruning <= 1:
         callbacks.append(ModelPruning("l1_unstructured", amount=model_pruning))
-
-    progress_bar = RichProgressBar(
-        refresh_rate=1,
-        theme=RichProgressBarTheme(
-            description="#cacaca",
-            progress_bar="#ACFCD6",
-            progress_bar_finished="#ACFCD6",
-            progress_bar_pulse="#FCADED",
-            batch_progress="#AA9439",
-            time="grey54",
-            processing_speed="grey70",
-            metrics="#cacaca",
-            metrics_text_delimiter="•",
-            metrics_format=".3e",
-        ),
-    )
-    callbacks.append(progress_bar)
 
     return lr_monitor, callbacks

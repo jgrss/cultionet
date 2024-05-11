@@ -8,7 +8,9 @@ import einops
 import joblib
 import numpy as np
 import torch
-from torchvision.transforms import InterpolationMode, v2
+from torchvision.transforms import InterpolationMode
+from torchvision.transforms import functional as TF
+from torchvision.transforms import v2
 from tsaug import AddNoise, Drift, TimeWarp
 
 from ..data.data import Data
@@ -38,7 +40,8 @@ class AugmenterModule(object):
         assert isinstance(self.name_, str)
 
         cdata = self.forward(ldata.copy(), aug_args)
-        cdata.x = cdata.x.float()
+        cdata.x = cdata.x.float().clip(1e-9, 1)
+        cdata.bdist = cdata.bdist.float().clip(0, 1)
         if cdata.y is not None:
             cdata.y = cdata.y.long()
 
@@ -205,9 +208,9 @@ class Flip(AugmenterModule):
         x = einops.rearrange(cdata.x, '1 c t h w -> 1 t c h w')
 
         if self.direction == 'fliplr':
-            flip_transform = v2.RandomHorizontalFlip(p=1.0)
+            flip_transform = TF.hflip
         elif self.direction == 'flipud':
-            flip_transform = v2.RandomVerticalFlip(p=1.0)
+            flip_transform = TF.vflip
         else:
             raise NameError("The direction is not supported.")
 
@@ -344,7 +347,7 @@ class AugmenterMapping(enum.Enum):
     fliplr = Flip(direction="fliplr")
     flipud = Flip(direction="flipud")
     gaussian = GaussianBlur(sigma=(0.2, 0.5))
-    saltpepper = SaltAndPepperNoise(sigma=0.05)
+    saltpepper = SaltAndPepperNoise(sigma=0.01)
     cropresize = RandomCropResize()
     none = NoAugmentation()
 

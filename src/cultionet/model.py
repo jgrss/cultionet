@@ -19,7 +19,11 @@ from rasterio.windows import Window
 from scipy.stats import mode as sci_mode
 from torchvision import transforms
 
-from .callbacks import LightningGTiffWriter, setup_callbacks
+from .callbacks import (
+    PROGRESS_BAR_CALLBACK,
+    LightningGTiffWriter,
+    setup_callbacks,
+)
 from .data.constant import SCALE_FACTOR
 from .data.data import Data
 from .data.datasets import EdgeDataset
@@ -424,6 +428,7 @@ def fit_transfer(cultionet_params: CultionetParams) -> None:
     cultionet_params.check_checkpoint()
 
     _, callbacks = setup_callbacks(**cultionet_params.get_callback_params())
+    callbacks.append(PROGRESS_BAR_CALLBACK)
 
     # Setup the trainer
     trainer = L.Trainer(
@@ -678,7 +683,7 @@ def predict_lightning(
     )
     trainer_kwargs = dict(
         default_root_dir=str(ckpt_file.parent),
-        callbacks=[pred_writer],
+        callbacks=[pred_writer, PROGRESS_BAR_CALLBACK],
         precision=precision,
         devices=devices,
         accelerator=device,

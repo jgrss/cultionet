@@ -694,7 +694,7 @@ def create_one_id(
     region_df: gpd.GeoDataFrame,
     polygon_df: gpd.GeoDataFrame,
     processed_path: Path,
-    bbox_offsets: T.Optional[T.Sequence[T.Tuple[int, int]]] = None,
+    bbox_offsets: T.Optional[T.List[T.Tuple[int, int]]] = None,
 ) -> None:
     """Creates a single dataset.
 
@@ -715,7 +715,7 @@ def create_one_id(
     row_id = processed_path.name
 
     bbox_offset_list = [(0, 0)]
-    if bbox_offsets is None:
+    if bbox_offsets is not None:
         bbox_offset_list.extend(bbox_offsets)
 
     for grid_offset in bbox_offset_list:
@@ -982,7 +982,7 @@ def create_dataset(args):
     )
 
     with parallel_config(
-        backend="threading",
+        backend="loky",
         n_jobs=1 if args.destination == "predict" else args.num_workers,
     ):
         with ParallelProgress(
@@ -1534,18 +1534,18 @@ cultionet predict --project-path /projects/data -o estimates.tif --region imagei
                 list(
                     map(
                         lambda x: list(map(int, x.split(":"))),
-                        args.replace_dict,
+                        args.replace_dict.split(" "),
                     )
                 )
             )
             setattr(args, "replace_dict", replace_dict)
 
-    if hasattr(args, "bbox_offsets"):
-        if args.bbox_offsets is not None:
-            bbox_offsets = list(
-                map(lambda x: tuple(map(int, x.split(","))), args.bbox_offsets)
-            )
-            setattr(args, "bbox_offsets", bbox_offsets)
+    # if hasattr(args, "bbox_offsets"):
+    #     if args.bbox_offsets is not None:
+    #         bbox_offsets = list(
+    #             map(lambda x: tuple(map(int, x.split(","))), args.bbox_offsets)
+    #         )
+    #         setattr(args, "bbox_offsets", bbox_offsets)
 
     project_path = Path(args.project_path) / "ckpt"
     project_path.mkdir(parents=True, exist_ok=True)

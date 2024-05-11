@@ -128,15 +128,11 @@ create:
   replace_dict:
     short: ''
     long: replace-dict
-    help: Crop class recodings (e.g., 61:0 141:0)
-    kwargs:
-      nargs: '+'
+    help: Crop class recodings (e.g., "61:0 141:0")
   bbox_offsets:
     short: ''
     long: bbox_offsets
     help: Additional grid bounding box offsets (e.g., 0,0 1000,0)
-    kwargs:
-      nargs: '+'
   nonag_is_unknown:
     short: ''
     long: nonag-is-unknown
