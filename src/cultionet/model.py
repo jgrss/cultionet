@@ -19,7 +19,7 @@ from rasterio.windows import Window
 from scipy.stats import mode as sci_mode
 from torchvision import transforms
 
-from .callbacks import LightningGTiffWriter
+from .callbacks import LightningGTiffWriter, setup_callbacks
 from .data.constant import SCALE_FACTOR
 from .data.data import Data
 from .data.datasets import EdgeDataset
@@ -395,50 +395,6 @@ def get_data_module(
     )
 
     return data_module
-
-
-def setup_callbacks(
-    ckpt_file: T.Union[str, Path],
-    stochastic_weight_averaging: bool = False,
-    stochastic_weight_averaging_lr: float = 0.05,
-    stochastic_weight_averaging_start: float = 0.8,
-    model_pruning: bool = False,
-) -> T.Tuple[LearningRateMonitor, T.Sequence[T.Any]]:
-    # Checkpoint
-    cb_train_loss = ModelCheckpoint(monitor="loss")
-    # Validation and test loss
-    cb_val_loss = ModelCheckpoint(
-        dirpath=ckpt_file.parent,
-        filename=ckpt_file.stem,
-        save_last=False,
-        save_top_k=1,
-        mode="min",
-        monitor="val_score",
-        every_n_train_steps=0,
-        every_n_epochs=1,
-    )
-    # Early stopping
-    # early_stop_callback = EarlyStopping(
-    #     monitor="val_score",
-    #     min_delta=early_stopping_min_delta,
-    #     patience=early_stopping_patience,
-    #     mode="min",
-    #     check_on_train_epoch_end=False,
-    # )
-    # Learning rate
-    lr_monitor = LearningRateMonitor(logging_interval="epoch")
-    callbacks = [lr_monitor, cb_train_loss, cb_val_loss]
-    if stochastic_weight_averaging:
-        callbacks.append(
-            StochasticWeightAveraging(
-                swa_lrs=stochastic_weight_averaging_lr,
-                swa_epoch_start=stochastic_weight_averaging_start,
-            )
-        )
-    if 0 < model_pruning <= 1:
-        callbacks.append(ModelPruning("l1_unstructured", amount=model_pruning))
-
-    return lr_monitor, callbacks
 
 
 def fit_transfer(cultionet_params: CultionetParams) -> None:

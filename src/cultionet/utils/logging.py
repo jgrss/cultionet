@@ -33,11 +33,20 @@ class ColorFormatter(logging.Formatter):
 
 def set_color_logger(logger_name):
     logger = logging.getLogger(logger_name)
-    logger.setLevel(logging.DEBUG)
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
-    ch.setFormatter(ColorFormatter())
-    logger.addHandler(ch)
+    logger.setLevel(logging.INFO)
+    formatter = ColorFormatter()
+
+    file_handler = logging.FileHandler(
+        "cultionet.log", mode="w", encoding="utf-8"
+    )
+    file_handler.setLevel(logging.WARNING)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
 
     return logger
 

@@ -151,6 +151,7 @@ class EdgeDataset(Dataset):
                 tqdm_kwargs={
                     "total": len(self),
                     "desc": "Building GeoDataFrame",
+                    "ascii": "\u2015\u25E4\u25E5\u25E2\u25E3\u25AA",
                 }
             ) as pool:
                 results = pool(

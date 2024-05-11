@@ -5,7 +5,17 @@ import filelock
 import geowombat as gw
 import rasterio as rio
 import torch
-from lightning.pytorch.callbacks import BasePredictionWriter
+from lightning.pytorch.callbacks import (
+    BasePredictionWriter,
+    LearningRateMonitor,
+    ModelCheckpoint,
+    ModelPruning,
+    RichProgressBar,
+    StochasticWeightAveraging,
+)
+from lightning.pytorch.callbacks.progress.rich_progress import (
+    RichProgressBarTheme,
+)
 from rasterio.windows import Window
 
 from .data.constant import SCALE_FACTOR
@@ -175,3 +185,64 @@ class LightningGTiffWriter(BasePredictionWriter):
                     indexes=range(1, self.dst.profile["count"] + 1),
                     window=write_window,
                 )
+
+
+def setup_callbacks(
+    ckpt_file: T.Union[str, Path],
+    stochastic_weight_averaging: bool = False,
+    stochastic_weight_averaging_lr: float = 0.05,
+    stochastic_weight_averaging_start: float = 0.8,
+    model_pruning: bool = False,
+) -> T.Tuple[LearningRateMonitor, T.Sequence[T.Any]]:
+    # Checkpoint
+    cb_train_loss = ModelCheckpoint(monitor="loss")
+    # Validation and test loss
+    cb_val_loss = ModelCheckpoint(
+        dirpath=ckpt_file.parent,
+        filename=ckpt_file.stem,
+        save_last=False,
+        save_top_k=1,
+        mode="min",
+        monitor="val_score",
+        every_n_train_steps=0,
+        every_n_epochs=1,
+    )
+    # Early stopping
+    # early_stop_callback = EarlyStopping(
+    #     monitor="val_score",
+    #     min_delta=early_stopping_min_delta,
+    #     patience=early_stopping_patience,
+    #     mode="min",
+    #     check_on_train_epoch_end=False,
+    # )
+    # Learning rate
+    lr_monitor = LearningRateMonitor(logging_interval="epoch")
+    callbacks = [lr_monitor, cb_train_loss, cb_val_loss]
+    if stochastic_weight_averaging:
+        callbacks.append(
+            StochasticWeightAveraging(
+                swa_lrs=stochastic_weight_averaging_lr,
+                swa_epoch_start=stochastic_weight_averaging_start,
+            )
+        )
+    if 0 < model_pruning <= 1:
+        callbacks.append(ModelPruning("l1_unstructured", amount=model_pruning))
+
+    progress_bar = RichProgressBar(
+        refresh_rate=1,
+        theme=RichProgressBarTheme(
+            description="#cacaca",
+            progress_bar="#ACFCD6",
+            progress_bar_finished="#ACFCD6",
+            progress_bar_pulse="#FCADED",
+            batch_progress="#AA9439",
+            time="grey54",
+            processing_speed="grey70",
+            metrics="#cacaca",
+            metrics_text_delimiter="•",
+            metrics_format=".3e",
+        ),
+    )
+    callbacks.append(progress_bar)
+
+    return lr_monitor, callbacks

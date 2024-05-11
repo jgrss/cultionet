@@ -16,6 +16,7 @@ from pathlib import Path
 import filelock
 import geopandas as gpd
 import geowombat as gw
+import numpy as np
 import pandas as pd
 import rasterio as rio
 import ray
@@ -496,9 +497,9 @@ def predict_image(args):
             batch_size=args.batch_size,
             load_batch_workers=args.load_batch_workers,
             precision=args.precision,
-            resampling=ds[0].resampling
-            if hasattr(ds[0], 'resampling')
-            else 'nearest',
+            resampling=ds[0].resampling[0]
+            if hasattr(ds[0], "resampling")
+            else "nearest",
             compression=args.compression,
             is_transfer_model=args.process == CLISteps.PREDICT_TRANSFER,
             refine_pt=ckpt_file.parent / "refine" / "refine.pt",
@@ -743,7 +744,9 @@ def create_one_id(
         # Check for multi-polygons
         row_polygon_df = split_multipolygons(row_polygon_df)
         # Rather than check for a None CRS, just set it
-        row_polygon_df.crs = polygon_df_intersection.crs
+        row_polygon_df = row_polygon_df.set_crs(
+            polygon_df_intersection.crs, allow_override=True
+        )
 
         end_year = int(row_region_df[DataColumns.YEAR])
 
@@ -755,7 +758,9 @@ def create_one_id(
         )
 
         if not vi_path.exists():
-            # logger.warning(f"The {image_vi} path is missing for {str(ppaths.image_path)}.")
+            logger.warning(
+                f"The {image_vi} path is missing for {str(vi_path)}."
+            )
             return
 
         # Get the requested time slice
@@ -915,6 +920,13 @@ def create_dataset(args):
         else:
             processed_ids = list(ppaths.image_path.resolve().glob('*'))
 
+    # Filter ids to those that have been processed
+    processed_mask = np.isin(
+        np.array([fn.name for fn in processed_ids]),
+        region_df[DataColumns.GEOID].values,
+    )
+    processed_ids = np.array(processed_ids)[processed_mask]
+
     partial_create_one_id = partial(
         create_one_id,
         args=args,
@@ -925,7 +937,7 @@ def create_dataset(args):
     )
 
     with parallel_config(
-        backend="loky",
+        backend="threading",
         n_jobs=1 if args.destination == "predict" else args.num_workers,
     ):
         with ParallelProgress(
@@ -933,6 +945,7 @@ def create_dataset(args):
                 "total": len(processed_ids),
                 "desc": f"Creating {args.destination} files",
                 "colour": "green",
+                "ascii": "\u2015\u25E4\u25E5\u25E2\u25E3\u25AA",
             },
         ) as parallel_pool:
             parallel_pool(
