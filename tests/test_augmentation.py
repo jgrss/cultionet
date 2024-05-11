@@ -55,9 +55,9 @@ def test_augmenter_loading():
         'tsnoise',
         'tsdrift',
         'tspeaks',
+        'tsdrift',
         'gaussian',
         'saltpepper',
-        'tsdrift',
     ]
     aug = Augmenters(augmentations=augmentations, max_crop_class=1)
     for i, method in enumerate(aug):
