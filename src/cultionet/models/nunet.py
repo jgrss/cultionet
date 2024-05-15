@@ -13,8 +13,7 @@ from einops.layers.torch import Rearrange
 from .. import nn as cunn
 from ..enums import AttentionTypes, ResBlockTypes
 from ..layers.weights import init_conv_weights
-
-# from .field_of_junctions import FieldOfJunctions
+from .vit import ImageEncoderViT
 
 
 class DepthwiseSeparableConv(nn.Module):
@@ -673,99 +672,6 @@ class ResUNet3Psi(nn.Module):
         return out
 
 
-class TowerFinal(nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        num_classes: int,
-        mask_activation: T.Callable,
-        resample_factor: int = 0,
-    ):
-        super(TowerFinal, self).__init__()
-
-        self.up = cunn.UpSample()
-
-        if resample_factor > 1:
-            self.up_conv = nn.ConvTranspose2d(
-                in_channels=in_channels,
-                out_channels=in_channels,
-                kernel_size=3,
-                stride=resample_factor,
-                padding=1,
-            )
-
-        self.expand = nn.Conv2d(
-            in_channels, in_channels * 3, kernel_size=1, padding=0
-        )
-        self.final_dist = nn.Sequential(
-            cunn.ConvBlock2d(
-                in_channels=in_channels,
-                out_channels=in_channels,
-                kernel_size=3,
-                padding=1,
-                add_activation=True,
-                activation_type="SiLU",
-            ),
-            nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
-            nn.Sigmoid(),
-        )
-        self.final_edge = nn.Sequential(
-            cunn.ConvBlock2d(
-                in_channels=in_channels + 1,
-                out_channels=in_channels,
-                kernel_size=3,
-                padding=1,
-                add_activation=True,
-                activation_type="SiLU",
-            ),
-            nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
-            cunn.SigmoidCrisp(),
-        )
-        self.final_mask = nn.Sequential(
-            cunn.ConvBlock2d(
-                in_channels=in_channels + 2,
-                out_channels=in_channels,
-                kernel_size=3,
-                padding=1,
-                add_activation=True,
-                activation_type="SiLU",
-            ),
-            nn.Conv2d(in_channels, num_classes, kernel_size=1, padding=0),
-            mask_activation,
-        )
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        shape: T.Optional[tuple] = None,
-        suffix: str = "",
-        foj_boundaries: T.Optional[torch.Tensor] = None,
-    ) -> T.Dict[str, torch.Tensor]:
-        if shape is not None:
-            x = self.up(
-                self.up_conv(x),
-                size=shape,
-                mode="bilinear",
-            )
-
-        dist_connect, edge_connect, mask_connect = torch.chunk(
-            self.expand(x), 3, dim=1
-        )
-
-        # if foj_boundaries is not None:
-        #     edge = edge * foj_boundaries
-
-        dist = self.final_dist(dist_connect)
-        edge = self.final_edge(torch.cat((edge_connect, dist), dim=1))
-        mask = self.final_mask(torch.cat((mask_connect, dist, edge), dim=1))
-
-        return {
-            f"dist{suffix}": dist,
-            f"edge{suffix}": edge,
-            f"mask{suffix}": mask,
-        }
-
-
 class TowerUNet(nn.Module):
     """Tower U-Net."""
 
@@ -782,7 +688,9 @@ class TowerUNet(nn.Module):
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         mask_activation: T.Union[nn.Softmax, nn.Sigmoid] = nn.Softmax(dim=1),
         deep_supervision: bool = False,
+        pool_attention: bool = False,
         pool_first: bool = False,
+        repeat_resa_kernel: bool = False,
         std_conv: bool = False,
     ):
         super(TowerUNet, self).__init__()
@@ -807,33 +715,49 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
         )
 
+        # self.vit_encoder = ImageEncoderViT(
+        #     in_channels=channels[0],
+        #     out_channels=up_channels,
+        #     embed_dim=up_channels * 2,
+        #     num_head=8,
+        # )
+
         # Backbone layers
         if res_block_type.lower() == ResBlockTypes.RES:
-            self.down_a = cunn.ResidualConv(
+            self.init_a = cunn.ResidualConv(
                 in_channels=channels[0],
                 out_channels=channels[0],
-                num_blocks=2,
                 activation_type=activation_type,
-                attention_weights=attention_weights,
+                attention_weights=attention_weights
+                if pool_attention
+                else None,
                 std_conv=std_conv,
             )
         else:
-            self.down_a = cunn.ResidualAConv(
+            # 2 blocks with:
+            #   kernels 1, 3 with dilations 1, 2
+            self.init_a = cunn.ResidualAConv(
                 in_channels=channels[0],
                 out_channels=channels[0],
                 dilations=dilations,
+                repeat_kernel=repeat_resa_kernel,
                 activation_type=activation_type,
-                attention_weights=attention_weights,
+                attention_weights=attention_weights
+                if pool_attention
+                else None,
                 std_conv=std_conv,
             )
 
+        # 2 blocks with:
+        #   kernels 1, 3 with dilations 1, 2
         self.down_b = cunn.PoolResidualConv(
             channels[0],
             channels[1],
             dropout=dropout,
-            attention_weights=attention_weights,
+            attention_weights=attention_weights if pool_attention else None,
             res_block_type=res_block_type,
             dilations=dilations,
+            repeat_resa_kernel=repeat_resa_kernel,
             pool_first=pool_first,
             std_conv=std_conv,
         )
@@ -842,9 +766,10 @@ class TowerUNet(nn.Module):
             channels[2],
             dropout=dropout,
             activation_type=activation_type,
-            attention_weights=attention_weights,
+            attention_weights=attention_weights if pool_attention else None,
             res_block_type=res_block_type,
             dilations=dilations,
+            repeat_resa_kernel=repeat_resa_kernel,
             pool_first=pool_first,
             std_conv=std_conv,
         )
@@ -855,26 +780,28 @@ class TowerUNet(nn.Module):
             kernel_size=1,
             num_blocks=1,
             activation_type=activation_type,
-            attention_weights=attention_weights,
+            attention_weights=attention_weights if pool_attention else None,
             res_block_type=res_block_type,
             dilations=[1],
             pool_first=pool_first,
             std_conv=std_conv,
         )
 
-        # Up layers
-        self.up_du = cunn.TowerUNetUpLayer(
+        # Over layer
+        self.over_du = cunn.TowerUNetUpLayer(
             in_channels=channels[3],
             out_channels=up_channels,
-            num_blocks=1,
             kernel_size=1,
-            attention_weights=attention_weights,
+            num_blocks=1,
+            attention_weights=None,
             activation_type=activation_type,
             res_block_type=res_block_type,
             dilations=[1],
             resample_up=False,
             std_conv=std_conv,
         )
+
+        # Up layers
         self.up_cu = cunn.TowerUNetUpLayer(
             in_channels=up_channels,
             out_channels=up_channels,
@@ -882,6 +809,7 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
             dilations=dilations,
+            repeat_resa_kernel=repeat_resa_kernel,
             std_conv=std_conv,
         )
         self.up_bu = cunn.TowerUNetUpLayer(
@@ -891,6 +819,7 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
             dilations=dilations,
+            repeat_resa_kernel=repeat_resa_kernel,
             std_conv=std_conv,
         )
         self.up_au = cunn.TowerUNetUpLayer(
@@ -900,6 +829,7 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
             dilations=dilations,
+            repeat_resa_kernel=repeat_resa_kernel,
             std_conv=std_conv,
         )
 
@@ -912,6 +842,7 @@ class TowerUNet(nn.Module):
             attention_weights=attention_weights,
             activation_type=activation_type,
             res_block_type=res_block_type,
+            repeat_resa_kernel=repeat_resa_kernel,
             dilations=dilations,
             std_conv=std_conv,
         )
@@ -926,6 +857,7 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
             dilations=dilations,
+            repeat_resa_kernel=repeat_resa_kernel,
             std_conv=std_conv,
         )
 
@@ -939,33 +871,24 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             res_block_type=res_block_type,
             dilations=dilations,
+            repeat_resa_kernel=repeat_resa_kernel,
             std_conv=std_conv,
         )
 
-        # self.field_of_junctions = None
-        # if get_junctions:
-        #     self.field_of_junctions = FieldOfJunctions(
-        #         in_channels=hidden_channels,
-        #         # NOTE: setup for padding of 5 x 5
-        #         # TODO: set this as a parameter
-        #         height=110,
-        #         width=110,
-        #     )
-
-        self.final_a = TowerFinal(
+        self.final_a = cunn.TowerUNetFinal(
             in_channels=up_channels,
             num_classes=num_classes,
             mask_activation=mask_activation,
         )
 
         if self.deep_supervision:
-            self.final_b = TowerFinal(
+            self.final_b = cunn.TowerUNetFinal(
                 in_channels=up_channels,
                 num_classes=num_classes,
                 mask_activation=mask_activation,
                 resample_factor=2,
             )
-            self.final_c = TowerFinal(
+            self.final_c = cunn.TowerUNetFinal(
                 in_channels=up_channels,
                 num_classes=num_classes,
                 mask_activation=mask_activation,
@@ -986,19 +909,21 @@ class TowerUNet(nn.Module):
         Parameters
         ==========
         x
-            Shaped (B x C X T|D x H x W) temporal_encoding Shaped (B x C x H X W)
+            Shaped (B x C X T x H x W)
+        temporal_encoding
+            Shaped (B x C x H X W)
         """
 
         embeddings = self.pre_unet(x, temporal_encoding=temporal_encoding)
 
         # Backbone
-        x_a = self.down_a(embeddings)
+        x_a = self.init_a(embeddings)
         x_b = self.down_b(x_a)
         x_c = self.down_c(x_b)
         x_d = self.down_d(x_c)
 
         # Over
-        x_du = self.up_du(x_d, shape=x_d.shape[-2:])
+        x_du = self.over_du(x_d, shape=x_d.shape[-2:])
 
         # Up
         x_cu = self.up_cu(x_du, shape=x_c.shape[-2:])
@@ -1026,22 +951,10 @@ class TowerUNet(nn.Module):
             down_tower=x_tower_b,
         )
 
-        # foj_output = {}
-        # if self.field_of_junctions is not None:
-        #     foj_output = self.field_of_junctions(embeddings)
+        # ViT image embedding
+        # x_tower_a = x_tower_a + self.vit_encoder(embeddings, shape=x.shape[-2:])
 
-        out = self.final_a(
-            x_tower_a,
-            # foj_boundaries=foj_output.get("boundaries"),
-        )
-
-        # if foj_output:
-        #     out.update(
-        #         {
-        #             "foj_image_patches": foj_output["image_patches"],
-        #             "foj_patches": foj_output["patches"],
-        #         }
-        #     )
+        out = self.final_a(x_tower_a)
 
         if self.deep_supervision:
             out_c = self.final_c(
