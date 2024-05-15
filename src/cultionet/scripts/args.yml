@@ -159,13 +159,6 @@ create_predict:
     short: ''
     long: ts-path
     help: A path with time series data (overrides the config regions)
-  chunksize:
-    short: ''
-    long: chunksize
-    help: The window chunksize for processing batches
-    kwargs:
-      default: 100
-      type: '&int'
 
 train_predict:
   model_type:
@@ -185,7 +178,7 @@ train_predict:
     kwargs:
       default: 'SiLU'
   res_block_type:
-    short: ''
+    short: rb
     long: res-block-type
     help: The residual block type (only relevant when --model-type=ResUNet3Psi)
     kwargs:
@@ -344,7 +337,7 @@ train:
     long: val-frac
     help: the validation fraction
     kwargs:
-      default: 0.1
+      default: 0.2
       type: '&float'
   augment_prob:
     short: ''
@@ -469,6 +462,18 @@ train:
     short: ''
     long: pool-first
     help: Whether to apply max pooling before convolution
+    kwargs:
+      action: store_true
+  pool_attention:
+    short: ''
+    long: pool-attention
+    help: Whether to apply attention along the backbone pooling layers
+    kwargs:
+      action: store_true
+  repeat_resa_kernel:
+    short: ''
+    long: repeat-resa-kernel
+    help: Whether to repeat the input res-a kernel (otherwise, the first kernel is always 1x1)
     kwargs:
       action: store_true
   std_conv:
