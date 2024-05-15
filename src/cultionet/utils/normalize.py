@@ -6,6 +6,14 @@ import joblib
 import torch
 from einops import rearrange
 from joblib import delayed, parallel_backend
+from rich.progress import (
+    BarColumn,
+    Progress,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
+from rich.style import Style
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
@@ -199,15 +207,28 @@ class NormValues:
                 ).long()
                 edge_counts = torch.zeros(2).long()
                 with cache_load_enabled(True):
-                    with tqdm(
-                        total=int(len(dataset) / batch_size),
-                        desc='Calculating dataset statistics',
-                        ascii="\u2015\u25E4\u25E5\u25E2\u25E3\u25AA",
+                    with Progress(
+                        TextColumn(
+                            "Calculating stats", style=Style(color="#cacaca")
+                        ),
+                        TextColumn("•", style=Style(color="#cacaca")),
+                        BarColumn(
+                            style="#ACFCD6",
+                            complete_style="#AA9439",
+                            finished_style="#ACFCD6",
+                            pulse_style="#FCADED",
+                        ),
+                        TaskProgressColumn(),
+                        TextColumn("•", style=Style(color="#cacaca")),
+                        TimeElapsedColumn(),
                     ) as pbar:
-                        for batch in tally_stats(
-                            stats=(stat_var, stat_q),
-                            loader=data_loader,
-                            caches=(var_data_cache, q_data_cache),
+                        for batch in pbar.track(
+                            tally_stats(
+                                stats=(stat_var, stat_q),
+                                loader=data_loader,
+                                caches=(var_data_cache, q_data_cache),
+                            ),
+                            total=len(data_loader),
                         ):
                             # Stack samples
                             x = rearrange(batch.x, 'b c t h w -> (b t h w) c')
@@ -230,8 +251,6 @@ class NormValues:
                             edge_counts[1] += (
                                 batch.y == class_info['edge_class']
                             ).sum()
-
-                            pbar.update(1)
 
                 data_stds = stat_var.std()
                 data_means = stat_q.median()
