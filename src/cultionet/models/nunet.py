@@ -13,7 +13,6 @@ from einops.layers.torch import Rearrange
 from .. import nn as cunn
 from ..enums import AttentionTypes, ResBlockTypes
 from ..layers.weights import init_conv_weights
-from .vit import ImageEncoderViT
 
 
 class DepthwiseSeparableConv(nn.Module):
@@ -715,13 +714,6 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
         )
 
-        # self.vit_encoder = ImageEncoderViT(
-        #     in_channels=channels[0],
-        #     out_channels=up_channels,
-        #     embed_dim=up_channels * 2,
-        #     num_head=8,
-        # )
-
         # Backbone layers
         if res_block_type.lower() == ResBlockTypes.RES:
             self.init_a = cunn.ResidualConv(
@@ -950,9 +942,6 @@ class TowerUNet(nn.Module):
             down=x_bu,
             down_tower=x_tower_b,
         )
-
-        # ViT image embedding
-        # x_tower_a = x_tower_a + self.vit_encoder(embeddings, shape=x.shape[-2:])
 
         out = self.final_a(x_tower_a)
 
