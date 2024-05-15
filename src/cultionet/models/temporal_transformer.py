@@ -44,7 +44,7 @@ class ScaledDotProductAttention(nn.Module):
         value: torch.Tensor,
         prev_attention: Optional[torch.Tensor] = None,
     ):
-        scores = torch.einsum('hblk, hbtk -> hblt', [query, key]) * self.scale
+        scores = torch.einsum('hblk, hbtk -> hblt', [query * self.scale, key])
         if prev_attention is not None:
             scores = scores + prev_attention
 
@@ -117,11 +117,11 @@ class MultiHeadAttention(nn.Module):
 
 
 class PositionWiseFeedForward(nn.Module):
-    def __init__(self, d_model: int):
+    def __init__(self, d_model: int, hidden_channels: int):
         super(PositionWiseFeedForward, self).__init__()
 
-        self.fc1 = nn.Linear(d_model, d_model)
-        self.fc2 = nn.Linear(d_model, d_model)
+        self.fc1 = nn.Linear(d_model, hidden_channels)
+        self.fc2 = nn.Linear(hidden_channels, d_model)
         self.act = nn.GELU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -140,7 +140,7 @@ class EncoderLayer(nn.Module):
         self.self_attn = MultiHeadAttention(
             d_model=d_model, num_head=num_head, dropout=dropout
         )
-        self.feed_forward = PositionWiseFeedForward(d_model)
+        self.feed_forward = PositionWiseFeedForward(d_model, d_model)
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
