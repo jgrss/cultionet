@@ -477,6 +477,7 @@ class ResConvLayer(nn.Module):
         dilations: T.List[int] = None,
         activation_type: str = "SiLU",
         num_blocks: int = 1,
+        repeat_kernel: bool = False,
         std_conv: bool = False,
     ):
         super(ResConvLayer, self).__init__()
@@ -486,13 +487,18 @@ class ResConvLayer(nn.Module):
         if dilations is None:
             dilations = list(range(1, num_blocks + 1))
 
-        # Block 1
+        if repeat_kernel:
+            first_kernel_size = kernel_size
+        else:
+            # If multiple blocks, then the first kernel is 1x1
+            first_kernel_size = 1 if len(dilations) > 1 else kernel_size
+
         layers = [
             ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
-                kernel_size=kernel_size,
-                padding=0 if kernel_size == 1 else dilations[0],
+                kernel_size=first_kernel_size,
+                padding=0 if first_kernel_size == 1 else dilations[0],
                 dilation=dilations[0],
                 activation_type=activation_type,
                 add_activation=True,
@@ -668,6 +674,8 @@ class ResidualAConv(nn.Module):
         out_channels: int,
         kernel_size: int = 3,
         dilations: T.List[int] = None,
+        num_blocks: int = 2,
+        repeat_kernel: bool = False,
         attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
         std_conv: bool = False,
@@ -700,9 +708,10 @@ class ResidualAConv(nn.Module):
                     in_channels=in_channels,
                     out_channels=out_channels,
                     kernel_size=kernel_size,
-                    dilations=[dilation] * 2,
+                    dilations=[dilation] * num_blocks,
                     activation_type=activation_type,
-                    num_blocks=2,
+                    num_blocks=num_blocks,
+                    repeat_kernel=repeat_kernel,
                     std_conv=std_conv,
                 )
                 for dilation in dilations
@@ -764,8 +773,9 @@ class PoolResidualConv(nn.Module):
         num_blocks: int = 2,
         attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
-        res_block_type: str = ResBlockTypes.RES,
+        res_block_type: str = ResBlockTypes.RESA,
         dilations: T.Sequence[int] = None,
+        repeat_resa_kernel: bool = False,
         pool_first: bool = False,
         std_conv: bool = False,
     ):
@@ -794,6 +804,8 @@ class PoolResidualConv(nn.Module):
                 out_channels,
                 kernel_size=kernel_size,
                 dilations=dilations,
+                num_blocks=num_blocks,
+                repeat_kernel=repeat_resa_kernel,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
                 std_conv=std_conv,
