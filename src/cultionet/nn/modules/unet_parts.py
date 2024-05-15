@@ -6,8 +6,10 @@ import torch.nn as nn
 
 from cultionet.enums import AttentionTypes, ModelTypes, ResBlockTypes
 
+from .activations import SigmoidCrisp
 from .attention import AttentionGate
 from .convolution import (
+    ConvBlock2d,
     DoubleConv,
     PoolConv,
     PoolResidualConv,
@@ -15,6 +17,95 @@ from .convolution import (
     ResidualConv,
 )
 from .reshape import UpSample
+
+
+class TowerUNetFinal(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        num_classes: int,
+        mask_activation: T.Callable,
+        resample_factor: int = 0,
+    ):
+        super(TowerUNetFinal, self).__init__()
+
+        self.up = UpSample()
+
+        if resample_factor > 1:
+            self.up_conv = nn.ConvTranspose2d(
+                in_channels=in_channels,
+                out_channels=in_channels,
+                kernel_size=3,
+                stride=resample_factor,
+                padding=1,
+            )
+
+        self.expand = nn.Conv2d(
+            in_channels, in_channels * 3, kernel_size=1, padding=0
+        )
+        self.final_dist = nn.Sequential(
+            ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=in_channels,
+                kernel_size=3,
+                padding=1,
+                add_activation=True,
+                activation_type="SiLU",
+            ),
+            nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
+            nn.Sigmoid(),
+        )
+        self.final_edge = nn.Sequential(
+            ConvBlock2d(
+                in_channels=in_channels + 1,
+                out_channels=in_channels,
+                kernel_size=3,
+                padding=1,
+                add_activation=True,
+                activation_type="SiLU",
+            ),
+            nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
+            SigmoidCrisp(),
+        )
+        self.final_mask = nn.Sequential(
+            ConvBlock2d(
+                in_channels=in_channels + 2,
+                out_channels=in_channels,
+                kernel_size=3,
+                padding=1,
+                add_activation=True,
+                activation_type="SiLU",
+            ),
+            nn.Conv2d(in_channels, num_classes, kernel_size=1, padding=0),
+            mask_activation,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        shape: T.Optional[tuple] = None,
+        suffix: str = "",
+    ) -> T.Dict[str, torch.Tensor]:
+        if shape is not None:
+            x = self.up(
+                self.up_conv(x),
+                size=shape,
+                mode="bilinear",
+            )
+
+        dist_connect, edge_connect, mask_connect = torch.chunk(
+            self.expand(x), 3, dim=1
+        )
+
+        dist = self.final_dist(dist_connect)
+        edge = self.final_edge(torch.cat((edge_connect, dist), dim=1))
+        mask = self.final_mask(torch.cat((mask_connect, dist, edge), dim=1))
+
+        return {
+            f"dist{suffix}": dist,
+            f"edge{suffix}": edge,
+            f"mask{suffix}": mask,
+        }
 
 
 class TowerUNetUpLayer(nn.Module):
@@ -26,8 +117,9 @@ class TowerUNetUpLayer(nn.Module):
         num_blocks: int = 2,
         attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
-        res_block_type: str = ResBlockTypes.RES,
+        res_block_type: str = ResBlockTypes.RESA,
         dilations: T.Sequence[int] = None,
+        repeat_resa_kernel: bool = False,
         resample_up: bool = True,
         std_conv: bool = False,
     ):
@@ -60,6 +152,7 @@ class TowerUNetUpLayer(nn.Module):
                 out_channels,
                 kernel_size=kernel_size,
                 dilations=dilations,
+                repeat_kernel=repeat_resa_kernel,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
                 std_conv=std_conv,
@@ -87,8 +180,9 @@ class TowerUNetBlock(nn.Module):
         kernel_size: int = 3,
         num_blocks: int = 2,
         attention_weights: T.Optional[str] = None,
-        res_block_type: str = ResBlockTypes.RES,
+        res_block_type: str = ResBlockTypes.RESA,
         dilations: T.Sequence[int] = None,
+        repeat_resa_kernel: bool = False,
         activation_type: str = "SiLU",
         std_conv: bool = False,
     ):
@@ -139,7 +233,9 @@ class TowerUNetBlock(nn.Module):
                 in_channels,
                 out_channels,
                 kernel_size=kernel_size,
+                num_blocks=num_blocks,
                 dilations=dilations,
+                repeat_kernel=repeat_resa_kernel,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
                 std_conv=std_conv,
