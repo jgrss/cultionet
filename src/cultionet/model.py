@@ -90,6 +90,8 @@ class CultionetParams:
     model_name: str = attr.ib(converter=str, default="cultionet")
     deep_supervision: bool = attr.ib(default=False)
     pool_first: bool = attr.ib(default=False)
+    pool_attention: bool = attr.ib(default=False)
+    repeat_resa_kernel: bool = attr.ib(default=False)
     std_conv: bool = attr.ib(default=False)
     scale_pos_weight: bool = attr.ib(default=False)
     save_batch_val_metrics: bool = attr.ib(default=False)
@@ -174,6 +176,8 @@ class CultionetParams:
             model_name=self.model_name,
             deep_supervision=self.deep_supervision,
             pool_first=self.pool_first,
+            pool_attention=self.pool_attention,
+            repeat_resa_kernel=self.repeat_resa_kernel,
             std_conv=self.std_conv,
             class_counts=self.class_counts,
             edge_class=self.edge_class,
@@ -463,6 +467,7 @@ def fit(cultionet_params: CultionetParams) -> None:
     lr_monitor, callbacks = setup_callbacks(
         **cultionet_params.get_callback_params()
     )
+    callbacks.append(PROGRESS_BAR_CALLBACK)
 
     # Setup the trainer
     trainer = L.Trainer(
