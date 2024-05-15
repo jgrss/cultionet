@@ -262,7 +262,10 @@ class CultioNet(nn.Module):
         res_block_type (str): The residual convolution block type.
         attention_weights (str): The attention weight type.
         deep_supervision (bool): Whether to use deep supervision.
-        pool_first (bool): Whethe to apply max pooling before convolution.
+        pool_attention (bool): Whether to apply attention along the backbone pooling layers.
+        pool_first (bool): Whether to apply max pooling before convolution.
+        repeat_resa_kernel (bool): Whether to repeat the input res-a kernel (otherwise, the first kernel is always 1x1).
+        std_conv (bool): Whether to apply convolutions with standarized weights.
     """
 
     def __init__(
@@ -278,7 +281,9 @@ class CultioNet(nn.Module):
         res_block_type: str = ResBlockTypes.RES,
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         deep_supervision: bool = False,
+        pool_attention: bool = False,
         pool_first: bool = False,
+        repeat_resa_kernel: bool = False,
         std_conv: bool = False,
     ):
         super(CultioNet, self).__init__()
@@ -314,8 +319,10 @@ class CultioNet(nn.Module):
             "dilations": dilations,
             "activation_type": activation_type,
             "deep_supervision": deep_supervision,
+            "pool_attention": pool_attention,
             "mask_activation": nn.Softmax(dim=1),
             "pool_first": pool_first,
+            "repeat_resa_kernel": repeat_resa_kernel,
             "std_conv": std_conv,
         }
 
