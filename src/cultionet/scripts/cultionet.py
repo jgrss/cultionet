@@ -836,7 +836,6 @@ def create_one_id(
                     window_size=args.window_size,
                     padding=args.padding,
                     num_workers=args.num_workers,
-                    chunksize=args.chunksize,
                 )
             else:
                 class_info = {
@@ -964,12 +963,13 @@ def create_dataset(args):
         else:
             processed_ids = list(ppaths.image_path.resolve().glob('*'))
 
-    # Filter ids to those that have been processed
-    processed_mask = np.isin(
-        np.array([fn.name for fn in processed_ids]),
-        region_df[DataColumns.GEOID].values,
-    )
-    processed_ids = np.array(processed_ids)[processed_mask]
+    if args.destination == "train":
+        # Filter ids to those that have been processed
+        processed_mask = np.isin(
+            np.array([fn.name for fn in processed_ids]),
+            region_df[DataColumns.GEOID].values,
+        )
+        processed_ids = np.array(processed_ids)[processed_mask]
 
     partial_create_one_id = partial(
         create_one_id,
@@ -978,25 +978,32 @@ def create_dataset(args):
         ppaths=ppaths,
         region_df=region_df,
         polygon_df=polygon_df,
-        bbox_offsets=args.bbox_offsets,
+        bbox_offsets=args.bbox_offsets
+        if args.destination == "train"
+        else None,
     )
 
-    with parallel_config(
-        backend="loky",
-        n_jobs=1 if args.destination == "predict" else args.num_workers,
-    ):
-        with ParallelProgress(
-            tqdm_params={
-                "total": len(processed_ids),
-                "desc": f"Creating {args.destination} files",
-                "colour": "green",
-                "ascii": "\u2015\u25E4\u25E5\u25E2\u25E3\u25AA",
-            },
-        ) as parallel_pool:
-            parallel_pool(
-                delayed(partial_create_one_id)(processed_path=processed_path)
-                for processed_path in processed_ids
-            )
+    if args.destination == "predict":
+        partial_create_one_id(processed_path=processed_ids[0])
+    else:
+        with parallel_config(
+            backend="loky",
+            n_jobs=args.num_workers,
+        ):
+            with ParallelProgress(
+                tqdm_params={
+                    "total": len(processed_ids),
+                    "desc": f"Creating {args.destination} files",
+                    "colour": "green",
+                    "ascii": "\u2015\u25E4\u25E5\u25E2\u25E3\u25AA",
+                },
+            ) as parallel_pool:
+                parallel_pool(
+                    delayed(partial_create_one_id)(
+                        processed_path=processed_path
+                    )
+                    for processed_path in processed_ids
+                )
 
 
 def train_maskrcnn(args):
@@ -1287,7 +1294,7 @@ def train_model(args):
             dataset=train_ds,
             class_info=class_info,
             num_workers=args.load_batch_workers,
-            batch_size=args.batch_size * 2,
+            batch_size=args.batch_size * 4,
             mean_color=args.mean_color,
             sse_color=args.sse_color,
         )
@@ -1361,6 +1368,8 @@ def train_model(args):
         weight_decay=args.weight_decay,
         deep_supervision=args.deep_supervision,
         pool_first=args.pool_first,
+        pool_attention=args.pool_attention,
+        repeat_resa_kernel=args.repeat_resa_kernel,
         scale_pos_weight=args.scale_pos_weight,
         save_batch_val_metrics=args.save_batch_val_metrics,
         epochs=args.epochs,
