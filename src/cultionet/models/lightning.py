@@ -3,6 +3,7 @@ import typing as T
 import warnings
 from pathlib import Path
 
+import einops
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -527,6 +528,7 @@ class LightningModuleMixin(LightningModule):
             mask = torch.where(batch.y == -1, 0, 1).to(
                 dtype=torch.uint8, device=batch.y.device
             )
+            mask = einops.rearrange(mask, 'b h w -> b 1 h w')
 
         return {
             "true_edge": true_edge,

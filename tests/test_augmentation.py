@@ -68,6 +68,10 @@ def test_augmenter_loading():
             width=50,
         )
 
+        assert batch.x.min() >= 0
+        assert batch.x.max() <= 1
+        assert batch.y.min() == -1
+
         batch.segments = np.uint8(nd_label(batch.y.squeeze().numpy() == 1)[0])
         batch.props = regionprops(batch.segments)
         aug_batch = method(batch.copy(), aug_args=aug.aug_args)
@@ -92,6 +96,10 @@ def test_augmenter_loading():
             height=50,
             width=50,
         )
+
+        assert batch.x.min() >= 0
+        assert batch.x.max() <= 1
+        assert batch.y.min() == -1
 
         aug_batch = method(batch.copy(), aug_args=aug.aug_args)
 

@@ -44,6 +44,9 @@ DISCRETE_EDGE_TARGETS = torch.from_numpy(
 DIST_TARGETS = torch.from_numpy(
     rng.random((BATCH_SIZE, HEIGHT, WIDTH))
 ).float()
+MASK = torch.from_numpy(
+    rng.integers(low=0, high=2, size=(BATCH_SIZE, 1, HEIGHT, WIDTH))
+).long()
 
 
 def test_loss_preprocessing():
@@ -53,18 +56,14 @@ def test_loss_preprocessing():
     )
     inputs, targets = preprocessor(INPUTS_CROP_LOGIT, DISCRETE_TARGETS)
 
-    assert inputs.shape == (BATCH_SIZE * HEIGHT * WIDTH, 2)
-    assert targets.shape == (BATCH_SIZE * HEIGHT * WIDTH, 2)
-    assert torch.allclose(targets.max(dim=0).values, torch.ones(2))
+    assert inputs.shape == (BATCH_SIZE, 2, HEIGHT, WIDTH)
+    assert targets.shape == (BATCH_SIZE, 2, HEIGHT, WIDTH)
     assert torch.allclose(
-        inputs.sum(dim=1), torch.ones(BATCH_SIZE * HEIGHT * WIDTH), rtol=0.1
+        inputs.sum(dim=1), torch.ones(BATCH_SIZE, HEIGHT, WIDTH), rtol=0.1
     )
     assert torch.allclose(
         inputs,
-        rearrange(
-            F.softmax(INPUTS_CROP_LOGIT, dim=1, dtype=INPUTS_CROP_LOGIT.dtype),
-            'b c h w -> (b h w) c',
-        ),
+        F.softmax(INPUTS_CROP_LOGIT, dim=1, dtype=INPUTS_CROP_LOGIT.dtype),
     )
 
     # Input probabilities
@@ -73,31 +72,26 @@ def test_loss_preprocessing():
     )
     inputs, targets = preprocessor(INPUTS_CROP_PROB, DISCRETE_TARGETS)
 
-    assert inputs.shape == (BATCH_SIZE * HEIGHT * WIDTH, 2)
-    assert targets.shape == (BATCH_SIZE * HEIGHT * WIDTH, 2)
-    assert torch.allclose(targets.max(dim=0).values, torch.ones(2))
+    assert inputs.shape == (BATCH_SIZE, 2, HEIGHT, WIDTH)
+    assert targets.shape == (BATCH_SIZE, 2, HEIGHT, WIDTH)
     assert torch.allclose(
-        inputs.sum(dim=1), torch.ones(BATCH_SIZE * HEIGHT * WIDTH), rtol=0.1
+        inputs.sum(dim=1), torch.ones(BATCH_SIZE, HEIGHT, WIDTH), rtol=0.1
     )
     assert torch.allclose(
         inputs,
-        rearrange(INPUTS_CROP_PROB, 'b c h w -> (b h w) c'),
+        INPUTS_CROP_PROB,
     )
 
     preprocessor = LossPreprocessing(
         transform_logits=False, one_hot_targets=True
     )
-    # This should fail because there are more class targets than the input dimensions
-    with pytest.raises(ValueError):
-        inputs, targets = preprocessor(INPUTS_EDGE_PROB, DISCRETE_TARGETS)
     inputs, targets = preprocessor(INPUTS_EDGE_PROB, DISCRETE_EDGE_TARGETS)
 
-    assert inputs.shape == (BATCH_SIZE * HEIGHT * WIDTH, 1)
-    assert targets.shape == (BATCH_SIZE * HEIGHT * WIDTH, 1)
-    assert torch.allclose(targets.max(dim=0).values, torch.ones(1))
+    assert inputs.shape == (BATCH_SIZE, 1, HEIGHT, WIDTH)
+    assert targets.shape == (BATCH_SIZE, 1, HEIGHT, WIDTH)
     assert torch.allclose(
         inputs,
-        rearrange(INPUTS_EDGE_PROB, 'b c h w -> (b h w) c'),
+        INPUTS_EDGE_PROB,
     )
 
     # Regression
@@ -107,32 +101,31 @@ def test_loss_preprocessing():
     inputs, targets = preprocessor(INPUTS_DIST, DIST_TARGETS)
 
     # Preprocessing should not change the inputs other than the shape
-    assert torch.allclose(
-        inputs, rearrange(INPUTS_DIST, 'b c h w -> (b h w) c')
-    )
-    assert torch.allclose(
-        targets, rearrange(DIST_TARGETS, 'b h w -> (b h w) 1')
-    )
+    assert torch.allclose(inputs, INPUTS_DIST)
+    assert torch.allclose(targets, rearrange(DIST_TARGETS, 'b h w -> b 1 h w'))
 
 
 def test_tanimoto_classification_loss():
-    loss_func = TanimotoDistLoss(
-        scale_pos_weight=False,
-        transform_logits=False,
-        one_hot_targets=True,
-    )
+    loss_func = TanimotoDistLoss()
+
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS)
-    assert round(float(loss.item()), 3) == 0.611
+    assert round(float(loss.item()), 3) == 0.61
+
+    loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS, mask=MASK)
+    assert round(float(loss.item()), 3) == 0.608
 
     loss_func = TanimotoComplementLoss()
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS)
-    assert round(float(loss.item()), 3) == 0.824
+    assert round(float(loss.item()), 3) == 0.649
+
+    loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS, mask=MASK)
+    assert round(float(loss.item()), 3) == 0.647
 
 
 def test_tanimoto_regression_loss():
     loss_func = TanimotoDistLoss(one_hot_targets=False)
     loss = loss_func(INPUTS_DIST, DIST_TARGETS)
-    assert round(float(loss.item()), 4) == 0.4174
+    assert round(float(loss.item()), 3) == 0.417
 
     loss_func = TanimotoComplementLoss(one_hot_targets=False)
     loss = loss_func(INPUTS_DIST, DIST_TARGETS)

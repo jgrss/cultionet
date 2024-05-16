@@ -238,7 +238,6 @@ class TanimotoComplementLoss(nn.Module):
         scale = 1.0 / self.depth
 
         if mask is not None:
-            mask = einops.rearrange(mask, 'b h w -> b 1 h w')
             y = y * mask
             yhat = yhat * mask
 
@@ -252,16 +251,18 @@ class TanimotoComplementLoss(nn.Module):
             tpl = tpl * weights
             sq_sum = sq_sum * weights
 
-        numerator = tpl + self.smooth
         denominator = 0.0
         for d in range(0, self.depth):
             a = 2.0**d
             b = -(2.0 * a - 1.0)
             denominator = denominator + torch.reciprocal(
-                (a * sq_sum) + (b * tpl) + self.smooth
+                (a * sq_sum) + (b * tpl)
+            )
+            denominator = torch.nan_to_num(
+                denominator, nan=0.0, posinf=0.0, neginf=0.0
             )
 
-        return ((numerator * denominator) * scale).sum(dim=1)
+        return ((tpl * denominator) * scale).sum(dim=1)
 
     def forward(
         self,
@@ -327,7 +328,6 @@ def tanimoto_dist(
 
     # Apply a mask to zero-out gradients where mask == 0
     if mask is not None:
-        mask = einops.rearrange(mask, 'b h w -> b 1 h w')
         ytrue = ytrue * mask
         ypred = ypred * mask
 
