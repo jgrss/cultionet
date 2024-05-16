@@ -793,6 +793,8 @@ def create_one_id(
             )
 
             end_year = int(row_region_df[DataColumns.YEAR])
+            if args.add_year > 0:
+                end_year += args.add_year
 
         image_list = []
         for image_vi in config["image_vis"]:

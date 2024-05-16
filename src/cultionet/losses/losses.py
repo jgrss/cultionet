@@ -237,12 +237,13 @@ class TanimotoComplementLoss(nn.Module):
     ) -> torch.Tensor:
         scale = 1.0 / self.depth
 
+        if mask is not None:
+            mask = einops.rearrange(mask, 'b h w -> b 1 h w')
+            y = y * mask
+            yhat = yhat * mask
+
         tpl = y * yhat
         sq_sum = y**2 + yhat**2
-
-        if mask is not None:
-            tpl = tpl * mask
-            sq_sum = sq_sum * mask
 
         tpl = tpl.sum(dim=(2, 3))
         sq_sum = sq_sum.sum(dim=(2, 3))
@@ -263,7 +264,10 @@ class TanimotoComplementLoss(nn.Module):
         return ((numerator * denominator) * scale).sum(dim=1)
 
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Performs a single forward pass.
 
@@ -276,8 +280,10 @@ class TanimotoComplementLoss(nn.Module):
         """
         inputs, targets = self.preprocessor(inputs, targets)
 
-        loss = 1.0 - self.tanimoto_distance(targets, inputs)
-        compl_loss = 1.0 - self.tanimoto_distance(1.0 - targets, 1.0 - inputs)
+        loss = 1.0 - self.tanimoto_distance(targets, inputs, mask=mask)
+        compl_loss = 1.0 - self.tanimoto_distance(
+            1.0 - targets, 1.0 - inputs, mask=mask
+        )
         loss = (loss + compl_loss) * 0.5
 
         return loss.mean()
@@ -319,12 +325,14 @@ def tanimoto_dist(
         weights = (1.0 - beta) / effective_num
         weights = weights / weights.sum() * class_counts.shape[0]
 
+    # Apply a mask to zero-out gradients where mask == 0
+    if mask is not None:
+        mask = einops.rearrange(mask, 'b h w -> b 1 h w')
+        ytrue = ytrue * mask
+        ypred = ypred * mask
+
     tpl = ypred * ytrue
     sq_sum = ypred**2 + ytrue**2
-
-    if mask is not None:
-        tpl = tpl * mask
-        sq_sum = sq_sum * mask
 
     # Sum over rows and columns
     tpl = tpl.sum(dim=(2, 3))
@@ -407,7 +415,10 @@ class TanimotoDistLoss(nn.Module):
         )
 
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Performs a single forward pass.
 
@@ -428,6 +439,7 @@ class TanimotoDistLoss(nn.Module):
             class_counts=self.class_counts,
             beta=self.beta,
             smooth=self.smooth,
+            mask=mask,
         )
         compl_loss = 1.0 - tanimoto_dist(
             1.0 - inputs,
@@ -436,6 +448,7 @@ class TanimotoDistLoss(nn.Module):
             class_counts=self.class_counts,
             beta=self.beta,
             smooth=self.smooth,
+            mask=mask,
         )
         loss = (loss + compl_loss) * 0.5
 

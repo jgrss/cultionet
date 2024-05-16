@@ -139,6 +139,12 @@ create:
     help: Whether the non-agricultural background is unknown
     kwargs:
       action: store_true
+  add_year:
+    short: ''
+    long: add-year
+    help: The number of years to add to the year column to derive the end year
+    kwargs:
+      type: '&int'
 
 create_predict:
   window_size:

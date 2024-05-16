@@ -246,7 +246,8 @@ class NormValues:
                                 crop_counts[i] += (batch.y == i).sum()
 
                             edge_counts[0] += (
-                                batch.y != class_info['edge_class']
+                                (batch.y >= 0)
+                                & (batch.y != class_info['edge_class'])
                             ).sum()
                             edge_counts[1] += (
                                 batch.y == class_info['edge_class']

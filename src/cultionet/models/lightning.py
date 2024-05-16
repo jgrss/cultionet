@@ -521,12 +521,20 @@ class LightningModuleMixin(LightningModule):
                 batch.y == self.edge_class, 0, batch.y
             ).long()
 
+        # Weak supervision mask
+        mask = None
+        if batch.y.min() == -1:
+            mask = torch.where(batch.y == -1, 0, 1).to(
+                dtype=torch.uint8, device=batch.y.device
+            )
+
         return {
             "true_edge": true_edge,
             "true_crop": true_crop,
             "true_crop_and_edge": true_crop_and_edge,
             "true_crop_or_edge": true_crop_or_edge,
             "true_crop_type": true_crop_type,
+            "mask": mask,
         }
 
     # def on_validation_epoch_end(self, *args, **kwargs):
@@ -565,6 +573,7 @@ class LightningModuleMixin(LightningModule):
             classes_l2_loss = self.classes_l2_loss(
                 predictions["classes_l2"],
                 true_labels_dict["true_crop_and_edge"],
+                mask=true_labels_dict["mask"],
             )
             loss = loss + classes_l2_loss * weights["l2"]
 
@@ -573,28 +582,41 @@ class LightningModuleMixin(LightningModule):
             classes_last_loss = self.classes_last_loss(
                 predictions["classes_l3"],
                 true_labels_dict["true_crop_or_edge"],
+                mask=true_labels_dict["mask"],
             )
             loss = loss + classes_last_loss * weights["l3"]
 
         # Edge losses
         if self.deep_supervision:
             dist_loss_deep_b = self.dist_loss_deep_b(
-                predictions["dist_b"], batch.bdist
+                predictions["dist_b"],
+                batch.bdist,
+                mask=true_labels_dict["mask"],
             )
             edge_loss_deep_b = self.edge_loss_deep_b(
-                predictions["edge_b"], true_labels_dict["true_edge"]
+                predictions["edge_b"],
+                true_labels_dict["true_edge"],
+                mask=true_labels_dict["mask"],
             )
             crop_loss_deep_b = self.crop_loss_deep_b(
-                predictions["mask_b"], true_labels_dict["true_crop"]
+                predictions["mask_b"],
+                true_labels_dict["true_crop"],
+                mask=true_labels_dict["mask"],
             )
             dist_loss_deep_c = self.dist_loss_deep_c(
-                predictions["dist_c"], batch.bdist
+                predictions["dist_c"],
+                batch.bdist,
+                mask=true_labels_dict["mask"],
             )
             edge_loss_deep_c = self.edge_loss_deep_c(
-                predictions["edge_c"], true_labels_dict["true_edge"]
+                predictions["edge_c"],
+                true_labels_dict["true_edge"],
+                mask=true_labels_dict["mask"],
             )
             crop_loss_deep_c = self.crop_loss_deep_c(
-                predictions["mask_c"], true_labels_dict["true_crop"]
+                predictions["mask_c"],
+                true_labels_dict["true_crop"],
+                mask=true_labels_dict["mask"],
             )
 
             weights["dist_loss_deep_b"] = 0.25
@@ -616,18 +638,26 @@ class LightningModuleMixin(LightningModule):
             )
 
         # Distance transform loss
-        dist_loss = self.dist_loss(predictions["dist"], batch.bdist)
+        dist_loss = self.dist_loss(
+            predictions["dist"],
+            batch.bdist,
+            mask=true_labels_dict["mask"],
+        )
         loss = loss + dist_loss * weights["dist_loss"]
 
         # Edge loss
         edge_loss = self.edge_loss(
-            predictions["edge"], true_labels_dict["true_edge"]
+            predictions["edge"],
+            true_labels_dict["true_edge"],
+            mask=true_labels_dict["mask"],
         )
         loss = loss + edge_loss * weights["edge_loss"]
 
         # Crop mask loss
         crop_loss = self.crop_loss(
-            predictions["mask"], true_labels_dict["true_crop"]
+            predictions["mask"],
+            true_labels_dict["true_crop"],
+            mask=true_labels_dict["mask"],
         )
         loss = loss + crop_loss * weights["crop_loss"]
 

@@ -11,7 +11,7 @@ import torch
 import xarray as xr
 from affine import Affine
 from dask.distributed import Client, LocalCluster, progress
-from rasterio.windows import from_bounds
+from rasterio.windows import Window, from_bounds
 from scipy.ndimage import label as nd_label
 from skimage.measure import regionprops
 from threadpoolctl import threadpool_limits
@@ -300,13 +300,13 @@ class ReferenceArrays:
 class ImageVariables:
     def __init__(
         self,
-        time_series: np.ndarray,
-        labels_array: np.ndarray,
-        boundary_distance: np.ndarray,
-        orientation: np.ndarray,
-        edge_array: np.ndarray,
-        num_time: int,
-        num_bands: int,
+        time_series: np.ndarray = None,
+        labels_array: np.ndarray = None,
+        boundary_distance: np.ndarray = None,
+        orientation: np.ndarray = None,
+        edge_array: np.ndarray = None,
+        num_time: int = None,
+        num_bands: int = None,
     ):
         self.time_series = time_series
         self.labels_array = labels_array
@@ -365,12 +365,20 @@ class ImageVariables:
         # Get the reference bounds from the grid geometry
         ref_bounds = reference_grid.total_bounds.tolist()
 
+        # Pre-check before opening files
         if grid_size is not None:
             ref_window = from_bounds(
                 *ref_bounds,
                 Affine(
                     ref_res, 0.0, ref_bounds[0], 0.0, -ref_res, ref_bounds[3]
                 ),
+            )
+
+            ref_window = Window(
+                row_off=int(ref_window.row_off),
+                col_off=int(ref_window.col_off),
+                height=int(round(ref_window.height)),
+                width=int(round(ref_window.width)),
             )
 
             assert (int(ref_window.height) == grid_size[0]) and (
@@ -392,6 +400,13 @@ class ImageVariables:
                 band_names=list(range(1, len(image) + 1)),
                 resampling=resampling,
             ) as src_ts:
+                if grid_size is not None:
+                    assert (src_ts.gw.nrows == grid_size[0]) and (
+                        src_ts.gw.ncols == grid_size[1]
+                    ), (
+                        f"The reference image size is {src_ts.gw.nrows} rows x {src_ts.gw.ncols} columns, but the expected "
+                        f"dimensions are {grid_size[0]} rows x {grid_size[1]} columns"
+                    )
 
                 # Get the time and band count
                 num_time, num_bands = get_image_list_dims(image, src_ts)
@@ -410,9 +425,10 @@ class ImageVariables:
                 # NaNs are filled with 0 in reshape_and_mask_array()
                 zero_mask = time_series.sum(axis=0) == 0
                 if zero_mask.all():
-                    raise ValueError(
+                    logger.warning(
                         f"The {region} time series contains all NaNs."
                     )
+                    return cls()
 
                 # Default outputs
                 (
@@ -424,6 +440,7 @@ class ImageVariables:
                     num_rows=src_ts.gw.nrows, num_cols=src_ts.gw.ncols
                 )
 
+                # Any polygons intersecting the grid?
                 if df_polygons_grid is not None:
                     if replace_dict is not None:
                         # Recode polygons
