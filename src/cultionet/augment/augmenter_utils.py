@@ -4,7 +4,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from einops import rearrange
-from scipy.ndimage.measurements import label as nd_label
 from tsaug import AddNoise, Drift, TimeWarp
 
 from ..data.data import Data

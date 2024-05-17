@@ -25,283 +25,17 @@ from ..enums import (
 from ..layers.weights import init_attention_weights, init_conv_weights
 from ..losses import TanimotoComplementLoss, TanimotoDistLoss
 from .cultionet import CultioNet, GeoRefinement
-from .maskcrnn import BFasterRCNN
+from .maskcrnn import (
+    BFasterRCNN,
+    create_mask_targets,
+    mask_2d_to_3d,
+    pad_label_and_resize,
+)
 
 warnings.filterwarnings("ignore")
 logging.getLogger("lightning").addHandler(logging.NullHandler())
 logging.getLogger("lightning").propagate = False
 logging.getLogger("lightning").setLevel(logging.ERROR)
-
-
-class MaskRCNNLitModel(LightningModule):
-    def __init__(
-        self,
-        cultionet_model_file: Path,
-        cultionet_in_channels: int,
-        cultionet_num_time: int,
-        cultionet_hidden_channels: int,
-        cultionet_num_classes: int,
-        ckpt_name: str = "maskrcnn",
-        model_name: str = "maskrcnn",
-        learning_rate: float = 1e-3,
-        weight_decay: float = 1e-5,
-        resize_height: int = 201,
-        resize_width: int = 201,
-        min_image_size: int = 100,
-        max_image_size: int = 500,
-        trainable_backbone_layers: int = 3,
-    ):
-        """Lightning model.
-
-        Args:
-            in_channels
-            num_time
-            hidden_channels
-            learning_rate
-            weight_decay
-        """
-        super(MaskRCNNLitModel, self).__init__()
-        self.save_hyperparameters()
-
-        self.ckpt_name = ckpt_name
-        self.model_name = model_name
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.num_classes = 2
-        self.resize_height = resize_height
-        self.resize_width = resize_width
-
-        self.cultionet_model = CultionetLitModel(
-            in_channels=cultionet_in_channels,
-            num_time=cultionet_num_time,
-            hidden_channels=cultionet_hidden_channels,
-            num_classes=cultionet_num_classes,
-        )
-        self.cultionet_model.load_state_dict(
-            state_dict=torch.load(cultionet_model_file)
-        )
-        self.cultionet_model.eval()
-        self.cultionet_model.freeze()
-        self.model = BFasterRCNN(
-            in_channels=4,
-            out_channels=256,
-            num_classes=self.num_classes,
-            sizes=(16, 32, 64, 128, 256),
-            aspect_ratios=(0.5, 1.0, 3.0),
-            trainable_backbone_layers=trainable_backbone_layers,
-            min_image_size=min_image_size,
-            max_image_size=max_image_size,
-        )
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    def mask_forward(
-        self,
-        distance_ori: torch.Tensor,
-        distance: torch.Tensor,
-        edge: torch.Tensor,
-        crop_r: torch.Tensor,
-        height: T.Union[None, int, torch.Tensor],
-        width: T.Union[None, int, torch.Tensor],
-        batch: T.Union[None, int, torch.Tensor],
-        y: T.Union[None, torch.Tensor] = None,
-    ):
-        height = int(height) if batch is None else int(height[0])
-        width = int(width) if batch is None else int(width[0])
-        batch_size = 1 if batch is None else batch.unique().size(0)
-        x = torch.cat(
-            (
-                distance_ori,
-                distance,
-                edge[:, 1][:, None],
-                crop_r[:, 1][:, None],
-            ),
-            dim=1,
-        )
-        resizer = transforms.Resize((self.resize_height, self.resize_width))
-        x = [resizer(image) for image in x]
-        targets = None
-        if y is not None:
-            targets = []
-            for bidx in y["image_id"].unique():
-                batch_dict = {}
-                batch_slice = y["image_id"] == bidx
-                for k in y.keys():
-                    if k == "masks":
-                        batch_dict[k] = resizer(y[k][batch_slice])
-                    elif k == "boxes":
-                        # [xmin, ymin, xmax, ymax]
-                        batch_dict[k] = self.scale_boxes(
-                            y[k][batch_slice], batch, [height]
-                        )
-                    else:
-                        batch_dict[k] = y[k][batch_slice]
-                    targets.append(batch_dict)
-        outputs = self.model(x, targets)
-
-        return outputs
-
-    def scale_boxes(
-        self,
-        boxes: torch.Tensor,
-        batch: torch.Tensor,
-        height: T.Union[None, int, T.List[int], torch.Tensor],
-    ):
-        height = int(height) if batch is None else int(height[0])
-        scale = self.resize_height / height
-
-        return boxes * scale
-
-    def forward(
-        self,
-        batch: Data,
-        batch_idx: int = None,
-        y: T.Optional[torch.Tensor] = None,
-    ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
-    ]:
-        """Performs a single model forward pass."""
-        with torch.no_grad():
-            distance_ori, distance, edge, __, crop_r = self.cultionet_model(
-                batch
-            )
-        estimates = self.mask_forward(
-            distance_ori,
-            distance,
-            edge,
-            crop_r,
-            height=batch.height,
-            width=batch.width,
-            batch=batch.batch,
-            y=y,
-        )
-
-        return estimates
-
-    def on_save_checkpoint(self, checkpoint):
-        """Save the checkpoint."""
-        ckpt_file = Path(self.logger.save_dir) / f"{self.ckpt_name}.ckpt"
-        if ckpt_file.is_file():
-            ckpt_file.unlink()
-        torch.save(checkpoint, ckpt_file)
-
-    def on_validation_epoch_end(self, *args, **kwargs):
-        """Save the model on validation end."""
-        model_file = Path(self.logger.save_dir) / f"{self.model_name}.pt"
-        if model_file.is_file():
-            model_file.unlink()
-        torch.save(self.state_dict(), model_file)
-
-    def calc_loss(
-        self, batch: T.Union[Data, T.List], y: T.Optional[torch.Tensor] = None
-    ):
-        """Calculates the loss for each layer.
-
-        Returns:
-            Average loss
-        """
-        losses = self(batch, y=y)
-        loss = sum(loss for loss in losses.values())
-
-        return loss
-
-    def training_step(self, batch: Data, batch_idx: int = None):
-        """Executes one training step."""
-        y = {
-            "boxes": batch.boxes,
-            "labels": batch.box_labels,
-            "masks": batch.box_masks,
-            "image_id": batch.image_id,
-        }
-        loss = self.calc_loss(batch, y=y)
-        self.log("loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-
-        return loss
-
-    def _shared_eval_step(self, batch: Data) -> dict:
-        # Predictions
-        instances = self(batch)
-        # True boxes
-        true_boxes = self.scale_boxes(batch.boxes, batch, batch.height)
-
-        predict_iou_score = torch.tensor(0.0, device=self.device)
-        iou_score = torch.tensor(0.0, device=self.device)
-        box_score = torch.tensor(0.0, device=self.device)
-        for bidx, batch_value in enumerate(batch.image_id.unique()):
-            # This should be low (i.e., low overlap of predicted boxes)
-            predict_iou_score += box_iou(
-                instances[bidx]["boxes"], instances[bidx]["boxes"]
-            ).mean()
-            # This should be high (i.e., high overlap of predictions and true boxes)
-            iou_score += box_iou(
-                true_boxes[batch.image_id == batch_value],
-                instances[bidx]["boxes"],
-            ).mean()
-            # This should be high (i.e., masks should be confident)
-            box_score += instances[bidx]["scores"].mean()
-        predict_iou_score /= batch.image_id.unique().size(0)
-        iou_score /= batch.image_id.unique().size(0)
-        box_score /= batch.image_id.unique().size(0)
-
-        total_iou_score = (predict_iou_score + (1.0 - iou_score)) * 0.5
-        box_score = 1.0 - box_score
-        # Minimize intersection-over-union and maximum score
-        total_score = (total_iou_score + box_score) * 0.5
-
-        metrics = {
-            "predict_iou_score": predict_iou_score,
-            "iou_score": iou_score,
-            "box_score": box_score,
-            "mean_score": total_score,
-        }
-
-        return metrics
-
-    def validation_step(self, batch: Data, batch_idx: int = None) -> dict:
-        """Executes one valuation step."""
-        eval_metrics = self._shared_eval_step(batch)
-
-        metrics = {
-            "val_loss": eval_metrics["mean_score"],
-            "val_piou": eval_metrics["predict_iou_score"],
-            "val_iou": eval_metrics["iou_score"],
-            "val_box": eval_metrics["box_score"],
-        }
-        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
-
-        return metrics
-
-    def test_step(self, batch: Data, batch_idx: int = None) -> dict:
-        """Executes one test step."""
-        eval_metrics = self._shared_eval_step(batch)
-
-        metrics = {
-            "test_loss": eval_metrics["mean_score"],
-            "test_piou": eval_metrics["predict_iou_score"],
-            "test_iou": eval_metrics["iou_score"],
-            "test_box": eval_metrics["box_score"],
-        }
-        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
-
-        return metrics
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            list(self.model.parameters()),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay,
-            eps=1e-4,
-        )
-        lr_scheduler = optim_lr_scheduler.ReduceLROnPlateau(
-            optimizer, factor=0.1, patience=5
-        )
-
-        return {
-            "optimizer": optimizer,
-            "scheduler": lr_scheduler,
-            "monitor": "val_loss",
-        }
 
 
 def scale_logits(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
@@ -488,8 +222,17 @@ class LightningModuleMixin(LightningModule):
     ) -> T.Dict[str, torch.Tensor]:
         """A prediction step for Lightning."""
         predictions = self.forward(batch, batch_idx)
+
         if self.temperature_lit_model is not None:
             predictions = self.temperature_lit_model(predictions, batch)
+
+        if self.train_maskrcnn:
+            # Apply a forward pass on Mask RCNN
+            mask_outputs, _ = self.mask_rcnn_forward(
+                batch=batch,
+                predictions=predictions,
+                mode='predict',
+            )
 
         return predictions
 
@@ -686,10 +429,113 @@ class LightningModuleMixin(LightningModule):
 
         return loss / sum(weights.values())
 
+    def mask_rcnn_forward(
+        self,
+        batch: Data,
+        predictions: T.Dict[str, torch.Tensor],
+        mode: str,
+    ) -> tuple:
+        """Mask-RCNN forward."""
+
+        assert mode in (
+            'eval',
+            'predict',
+            'train',
+        ), "Choose 'eval', 'predict', or 'train' mode."
+
+        if mode in (
+            'eval',
+            'train',
+        ):
+            # NOTE: Mask-RCNN does not return loss in eval() mode
+            self.mask_rcnn_model.train()
+        else:
+            self.mask_rcnn_model.eval()
+
+        if mode == 'eval':
+            # Turn off layers
+            for module in self.mask_rcnn_model.modules():
+                if isinstance(module, (nn.Dropout, nn.BatchNorm2d)):
+                    module.eval()
+
+        # Iterate over the batches and create box masks
+        mask_x = []
+        mask_y = []
+        for bidx in range(batch.x.shape[0]):
+            x, labels = pad_label_and_resize(
+                x=torch.cat(
+                    (
+                        predictions['dist'][bidx].detach(),
+                        predictions['edge'][bidx].detach(),
+                        einops.rearrange(
+                            predictions['mask'][bidx, 1].detach(),
+                            'h w -> 1 h w',
+                        ),
+                    ),
+                    dim=0,
+                ),
+                y=None if mode == 'predict' else batch.y[bidx],
+            )
+            if mode == 'predict':
+                mask_x.append(x[0])
+            else:
+                masks = mask_2d_to_3d(labels)
+                x, masks = create_mask_targets(x, masks)
+                mask_x.append(x[0])
+                mask_y.append(masks)
+
+        # Apply a forward pass on Mask RCNN
+        if mode in (
+            'eval',
+            'predict',
+        ):
+            with torch.no_grad():
+                mask_outputs = self.mask_rcnn_model(
+                    x=mask_x,
+                    y=None if mode == 'predict' else mask_y,
+                )
+        else:
+            mask_outputs = self.mask_rcnn_model(x=mask_x, y=mask_y)
+
+        mask_loss = None
+        if mode in (
+            'eval',
+            'train',
+        ):
+            mask_loss = sum([loss for loss in mask_outputs.values()]) / len(
+                mask_outputs
+            )
+        else:
+            pred_mask_scores = torch.cat(
+                [
+                    F.interpolate(
+                        batch_output['masks'][batch_output['scores'] > 0.5],
+                        size=batch.x.shape[-2:],
+                        mode='bilinear',
+                    )
+                    for batch_output in mask_outputs
+                ],
+                dim=0,
+            )
+
+        return mask_outputs, mask_loss
+
     def training_step(self, batch: Data, batch_idx: int = None):
         """Executes one training step and logs training step metrics."""
         predictions = self(batch)
+
         loss = self.calc_loss(batch, predictions)
+
+        if self.train_maskrcnn:
+            # Apply a forward pass on Mask RCNN
+            _, mask_loss = self.mask_rcnn_forward(
+                batch=batch,
+                predictions=predictions,
+                mode='train',
+            )
+
+            loss = loss + mask_loss
+
         self.log(
             "loss",
             loss,
@@ -704,6 +550,16 @@ class LightningModuleMixin(LightningModule):
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
         predictions = self(batch)
         loss = self.calc_loss(batch, predictions)
+
+        if self.train_maskrcnn:
+            # Apply a forward pass on Mask RCNN
+            _, mask_loss = self.mask_rcnn_forward(
+                batch=batch,
+                predictions=predictions,
+                mode='eval',
+            )
+
+            loss = loss + mask_loss
 
         dist_mae = self.dist_mae(
             # B x 1 x H x W
@@ -1164,6 +1020,7 @@ class CultionetLitModel(LightningModuleMixin):
         temperature_lit_model: T.Optional[GeoRefinement] = None,
         scale_pos_weight: bool = False,
         save_batch_val_metrics: bool = False,
+        train_maskrcnn: bool = True,
     ):
         """Lightning model."""
 
@@ -1187,6 +1044,7 @@ class CultionetLitModel(LightningModuleMixin):
         self.scale_pos_weight = scale_pos_weight
         self.save_batch_val_metrics = save_batch_val_metrics
         self.deep_supervision = deep_supervision
+        self.train_maskrcnn = train_maskrcnn
 
         self.sigmoid = torch.nn.Sigmoid()
         if edge_class is not None:
@@ -1204,6 +1062,18 @@ class CultionetLitModel(LightningModuleMixin):
                 "regression": TanimotoDistLoss(one_hot_targets=False),
             },
         }
+
+        if self.train_maskrcnn:
+            self.mask_rcnn_model = BFasterRCNN(
+                in_channels=3,
+                out_channels=hidden_channels * 2,
+                num_classes=2,  # non-cropland and cropland
+                # sizes=(16, 32, 64, 128, 256),
+                # aspect_ratios=(0.5, 1.0, 3.0,),
+                trainable_backbone_layers=1,
+                min_image_size=256,
+                max_image_size=256,
+            )
 
         self.model_attr = f"{model_name}_{model_type}"
         setattr(

@@ -8,9 +8,8 @@ import einops
 import joblib
 import numpy as np
 import torch
-from torchvision.transforms import InterpolationMode
-from torchvision.transforms import functional as TF
-from torchvision.transforms import v2
+from torchvision.transforms import InterpolationMode, v2
+from torchvision.transforms.v2 import functional as VF
 from tsaug import AddNoise, Drift, TimeWarp
 
 from ..data.data import Data
@@ -208,9 +207,9 @@ class Flip(AugmenterModule):
         x = einops.rearrange(cdata.x, '1 c t h w -> 1 t c h w')
 
         if self.direction == 'fliplr':
-            flip_transform = TF.hflip
+            flip_transform = VF.hflip
         elif self.direction == 'flipud':
-            flip_transform = TF.vflip
+            flip_transform = VF.vflip
         else:
             raise NameError("The direction is not supported.")
 

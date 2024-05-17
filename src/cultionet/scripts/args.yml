@@ -144,6 +144,7 @@ create:
     long: add-year
     help: The number of years to add to the year column to derive the end year
     kwargs:
+      default: 0
       type: '&int'
 
 create_predict:
@@ -274,43 +275,6 @@ train_predict:
     kwargs:
       default: 'ddp'
       choices: ['ddp', 'ddp_spawn', 'fsdp']
-
-maskrcnn:
-  resize_height:
-    short: ''
-    long: resize-height
-    help: The image resize height
-    kwargs:
-      default: 201
-      type: '&int'
-  resize_width:
-    short: ''
-    long: resize-width
-    help: The image resize width
-    kwargs:
-      default: 201
-      type: '&int'
-  min_image_size:
-    short: ''
-    long: min-image-size
-    help: The minimum image size
-    kwargs:
-      default: 100
-      type: '&int'
-  max_image_size:
-    short: ''
-    long: max-image-size
-    help: The maximum image size
-    kwargs:
-      default: 600
-      type: '&int'
-  trainable_backbone_layers:
-    short: ''
-    long: trainable-layers
-    help: The number of trainable backbone layers
-    kwargs:
-      default: 3
-      type: '&int'
 
 shared_partitions:
   spatial_partitions:
