@@ -1,25 +1,85 @@
 import typing as T
 
 import einops
+import geopandas as gpd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms.v2.functional as VF
+from affine import Affine
+from rasterio import features
 from scipy.ndimage.measurements import label as nd_label
+from shapely.geometry import shape
 from torchvision.models.detection import maskrcnn_resnet50_fpn_v2
 
 # from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
-from torchvision.ops import masks_to_boxes
+from torchvision.ops import masks_to_boxes, nms
 from torchvision.transforms import v2
 from torchvision.tv_tensors import BoundingBoxes, BoundingBoxFormat, Mask
+
+
+def reshape_and_resize(
+    x: torch.Tensor,
+    dimensions: str,
+    size: int,
+    mode: str,
+) -> torch.Tensor:
+    x = einops.rearrange(x, dimensions)
+    x = F.interpolate(x, size=size, mode=mode)
+
+    return x
+
+
+class ReshapeMaskData:
+    def __init__(
+        self, x: torch.Tensor, masks: T.Optional[torch.Tensor] = None
+    ):
+        self.x = x
+        self.masks = masks
+
+    @classmethod
+    def prepare(
+        cls,
+        x: torch.Tensor,
+        size: int = 256,
+        y: T.Optional[torch.Tensor] = None,
+    ) -> "ReshapeMaskData":
+        """Pads and resizes."""
+
+        x = reshape_and_resize(
+            x=F.pad(x, pad=(1, 1, 1, 1)),
+            dimensions='c h w -> 1 c h w',
+            size=size,
+            mode='bilinear',
+        )
+
+        if y is None:
+            return cls(x=x)
+
+        # Label segments
+        y = F.pad(y, pad=(1, 1, 1, 1)).detach().cpu().numpy()
+        labels = nd_label(y == 1)[0]
+        labels = torch.from_numpy(labels).to(
+            dtype=torch.uint8, device=y.device
+        )
+
+        labels = reshape_and_resize(
+            x=labels,
+            dimensions='h w -> 1 1 h w',
+            size=size,
+            mode='nearest',
+        )
+
+        return cls(x=x, masks=labels.long())
 
 
 def pad_label_and_resize(
     x: torch.Tensor, y: T.Optional[torch.Tensor] = None
 ) -> tuple:
+    """Pads and resizes."""
     x = F.pad(x, pad=(1, 1, 1, 1))
     x = einops.rearrange(x, 'c h w -> 1 c h w')
     x = F.interpolate(x, size=256, mode='bilinear')
@@ -40,6 +100,8 @@ def pad_label_and_resize(
 
 
 def mask_2d_to_3d(labels: torch.Tensor) -> torch.Tensor:
+    """Converts 2d masks to 3d."""
+
     unique_labels = labels.unique()
     if 0 in unique_labels:
         unique_labels = unique_labels[1:]
@@ -60,6 +122,8 @@ def mask_2d_to_3d(labels: torch.Tensor) -> torch.Tensor:
 
 
 def create_mask_targets(x: torch.Tensor, masks: torch.Tensor) -> tuple:
+    """Creates targets for Mask-RCNN."""
+
     if masks.max() == 0:
         bboxes = torch.tensor([[0, 0, 0, 0]])
     else:
@@ -84,6 +148,69 @@ def create_mask_targets(x: torch.Tensor, masks: torch.Tensor) -> tuple:
     x, targets = box_sanitizer(x, targets)
 
     return x, targets
+
+
+def nms_masks(
+    boxes: torch.Tensor,
+    scores: torch.Tensor,
+    masks: torch.Tensor,
+    iou_threshold: float,
+    size: tuple,
+) -> torch.Tensor:
+    """Get non maximum suppression scores."""
+
+    nms_idx = nms(
+        boxes=boxes,
+        scores=scores,
+        iou_threshold=iou_threshold,
+    )
+    # Get the scores and resize
+    pred_masks = F.interpolate(
+        masks[scores[nms_idx] > iou_threshold],
+        size=size,
+        mode='bilinear',
+    )
+
+    return pred_masks
+
+
+def mask_to_polygon(
+    masks: torch.Tensor,
+    image_left: float,
+    image_top: float,
+    row_off: int,
+    col_off: int,
+    resolution: float,
+    padding: int,
+) -> gpd.GeoDataFrame:
+    # Set the window transform
+    window_transform = Affine(
+        resolution,
+        0.0,
+        image_left + col_off,
+        0.0,
+        -resolution,
+        image_top - row_off,
+    )
+    geometry = []
+    for mask_layer in (
+        masks.squeeze(dim=1)[..., padding:-padding, padding:-padding]
+        .detach()
+        .cpu()
+        .numpy()
+    ):
+        # Get the polygon for every box mask
+        shapes = features.shapes(
+            (mask_layer > 0).astype('uint8'),
+            mask=(mask_layer > 0).astype('uint8'),
+            transform=window_transform,
+        )
+        layer_geometry = [shape(polygon) for polygon, value in shapes]
+        geometry.extend(layer_geometry)
+
+    df = gpd.GeoDataFrame(geometry=geometry)
+
+    return df
 
 
 class BFasterRCNN(nn.Module):

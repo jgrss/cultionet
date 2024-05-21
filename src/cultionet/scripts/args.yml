@@ -67,7 +67,7 @@ shared_create:
     long: res
     help: The cell resolution
     kwargs:
-      default: !!null
+      default: 10.0
       type: '&float'
   feature_pattern:
     short: ''
@@ -88,6 +88,13 @@ shared_create:
     help: Whether to create a dataset for instance segmentation
     kwargs:
       action: store_true
+  add_year:
+    short: ''
+    long: add-year
+    help: The number of years to add to the year column to derive the end year
+    kwargs:
+      default: 0
+      type: '&int'
 
 create:
   grid_size:
@@ -139,13 +146,6 @@ create:
     help: Whether the non-agricultural background is unknown
     kwargs:
       action: store_true
-  add_year:
-    short: ''
-    long: add-year
-    help: The number of years to add to the year column to derive the end year
-    kwargs:
-      default: 0
-      type: '&int'
 
 create_predict:
   window_size:

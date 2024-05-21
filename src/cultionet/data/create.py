@@ -148,13 +148,15 @@ def create_predict_dataset(
                 {
                     "distributed.worker.memory.terminate": False,
                     "distributed.comm.retry.count": 10,
-                    "distributed.comm.timeouts.connect": 30,
+                    "distributed.comm.timeouts.connect": 5,
+                    "distributed.scheduler.allowed-failures": 20,
                 }
             ):
                 with LocalCluster(
                     processes=True,
                     n_workers=num_workers,
-                    threads_per_worker=2,
+                    threads_per_worker=1,
+                    memory_target_fraction=0.97,
                     memory_limit="4GB",  # per worker limit
                 ) as cluster:
                     with Client(cluster) as client:

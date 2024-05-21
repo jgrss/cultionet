@@ -11,8 +11,6 @@ import torch.nn.functional as F
 import torchmetrics
 from lightning import LightningModule
 from torch.optim import lr_scheduler as optim_lr_scheduler
-from torchvision import transforms
-from torchvision.ops import box_iou
 
 from .. import nn as cunn
 from ..data.data import Data
@@ -27,9 +25,11 @@ from ..losses import TanimotoComplementLoss, TanimotoDistLoss
 from .cultionet import CultioNet, GeoRefinement
 from .maskcrnn import (
     BFasterRCNN,
+    ReshapeMaskData,
     create_mask_targets,
     mask_2d_to_3d,
-    pad_label_and_resize,
+    mask_to_polygon,
+    nms_masks,
 )
 
 warnings.filterwarnings("ignore")
@@ -228,11 +228,12 @@ class LightningModuleMixin(LightningModule):
 
         if self.train_maskrcnn:
             # Apply a forward pass on Mask RCNN
-            mask_outputs, _ = self.mask_rcnn_forward(
+            mask_data = self.mask_rcnn_forward(
                 batch=batch,
                 predictions=predictions,
                 mode='predict',
             )
+            predictions.update(pred_df=mask_data['pred_df'])
 
         return predictions
 
@@ -434,7 +435,7 @@ class LightningModuleMixin(LightningModule):
         batch: Data,
         predictions: T.Dict[str, torch.Tensor],
         mode: str,
-    ) -> tuple:
+    ) -> dict:
         """Mask-RCNN forward."""
 
         assert mode in (
@@ -462,7 +463,7 @@ class LightningModuleMixin(LightningModule):
         mask_x = []
         mask_y = []
         for bidx in range(batch.x.shape[0]):
-            x, labels = pad_label_and_resize(
+            mask_data = ReshapeMaskData.prepare(
                 x=torch.cat(
                     (
                         predictions['dist'][bidx].detach(),
@@ -476,13 +477,16 @@ class LightningModuleMixin(LightningModule):
                 ),
                 y=None if mode == 'predict' else batch.y[bidx],
             )
+
             if mode == 'predict':
-                mask_x.append(x[0])
+                mask_x.append(mask_data.x[0])
             else:
-                masks = mask_2d_to_3d(labels)
-                x, masks = create_mask_targets(x, masks)
-                mask_x.append(x[0])
-                mask_y.append(masks)
+                mask_data.masks = mask_2d_to_3d(mask_data.masks)
+                mask_data.x, mask_data.masks = create_mask_targets(
+                    mask_data.x, mask_data.masks
+                )
+                mask_x.append(mask_data.x[0])
+                mask_y.append(mask_data.masks)
 
         # Apply a forward pass on Mask RCNN
         if mode in (
@@ -498,6 +502,7 @@ class LightningModuleMixin(LightningModule):
             mask_outputs = self.mask_rcnn_model(x=mask_x, y=mask_y)
 
         mask_loss = None
+        pred_df = None
         if mode in (
             'eval',
             'train',
@@ -506,19 +511,35 @@ class LightningModuleMixin(LightningModule):
                 mask_outputs
             )
         else:
-            pred_mask_scores = torch.cat(
-                [
-                    F.interpolate(
-                        batch_output['masks'][batch_output['scores'] > 0.5],
-                        size=batch.x.shape[-2:],
-                        mode='bilinear',
-                    )
-                    for batch_output in mask_outputs
-                ],
-                dim=0,
-            )
+            pred_df = []
+            for bidx, batch_output in enumerate(mask_outputs):
+                batch_pred_masks = nms_masks(
+                    boxes=batch_output['boxes'],
+                    scores=batch_output['scores'],
+                    masks=batch_output['masks'],
+                    iou_threshold=0.7,
+                    size=batch.x.shape[-2:],
+                )
+                pred_frame = mask_to_polygon(
+                    batch_pred_masks,
+                    image_left=batch.left[0],
+                    image_top=batch.top[0],
+                    row_off=batch.window_row_off[bidx],
+                    col_off=batch.window_col_off[bidx],
+                    resolution=10.0,
+                    # FIXME: res is currently passing None
+                    # resolution=batch.res[0],
+                    padding=batch.padding[0],
+                )
+                pred_df.append(pred_frame)
 
-        return mask_outputs, mask_loss
+            pred_df = pd.concat(pred_df)
+
+        return {
+            'outputs': mask_outputs,
+            'loss': mask_loss,
+            'pred_df': pred_df,
+        }
 
     def training_step(self, batch: Data, batch_idx: int = None):
         """Executes one training step and logs training step metrics."""
@@ -528,13 +549,13 @@ class LightningModuleMixin(LightningModule):
 
         if self.train_maskrcnn:
             # Apply a forward pass on Mask RCNN
-            _, mask_loss = self.mask_rcnn_forward(
+            mask_data = self.mask_rcnn_forward(
                 batch=batch,
                 predictions=predictions,
                 mode='train',
             )
 
-            loss = loss + mask_loss
+            loss = loss + mask_data['loss']
 
         self.log(
             "loss",
@@ -553,13 +574,13 @@ class LightningModuleMixin(LightningModule):
 
         if self.train_maskrcnn:
             # Apply a forward pass on Mask RCNN
-            _, mask_loss = self.mask_rcnn_forward(
+            mask_data = self.mask_rcnn_forward(
                 batch=batch,
                 predictions=predictions,
                 mode='eval',
             )
 
-            loss = loss + mask_loss
+            loss = loss + mask_data['loss']
 
         dist_mae = self.dist_mae(
             # B x 1 x H x W
@@ -1020,7 +1041,7 @@ class CultionetLitModel(LightningModuleMixin):
         temperature_lit_model: T.Optional[GeoRefinement] = None,
         scale_pos_weight: bool = False,
         save_batch_val_metrics: bool = False,
-        train_maskrcnn: bool = True,
+        train_maskrcnn: bool = False,
     ):
         """Lightning model."""
 

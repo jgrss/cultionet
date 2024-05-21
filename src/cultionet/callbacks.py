@@ -1,3 +1,4 @@
+import hashlib
 import typing as T
 from pathlib import Path
 
@@ -61,6 +62,7 @@ class LightningGTiffWriter(BasePredictionWriter):
         self.out_path.parent.mkdir(parents=True, exist_ok=True)
 
         with gw.open(reference_image, resampling=resampling) as src:
+            self.crs = src.crs
             rechunk = False
             new_row_chunks = src.gw.check_chunksize(
                 src.gw.row_chunks, src.gw.nrows
@@ -82,7 +84,7 @@ class LightningGTiffWriter(BasePredictionWriter):
                 )
 
             profile = {
-                "crs": src.crs,
+                "crs": self.crs,
                 "transform": src.gw.transform,
                 "height": src.gw.nrows,
                 "width": src.gw.ncols,
@@ -154,6 +156,20 @@ class LightningGTiffWriter(BasePredictionWriter):
         batch_idx,
         dataloader_idx,
     ):
+        pred_df = prediction.get("pred_df")
+        if pred_df is not None:
+            if not pred_df.empty:
+                pred_df = pred_df.set_crs(crs=self.crs, allow_override=True)
+                # Create a hash to avoid long file names
+                batch_hash = hashlib.shake_256(
+                    '-'.join(batch.batch_id).encode()
+                )
+                pred_df.to_file(
+                    self.out_path.parent
+                    / f"{self.out_path.stem}_{batch_hash.hexdigest(16)}.gpkg",
+                    driver="GPKG",
+                )
+
         distance = prediction["dist"]
         edge = prediction["edge"]
         crop = prediction["mask"]
