@@ -428,10 +428,10 @@ train:
     help: Whether to use deep supervision
     kwargs:
       action: store_true
-  pool_first:
+  pool_by_max:
     short: ''
-    long: pool-first
-    help: Whether to apply max pooling before convolution
+    long: pool-by-max
+    help: Whether to apply max pooling before convolution (otherwise, use strided convolution)
     kwargs:
       action: store_true
   pool_attention:
@@ -446,10 +446,10 @@ train:
     help: Whether to repeat the input res-a kernel (otherwise, the first kernel is always 1x1)
     kwargs:
       action: store_true
-  std_conv:
+  batchnorm_first:
     short: ''
-    long: std-conv
-    help: Whether to apply convolutions with standarized weights
+    long: batchnorm-first
+    help: Whether to apply BN->Act->Conv, otherwise Conv->BN->Act
     kwargs:
       action: store_true
   loss_name:
