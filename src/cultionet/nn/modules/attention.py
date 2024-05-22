@@ -386,7 +386,6 @@ class ChannelAttention(nn.Module):
                 out_channels=out_channels // 2,
                 kernel_size=1,
                 padding=0,
-                bias=False,
             ),
             SetActivation(activation_type=activation_type),
             nn.Conv2d(
@@ -394,7 +393,6 @@ class ChannelAttention(nn.Module):
                 out_channels=out_channels,
                 kernel_size=1,
                 padding=0,
-                bias=False,
             ),
         )
 
@@ -416,7 +414,6 @@ class SpatialAttention(nn.Module):
             out_channels=1,
             kernel_size=3,
             padding=1,
-            bias=False,
         )
 
         self.sigmoid = nn.Sigmoid()
@@ -445,7 +442,8 @@ class SpatialChannelAttention(nn.Module):
         super(SpatialChannelAttention, self).__init__()
 
         self.channel_attention = ChannelAttention(
-            out_channels=out_channels, activation_type=activation_type
+            out_channels=out_channels,
+            activation_type=activation_type,
         )
         self.spatial_attention = SpatialAttention()
 
