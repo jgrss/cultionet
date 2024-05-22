@@ -87,11 +87,13 @@ class TowerUNetFinal(nn.Module):
         suffix: str = "",
     ) -> T.Dict[str, torch.Tensor]:
         if shape is not None:
-            x = self.up(
-                self.up_conv(x),
-                size=shape,
-                mode="bilinear",
-            )
+            x = self.up_conv(x)
+            if x.shape[-2:] != shape:
+                x = self.up(
+                    x,
+                    size=shape,
+                    mode="bilinear",
+                )
 
         dist_connect, edge_connect, mask_connect = torch.chunk(
             self.expand(x), 3, dim=1
@@ -108,7 +110,7 @@ class TowerUNetFinal(nn.Module):
         }
 
 
-class TowerUNetUpLayer(nn.Module):
+class TowerUNetUpBlock(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -121,9 +123,9 @@ class TowerUNetUpLayer(nn.Module):
         dilations: T.Sequence[int] = None,
         repeat_resa_kernel: bool = False,
         resample_up: bool = True,
-        std_conv: bool = False,
+        batchnorm_first: bool = False,
     ):
-        super(TowerUNetUpLayer, self).__init__()
+        super(TowerUNetUpBlock, self).__init__()
 
         self.up = UpSample()
 
@@ -144,7 +146,7 @@ class TowerUNetUpLayer(nn.Module):
                 num_blocks=num_blocks,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
-                std_conv=std_conv,
+                batchnorm_first=batchnorm_first,
             )
         else:
             self.conv = ResidualAConv(
@@ -155,16 +157,18 @@ class TowerUNetUpLayer(nn.Module):
                 repeat_kernel=repeat_resa_kernel,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
-                std_conv=std_conv,
+                batchnorm_first=batchnorm_first,
             )
 
     def forward(self, x: torch.Tensor, shape: tuple) -> torch.Tensor:
         if x.shape[-2:] != shape:
-            x = self.up(
-                self.up_conv(x),
-                size=shape,
-                mode="bilinear",
-            )
+            x = self.up_conv(x)
+            if x.shape[-2:] != shape:
+                x = self.up(
+                    x,
+                    size=shape,
+                    mode="bilinear",
+                )
 
         return self.conv(x)
 
@@ -184,7 +188,7 @@ class TowerUNetBlock(nn.Module):
         dilations: T.Sequence[int] = None,
         repeat_resa_kernel: bool = False,
         activation_type: str = "SiLU",
-        std_conv: bool = False,
+        batchnorm_first: bool = False,
     ):
         super(TowerUNetBlock, self).__init__()
 
@@ -226,7 +230,7 @@ class TowerUNetBlock(nn.Module):
                 num_blocks=num_blocks,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
-                std_conv=std_conv,
+                batchnorm_first=batchnorm_first,
             )
         else:
             self.conv = ResidualAConv(
@@ -238,7 +242,7 @@ class TowerUNetBlock(nn.Module):
                 repeat_kernel=repeat_resa_kernel,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
-                std_conv=std_conv,
+                batchnorm_first=batchnorm_first,
             )
 
     def forward(
@@ -249,16 +253,21 @@ class TowerUNetBlock(nn.Module):
         down: torch.Tensor,
         down_tower: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        backbone_down = self.up(
-            self.backbone_down_conv(backbone_down),
-            size=side.shape[-2:],
-            mode="bilinear",
-        )
-        down = self.up(
-            self.down_conv(down),
-            size=side.shape[-2:],
-            mode="bilinear",
-        )
+        backbone_down = self.backbone_down_conv(backbone_down)
+        if backbone_down.shape[-2:] != side.shape[-2:]:
+            backbone_down = self.up(
+                backbone_down,
+                size=side.shape[-2:],
+                mode="bilinear",
+            )
+
+        down = self.down_conv(down)
+        if down.shape[-2:] != side.shape[-2:]:
+            down = self.up(
+                down,
+                size=side.shape[-2:],
+                mode="bilinear",
+            )
 
         x = torch.cat(
             (backbone_side, backbone_down, side, down),
@@ -266,11 +275,14 @@ class TowerUNetBlock(nn.Module):
         )
 
         if down_tower is not None:
-            down_tower = self.up(
-                self.tower_conv(down_tower),
-                size=side.shape[-2:],
-                mode="bilinear",
-            )
+            down_tower = self.tower_conv(down_tower)
+            if down_tower.shape[-2:] != side.shape[-2:]:
+                down_tower = self.up(
+                    down_tower,
+                    size=side.shape[-2:],
+                    mode="bilinear",
+                )
+
             x = torch.cat((x, down_tower), dim=1)
 
         return self.conv(x)
