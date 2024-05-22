@@ -263,9 +263,10 @@ class CultioNet(nn.Module):
         attention_weights (str): The attention weight type.
         deep_supervision (bool): Whether to use deep supervision.
         pool_attention (bool): Whether to apply attention along the backbone pooling layers.
-        pool_first (bool): Whether to apply max pooling before convolution.
+        pool_by_max (bool): Whether to apply max pooling before residual block.
         repeat_resa_kernel (bool): Whether to repeat the input res-a kernel (otherwise, the first kernel is always 1x1).
-        std_conv (bool): Whether to apply convolutions with standarized weights.
+        batchnorm_first (bool): Whether to apply BatchNorm2d -> Activation -> Convolution2d. Otherwise,
+            apply Convolution2d -> BatchNorm2d -> Activation.
     """
 
     def __init__(
@@ -282,9 +283,9 @@ class CultioNet(nn.Module):
         attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
         deep_supervision: bool = False,
         pool_attention: bool = False,
-        pool_first: bool = False,
+        pool_by_max: bool = False,
         repeat_resa_kernel: bool = False,
-        std_conv: bool = False,
+        batchnorm_first: bool = False,
     ):
         super(CultioNet, self).__init__()
 
@@ -321,9 +322,9 @@ class CultioNet(nn.Module):
             "deep_supervision": deep_supervision,
             "pool_attention": pool_attention,
             "mask_activation": nn.Softmax(dim=1),
-            "pool_first": pool_first,
+            "pool_by_max": pool_by_max,
             "repeat_resa_kernel": repeat_resa_kernel,
-            "std_conv": std_conv,
+            "batchnorm_first": batchnorm_first,
         }
 
         assert model_type in (
@@ -339,7 +340,9 @@ class CultioNet(nn.Module):
         else:
             self.mask_model = TowerUNet(**unet3_kwargs)
 
-    def forward(self, batch: Data) -> T.Dict[str, torch.Tensor]:
+    def forward(
+        self, batch: Data, training: bool = True
+    ) -> T.Dict[str, torch.Tensor]:
         # Transformer attention encoder
         transformer_outputs = self.temporal_encoder(batch.x)
 
@@ -347,16 +350,14 @@ class CultioNet(nn.Module):
         out = self.mask_model(
             batch.x,
             temporal_encoding=transformer_outputs['encoded'],
+            training=training,
         )
-
-        classes_l2 = transformer_outputs['l2']
-        classes_l3 = transformer_outputs['l3']
 
         out.update(
             {
                 "crop_type": None,
-                "classes_l2": classes_l2,
-                "classes_l3": classes_l3,
+                "classes_l2": transformer_outputs['l2'],
+                "classes_l3": transformer_outputs['l3'],
             }
         )
 
