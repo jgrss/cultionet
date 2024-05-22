@@ -53,9 +53,9 @@ def get_train_dataset(
 
 def test_cultionet(class_info: dict):
     num_channels = 3
-    in_time = 12
-    height = 50
-    width = 50
+    in_time = 13
+    height = 100
+    width = 100
     batch_size = 2
     num_samples = 12
     val_frac = 0.2
@@ -67,10 +67,15 @@ def test_cultionet(class_info: dict):
         num_classes=2,
         model_type=ModelTypes.TOWERUNET,
         activation_type="SiLU",
-        dilations=[1, 2, 3],
+        dilations=[1, 2],
+        dropout=0.2,
         res_block_type=ResBlockTypes.RESA,
         attention_weights=AttentionTypes.SPATIAL_CHANNEL,
-        deep_supervision=True,
+        deep_supervision=False,
+        pool_attention=False,
+        pool_by_max=False,
+        repeat_resa_kernel=False,
+        batchnorm_first=True,
     )
 
     model = CultioNet(**kwargs)
@@ -98,7 +103,7 @@ def test_cultionet(class_info: dict):
 
             assert output["dist"].shape == (batch_size, 1, height, width)
             assert output["edge"].shape == (batch_size, 1, height, width)
-            assert output["crop"].shape == (batch_size, 2, height, width)
+            assert output["mask"].shape == (batch_size, 2, height, width)
             assert output["classes_l2"].shape == (batch_size, 2, height, width)
             assert output["classes_l3"].shape == (
                 batch_size,
