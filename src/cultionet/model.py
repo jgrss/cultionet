@@ -88,10 +88,10 @@ class CultionetParams:
     ckpt_name: str = attr.ib(converter=str, default="last")
     model_name: str = attr.ib(converter=str, default="cultionet")
     deep_supervision: bool = attr.ib(default=False)
-    pool_first: bool = attr.ib(default=False)
+    pool_by_max: bool = attr.ib(default=False)
     pool_attention: bool = attr.ib(default=False)
     repeat_resa_kernel: bool = attr.ib(default=False)
-    std_conv: bool = attr.ib(default=False)
+    batchnorm_first: bool = attr.ib(default=False)
     scale_pos_weight: bool = attr.ib(default=False)
     save_batch_val_metrics: bool = attr.ib(default=False)
     epochs: int = attr.ib(converter=int, default=100)
@@ -174,10 +174,10 @@ class CultionetParams:
             ckpt_name=self.ckpt_name,
             model_name=self.model_name,
             deep_supervision=self.deep_supervision,
-            pool_first=self.pool_first,
+            pool_by_max=self.pool_by_max,
             pool_attention=self.pool_attention,
             repeat_resa_kernel=self.repeat_resa_kernel,
-            std_conv=self.std_conv,
+            batchnorm_first=self.batchnorm_first,
             class_counts=self.class_counts,
             edge_class=self.edge_class,
             scale_pos_weight=self.scale_pos_weight,
