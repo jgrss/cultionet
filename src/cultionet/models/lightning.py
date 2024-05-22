@@ -170,7 +170,7 @@ class LightningModuleMixin(LightningModule):
         return self.forward(*args, **kwargs)
 
     def forward(
-        self, batch: Data, batch_idx: int = None
+        self, batch: Data, training: bool = True, batch_idx: int = None
     ) -> T.Dict[str, torch.Tensor]:
         """Performs a single model forward pass.
 
@@ -179,7 +179,7 @@ class LightningModuleMixin(LightningModule):
             edge: Probabilities of edge|non-edge, [0,1].
             crop: Logits of crop|non-crop.
         """
-        return self.cultionet_model(batch)
+        return self.cultionet_model(batch, training=training)
 
     @property
     def cultionet_model(self) -> CultioNet:
@@ -221,7 +221,7 @@ class LightningModuleMixin(LightningModule):
         self, batch: Data, batch_idx: int = None
     ) -> T.Dict[str, torch.Tensor]:
         """A prediction step for Lightning."""
-        predictions = self.forward(batch, batch_idx)
+        predictions = self.forward(batch, training=False, batch_idx=batch_idx)
 
         if self.temperature_lit_model is not None:
             predictions = self.temperature_lit_model(predictions, batch)
@@ -273,6 +273,13 @@ class LightningModuleMixin(LightningModule):
                 dtype=torch.uint8, device=batch.y.device
             )
             mask = einops.rearrange(mask, 'b h w -> b 1 h w')
+        else:
+            mask = einops.rearrange(
+                torch.ones_like(batch.y).to(
+                    dtype=torch.uint8, device=batch.y.device
+                ),
+                'b h w -> b 1 h w',
+            )
 
         return {
             "true_edge": true_edge,
@@ -307,6 +314,9 @@ class LightningModuleMixin(LightningModule):
             "dist_loss": 1.0,
             "edge_loss": 1.0,
             "crop_loss": 1.0,
+            "zoom_dist_loss": 1.0,
+            "zoom_edge_loss": 1.0,
+            "zoom_crop_loss": 1.0,
         }
 
         true_labels_dict = self.get_true_labels(
@@ -314,6 +324,11 @@ class LightningModuleMixin(LightningModule):
         )
 
         loss = 0.0
+
+        ##########################
+        # Temporal encoding losses
+        ##########################
+
         if predictions["classes_l2"] is not None:
             # Temporal encoding level 2 loss (non-crop=0; crop|edge=1)
             classes_l2_loss = self.classes_l2_loss(
@@ -332,7 +347,10 @@ class LightningModuleMixin(LightningModule):
             )
             loss = loss + classes_last_loss * weights["l3"]
 
-        # Edge losses
+        #########################
+        # Deep supervision losses
+        #########################
+
         if self.deep_supervision:
             dist_loss_deep_b = self.dist_loss_deep_b(
                 predictions["dist_b"],
@@ -383,6 +401,77 @@ class LightningModuleMixin(LightningModule):
                 + crop_loss_deep_c * weights["crop_loss_deep_c"]
             )
 
+        #############
+        # Zoom losses
+        #############
+
+        # Distance transform loss
+        zoom_dist_loss = self.zoom_dist_loss(
+            predictions["dist_zoom"],
+            F.interpolate(
+                einops.rearrange(batch.bdist, 'b h w -> b 1 h w'),
+                size=predictions["dist_zoom"].shape[-2:],
+                mode="bilinear",
+                align_corners=True,
+            ).squeeze(dim=1),
+            mask=F.interpolate(
+                true_labels_dict["mask"],
+                size=predictions["dist_zoom"].shape[-2:],
+                mode="nearest",
+            ),
+        )
+        loss = loss + zoom_dist_loss * weights["zoom_dist_loss"]
+
+        def resample_labels(
+            labels: torch.Tensor, match: torch.Tensor
+        ) -> torch.Tensor:
+            return (
+                F.interpolate(
+                    einops.rearrange(
+                        labels.to(dtype=torch.uint8),
+                        'b h w -> b 1 h w',
+                    ),
+                    size=match.shape[-2:],
+                    mode="nearest",
+                )
+                .squeeze(dim=1)
+                .long()
+            )
+
+        # Edge loss
+        zoom_edge_loss = self.zoom_edge_loss(
+            predictions["edge_zoom"],
+            resample_labels(
+                true_labels_dict["true_edge"],
+                predictions["edge_zoom"],
+            ),
+            mask=F.interpolate(
+                true_labels_dict["mask"],
+                size=predictions["edge_zoom"].shape[-2:],
+                mode="nearest",
+            ),
+        )
+        loss = loss + zoom_edge_loss * weights["zoom_edge_loss"]
+
+        # Crop mask loss
+        zoom_crop_loss = self.zoom_crop_loss(
+            predictions["mask_zoom"],
+            resample_labels(
+                true_labels_dict["true_crop"],
+                predictions["mask_zoom"],
+            ),
+            mask=F.interpolate(
+                true_labels_dict["mask"],
+                size=predictions["mask_zoom"].shape[-2:],
+                mode="nearest",
+            ),
+        )
+        loss = loss + zoom_crop_loss * weights["zoom_crop_loss"]
+
+        #############
+        # Main losses
+        #############
+
         # Distance transform loss
         dist_loss = self.dist_loss(
             predictions["dist"],
@@ -406,14 +495,6 @@ class LightningModuleMixin(LightningModule):
             mask=true_labels_dict["mask"],
         )
         loss = loss + crop_loss * weights["crop_loss"]
-
-        if predictions.get("foj_image_patches") is not None:
-            foj_loss = self.foj_loss(
-                patches=predictions.get("foj_patches"),
-                image_patches=predictions.get("foj_image_patches"),
-            )
-            weights["foj"] = 0.1
-            loss = loss + foj_loss
 
         # if predictions["crop_type"] is not None:
         #     # Upstream (deep) loss on crop-type
@@ -572,6 +653,13 @@ class LightningModuleMixin(LightningModule):
         predictions = self(batch)
         loss = self.calc_loss(batch, predictions)
 
+        # Get the true edge and crop labels
+        true_labels_dict = self.get_true_labels(
+            batch, crop_type=predictions["crop_type"]
+        )
+        # Valid sample = True; Invalid sample = False
+        labels_bool_mask = true_labels_dict["mask"].to(dtype=torch.bool)
+
         if self.train_maskrcnn:
             # Apply a forward pass on Mask RCNN
             mask_data = self.mask_rcnn_forward(
@@ -582,40 +670,39 @@ class LightningModuleMixin(LightningModule):
 
             loss = loss + mask_data['loss']
 
-        dist_mae = self.dist_mae(
-            # B x 1 x H x W
-            predictions["dist"].squeeze(dim=1),
-            # B x H x W
-            batch.bdist,
+        dist_score_args = (
+            (predictions["dist"] * labels_bool_mask).squeeze(dim=1),
+            batch.bdist * labels_bool_mask.squeeze(dim=1),
         )
-        dist_mse = self.dist_mse(
-            predictions["dist"].squeeze(dim=1),
-            batch.bdist,
-        )
+
+        dist_mae = self.dist_mae(*dist_score_args)
+        dist_mse = self.dist_mse(*dist_score_args)
+
         # Get the class labels
         edge_ypred = self.probas_to_labels(predictions["edge"])
         crop_ypred = self.probas_to_labels(predictions["mask"])
-        # Get the true edge and crop labels
-        true_labels_dict = self.get_true_labels(
-            batch, crop_type=predictions["crop_type"]
+
+        edge_score_args = (
+            edge_ypred * labels_bool_mask.squeeze(dim=1),
+            true_labels_dict["true_edge"] * labels_bool_mask.squeeze(dim=1),
+        )
+        crop_score_args = (
+            crop_ypred * labels_bool_mask.squeeze(dim=1),
+            true_labels_dict["true_crop"] * labels_bool_mask.squeeze(dim=1),
         )
 
         # F1-score
-        edge_score = self.edge_f1(edge_ypred, true_labels_dict["true_edge"])
-        crop_score = self.crop_f1(crop_ypred, true_labels_dict["true_crop"])
+        edge_score = self.edge_f1(*edge_score_args)
+        crop_score = self.crop_f1(*crop_score_args)
         # MCC
-        edge_mcc = self.edge_mcc(edge_ypred, true_labels_dict["true_edge"])
-        crop_mcc = self.crop_mcc(crop_ypred, true_labels_dict["true_crop"])
+        edge_mcc = self.edge_mcc(*edge_score_args)
+        crop_mcc = self.crop_mcc(*crop_score_args)
         # Dice
-        edge_dice = self.edge_dice(edge_ypred, true_labels_dict["true_edge"])
-        crop_dice = self.crop_dice(crop_ypred, true_labels_dict["true_crop"])
+        edge_dice = self.edge_dice(*edge_score_args)
+        crop_dice = self.crop_dice(*crop_score_args)
         # Jaccard/IoU
-        edge_jaccard = self.edge_jaccard(
-            edge_ypred, true_labels_dict["true_edge"]
-        )
-        crop_jaccard = self.crop_jaccard(
-            crop_ypred, true_labels_dict["true_crop"]
-        )
+        edge_jaccard = self.edge_jaccard(*edge_score_args)
+        crop_jaccard = self.crop_jaccard(*crop_score_args)
 
         total_score = (
             loss
@@ -766,8 +853,14 @@ class LightningModuleMixin(LightningModule):
         self.edge_loss = self.loss_dict[self.loss_name].get("classification")
         # Crop mask loss
         self.crop_loss = self.loss_dict[self.loss_name].get("classification")
-        # Field of junctions loss
-        # self.foj_loss = FieldOfJunctionsLoss()
+
+        self.zoom_dist_loss = self.loss_dict[self.loss_name].get("regression")
+        self.zoom_edge_loss = self.loss_dict[self.loss_name].get(
+            "classification"
+        )
+        self.zoom_crop_loss = self.loss_dict[self.loss_name].get(
+            "classification"
+        )
 
         if self.deep_supervision:
             self.dist_loss_deep_b = self.loss_dict[self.loss_name].get(
@@ -1033,9 +1126,9 @@ class CultionetLitModel(LightningModuleMixin):
         model_name: str = "cultionet",
         deep_supervision: bool = False,
         pool_attention: bool = False,
-        pool_first: bool = False,
+        pool_by_max: bool = False,
         repeat_resa_kernel: bool = False,
-        std_conv: bool = False,
+        batchnorm_first: bool = False,
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
         temperature_lit_model: T.Optional[GeoRefinement] = None,
@@ -1113,9 +1206,9 @@ class CultionetLitModel(LightningModuleMixin):
                 attention_weights=attention_weights,
                 deep_supervision=deep_supervision,
                 pool_attention=pool_attention,
-                pool_first=pool_first,
+                pool_by_max=pool_by_max,
                 repeat_resa_kernel=repeat_resa_kernel,
-                std_conv=std_conv,
+                batchnorm_first=batchnorm_first,
             ),
         )
 
