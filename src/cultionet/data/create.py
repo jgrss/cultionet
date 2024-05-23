@@ -2,6 +2,7 @@ import typing as T
 from pathlib import Path
 
 import dask
+import dask.array as da
 import einops
 import geopandas as gpd
 import geowombat as gw
@@ -137,7 +138,34 @@ def create_predict_dataset(
             # Chunk the array into the windows
             time_series_array = time_series.chunk(
                 {"time": -1, "band": -1, "y": window_size, "x": window_size}
-            ).data.map_overlap(
+            ).data
+
+            # Check if the array needs to be padded
+            # First, get the end chunk size of rows and columns
+            height_end_chunk = time_series_array.chunks[-2][-1]
+            width_end_chunk = time_series_array.chunks[-1][-1]
+
+            height_padding = 0
+            width_padding = 0
+            if padding > height_end_chunk:
+                height_padding = padding - height_end_chunk
+            if padding > width_end_chunk:
+                width_padding = padding - width_end_chunk
+
+            if (height_padding > 0) or (width_padding > 0):
+                # Pad the full array if the end chunk is smaller than the padding
+                time_series_array = da.pad(
+                    time_series_array,
+                    pad_width=(
+                        (0, 0),
+                        (0, 0),
+                        (0, height_padding),
+                        (0, width_padding),
+                    ),
+                ).rechunk({0: -1, 1: -1, 2: window_size, 3: window_size})
+
+            # Add the padding to each chunk
+            time_series_array = time_series_array.map_overlap(
                 lambda x: x,
                 depth={0: 0, 1: 0, 2: padding, 3: padding},
                 boundary=0,

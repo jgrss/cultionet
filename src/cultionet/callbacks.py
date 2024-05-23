@@ -83,7 +83,7 @@ class LightningGTiffWriter(BasePredictionWriter):
                     }
                 )
 
-            profile = {
+            self.profile = {
                 "crs": self.crs,
                 "transform": src.gw.transform,
                 "height": src.gw.nrows,
@@ -98,11 +98,12 @@ class LightningGTiffWriter(BasePredictionWriter):
                 "sharing": False,
                 "compress": compression,
             }
-        profile["tiled"] = tile_size_is_correct(
-            profile["blockxsize"], profile["blockysize"]
+
+        self.profile["tiled"] = tile_size_is_correct(
+            self.profile["blockxsize"], self.profile["blockysize"]
         )
 
-        with rio.open(self.out_path, mode="w", **profile):
+        with rio.open(self.out_path, mode="w", **self.profile):
             pass
 
         self.dst = rio.open(self.out_path, mode="r+")
@@ -133,16 +134,16 @@ class LightningGTiffWriter(BasePredictionWriter):
             "crop_type": crop_type_batch,
         }
 
-    def get_batch_slice(self, batch: Data, batch_index: int) -> tuple:
+    def get_batch_slice(self, padding: int, window: Window) -> tuple:
         return (
             slice(0, None),
             slice(
-                batch.padding[batch_index],
-                batch.padding[batch_index] + batch.window_height[batch_index],
+                padding,
+                padding + window.height,
             ),
             slice(
-                batch.padding[batch_index],
-                batch.padding[batch_index] + batch.window_width[batch_index],
+                padding,
+                padding + window.width,
             ),
         )
 
@@ -174,15 +175,28 @@ class LightningGTiffWriter(BasePredictionWriter):
         edge = prediction["edge"]
         crop = prediction["mask"]
         crop_type = prediction.get("crop_type")
+
         for batch_index in range(batch.x.shape[0]):
+            window_row_off = int(batch.window_row_off[batch_index])
+            window_height = int(batch.window_height[batch_index])
+            window_col_off = int(batch.window_col_off[batch_index])
+            window_width = int(batch.window_width[batch_index])
+            if window_row_off + window_height > self.profile["height"]:
+                window_height = self.profile["height"] - window_row_off
+            if window_col_off + window_width > self.profile["width"]:
+                window_width = self.profile["width"] - window_col_off
+
             write_window = Window(
-                row_off=int(batch.window_row_off[batch_index]),
-                col_off=int(batch.window_col_off[batch_index]),
-                height=int(batch.window_height[batch_index]),
-                width=int(batch.window_width[batch_index]),
+                row_off=window_row_off,
+                col_off=window_col_off,
+                height=window_height,
+                width=window_width,
             )
 
-            batch_slice = self.get_batch_slice(batch, batch_index=batch_index)
+            batch_slice = self.get_batch_slice(
+                padding=batch.padding[batch_index],
+                window=write_window,
+            )
 
             batch_dict = self.slice_predictions(
                 batch_slice=batch_slice,

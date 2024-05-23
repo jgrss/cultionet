@@ -3,6 +3,7 @@ import typing as T
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from cultionet.enums import AttentionTypes, ModelTypes, ResBlockTypes
 
@@ -28,8 +29,6 @@ class TowerUNetFinal(nn.Module):
         resample_factor: int = 0,
     ):
         super(TowerUNetFinal, self).__init__()
-
-        self.up = UpSample()
 
         if resample_factor > 1:
             self.up_conv = nn.ConvTranspose2d(
@@ -89,10 +88,11 @@ class TowerUNetFinal(nn.Module):
         if shape is not None:
             x = self.up_conv(x)
             if x.shape[-2:] != shape:
-                x = self.up(
+                x = F.interpolate(
                     x,
                     size=shape,
                     mode="bilinear",
+                    align_corners=True,
                 )
 
         dist_connect, edge_connect, mask_connect = torch.chunk(
@@ -110,7 +110,7 @@ class TowerUNetFinal(nn.Module):
         }
 
 
-class TowerUNetUpBlock(nn.Module):
+class UNetUpBlock(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -124,22 +124,24 @@ class TowerUNetUpBlock(nn.Module):
         repeat_resa_kernel: bool = False,
         resample_up: bool = True,
         batchnorm_first: bool = False,
+        pool_by_max: bool = False,
     ):
-        super(TowerUNetUpBlock, self).__init__()
+        super(UNetUpBlock, self).__init__()
 
-        self.up = UpSample()
+        self.pool_by_max = pool_by_max
 
         if resample_up:
-            self.up_conv = nn.ConvTranspose2d(
-                in_channels=in_channels,
-                out_channels=in_channels,
-                kernel_size=3,
-                stride=2,
-                padding=1,
-            )
+            if not self.pool_by_max:
+                self.up_conv = nn.ConvTranspose2d(
+                    in_channels=in_channels,
+                    out_channels=in_channels,
+                    kernel_size=3,
+                    stride=2,
+                    padding=1,
+                )
 
         if res_block_type == ResBlockTypes.RES:
-            self.conv = ResidualConv(
+            self.res_conv = ResidualConv(
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=kernel_size,
@@ -149,7 +151,7 @@ class TowerUNetUpBlock(nn.Module):
                 batchnorm_first=batchnorm_first,
             )
         else:
-            self.conv = ResidualAConv(
+            self.res_conv = ResidualAConv(
                 in_channels,
                 out_channels,
                 kernel_size=kernel_size,
@@ -162,15 +164,24 @@ class TowerUNetUpBlock(nn.Module):
 
     def forward(self, x: torch.Tensor, shape: tuple) -> torch.Tensor:
         if x.shape[-2:] != shape:
-            x = self.up_conv(x)
-            if x.shape[-2:] != shape:
-                x = self.up(
+            if self.pool_by_max:
+                x = F.interpolate(
                     x,
                     size=shape,
                     mode="bilinear",
+                    align_corners=True,
                 )
+            else:
+                x = self.up_conv(x)
+                if x.shape[-2:] != shape:
+                    x = F.interpolate(
+                        x,
+                        size=shape,
+                        mode="bilinear",
+                        align_corners=True,
+                    )
 
-        return self.conv(x)
+        return self.res_conv(x)
 
 
 class TowerUNetBlock(nn.Module):
@@ -192,20 +203,16 @@ class TowerUNetBlock(nn.Module):
     ):
         super(TowerUNetBlock, self).__init__()
 
-        self.up = UpSample()
-
-        in_channels = (
-            backbone_side_channels + backbone_down_channels + up_channels * 2
-        )
+        in_channels = backbone_side_channels * 2 + up_channels * 2
 
         self.backbone_down_conv = nn.ConvTranspose2d(
             in_channels=backbone_down_channels,
-            out_channels=backbone_down_channels,
+            out_channels=backbone_side_channels,
             kernel_size=3,
             stride=2,
             padding=1,
         )
-        self.down_conv = nn.ConvTranspose2d(
+        self.decode_down_conv = nn.ConvTranspose2d(
             in_channels=up_channels,
             out_channels=up_channels,
             kernel_size=3,
@@ -223,7 +230,7 @@ class TowerUNetBlock(nn.Module):
             in_channels += up_channels
 
         if res_block_type == ResBlockTypes.RES:
-            self.conv = ResidualConv(
+            self.res_conv = ResidualConv(
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=kernel_size,
@@ -233,7 +240,7 @@ class TowerUNetBlock(nn.Module):
                 batchnorm_first=batchnorm_first,
             )
         else:
-            self.conv = ResidualAConv(
+            self.res_conv = ResidualAConv(
                 in_channels,
                 out_channels,
                 kernel_size=kernel_size,
@@ -249,43 +256,50 @@ class TowerUNetBlock(nn.Module):
         self,
         backbone_side: torch.Tensor,
         backbone_down: torch.Tensor,
-        side: torch.Tensor,
-        down: torch.Tensor,
-        down_tower: T.Optional[torch.Tensor] = None,
+        decode_side: torch.Tensor,
+        decode_down: torch.Tensor,
+        tower_down: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         backbone_down = self.backbone_down_conv(backbone_down)
-        if backbone_down.shape[-2:] != side.shape[-2:]:
-            backbone_down = self.up(
+        if backbone_down.shape[-2:] != decode_side.shape[-2:]:
+            backbone_down = F.interpolate(
                 backbone_down,
-                size=side.shape[-2:],
+                size=decode_side.shape[-2:],
                 mode="bilinear",
+                align_corners=True,
             )
 
-        down = self.down_conv(down)
-        if down.shape[-2:] != side.shape[-2:]:
-            down = self.up(
-                down,
-                size=side.shape[-2:],
+        backbone_down = backbone_down + backbone_side
+
+        decode_down = self.decode_down_conv(decode_down)
+        if decode_down.shape[-2:] != decode_side.shape[-2:]:
+            decode_down = F.interpolate(
+                decode_down,
+                size=decode_side.shape[-2:],
                 mode="bilinear",
+                align_corners=True,
             )
+
+        decode_down = decode_down + decode_side
 
         x = torch.cat(
-            (backbone_side, backbone_down, side, down),
+            (backbone_side, backbone_down, decode_side, decode_down),
             dim=1,
         )
 
-        if down_tower is not None:
-            down_tower = self.tower_conv(down_tower)
-            if down_tower.shape[-2:] != side.shape[-2:]:
-                down_tower = self.up(
-                    down_tower,
-                    size=side.shape[-2:],
+        if tower_down is not None:
+            tower_down = self.tower_conv(tower_down)
+            if tower_down.shape[-2:] != decode_side.shape[-2:]:
+                tower_down = F.interpolate(
+                    tower_down,
+                    size=decode_side.shape[-2:],
                     mode="bilinear",
+                    align_corners=True,
                 )
 
-            x = torch.cat((x, down_tower), dim=1)
+            x = torch.cat((x, tower_down), dim=1)
 
-        return self.conv(x)
+        return self.res_conv(x)
 
 
 class ResELUNetPsiLayer(nn.Module):

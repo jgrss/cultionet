@@ -240,7 +240,7 @@ class TemporalTransformer(nn.Module):
         hidden_channels: int = 128,
         num_head: int = 8,
         in_time: int = 1,
-        d_model: int = 256,
+        d_model: int = 128,
         dropout: float = 0.1,
         num_layers: int = 1,
         time_scaler: int = 100,

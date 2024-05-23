@@ -19,6 +19,7 @@ class ConvBlock2d(nn.Module):
         kernel_size: int,
         padding: int = 0,
         dilation: int = 1,
+        stride: int = 1,
         add_activation: bool = True,
         activation_type: str = "SiLU",
         batchnorm_first: bool = False,
@@ -37,6 +38,7 @@ class ConvBlock2d(nn.Module):
                     kernel_size=kernel_size,
                     padding=padding,
                     dilation=dilation,
+                    stride=stride,
                 ),
             ]
         else:
@@ -47,6 +49,7 @@ class ConvBlock2d(nn.Module):
                     kernel_size=kernel_size,
                     padding=padding,
                     dilation=dilation,
+                    stride=stride,
                     bias=False,
                 ),
                 nn.BatchNorm2d(out_channels),
@@ -458,6 +461,11 @@ class ResidualAConv(nn.Module):
                     activation_type=activation_type,
                 )
 
+            self.norm = nn.Sequential(
+                nn.BatchNorm2d(out_channels),
+                SetActivation(activation_type=activation_type),
+            )
+
         self.res_modules = nn.ModuleList(
             [
                 ResConvBlock2d(
@@ -491,9 +499,15 @@ class ResidualAConv(nn.Module):
             out = out + seq(x)
 
         if self.attention_weights is not None:
-            attention = self.attention_conv(skip)
+            if self.attention_weights == AttentionTypes.FRACTAL:
+                attention = self.attention_conv(skip)
+            else:
+                attention = self.attention_conv(out)
+
             attention = 1.0 + self.gamma * attention
             out = out * attention
+
+            out = self.norm(out)
 
         return out
 
@@ -538,18 +552,35 @@ class PoolResidualConv(nn.Module):
         self.pool_first = pool_first
         self.pool_by_max = pool_by_max
         if self.pool_first:
-            if not self.pool_by_max:
-                self.downsample = nn.Conv2d(
+            if self.pool_by_max:
+                stride = 1
+            else:
+                stride = 2
+
+            if batchnorm_first:
+                self.pool_conv = nn.Conv2d(
                     in_channels=in_channels,
                     out_channels=out_channels,
-                    kernel_size=1,
-                    padding=0,
-                    stride=2,
+                    kernel_size=3,
+                    padding=1,
+                    stride=stride,
+                )
+            else:
+                self.pool_conv = ConvBlock2d(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    kernel_size=3,
+                    padding=1,
+                    stride=stride,
+                    add_activation=False,
+                    batchnorm_first=False,
                 )
 
+            in_channels = out_channels
+
         if res_block_type == ResBlockTypes.RES:
-            self.conv = ResidualConv(
-                out_channels,
+            self.res_conv = ResidualConv(
+                in_channels,
                 out_channels,
                 kernel_size=kernel_size,
                 attention_weights=attention_weights,
@@ -558,8 +589,8 @@ class PoolResidualConv(nn.Module):
                 batchnorm_first=batchnorm_first,
             )
         else:
-            self.conv = ResidualAConv(
-                out_channels,
+            self.res_conv = ResidualAConv(
+                in_channels,
                 out_channels,
                 kernel_size=kernel_size,
                 dilations=dilations,
@@ -578,15 +609,15 @@ class PoolResidualConv(nn.Module):
         height, width = x.shape[-2:]
 
         if self.pool_first:
-            if not self.pool_by_max:
-                x = self.downsample(x)
-            else:
+            if self.pool_by_max:
                 x = F.adaptive_max_pool2d(
                     x, output_size=(height // 2, width // 2)
                 )
 
+            x = self.pool_conv(x)
+
         # Residual convolution and downsample height/width
-        x = self.conv(x)
+        x = self.res_conv(x)
 
         # Optional dropout
         if self.dropout_layer is not None:

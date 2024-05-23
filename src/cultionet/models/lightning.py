@@ -221,19 +221,22 @@ class LightningModuleMixin(LightningModule):
         self, batch: Data, batch_idx: int = None
     ) -> T.Dict[str, torch.Tensor]:
         """A prediction step for Lightning."""
-        predictions = self.forward(batch, training=False, batch_idx=batch_idx)
-
-        if self.temperature_lit_model is not None:
-            predictions = self.temperature_lit_model(predictions, batch)
-
-        if self.train_maskrcnn:
-            # Apply a forward pass on Mask RCNN
-            mask_data = self.mask_rcnn_forward(
-                batch=batch,
-                predictions=predictions,
-                mode='predict',
+        with torch.no_grad():
+            predictions = self.forward(
+                batch, training=False, batch_idx=batch_idx
             )
-            predictions.update(pred_df=mask_data['pred_df'])
+
+            if self.temperature_lit_model is not None:
+                predictions = self.temperature_lit_model(predictions, batch)
+
+            if self.train_maskrcnn:
+                # Apply a forward pass on Mask RCNN
+                mask_data = self.mask_rcnn_forward(
+                    batch=batch,
+                    predictions=predictions,
+                    mode='predict',
+                )
+                predictions.update(pred_df=mask_data['pred_df'])
 
         return predictions
 
@@ -314,9 +317,6 @@ class LightningModuleMixin(LightningModule):
             "dist_loss": 1.0,
             "edge_loss": 1.0,
             "crop_loss": 1.0,
-            "zoom_dist_loss": 1.0,
-            "zoom_edge_loss": 1.0,
-            "zoom_crop_loss": 1.0,
         }
 
         true_labels_dict = self.get_true_labels(
@@ -400,73 +400,6 @@ class LightningModuleMixin(LightningModule):
                 + edge_loss_deep_c * weights["edge_loss_deep_c"]
                 + crop_loss_deep_c * weights["crop_loss_deep_c"]
             )
-
-        #############
-        # Zoom losses
-        #############
-
-        # Distance transform loss
-        zoom_dist_loss = self.zoom_dist_loss(
-            predictions["dist_zoom"],
-            F.interpolate(
-                einops.rearrange(batch.bdist, 'b h w -> b 1 h w'),
-                size=predictions["dist_zoom"].shape[-2:],
-                mode="bilinear",
-                align_corners=True,
-            ).squeeze(dim=1),
-            mask=F.interpolate(
-                true_labels_dict["mask"],
-                size=predictions["dist_zoom"].shape[-2:],
-                mode="nearest",
-            ),
-        )
-        loss = loss + zoom_dist_loss * weights["zoom_dist_loss"]
-
-        def resample_labels(
-            labels: torch.Tensor, match: torch.Tensor
-        ) -> torch.Tensor:
-            return (
-                F.interpolate(
-                    einops.rearrange(
-                        labels.to(dtype=torch.uint8),
-                        'b h w -> b 1 h w',
-                    ),
-                    size=match.shape[-2:],
-                    mode="nearest",
-                )
-                .squeeze(dim=1)
-                .long()
-            )
-
-        # Edge loss
-        zoom_edge_loss = self.zoom_edge_loss(
-            predictions["edge_zoom"],
-            resample_labels(
-                true_labels_dict["true_edge"],
-                predictions["edge_zoom"],
-            ),
-            mask=F.interpolate(
-                true_labels_dict["mask"],
-                size=predictions["edge_zoom"].shape[-2:],
-                mode="nearest",
-            ),
-        )
-        loss = loss + zoom_edge_loss * weights["zoom_edge_loss"]
-
-        # Crop mask loss
-        zoom_crop_loss = self.zoom_crop_loss(
-            predictions["mask_zoom"],
-            resample_labels(
-                true_labels_dict["true_crop"],
-                predictions["mask_zoom"],
-            ),
-            mask=F.interpolate(
-                true_labels_dict["mask"],
-                size=predictions["mask_zoom"].shape[-2:],
-                mode="nearest",
-            ),
-        )
-        loss = loss + zoom_crop_loss * weights["zoom_crop_loss"]
 
         #############
         # Main losses
@@ -853,14 +786,6 @@ class LightningModuleMixin(LightningModule):
         self.edge_loss = self.loss_dict[self.loss_name].get("classification")
         # Crop mask loss
         self.crop_loss = self.loss_dict[self.loss_name].get("classification")
-
-        self.zoom_dist_loss = self.loss_dict[self.loss_name].get("regression")
-        self.zoom_edge_loss = self.loss_dict[self.loss_name].get(
-            "classification"
-        )
-        self.zoom_crop_loss = self.loss_dict[self.loss_name].get(
-            "classification"
-        )
 
         if self.deep_supervision:
             self.dist_loss_deep_b = self.loss_dict[self.loss_name].get(

@@ -673,31 +673,6 @@ class ResUNet3Psi(nn.Module):
         return out
 
 
-class Zoom(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, stride: int):
-        super(Zoom, self).__init__()
-
-        self.upsample_conv = nn.ConvTranspose2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=3,
-            stride=stride,
-            output_padding=1,
-        )
-
-    def forward(self, x: torch.Tensor, size: torch.Size) -> torch.Tensor:
-        x_zoom = self.upsample_conv(x)
-        if x_zoom.shape[-2:] != size:
-            x_zoom = F.interpolate(
-                x_zoom,
-                size=size,
-                mode="bilinear",
-                align_corners=True,
-            )
-
-        return x_zoom
-
-
 class TowerUNet(nn.Module):
     """Tower U-Net."""
 
@@ -768,25 +743,25 @@ class TowerUNet(nn.Module):
         self.down_c = cunn.PoolResidualConv(
             channels[1],
             channels[2],
-            dilations=dilations,
+            dilations=[1, 2],
             repeat_resa_kernel=repeat_resa_kernel,
             **backbone_kwargs,
         )
         self.down_d = cunn.PoolResidualConv(
             channels[2],
             channels[3],
-            kernel_size=1,
-            num_blocks=1,
             dilations=[1],
+            repeat_resa_kernel=repeat_resa_kernel,
             **backbone_kwargs,
         )
 
-        # Over layer
-        self.over_du = nn.Conv2d(
+        self.over_d = cunn.ConvBlock2d(
             in_channels=channels[3],
             out_channels=up_channels,
             kernel_size=1,
             padding=0,
+            activation_type=activation_type,
+            batchnorm_first=batchnorm_first,
         )
 
         # Up layers
@@ -794,23 +769,26 @@ class TowerUNet(nn.Module):
             attention_weights=attention_weights,
             activation_type=activation_type,
             res_block_type=res_block_type,
-            dilations=dilations,
             repeat_resa_kernel=repeat_resa_kernel,
             batchnorm_first=batchnorm_first,
+            pool_by_max=pool_by_max,
         )
-        self.up_cu = cunn.TowerUNetUpBlock(
+        self.up_cu = cunn.UNetUpBlock(
             in_channels=up_channels,
             out_channels=up_channels,
+            dilations=[1, 2],
             **up_kwargs,
         )
-        self.up_bu = cunn.TowerUNetUpBlock(
+        self.up_bu = cunn.UNetUpBlock(
             in_channels=up_channels,
             out_channels=up_channels,
+            dilations=dilations,
             **up_kwargs,
         )
-        self.up_au = cunn.TowerUNetUpBlock(
+        self.up_au = cunn.UNetUpBlock(
             in_channels=up_channels,
             out_channels=up_channels,
+            dilations=dilations,
             **up_kwargs,
         )
 
@@ -841,31 +819,6 @@ class TowerUNet(nn.Module):
             backbone_down_channels=channels[1],
             tower=True,
             **tower_kwargs,
-        )
-
-        # Zoom up
-        self.embedding_zoom = Zoom(
-            in_channels=channels[0], out_channels=up_channels, stride=2
-        )
-        self.tower_c_zoom = Zoom(
-            in_channels=up_channels,
-            out_channels=up_channels,
-            stride=8,
-        )
-        self.tower_b_zoom = Zoom(
-            in_channels=up_channels,
-            out_channels=up_channels,
-            stride=4,
-        )
-        self.tower_a_zoom = Zoom(
-            in_channels=up_channels,
-            out_channels=up_channels,
-            stride=2,
-        )
-        self.final_zoom = cunn.TowerUNetFinal(
-            in_channels=up_channels,
-            num_classes=num_classes,
-            mask_activation=mask_activation,
         )
 
         self.final_a = cunn.TowerUNetFinal(
@@ -918,8 +871,7 @@ class TowerUNet(nn.Module):
         x_c = self.down_c(x_b)  # 1/4 of input
         x_d = self.down_d(x_c)  # 1/8 of input
 
-        # Over
-        x_du = self.over_du(x_d)
+        x_du = self.over_d(x_d)
 
         # Up
         x_cu = self.up_cu(x_du, shape=x_c.shape[-2:])  # 1/4 of input
@@ -930,61 +882,41 @@ class TowerUNet(nn.Module):
         x_tower_c = self.tower_c(
             backbone_side=x_c,
             backbone_down=x_d,
-            side=x_cu,
-            down=x_du,
+            decode_side=x_cu,
+            decode_down=x_du,
         )
         x_tower_b = self.tower_b(
             backbone_side=x_b,
             backbone_down=x_c,
-            side=x_bu,
-            down=x_cu,
-            down_tower=x_tower_c,
+            decode_side=x_bu,
+            decode_down=x_cu,
+            tower_down=x_tower_c,
         )
         x_tower_a = self.tower_a(
             backbone_side=x_a,
             backbone_down=x_b,
-            side=x_au,
-            down=x_bu,
-            down_tower=x_tower_b,
-        )
-
-        # TODO:: this is exploratory
-        # Zoom up
-        target_size = torch.Size(torch.tensor(x.shape[-2:]) * 2)
-        embeddings_zoom = self.embedding_zoom(embeddings, size=target_size)
-        x_tower_c_zoom = self.tower_c_zoom(x_tower_c, size=target_size)
-        x_tower_b_zoom = self.tower_b_zoom(x_tower_b, size=target_size)
-        x_tower_a_zoom = self.tower_a_zoom(x_tower_a, size=target_size)
-
-        # Embed all towers at x2 resolution
-        embeddings_zoom = (
-            embeddings_zoom + x_tower_c_zoom + x_tower_b_zoom + x_tower_a_zoom
+            decode_side=x_au,
+            decode_down=x_bu,
+            tower_down=x_tower_b,
         )
 
         # Final outputs
-        out = self.final_a(
-            x_tower_a
-            + F.adaptive_max_pool2d(embeddings_zoom, output_size=x.shape[-2:])
-        )
+        out = self.final_a(x_tower_a)
 
-        if training:
-            out_zoom = self.final_zoom(embeddings_zoom, suffix="_zoom")
-            out.update(out_zoom)
+        if training and self.deep_supervision:
+            out_c = self.final_c(
+                x_tower_c,
+                shape=x_tower_a.shape[-2:],
+                suffix="_c",
+            )
+            out_b = self.final_b(
+                x_tower_b,
+                shape=x_tower_a.shape[-2:],
+                suffix="_b",
+            )
 
-            if self.deep_supervision:
-                out_c = self.final_c(
-                    x_tower_c,
-                    shape=x_tower_a.shape[-2:],
-                    suffix="_c",
-                )
-                out_b = self.final_b(
-                    x_tower_b,
-                    shape=x_tower_a.shape[-2:],
-                    suffix="_b",
-                )
-
-                out.update(out_b)
-                out.update(out_c)
+            out.update(out_b)
+            out.update(out_c)
 
         return out
 

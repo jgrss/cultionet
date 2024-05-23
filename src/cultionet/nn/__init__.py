@@ -18,11 +18,11 @@ from .modules.unet_parts import (
     ResUNet3_3_1,
     TowerUNetBlock,
     TowerUNetFinal,
-    TowerUNetUpBlock,
     UNet3_0_4,
     UNet3_1_3,
     UNet3_2_2,
     UNet3_3_1,
+    UNetUpBlock,
 )
 
 __all__ = [
@@ -39,7 +39,7 @@ __all__ = [
     'Trend3d',
     'UpSample',
     'TowerUNetFinal',
-    'TowerUNetUpBlock',
+    'UNetUpBlock',
     'TowerUNetBlock',
     'ResELUNetPsiBlock',
     'ResUNet3_0_4',
