@@ -276,13 +276,13 @@ class LightningModuleMixin(LightningModule):
                 dtype=torch.uint8, device=batch.y.device
             )
             mask = einops.rearrange(mask, 'b h w -> b 1 h w')
-        else:
-            mask = einops.rearrange(
-                torch.ones_like(batch.y).to(
-                    dtype=torch.uint8, device=batch.y.device
-                ),
-                'b h w -> b 1 h w',
-            )
+        # else:
+        #     mask = einops.rearrange(
+        #         torch.ones_like(batch.y).to(
+        #             dtype=torch.uint8, device=batch.y.device
+        #         ),
+        #         'b h w -> b 1 h w',
+        #     )
 
         return {
             "true_edge": true_edge,
@@ -591,7 +591,7 @@ class LightningModuleMixin(LightningModule):
             batch, crop_type=predictions["crop_type"]
         )
         # Valid sample = True; Invalid sample = False
-        labels_bool_mask = true_labels_dict["mask"].to(dtype=torch.bool)
+        # labels_bool_mask = true_labels_dict["mask"].to(dtype=torch.bool)
 
         if self.train_maskrcnn:
             # Apply a forward pass on Mask RCNN
@@ -603,10 +603,11 @@ class LightningModuleMixin(LightningModule):
 
             loss = loss + mask_data['loss']
 
-        dist_score_args = (
-            (predictions["dist"] * labels_bool_mask).squeeze(dim=1),
-            batch.bdist * labels_bool_mask.squeeze(dim=1),
-        )
+        # dist_score_args = (
+        #     (predictions["dist"] * labels_bool_mask).squeeze(dim=1),
+        #     batch.bdist * labels_bool_mask.squeeze(dim=1),
+        # )
+        dist_score_args = (predictions["dist"].squeeze(dim=1), batch.bdist)
 
         dist_mae = self.dist_mae(*dist_score_args)
         dist_mse = self.dist_mse(*dist_score_args)
@@ -615,14 +616,16 @@ class LightningModuleMixin(LightningModule):
         edge_ypred = self.probas_to_labels(predictions["edge"])
         crop_ypred = self.probas_to_labels(predictions["mask"])
 
-        edge_score_args = (
-            edge_ypred * labels_bool_mask.squeeze(dim=1),
-            true_labels_dict["true_edge"] * labels_bool_mask.squeeze(dim=1),
-        )
-        crop_score_args = (
-            crop_ypred * labels_bool_mask.squeeze(dim=1),
-            true_labels_dict["true_crop"] * labels_bool_mask.squeeze(dim=1),
-        )
+        # edge_score_args = (
+        #     edge_ypred * labels_bool_mask.squeeze(dim=1),
+        #     true_labels_dict["true_edge"] * labels_bool_mask.squeeze(dim=1),
+        # )
+        # crop_score_args = (
+        #     crop_ypred * labels_bool_mask.squeeze(dim=1),
+        #     true_labels_dict["true_crop"] * labels_bool_mask.squeeze(dim=1),
+        # )
+        edge_score_args = (edge_ypred, true_labels_dict["true_edge"])
+        crop_score_args = (crop_ypred, true_labels_dict["true_crop"])
 
         # F1-score
         edge_score = self.edge_f1(*edge_score_args)

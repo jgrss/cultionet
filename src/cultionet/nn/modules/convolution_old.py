@@ -3,38 +3,31 @@ import typing as T
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops.layers.torch import Rearrange
 
 from cultionet.enums import AttentionTypes, ResBlockTypes
 
 from .activations import SetActivation
 from .attention import FractalAttention, SpatialChannelAttention
-from .reshape import UpSample
-from .utils import check_upsample
+from .reshape import Squeeze, UpSample
 
 
-class ConvTranspose2d(nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: int = 3,
-        stride: int = 2,
-        padding: int = 1,
-    ):
-        super(ConvTranspose2d, self).__init__()
+class StdConv2d(nn.Conv2d):
+    """Convolution with standarized weights."""
 
-        self.up_conv = nn.ConvTranspose2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-        )
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        w = self.weight
+        v, m = torch.var_mean(w, dim=[1, 2, 3], keepdim=True, unbiased=False)
+        w = (w - m) / torch.sqrt(v + 1e-5)
 
-    def forward(self, x: torch.Tensor, size: torch.Size) -> torch.Tensor:
-        return check_upsample(
-            self.up_conv(x),
-            size=size,
+        return F.conv2d(
+            x,
+            w,
+            self.bias,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.groups,
         )
 
 
@@ -46,52 +39,173 @@ class ConvBlock2d(nn.Module):
         kernel_size: int,
         padding: int = 0,
         dilation: int = 1,
-        stride: int = 1,
         add_activation: bool = True,
         activation_type: str = "SiLU",
-        batchnorm_first: bool = False,
+        std_conv: bool = False,
     ):
         super(ConvBlock2d, self).__init__()
 
-        layers = []
+        conv = StdConv2d if std_conv else nn.Conv2d
 
-        if batchnorm_first:
+        layers = [
+            conv(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=padding,
+                dilation=dilation,
+                bias=False,
+            ),
+            nn.BatchNorm2d(out_channels),
+        ]
+        if add_activation:
             layers += [
-                nn.BatchNorm2d(in_channels),
-                SetActivation(activation_type, channels=in_channels, dims=2),
-                nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    kernel_size=kernel_size,
-                    padding=padding,
-                    dilation=dilation,
-                    stride=stride,
-                ),
+                SetActivation(activation_type, channels=out_channels, dims=2)
             ]
-        else:
-            layers += [
-                nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    kernel_size=kernel_size,
-                    padding=padding,
-                    dilation=dilation,
-                    stride=stride,
-                    bias=False,
-                ),
-                nn.BatchNorm2d(out_channels),
-            ]
-            if add_activation:
-                layers += [
-                    SetActivation(
-                        activation_type, channels=out_channels, dims=2
-                    )
-                ]
 
         self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
+
+
+class ConvBlock3d(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        in_time: int = 0,
+        padding: int = 0,
+        dilation: int = 1,
+        add_activation: bool = True,
+        squeeze: bool = False,
+        activation_type: str = "SiLU",
+    ):
+        super(ConvBlock3d, self).__init__()
+
+        layers = [
+            nn.Conv3d(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=padding,
+                dilation=dilation,
+                bias=False,
+            )
+        ]
+        if squeeze:
+            layers += [Squeeze(), nn.BatchNorm2d(in_time)]
+            dims = 2
+        else:
+            layers += [nn.BatchNorm3d(out_channels)]
+            dims = 3
+        if add_activation:
+            layers += [
+                SetActivation(
+                    activation_type, channels=out_channels, dims=dims
+                )
+            ]
+
+        self.seq = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
+
+
+class ResSpatioTemporalConv3d(nn.Module):
+    """A spatio-temporal convolution layer."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        activation_type: str = "SiLU",
+    ):
+        super(ResSpatioTemporalConv3d, self).__init__()
+
+        layers = [
+            # Conv -> Batchnorm -> Activation
+            ConvBlock3d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1,
+                activation_type=activation_type,
+            ),
+            # Conv -> Batchnorm
+            ConvBlock3d(
+                in_channels=out_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=2,
+                dilation=2,
+                add_activation=False,
+            ),
+        ]
+
+        self.seq = nn.Sequential(*layers)
+        # Conv -> Batchnorm
+        self.skip = ConvBlock3d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=1,
+            padding=0,
+            add_activation=False,
+        )
+        self.final_act = SetActivation(activation_type=activation_type)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.seq(x) + self.skip(x)
+
+        return self.final_act(x)
+
+
+class SpatioTemporalConv3d(nn.Module):
+    """A spatio-temporal convolution layer."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        num_layers: int = 1,
+        activation_type: str = "SiLU",
+    ):
+        super(SpatioTemporalConv3d, self).__init__()
+
+        layers = [
+            # Conv -> Batchnorm -> Activation
+            ConvBlock3d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1,
+                activation_type=activation_type,
+            ),
+        ]
+        if num_layers > 1:
+            for _ in range(1, num_layers):
+                # Conv -> Batchnorm -> Activation
+                layers += [
+                    ConvBlock3d(
+                        in_channels=out_channels,
+                        out_channels=out_channels,
+                        kernel_size=3,
+                        padding=2,
+                        dilation=2,
+                        activation_type=activation_type,
+                    )
+                ]
+
+        self.skip = nn.Sequential(
+            Rearrange('b c t h w -> b t h w c'),
+            nn.Linear(in_channels, out_channels),
+            Rearrange('b t h w c -> b c t h w'),
+        )
+        self.seq = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x) + self.skip(x)
 
 
 class DoubleConv(nn.Module):
@@ -141,6 +255,34 @@ class DoubleConv(nn.Module):
         ]
 
         self.seq = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
+
+
+class ResBlock2d(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        padding: int = 0,
+        dilation: int = 1,
+        activation_type: str = "SiLU",
+    ):
+        super(ResBlock2d, self).__init__()
+
+        self.seq = nn.Sequential(
+            nn.BatchNorm2d(in_channels),
+            SetActivation(activation_type, channels=in_channels, dims=2),
+            nn.Conv2d(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=padding,
+                dilation=dilation,
+            ),
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)
@@ -220,6 +362,28 @@ class AtrousPyramidPooling(nn.Module):
         return out
 
 
+class PoolConvSingle(nn.Module):
+    """Max pooling followed by convolution."""
+
+    def __init__(
+        self, in_channels: int, out_channels: int, pool_size: int = 2
+    ):
+        super(PoolConvSingle, self).__init__()
+
+        self.seq = nn.Sequential(
+            nn.MaxPool2d(pool_size),
+            ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1,
+            ),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
+
+
 class PoolConv(nn.Module):
     """Max pooling with (optional) dropout."""
 
@@ -253,8 +417,57 @@ class PoolConv(nn.Module):
         return self.seq(x)
 
 
-class ResConvBlock2d(nn.Module):
-    """Convolution layer designed for a residual activation."""
+class ResidualConvInit(nn.Module):
+    """A residual convolution layer."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        activation_type: str = "SiLU",
+    ):
+        super(ResidualConvInit, self).__init__()
+
+        self.seq = nn.Sequential(
+            # Conv -> Batchnorm -> Activation
+            ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1,
+                activation_type=activation_type,
+            ),
+            # Conv -> Batchnorm
+            ConvBlock2d(
+                in_channels=out_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=2,
+                dilation=2,
+                add_activation=False,
+            ),
+        )
+        # Conv -> Batchnorm
+        self.skip = ConvBlock2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=1,
+            padding=0,
+            add_activation=False,
+        )
+        self.final_act = SetActivation(activation_type=activation_type)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.seq(x) + self.skip(x)
+
+        return self.final_act(x)
+
+
+class ResConvLayer(nn.Module):
+    """Convolution layer designed for a residual activation.
+
+    if num_blocks [Conv2d-BatchNorm-Activation -> Conv2dAtrous-BatchNorm]
+    """
 
     def __init__(
         self,
@@ -265,9 +478,9 @@ class ResConvBlock2d(nn.Module):
         activation_type: str = "SiLU",
         num_blocks: int = 1,
         repeat_kernel: bool = False,
-        batchnorm_first: bool = False,
+        std_conv: bool = False,
     ):
-        super(ResConvBlock2d, self).__init__()
+        super(ResConvLayer, self).__init__()
 
         assert num_blocks > 0, "There must be at least one block."
 
@@ -289,7 +502,7 @@ class ResConvBlock2d(nn.Module):
                 dilation=dilations[0],
                 activation_type=activation_type,
                 add_activation=True,
-                batchnorm_first=batchnorm_first,
+                std_conv=std_conv,
             )
         ]
 
@@ -304,21 +517,15 @@ class ResConvBlock2d(nn.Module):
                     dilation=dilations[blk_idx],
                     activation_type=activation_type,
                     add_activation=True,
-                    batchnorm_first=batchnorm_first,
+                    std_conv=std_conv,
                 )
                 for blk_idx in range(1, num_blocks)
             ]
 
-        self.block = nn.ModuleList(layers)
+        self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        for layer in self.block:
-            # residual = x
-            x = layer(x)
-            # if x.shape[-3:] == residual.shape[-3:]:
-            #     x = residual + x
-
-        return x
+        return self.seq(x)
 
 
 class ResidualConv(nn.Module):
@@ -332,7 +539,7 @@ class ResidualConv(nn.Module):
         num_blocks: int = 2,
         attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
-        batchnorm_first: bool = False,
+        std_conv: bool = False,
     ):
         super(ResidualConv, self).__init__()
 
@@ -355,22 +562,26 @@ class ResidualConv(nn.Module):
                     out_channels=out_channels, activation_type=activation_type
                 )
 
-        self.seq = ResConvBlock2d(
+        # Ends with Conv2d -> BatchNorm2d
+        self.seq = ResConvLayer(
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=kernel_size,
             num_blocks=num_blocks,
             activation_type=activation_type,
-            batchnorm_first=batchnorm_first,
+            std_conv=std_conv,
         )
 
         self.skip = None
         if in_channels != out_channels:
-            self.skip = nn.Conv2d(
+            # Conv2d -> BatchNorm2d
+            self.skip = ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=1,
                 padding=0,
+                add_activation=False,
+                std_conv=std_conv,
             )
 
         if self.attention_weights is not None:
@@ -467,13 +678,11 @@ class ResidualAConv(nn.Module):
         repeat_kernel: bool = False,
         attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
-        batchnorm_first: bool = False,
-        concat_resid: bool = False,
+        std_conv: bool = False,
     ):
         super(ResidualAConv, self).__init__()
 
         self.attention_weights = attention_weights
-        self.concat_resid = concat_resid
 
         if self.attention_weights is not None:
             assert self.attention_weights in [
@@ -481,91 +690,79 @@ class ResidualAConv(nn.Module):
                 AttentionTypes.SPATIAL_CHANNEL,
             ], "The attention method is not supported."
 
+            self.gamma = nn.Parameter(torch.ones(1))
+
             if self.attention_weights == AttentionTypes.FRACTAL:
                 self.attention_conv = FractalAttention(
                     in_channels=in_channels, out_channels=out_channels
                 )
             elif self.attention_weights == AttentionTypes.SPATIAL_CHANNEL:
                 self.attention_conv = SpatialChannelAttention(
-                    out_channels=out_channels,
-                    activation_type=activation_type,
+                    out_channels=out_channels, activation_type=activation_type
                 )
-
-            # self.gamma = nn.Parameter(torch.ones(1))
-            # self.act = SetActivation(activation_type=activation_type)
 
         self.res_modules = nn.ModuleList(
             [
-                ResConvBlock2d(
+                # Conv2dAtrous -> Batchnorm
+                ResConvLayer(
                     in_channels=in_channels,
-                    out_channels=in_channels
-                    if self.concat_resid
-                    else out_channels,
+                    out_channels=out_channels,
                     kernel_size=kernel_size,
                     dilations=[dilation] * num_blocks,
                     activation_type=activation_type,
                     num_blocks=num_blocks,
                     repeat_kernel=repeat_kernel,
-                    batchnorm_first=batchnorm_first,
+                    std_conv=std_conv,
                 )
                 for dilation in dilations
             ]
         )
 
         self.skip = None
-        self.resid_connect = None
-        if self.concat_resid:
-            if in_channels != out_channels:
-                # Follows the FishNet block
-                self.resid_connect = ConvBlock2d(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=kernel_size,
-                    padding=kernel_size // 2,
-                    activation_type=activation_type,
-                    batchnorm_first=batchnorm_first,
-                )
-        else:
-            if in_channels != out_channels:
-                self.skip = ConvBlock2d(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=1,
-                    padding=0,
-                    add_activation=False,
-                )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = x if self.skip is None else self.skip(x)
-
-        for layer in self.res_modules:
-            out = out + layer(x)
-
-        if self.resid_connect is not None:
-            out = self.resid_connect(out)
+        if in_channels != out_channels:
+            # Conv2d -> BatchNorm2d
+            self.skip = ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding=0,
+                add_activation=False,
+                std_conv=std_conv,
+            )
 
         if self.attention_weights is not None:
-            attention = self.attention_conv(out)
-            # attention = 1.0 + self.gamma * attention
+            self.final_act = SetActivation(activation_type=activation_type)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.skip is not None:
+            # Align channels
+            out = self.skip(x)
+        else:
+            out = x
+
+        for seq in self.res_modules:
+            out = out + seq(x)
+
+        if self.attention_weights is not None:
+            # Get the attention weights
+            if self.attention_weights == AttentionTypes.SPATIAL_CHANNEL:
+                # Get weights from the residual
+                attention = self.attention_conv(out)
+            elif self.attention_weights == AttentionTypes.FRACTAL:
+                # Get weights from the input
+                attention = self.attention_conv(x)
+
+            # 1 + γA
+            attention = 1.0 + self.gamma * attention
             out = out * attention
-            # out = self.act(out)
+
+            out = self.final_act(out)
 
         return out
 
 
 class PoolResidualConv(nn.Module):
-    """Residual convolution with down-sampling.
-
-    Default:
-        1) Convolution block
-        2) Down-sampling by adaptive max pooling
-
-    If pool_first=True:
-        1) Down-sampling by adaptive max pooling
-        2) Convolution block
-        If dropout > 0
-        3) Dropout
-    """
+    """Max pooling followed by a residual convolution."""
 
     def __init__(
         self,
@@ -579,10 +776,8 @@ class PoolResidualConv(nn.Module):
         res_block_type: str = ResBlockTypes.RESA,
         dilations: T.Sequence[int] = None,
         repeat_resa_kernel: bool = False,
-        pool_first: bool = True,
-        pool_by_max: bool = False,
-        batchnorm_first: bool = False,
-        concat_resid: bool = False,
+        pool_first: bool = False,
+        std_conv: bool = False,
     ):
         super(PoolResidualConv, self).__init__()
 
@@ -592,42 +787,19 @@ class PoolResidualConv(nn.Module):
         )
 
         self.pool_first = pool_first
-        self.pool_by_max = pool_by_max
-        if self.pool_first:
-            if not self.pool_by_max:
-                if batchnorm_first:
-                    self.pool_conv = nn.Conv2d(
-                        in_channels=in_channels,
-                        out_channels=out_channels,
-                        kernel_size=3,
-                        padding=1,
-                        stride=2,
-                    )
-                else:
-                    self.pool_conv = ConvBlock2d(
-                        in_channels=in_channels,
-                        out_channels=out_channels,
-                        kernel_size=3,
-                        padding=1,
-                        stride=2,
-                        add_activation=False,
-                        batchnorm_first=False,
-                    )
-
-                in_channels = out_channels
 
         if res_block_type == ResBlockTypes.RES:
-            self.res_conv = ResidualConv(
+            self.conv = ResidualConv(
                 in_channels,
                 out_channels,
                 kernel_size=kernel_size,
                 attention_weights=attention_weights,
                 num_blocks=num_blocks,
                 activation_type=activation_type,
-                batchnorm_first=batchnorm_first,
+                std_conv=std_conv,
             )
         else:
-            self.res_conv = ResidualAConv(
+            self.conv = ResidualAConv(
                 in_channels,
                 out_channels,
                 kernel_size=kernel_size,
@@ -636,8 +808,7 @@ class PoolResidualConv(nn.Module):
                 repeat_kernel=repeat_resa_kernel,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
-                batchnorm_first=batchnorm_first,
-                concat_resid=concat_resid,
+                std_conv=std_conv,
             )
 
         self.dropout_layer = None
@@ -648,20 +819,37 @@ class PoolResidualConv(nn.Module):
         height, width = x.shape[-2:]
 
         if self.pool_first:
-            if self.pool_by_max:
-                x = F.adaptive_max_pool2d(
-                    x, output_size=(height // 2, width // 2)
-                )
-            else:
-                x = self.pool_conv(x)
+            # Max pooling
+            x = F.adaptive_max_pool2d(x, output_size=(height // 2, width // 2))
 
-        # Residual convolution
-        x = self.res_conv(x)
+        # Apply convolutions
+        x = self.conv(x)
 
+        if not self.pool_first:
+            x = F.adaptive_max_pool2d(x, output_size=(height // 2, width // 2))
+
+        # Optional dropout
         if self.dropout_layer is not None:
             x = self.dropout_layer(x)
 
         return x
+
+
+class SingleConv3d(nn.Module):
+    """A single convolution layer."""
+
+    def __init__(self, in_channels: int, out_channels: int):
+        super(SingleConv3d, self).__init__()
+
+        self.seq = ConvBlock3d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=3,
+            padding=1,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
 
 
 class SingleConv(nn.Module):
@@ -682,6 +870,44 @@ class SingleConv(nn.Module):
             padding=1,
             activation_type=activation_type,
         )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
+
+
+class TemporalConv(nn.Module):
+    """A temporal convolution layer."""
+
+    def __init__(
+        self, in_channels: int, hidden_channels: int, out_channels: int
+    ):
+        super(TemporalConv, self).__init__()
+
+        layers = [
+            ConvBlock3d(
+                in_channels=in_channels,
+                in_time=0,
+                out_channels=hidden_channels,
+                kernel_size=3,
+                padding=1,
+            ),
+            ConvBlock3d(
+                in_channels=hidden_channels,
+                in_time=0,
+                out_channels=hidden_channels,
+                kernel_size=3,
+                padding=2,
+                dilation=2,
+            ),
+            ConvBlock3d(
+                in_channels=hidden_channels,
+                in_time=0,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding=0,
+            ),
+        ]
+        self.seq = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq(x)

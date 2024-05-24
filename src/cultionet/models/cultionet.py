@@ -301,7 +301,7 @@ class CultioNet(nn.Module):
             in_time=self.in_time,
             dropout=0.2,
             num_layers=2,
-            d_model=self.hidden_channels * 4,  # the unet is 4 deep
+            d_model=128,
             time_scaler=100,
             num_classes_l2=self.num_classes,
             num_classes_last=self.num_classes + 1,

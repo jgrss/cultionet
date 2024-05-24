@@ -79,7 +79,7 @@ class PreUnet3Psi(nn.Module):
         self,
         in_channels: int,
         in_time: int,
-        out_channels: int,
+        channels: T.Sequence[int],
         activation_type: str,
         trend_kernel_size: int = 5,
     ):
@@ -87,14 +87,14 @@ class PreUnet3Psi(nn.Module):
 
         self.reduce_time_init = ReduceTimeToOne(
             in_channels=in_channels,
-            out_channels=out_channels,
+            out_channels=channels[0],
             num_time=in_time,
         )
         self.peak_kernel = nn.Sequential(
             cunn.Peaks3d(kernel_size=trend_kernel_size),
             ReduceTimeToOne(
                 in_channels=in_channels,
-                out_channels=out_channels,
+                out_channels=channels[0],
                 num_time=in_time,
                 activation_type=activation_type,
             ),
@@ -103,7 +103,7 @@ class PreUnet3Psi(nn.Module):
             cunn.Trend3d(kernel_size=trend_kernel_size, direction="positive"),
             ReduceTimeToOne(
                 in_channels=in_channels,
-                out_channels=out_channels,
+                out_channels=channels[0],
                 num_time=in_time,
                 activation_type=activation_type,
             ),
@@ -112,7 +112,7 @@ class PreUnet3Psi(nn.Module):
             cunn.Trend3d(kernel_size=trend_kernel_size, direction="negative"),
             ReduceTimeToOne(
                 in_channels=in_channels,
-                out_channels=out_channels,
+                out_channels=channels[0],
                 num_time=in_time,
                 activation_type=activation_type,
             ),
@@ -120,7 +120,7 @@ class PreUnet3Psi(nn.Module):
 
         self.layer_norm = nn.Sequential(
             Rearrange('b c h w -> b h w c'),
-            nn.LayerNorm(out_channels),
+            nn.LayerNorm(channels[0]),
             Rearrange('b h w c -> b c h w'),
         )
 
@@ -688,14 +688,14 @@ class TowerUNet(nn.Module):
         mask_activation: T.Union[nn.Softmax, nn.Sigmoid] = nn.Softmax(dim=1),
         deep_supervision: bool = False,
         pool_attention: bool = False,
-        pool_by_max: bool = False,
+        pool_first: bool = False,
         repeat_resa_kernel: bool = False,
-        batchnorm_first: bool = False,
-        concat_resid: bool = False,
+        std_conv: bool = False,
     ):
         super(TowerUNet, self).__init__()
 
-        attention_weights = None
+        pool_first = True
+        repeat_resa_kernel = False
 
         if dilations is None:
             dilations = [1, 2]
@@ -703,132 +703,171 @@ class TowerUNet(nn.Module):
         self.deep_supervision = deep_supervision
 
         channels = [
-            hidden_channels,  # a
-            hidden_channels * 2,  # b
-            hidden_channels * 4,  # c
-            hidden_channels * 8,  # d
+            hidden_channels,
+            hidden_channels * 2,
+            hidden_channels * 4,
+            hidden_channels * 8,
         ]
         up_channels = int(hidden_channels * len(channels))
 
         self.pre_unet = PreUnet3Psi(
             in_channels=in_channels,
             in_time=in_time,
-            out_channels=channels[0],
+            channels=channels,
             activation_type=activation_type,
         )
 
         # Backbone layers
-        backbone_kwargs = dict(
+        if res_block_type.lower() == ResBlockTypes.RES:
+            self.init_a = cunn.ResidualConv(
+                in_channels=channels[0],
+                out_channels=channels[0],
+                activation_type=activation_type,
+                attention_weights=attention_weights
+                if pool_attention
+                else None,
+                std_conv=std_conv,
+            )
+        else:
+            # 2 blocks with:
+            #   kernels 1, 3 with dilations 1, 2
+            self.init_a = cunn.ResidualAConv(
+                in_channels=channels[0],
+                out_channels=channels[0],
+                dilations=dilations,
+                repeat_kernel=repeat_resa_kernel,
+                activation_type=activation_type,
+                attention_weights=attention_weights
+                if pool_attention
+                else None,
+                std_conv=std_conv,
+            )
+
+        # 2 blocks with:
+        #   kernels 1, 3 with dilations 1, 2
+        self.down_b = cunn.PoolResidualConv(
+            channels[0],
+            channels[1],
             dropout=dropout,
-            activation_type=activation_type,
             attention_weights=attention_weights if pool_attention else None,
             res_block_type=res_block_type,
-            batchnorm_first=batchnorm_first,
-            pool_by_max=pool_by_max,
-            concat_resid=concat_resid,
-        )
-        self.down_a = cunn.PoolResidualConv(
-            in_channels=channels[0],
-            out_channels=channels[0],
             dilations=dilations,
             repeat_resa_kernel=repeat_resa_kernel,
-            pool_first=False,
-            **backbone_kwargs,
-        )
-        self.down_b = cunn.PoolResidualConv(
-            in_channels=channels[0],
-            out_channels=channels[1],
-            dilations=dilations,
-            repeat_resa_kernel=repeat_resa_kernel,
-            **backbone_kwargs,
+            pool_first=pool_first,
+            std_conv=std_conv,
         )
         self.down_c = cunn.PoolResidualConv(
             channels[1],
             channels[2],
-            dilations=dilations[:2],
+            dropout=dropout,
+            activation_type=activation_type,
+            attention_weights=attention_weights if pool_attention else None,
+            res_block_type=res_block_type,
+            dilations=dilations,
             repeat_resa_kernel=repeat_resa_kernel,
-            **backbone_kwargs,
+            pool_first=pool_first,
+            std_conv=std_conv,
         )
         self.down_d = cunn.PoolResidualConv(
             channels[2],
             channels[3],
+            dropout=dropout,
             kernel_size=1,
             num_blocks=1,
+            activation_type=activation_type,
+            attention_weights=attention_weights if pool_attention else None,
+            res_block_type=res_block_type,
             dilations=[1],
-            repeat_resa_kernel=repeat_resa_kernel,
-            **backbone_kwargs,
+            pool_first=pool_first,
+            std_conv=std_conv,
         )
 
-        # Up layers
-        up_kwargs = dict(
-            activation_type=activation_type,
-            res_block_type=res_block_type,
-            repeat_resa_kernel=repeat_resa_kernel,
-            batchnorm_first=batchnorm_first,
-            concat_resid=concat_resid,
-        )
-        self.over_d = cunn.UNetUpBlock(
+        # Over layer
+        self.over_du = cunn.TowerUNetUpLayer(
             in_channels=channels[3],
             out_channels=up_channels,
             kernel_size=1,
             num_blocks=1,
-            dilations=[1],
             attention_weights=None,
+            activation_type=activation_type,
+            res_block_type=res_block_type,
+            dilations=[1],
             resample_up=False,
-            **up_kwargs,
+            std_conv=std_conv,
         )
-        self.up_cu = cunn.UNetUpBlock(
+
+        # Up layers
+        self.up_cu = cunn.TowerUNetUpLayer(
             in_channels=up_channels,
             out_channels=up_channels,
             attention_weights=attention_weights,
-            dilations=dilations[:2],
-            **up_kwargs,
-        )
-        self.up_bu = cunn.UNetUpBlock(
-            in_channels=up_channels,
-            out_channels=up_channels,
-            attention_weights=attention_weights,
+            activation_type=activation_type,
+            res_block_type=res_block_type,
             dilations=dilations,
-            **up_kwargs,
+            repeat_resa_kernel=repeat_resa_kernel,
+            std_conv=std_conv,
         )
-        self.up_au = cunn.UNetUpBlock(
+        self.up_bu = cunn.TowerUNetUpLayer(
             in_channels=up_channels,
             out_channels=up_channels,
             attention_weights=attention_weights,
+            activation_type=activation_type,
+            res_block_type=res_block_type,
             dilations=dilations,
-            **up_kwargs,
+            repeat_resa_kernel=repeat_resa_kernel,
+            std_conv=std_conv,
+        )
+        self.up_au = cunn.TowerUNetUpLayer(
+            in_channels=up_channels,
+            out_channels=up_channels,
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+            res_block_type=res_block_type,
+            dilations=dilations,
+            repeat_resa_kernel=repeat_resa_kernel,
+            std_conv=std_conv,
         )
 
         # Towers
-        tower_kwargs = dict(
+        self.tower_c = cunn.TowerUNetBlock(
+            backbone_side_channels=channels[2],
+            backbone_down_channels=channels[3],
             up_channels=up_channels,
             out_channels=up_channels,
             attention_weights=attention_weights,
             activation_type=activation_type,
             res_block_type=res_block_type,
             repeat_resa_kernel=repeat_resa_kernel,
-            batchnorm_first=batchnorm_first,
-            concat_resid=concat_resid,
+            dilations=dilations,
+            std_conv=std_conv,
         )
-        self.tower_c = cunn.TowerUNetBlock(
-            backbone_side_channels=channels[2],
-            backbone_down_channels=channels[3],
-            dilations=dilations[:2],
-            **tower_kwargs,
-        )
+
         self.tower_b = cunn.TowerUNetBlock(
             backbone_side_channels=channels[1],
             backbone_down_channels=channels[2],
+            up_channels=up_channels,
+            out_channels=up_channels,
             tower=True,
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+            res_block_type=res_block_type,
             dilations=dilations,
-            **tower_kwargs,
+            repeat_resa_kernel=repeat_resa_kernel,
+            std_conv=std_conv,
         )
+
         self.tower_a = cunn.TowerUNetBlock(
             backbone_side_channels=channels[0],
             backbone_down_channels=channels[1],
+            up_channels=up_channels,
+            out_channels=up_channels,
             tower=True,
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+            res_block_type=res_block_type,
             dilations=dilations,
-            **tower_kwargs,
+            repeat_resa_kernel=repeat_resa_kernel,
+            std_conv=std_conv,
         )
 
         self.final_a = cunn.TowerUNetFinal(
@@ -871,57 +910,54 @@ class TowerUNet(nn.Module):
             Shaped (B x C x H X W)
         """
 
-        # Initial temporal reduction and convolutions to
-        # hidden dimensions
         embeddings = self.pre_unet(x, temporal_encoding=temporal_encoding)
 
         # Backbone
-        x_a = self.down_a(embeddings)  # 1/1 of input
-        x_b = self.down_b(x_a)  # 1/2 of input
-        x_c = self.down_c(x_b)  # 1/4 of input
-        x_d = self.down_d(x_c)  # 1/8 of input
+        x_a = self.init_a(embeddings)
+        x_b = self.down_b(x_a)
+        x_c = self.down_c(x_b)
+        x_d = self.down_d(x_c)
 
-        x_du = self.over_d(x_d, size=x_d.shape[-2:])
+        # Over
+        x_du = self.over_du(x_d, shape=x_d.shape[-2:])
 
         # Up
-        x_cu = self.up_cu(x_du, size=x_c.shape[-2:])
-        x_bu = self.up_bu(x_cu, size=x_b.shape[-2:])
-        x_au = self.up_au(x_bu, size=x_a.shape[-2:])
+        x_cu = self.up_cu(x_du, shape=x_c.shape[-2:])
+        x_bu = self.up_bu(x_cu, shape=x_b.shape[-2:])
+        x_au = self.up_au(x_bu, shape=x_a.shape[-2:])
 
-        # Central towers
         x_tower_c = self.tower_c(
             backbone_side=x_c,
             backbone_down=x_d,
-            decode_side=x_cu,
-            decode_down=x_du,
+            side=x_cu,
+            down=x_du,
         )
         x_tower_b = self.tower_b(
             backbone_side=x_b,
             backbone_down=x_c,
-            decode_side=x_bu,
-            decode_down=x_cu,
-            tower_down=x_tower_c,
+            side=x_bu,
+            down=x_cu,
+            down_tower=x_tower_c,
         )
         x_tower_a = self.tower_a(
             backbone_side=x_a,
             backbone_down=x_b,
-            decode_side=x_au,
-            decode_down=x_bu,
-            tower_down=x_tower_b,
+            side=x_au,
+            down=x_bu,
+            down_tower=x_tower_b,
         )
 
-        # Final outputs
         out = self.final_a(x_tower_a)
 
-        if training and self.deep_supervision:
+        if self.deep_supervision:
             out_c = self.final_c(
                 x_tower_c,
-                size=x_tower_a.shape[-2:],
+                shape=x_tower_a.shape[-2:],
                 suffix="_c",
             )
             out_b = self.final_b(
                 x_tower_b,
-                size=x_tower_a.shape[-2:],
+                shape=x_tower_a.shape[-2:],
                 suffix="_b",
             )
 
@@ -934,9 +970,9 @@ class TowerUNet(nn.Module):
 if __name__ == '__main__':
     batch_size = 2
     num_channels = 3
-    hidden_channels = 32
+    in_encoding_channels = 64
     num_head = 8
-    num_time = 13
+    num_time = 12
     height = 100
     width = 100
 
@@ -945,24 +981,16 @@ if __name__ == '__main__':
         dtype=torch.float32,
     )
     logits_hidden = torch.rand(
-        (batch_size, hidden_channels, height, width), dtype=torch.float32
+        (batch_size, in_encoding_channels, height, width), dtype=torch.float32
     )
 
-    model = TowerUNet(
+    model = ResUNet3Psi(
         in_channels=num_channels,
         in_time=num_time,
-        hidden_channels=hidden_channels,
-        dilations=[1, 2],
-        dropout=0.2,
-        res_block_type=ResBlockTypes.RESA,
-        attention_weights=AttentionTypes.SPATIAL_CHANNEL,
-        deep_supervision=False,
-        pool_attention=False,
-        pool_first=False,
-        repeat_resa_kernel=False,
-        batchnorm_first=True,
+        in_encoding_channels=in_encoding_channels,
+        activation_type="SiLU",
+        res_block_type=ResBlockTypes.RES,
     )
-
     logits = model(x, temporal_encoding=logits_hidden)
 
     assert logits['dist'].shape == (batch_size, 1, height, width)

@@ -2,6 +2,7 @@ from .modules.activations import SetActivation, SigmoidCrisp
 from .modules.attention import SpatialChannelAttention
 from .modules.convolution import (
     ConvBlock2d,
+    ConvTranspose2d,
     FinalConv2dDropout,
     PoolConv,
     PoolResidualConv,
@@ -27,6 +28,7 @@ from .modules.unet_parts import (
 
 __all__ = [
     'ConvBlock2d',
+    'ConvTranspose2d',
     'FinalConv2dDropout',
     'Peaks3d',
     'PoolConv',
