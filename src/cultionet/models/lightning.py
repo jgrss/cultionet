@@ -272,6 +272,9 @@ class LightningModuleMixin(LightningModule):
         # Weak supervision mask
         mask = None
         if batch.y.min() == -1:
+            raise ValueError(
+                "There shouldn't be any unknowns in this dataset."
+            )
             mask = torch.where(batch.y == -1, 0, 1).to(
                 dtype=torch.uint8, device=batch.y.device
             )
