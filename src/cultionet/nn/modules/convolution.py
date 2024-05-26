@@ -261,62 +261,67 @@ class ResConvBlock2d(nn.Module):
         in_channels: int,
         out_channels: int,
         kernel_size: int = 3,
-        dilations: T.List[int] = None,
+        dilation: int = 1,
         activation_type: str = "SiLU",
-        num_blocks: int = 1,
+        num_blocks: int = 2,
         repeat_kernel: bool = False,
         batchnorm_first: bool = False,
     ):
         super(ResConvBlock2d, self).__init__()
 
-        assert num_blocks > 0, "There must be at least one block."
+        assert (
+            0 < num_blocks < 3
+        ), "There must be at least one block but no more than 3."
 
-        if dilations is None:
-            dilations = list(range(1, num_blocks + 1))
+        self.residual_conv = None
+        if in_channels != out_channels:
+            self.residual_conv = ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding=0,
+                dilation=1,
+                activation_type=activation_type,
+                add_activation=True,
+                batchnorm_first=batchnorm_first,
+            )
 
-        if repeat_kernel:
-            first_kernel_size = kernel_size
-        else:
-            # If multiple blocks, then the first kernel is 1x1
-            first_kernel_size = 1 if len(dilations) > 1 else kernel_size
-
-        layers = [
+        conv_layers = [
             ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
-                kernel_size=first_kernel_size,
-                padding=0 if first_kernel_size == 1 else dilations[0],
-                dilation=dilations[0],
+                kernel_size=kernel_size,
+                padding=0 if kernel_size == 1 else dilation,
+                dilation=1 if kernel_size == 1 else dilation,
                 activation_type=activation_type,
                 add_activation=True,
                 batchnorm_first=batchnorm_first,
             )
         ]
 
-        if num_blocks > 1:
-            # Blocks 2:N-1
-            layers += [
+        if (kernel_size > 1) and (num_blocks > 1):
+            conv_layers += [
                 ConvBlock2d(
                     in_channels=out_channels,
                     out_channels=out_channels,
                     kernel_size=kernel_size,
-                    padding=0 if kernel_size == 1 else dilations[blk_idx],
-                    dilation=dilations[blk_idx],
+                    padding=max(1, dilation - 1),
+                    dilation=max(1, dilation - 1),
                     activation_type=activation_type,
                     add_activation=True,
                     batchnorm_first=batchnorm_first,
                 )
-                for blk_idx in range(1, num_blocks)
             ]
 
-        self.block = nn.ModuleList(layers)
+        self.block = nn.Sequential(*conv_layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        for layer in self.block:
-            # residual = x
-            x = layer(x)
-            # if x.shape[-3:] == residual.shape[-3:]:
-            #     x = residual + x
+        if self.residual_conv is not None:
+            residual = self.residual_conv(x)
+        else:
+            residual = x
+
+        x = residual + self.block(x)
 
         return x
 
@@ -502,7 +507,7 @@ class ResidualAConv(nn.Module):
                     if self.concat_resid
                     else out_channels,
                     kernel_size=kernel_size,
-                    dilations=[dilation] * num_blocks,
+                    dilation=dilation,
                     activation_type=activation_type,
                     num_blocks=num_blocks,
                     repeat_kernel=repeat_kernel,
