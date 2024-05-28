@@ -1230,6 +1230,7 @@ def train_model(args):
                 )
             except TensorShapeError as e:
                 raise ValueError(e)
+
             test_ds = EdgeDataset(
                 root=ppaths.test_path,
                 norm_values=norm_values,
@@ -1243,6 +1244,9 @@ def train_model(args):
 
     cultionet_params = CultionetParams(
         ckpt_file=ppaths.ckpt_file,
+        model_name="cultionet_transfer"
+        if args.process == CLISteps.TRAIN_TRANSFER
+        else "cultionet_transfer",
         dataset=ds,
         test_dataset=test_ds,
         val_frac=args.val_frac,
