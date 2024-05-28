@@ -13,9 +13,7 @@ import pygrts
 import torch
 from joblib import delayed, parallel_backend
 from scipy.ndimage.measurements import label as nd_label
-from shapely.geometry import box
 from skimage.measure import regionprops
-from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 
 from ..augment.augmenters import Augmenters
@@ -24,6 +22,7 @@ from ..utils.logging import set_color_logger
 from ..utils.model_preprocessing import TqdmParallel
 from ..utils.normalize import NormValues
 from .data import Data
+from .spatial_dataset import SpatialDataset
 
 ATTRVINSTANCE = attr.validators.instance_of
 ATTRVIN = attr.validators.in_
@@ -51,7 +50,7 @@ def _check_shape(
     return True, index, uid
 
 
-class EdgeDataset(Dataset):
+class EdgeDataset(SpatialDataset):
     """An edge dataset."""
 
     data_list_ = None
@@ -140,53 +139,22 @@ class EdgeDataset(Dataset):
         """Get the number of time features."""
         return self[0].num_time
 
-    def to_frame(self) -> gpd.GeoDataFrame:
-        """Converts the Dataset to a GeoDataFrame."""
-
-        def get_box_id(data_id: str, *bounds):
-            return data_id, box(*list(map(float, bounds))).centroid
-
-        with parallel_backend(backend="loky", n_jobs=self.processes):
-            with TqdmParallel(
-                tqdm_kwargs={
-                    "total": len(self),
-                    "desc": "Building GeoDataFrame",
-                    "ascii": "\u2015\u25E4\u25E5\u25E2\u25E3\u25AA",
-                    "colour": "green",
-                }
-            ) as pool:
-                results = pool(
-                    delayed(get_box_id)(
-                        data.batch_id,
-                        data.left,
-                        data.bottom,
-                        data.right,
-                        data.top,
-                    )
-                    for data in self
-                )
-
-        ids, geometry = list(map(list, zip(*results)))
-        df = gpd.GeoDataFrame(
-            data=ids,
-            columns=[self.grid_id_column],
-            geometry=geometry,
-            crs="epsg:4326",
-        )
-
-        return df
-
     def get_spatial_partitions(
         self,
         spatial_partitions: T.Union[str, Path, gpd.GeoDataFrame],
         splits: int = 0,
     ) -> None:
         """Gets the spatial partitions."""
-        self.create_spatial_index()
+        self.create_spatial_index(
+            id_column=self.grid_id_column, n_jobs=self.processes
+        )
         if isinstance(spatial_partitions, (str, Path)):
             spatial_partitions = gpd.read_file(spatial_partitions)
         else:
-            spatial_partitions = self.to_frame()
+            spatial_partitions = self.to_frame(
+                id_column=self.grid_id_column,
+                n_jobs=self.processes,
+            )
 
         if splits > 0:
             qt = pygrts.QuadTree(spatial_partitions, force_square=False)
@@ -267,20 +235,6 @@ class EdgeDataset(Dataset):
             train_ds, test_ds = self.split_indices(kfold_indices)
 
             yield str(getattr(kfold, partition_column)), train_ds, test_ds
-
-    @property
-    def grid_gpkg_path(self) -> Path:
-        return self.root / "dataset_grids.gpkg"
-
-    def create_spatial_index(self):
-        """Creates the spatial index."""
-        dataset_grid_path = self.grid_gpkg_path
-
-        if dataset_grid_path.is_file():
-            self.dataset_df = gpd.read_file(dataset_grid_path)
-        else:
-            self.dataset_df = self.to_frame()
-            self.dataset_df.to_file(dataset_grid_path, driver="GPKG")
 
     def check_dims(
         self,
@@ -381,6 +335,7 @@ class EdgeDataset(Dataset):
         val_frac: float,
         spatial_overlap_allowed: bool = True,
         spatial_balance: bool = True,
+        crs: str = "EPSG:8857",
     ) -> T.Tuple["EdgeDataset", "EdgeDataset"]:
         """Splits the dataset into train and validation.
 
@@ -397,55 +352,13 @@ class EdgeDataset(Dataset):
             train_ds = self[:n_train]
             val_ds = self[n_train:]
         else:
-            # Create a GeoDataFrame of every .pt file in
-            # the dataset.
-            self.create_spatial_index()
-
-            if spatial_balance:
-                # Separate train and validation by spatial location
-
-                # Setup a quad-tree using the GRTS method
-                # (see https://github.com/jgrss/pygrts for details)
-                qt = pygrts.QuadTree(
-                    self.dataset_df.to_crs("EPSG:8858"),
-                    force_square=False,
-                )
-
-                # Recursively split the quad-tree until each grid has
-                # only one sample.
-                qt.split_recursive(max_samples=1)
-
-                n_val = int(val_frac * len(self.dataset_df.index))
-                # `qt.sample` random samples from the quad-tree in a
-                # spatially balanced manner. Thus, `df_val_sample` is
-                # a GeoDataFrame with `n_val` sites spatially balanced.
-                df_val_sample = qt.sample(
-                    n=n_val, random_state=self.random_seed
-                )
-
-                # Since we only took one sample from each coordinate,
-                # we need to find all of the .pt files that share
-                # coordinates with the sampled sites.
-                val_mask = self.dataset_df[self.grid_id_column].isin(
-                    df_val_sample[self.grid_id_column]
-                )
-            else:
-                # Randomly sample a percentage for validation
-                df_val_ids = self.dataset_df.sample(
-                    frac=val_frac, random_state=self.random_seed
-                ).to_frame(name=self.grid_id_column)
-                # Get all ids for validation samples
-                val_mask = self.dataset_df[self.grid_id_column].isin(
-                    df_val_ids[self.grid_id_column]
-                )
-
-            # Get train/val indices
-            val_idx = self.dataset_df.loc[val_mask].index.values
-            train_idx = self.dataset_df.loc[~val_mask].index.values
-
-            # Slice the dataset
-            train_ds = self[train_idx]
-            val_ds = self[val_idx]
+            train_ds, val_ds = self.spatial_splits(
+                val_frac=val_frac,
+                id_column=self.grid_id_column,
+                spatial_balance=spatial_balance,
+                crs=crs,
+                random_state=self.random_seed,
+            )
 
         val_ds.augment_prob = 0.0
 

@@ -4,7 +4,6 @@ from typing import Optional
 import numpy as np
 import pytest
 import torch
-from torch.distributions import Uniform
 
 from cultionet.data.data import Data
 from cultionet.data.datasets import EdgeDataset

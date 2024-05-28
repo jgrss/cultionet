@@ -7,6 +7,7 @@ from typing import List, Optional, Union
 import joblib
 import numpy as np
 import torch
+import xarray as xr
 
 
 class Data:
@@ -140,6 +141,24 @@ class Data:
 
     def __repr__(self):
         return str(self)
+
+    def to_xarray(self) -> xr.Dataset:
+        return xr.Dataset(
+            data_vars=dict(
+                x=(["channel", "time", "height", "width"], self.x[0].numpy()),
+                y=(["height", "width"], self.y[0].numpy()),
+                dist=(["height", "width"], self.bdist[0].numpy()),
+            ),
+            coords={
+                "channel": range(1, self.num_channels + 1),
+                "time": range(1, self.num_time + 1),
+                "height": np.arange(self.top[0], self.bottom[0], -self.res[0]),
+                "width": np.arange(self.left[0], self.right[0], self.res[0]),
+            },
+            attrs={
+                "name": self.batch_id[0],
+            },
+        )
 
 
 @dataclass
