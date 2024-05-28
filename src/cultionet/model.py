@@ -241,23 +241,25 @@ def fit_transfer(cultionet_params: CultionetParams) -> None:
     """Fits a transfer model."""
 
     # This file should already exist
-    pretrained_ckpt_file = cultionet_params.ckpt_file
-    assert (
-        pretrained_ckpt_file.is_file()
-    ), "The pretrained checkpoint does not exist."
-    # This will be the new checkpoint for the transfer model
-    ckpt_file = (
-        cultionet_params.ckpt_file.parent / ModelNames.CKPT_TRANSFER_NAME
+    pretrained_ckpt_file = (
+        cultionet_params.ckpt_file.parent / "last_cultionet.ckpt"
     )
+    assert (
+        pretrained_ckpt_file.exists()
+    ), "The pretrained checkpoint does not exist."
 
     # Split the dataset into train/validation
     data_module: EdgeDataModule = get_data_module(
         **cultionet_params.get_datamodule_params()
     )
 
+    # Get the channel and time dimensions from the dataset
+    cultionet_params = cultionet_params.update_channels(data_module)
+
     # Setup the Lightning model
     lit_model = CultionetLitTransferModel(
-        **cultionet_params.get_lightning_params()
+        pretrained_ckpt_file=pretrained_ckpt_file,
+        **cultionet_params.get_lightning_params(),
     )
 
     # Remove the model file if requested
@@ -275,7 +277,9 @@ def fit_transfer(cultionet_params: CultionetParams) -> None:
     trainer.fit(
         model=lit_model,
         datamodule=data_module,
-        ckpt_path=ckpt_file if ckpt_file.is_file() else None,
+        ckpt_path=cultionet_params.ckpt_file
+        if cultionet_params.ckpt_file.exists()
+        else None,
     )
 
 
@@ -318,7 +322,7 @@ def fit(cultionet_params: CultionetParams) -> None:
                 model=lit_model,
                 datamodule=data_module,
                 ckpt_path=cultionet_params.ckpt_file
-                if cultionet_params.ckpt_file.is_file()
+                if cultionet_params.ckpt_file.exists()
                 else None,
             )
 
