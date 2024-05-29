@@ -352,6 +352,11 @@ class EdgeDataset(SpatialDataset):
             train_ds = self[:n_train]
             val_ds = self[n_train:]
         else:
+            self.create_spatial_index(
+                id_column=self.grid_id_column,
+                n_jobs=self.processes,
+            )
+
             train_ds, val_ds = self.spatial_splits(
                 val_frac=val_frac,
                 id_column=self.grid_id_column,
