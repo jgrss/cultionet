@@ -274,6 +274,7 @@ class ReferenceArrays:
             ),
             reference_data=data_array,
             column=crop_column,
+            all_touched=True,
         )
 
         if not edge_array.flags["WRITEABLE"]:
