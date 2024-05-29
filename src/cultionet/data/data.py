@@ -1,13 +1,49 @@
 import inspect
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import singledispatch
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
+import geowombat as gw
 import joblib
 import numpy as np
 import torch
 import xarray as xr
+from pyproj import CRS
+from pyproj.crs import CRSError
+from rasterio.coords import BoundingBox
+from rasterio.transform import from_bounds
+from rasterio.warp import transform_bounds
+
+
+@singledispatch
+def sanitize_crs(crs: CRS) -> CRS:
+    try:
+        return crs
+    except CRSError:
+        return CRS.from_string("epsg:4326")
+
+
+@sanitize_crs.register
+def _(crs: str) -> CRS:
+    return CRS.from_string(crs)
+
+
+@sanitize_crs.register
+def _(crs: int) -> CRS:
+    return CRS.from_epsg(crs)
+
+
+@singledispatch
+def sanitize_res(res: tuple) -> Tuple[float, float]:
+    return tuple(map(float, res))
+
+
+@sanitize_res.register(int)
+@sanitize_res.register(float)
+def _(res) -> Tuple[float, float]:
+    return sanitize_res((res, res))
 
 
 class Data:
@@ -142,21 +178,126 @@ class Data:
     def __repr__(self):
         return str(self)
 
-    def to_xarray(self) -> xr.Dataset:
+    def plot(
+        self,
+        channel: Union[int, Sequence[int]],
+        res: Union[float, Sequence[float]],
+        crs: Optional[Union[int, str]] = None,
+    ) -> tuple:
+
+        import matplotlib.pyplot as plt
+
+        fig, axes = plt.subplots(1, 3, figsize=(8, 4), sharey=True, dpi=150)
+
+        ds = self.to_dataset(res=res, crs=crs)
+
+        bands = ds["bands"].assign_attrs(**ds.attrs).sel(channel=channel)
+        bands = bands.where(lambda x: x > 0)
+        cv = bands.std(dim='time') / bands.mean(dim='time')
+
+        cv.plot.imshow(
+            add_colorbar=False,
+            robust=True,
+            interpolation="nearest",
+            ax=axes[0],
+        )
+        (
+            ds["labels"].where(lambda x: x != -1).assign_attrs(**ds.attrs)
+        ).plot.imshow(add_colorbar=False, interpolation="nearest", ax=axes[1])
+        (ds["distances"].assign_attrs(**ds.attrs)).plot.imshow(
+            add_colorbar=False, interpolation="nearest", ax=axes[2]
+        )
+
+        for ax in axes:
+            ax.set_xlabel('')
+            ax.set_ylabel('')
+
+        axes[0].set_title("CV")
+        axes[1].set_title("Labels")
+        axes[2].set_title("Distances")
+
+        fig.supxlabel("X")
+        fig.supylabel("Y")
+
+        return fig, axes
+
+    def transform_bounds(
+        self, crs: Optional[Union[int, str]] = None
+    ) -> BoundingBox:
+        """Transforms a bounding box to a new CRS."""
+
+        bounds = transform_bounds(
+            src_crs=sanitize_crs("epsg:4326"),
+            dst_crs=sanitize_crs(crs),
+            left=self.left[0],
+            bottom=self.bottom[0],
+            right=self.right[0],
+            top=self.top[0],
+        )
+
+        return BoundingBox(*bounds)
+
+    def from_bounds(
+        self,
+        bounds: BoundingBox,
+        res: Union[float, Sequence[float]],
+    ) -> tuple:
+        """Converts a bounding box to a transform adjusted by the
+        resolution."""
+
+        res = sanitize_res(res)
+
+        adjusted_bounds = BoundingBox(
+            left=bounds.left,
+            bottom=bounds.top - self.height * float(abs(res[1])),
+            right=bounds.left + self.width * float(abs(res[0])),
+            top=bounds.top,
+        )
+
+        adjusted_transform = from_bounds(
+            *adjusted_bounds,
+            width=self.width,
+            height=self.height,
+        )
+
+        return adjusted_bounds, adjusted_transform
+
+    def to_dataset(
+        self,
+        res: Union[float, Sequence[float]],
+        crs: Optional[Union[int, str]] = None,
+    ) -> xr.Dataset:
+        """Converts a PyTorch data batch to an Xarray Dataset."""
+
+        crs = sanitize_crs(crs)
+        dst_bounds = self.transform_bounds(crs)
+        dst_bounds, transform = self.from_bounds(dst_bounds, res=res)
+
         return xr.Dataset(
             data_vars=dict(
-                x=(["channel", "time", "height", "width"], self.x[0].numpy()),
-                y=(["height", "width"], self.y[0].numpy()),
-                dist=(["height", "width"], self.bdist[0].numpy()),
+                bands=(
+                    ["channel", "time", "y", "x"],
+                    self.x[0].numpy() * 1e-4,
+                ),
+                labels=(["y", "x"], self.y[0].numpy()),
+                distances=(["y", "x"], self.bdist[0].numpy() * 1e-4),
             ),
             coords={
                 "channel": range(1, self.num_channels + 1),
                 "time": range(1, self.num_time + 1),
-                "height": np.arange(self.top[0], self.bottom[0], -self.res[0]),
-                "width": np.arange(self.left[0], self.right[0], self.res[0]),
+                "y": np.linspace(
+                    dst_bounds.top, dst_bounds.bottom, self.height
+                ),
+                "x": np.linspace(
+                    dst_bounds.left, dst_bounds.right, self.width
+                ),
             },
             attrs={
                 "name": self.batch_id[0],
+                "crs": crs.to_epsg(),
+                "res": (float(abs(transform[0])), float(abs(transform[4]))),
+                "transform": transform,
+                "_FillValue": -1,
             },
         )
 
