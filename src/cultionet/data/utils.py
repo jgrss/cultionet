@@ -191,7 +191,8 @@ def cleanup_edges(
     array = np.where(
         (array > 0)
         & (array != edge_class)
-        & (get_crop_count(array, edge_class) <= 1),
+        & (get_crop_count(array, edge_class) <= 1)
+        & (get_edge_count(array, edge_class) <= 1),
         0,
         array,
     )
@@ -207,8 +208,10 @@ def create_boundary_distances(
         mask = np.uint8(labels_array)
     else:
         mask = np.uint8(1 - labels_array)
+
     # Get unique segments
     segments = nd_label(mask)[0]
+
     # Get the distance from edges
     bdist = cv2.distanceTransform(mask, cv2.DIST_L2, 3)
     bdist *= cell_res
