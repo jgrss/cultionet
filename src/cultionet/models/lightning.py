@@ -323,22 +323,24 @@ class LightningModuleMixin(LightningModule):
         ##########################
 
         if predictions["classes_l2"] is not None:
-            # Temporal encoding level 2 loss (non-crop=0; crop|edge=1)
-            classes_l2_loss = self.classes_l2_loss(
-                predictions["classes_l2"],
-                true_labels_dict["true_crop_and_edge"],
-                mask=true_labels_dict["mask"],
-            )
-            loss = loss + classes_l2_loss * weights["l2"]
+            if self.classes_l2_loss is not None:
+                # Temporal encoding level 2 loss (non-crop=0; crop|edge=1)
+                classes_l2_loss = self.classes_l2_loss(
+                    predictions["classes_l2"],
+                    true_labels_dict["true_crop_and_edge"],
+                    mask=true_labels_dict["mask"],
+                )
+                loss = loss + classes_l2_loss * weights["l2"]
 
         if predictions["classes_l3"] is not None:
-            # Temporal encoding final loss (non-crop=0; crop=1; edge=2)
-            classes_last_loss = self.classes_last_loss(
-                predictions["classes_l3"],
-                true_labels_dict["true_crop_or_edge"],
-                mask=true_labels_dict["mask"],
-            )
-            loss = loss + classes_last_loss * weights["l3"]
+            if self.classes_last_loss is not None:
+                # Temporal encoding final loss (non-crop=0; crop=1; edge=2)
+                classes_last_loss = self.classes_last_loss(
+                    predictions["classes_l3"],
+                    true_labels_dict["true_crop_or_edge"],
+                    mask=true_labels_dict["mask"],
+                )
+                loss = loss + classes_last_loss * weights["l3"]
 
         #########################
         # Deep supervision losses
@@ -822,13 +824,17 @@ class LightningModuleMixin(LightningModule):
                 "classification"
             )
 
-        # Crop Temporal encoding losses
-        self.classes_l2_loss = self.loss_dict[self.loss_name].get(
-            "classification"
-        )
-        self.classes_last_loss = self.loss_dict[self.loss_name].get(
-            "classification"
-        )
+        self.classes_l2_loss = None
+        self.classes_last_loss = None
+        if not self.is_transfer_model:
+            # Crop Temporal encoding losses
+            self.classes_l2_loss = self.loss_dict[self.loss_name].get(
+                "classification"
+            )
+            self.classes_last_loss = self.loss_dict[self.loss_name].get(
+                "classification"
+            )
+
         if self.num_classes > 2:
             self.crop_type_star_loss = self.loss_dict[self.loss_name].get(
                 "classification"
@@ -984,46 +990,46 @@ class CultionetLitTransferModel(LightningModuleMixin):
         if not finetune:
             # Set new final layers to learn new weights
             # Level 2 level (non-crop; crop)
-            self.cultionet_model.temporal_encoder.final_l2 = cunn.FinalConv2dDropout(
-                hidden_dim=self.cultionet_model.temporal_encoder.final_l2.net[
-                    0
-                ]
-                .seq.block[0]
-                .seq[0]
-                .in_channels,
-                dim_factor=1,
-                activation_type=activation_type,
-                final_activation=nn.Softmax(dim=1),
-                num_classes=num_classes,
-            )
-            self.cultionet_model.temporal_encoder.final_l2.apply(
-                init_attention_weights
-            )
-            # Last level (non-crop; crop; edges)
-            self.cultionet_model.temporal_encoder.final_l3 = cunn.FinalConv2dDropout(
-                hidden_dim=self.cultionet_model.temporal_encoder.final_l3.net[
-                    0
-                ]
-                .seq.block[0]
-                .seq[0]
-                .in_channels,
-                dim_factor=1,
-                activation_type=activation_type,
-                final_activation=nn.Softmax(dim=1),
-                num_classes=num_classes + 1,
-            )
-            self.cultionet_model.temporal_encoder.final_l3.apply(
-                init_attention_weights
-            )
-            self.cultionet_model.temporal_encoder.final = nn.Conv2d(
-                in_channels=self.cultionet_model.temporal_encoder.final.in_channels,
-                out_channels=self.cultionet_model.temporal_encoder.final.out_channels,
-                kernel_size=self.cultionet_model.temporal_encoder.final.kernel_size,
-                padding=self.cultionet_model.temporal_encoder.final.padding,
-            )
-            self.cultionet_model.temporal_encoder.final.apply(
-                init_attention_weights
-            )
+            # self.cultionet_model.temporal_encoder.final_l2 = cunn.FinalConv2dDropout(
+            #     hidden_dim=self.cultionet_model.temporal_encoder.final_l2.net[
+            #         0
+            #     ]
+            #     .seq.block[0]
+            #     .seq[0]
+            #     .in_channels,
+            #     dim_factor=1,
+            #     activation_type=activation_type,
+            #     final_activation=nn.Softmax(dim=1),
+            #     num_classes=num_classes,
+            # )
+            # self.cultionet_model.temporal_encoder.final_l2.apply(
+            #     init_attention_weights
+            # )
+            # # Last level (non-crop; crop; edges)
+            # self.cultionet_model.temporal_encoder.final_l3 = cunn.FinalConv2dDropout(
+            #     hidden_dim=self.cultionet_model.temporal_encoder.final_l3.net[
+            #         0
+            #     ]
+            #     .seq.block[0]
+            #     .seq[0]
+            #     .in_channels,
+            #     dim_factor=1,
+            #     activation_type=activation_type,
+            #     final_activation=nn.Softmax(dim=1),
+            #     num_classes=num_classes + 1,
+            # )
+            # self.cultionet_model.temporal_encoder.final_l3.apply(
+            #     init_attention_weights
+            # )
+            # self.cultionet_model.temporal_encoder.final = nn.Conv2d(
+            #     in_channels=self.cultionet_model.temporal_encoder.final.in_channels,
+            #     out_channels=self.cultionet_model.temporal_encoder.final.out_channels,
+            #     kernel_size=self.cultionet_model.temporal_encoder.final.kernel_size,
+            #     padding=self.cultionet_model.temporal_encoder.final.padding,
+            # )
+            # self.cultionet_model.temporal_encoder.final.apply(
+            #     init_attention_weights
+            # )
 
             # self.cultionet_model.mask_model = layers[-1]
             # Update the post-UNet layer with trainable parameters
@@ -1033,25 +1039,25 @@ class CultionetLitTransferModel(LightningModuleMixin):
                 mask_activation=nn.Softmax(dim=1),
             )
             self.cultionet_model.mask_model.final_a.apply(init_conv_weights)
-            if hasattr(self.cultionet_model.mask_model, "final_b"):
-                self.cultionet_model.mask_model.final_b = cunn.TowerUNetFinal(
-                    in_channels=self.cultionet_model.mask_model.final_b.expand.in_channels,
-                    num_classes=num_classes,
-                    mask_activation=nn.Softmax(dim=1),
-                    resample_factor=2,
-                )
-                self.cultionet_model.mask_model.final_b.apply(
-                    init_conv_weights
-                )
-                self.cultionet_model.mask_model.final_c = cunn.TowerUNetFinal(
-                    in_channels=self.cultionet_model.mask_model.final_c.expand.in_channels,
-                    num_classes=num_classes,
-                    mask_activation=nn.Softmax(dim=1),
-                    resample_factor=4,
-                )
-                self.cultionet_model.mask_model.final_c.apply(
-                    init_conv_weights
-                )
+            # if hasattr(self.cultionet_model.mask_model, "final_b"):
+            #     self.cultionet_model.mask_model.final_b = cunn.TowerUNetFinal(
+            #         in_channels=self.cultionet_model.mask_model.final_b.expand.in_channels,
+            #         num_classes=num_classes,
+            #         mask_activation=nn.Softmax(dim=1),
+            #         resample_factor=2,
+            #     )
+            #     self.cultionet_model.mask_model.final_b.apply(
+            #         init_conv_weights
+            #     )
+            #     self.cultionet_model.mask_model.final_c = cunn.TowerUNetFinal(
+            #         in_channels=self.cultionet_model.mask_model.final_c.expand.in_channels,
+            #         num_classes=num_classes,
+            #         mask_activation=nn.Softmax(dim=1),
+            #         resample_factor=4,
+            #     )
+            #     self.cultionet_model.mask_model.final_c.apply(
+            #         init_conv_weights
+            #     )
 
         self.model_attr = f"{model_name}_{model_type}"
         setattr(
@@ -1062,6 +1068,10 @@ class CultionetLitTransferModel(LightningModuleMixin):
 
         self.configure_loss()
         self.configure_scorer()
+
+    @property
+    def is_transfer_model(self) -> bool:
+        return True
 
     def unfreeze_layer(self, layer):
         for param in layer.parameters():
@@ -1182,6 +1192,10 @@ class CultionetLitModel(LightningModuleMixin):
 
         self.configure_loss()
         self.configure_scorer()
+
+    @property
+    def is_transfer_model(self) -> bool:
+        return False
 
     # def on_train_epoch_start(self):
     #     # Get the current learning rate from the optimizer
