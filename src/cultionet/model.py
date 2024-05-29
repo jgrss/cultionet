@@ -259,6 +259,7 @@ def fit_transfer(cultionet_params: CultionetParams) -> None:
     # Setup the Lightning model
     lit_model = CultionetLitTransferModel(
         pretrained_ckpt_file=pretrained_ckpt_file,
+        finetune=cultionet_params.finetune,
         **cultionet_params.get_lightning_params(),
     )
 
