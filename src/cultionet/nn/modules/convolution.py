@@ -496,8 +496,8 @@ class ResidualAConv(nn.Module):
                     activation_type=activation_type,
                 )
 
-            # self.gamma = nn.Parameter(torch.ones(1))
-            # self.act = SetActivation(activation_type=activation_type)
+            self.gamma = nn.Parameter(torch.ones(1))
+            self.act = SetActivation(activation_type=activation_type)
 
         self.res_modules = nn.ModuleList(
             [
@@ -551,9 +551,8 @@ class ResidualAConv(nn.Module):
 
         if self.attention_weights is not None:
             attention = self.attention_conv(out)
-            # attention = 1.0 + self.gamma * attention
-            out = out * attention
-            # out = self.act(out)
+            attention = 1.0 + self.gamma * attention
+            out = self.act(out * attention)
 
         return out
 
