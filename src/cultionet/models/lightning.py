@@ -981,46 +981,55 @@ class CultionetLitTransferModel(LightningModuleMixin):
             checkpoint_path=str(pretrained_ckpt_file)
         )
 
-        if not finetune:
-            # Freeze all parameters for feature extraction
-            self.cultionet_model.freeze()
-
+        # Freeze all parameters
+        self.cultionet_model.freeze()
         self.cultionet_model = self.cultionet_model.cultionet_model
 
-        if not finetune:
+        if finetune:
+            self.cultionet_model.mask_model.final_a = self.unfreeze_layer(
+                self.cultionet_model.mask_model.final_a
+            )
+            if self.deep_supervision:
+                self.cultionet_model.mask_model.final_b = self.unfreeze_layer(
+                    self.cultionet_model.mask_model.final_b
+                )
+                self.cultionet_model.mask_model.final_c = self.unfreeze_layer(
+                    self.cultionet_model.mask_model.final_c
+                )
+        else:
             # Set new final layers to learn new weights
             # Level 2 level (non-crop; crop)
-            # self.cultionet_model.temporal_encoder.final_l2 = cunn.FinalConv2dDropout(
-            #     hidden_dim=self.cultionet_model.temporal_encoder.final_l2.net[
-            #         0
-            #     ]
-            #     .seq.block[0]
-            #     .seq[0]
-            #     .in_channels,
-            #     dim_factor=1,
-            #     activation_type=activation_type,
-            #     final_activation=nn.Softmax(dim=1),
-            #     num_classes=num_classes,
-            # )
-            # self.cultionet_model.temporal_encoder.final_l2.apply(
-            #     init_attention_weights
-            # )
-            # # Last level (non-crop; crop; edges)
-            # self.cultionet_model.temporal_encoder.final_l3 = cunn.FinalConv2dDropout(
-            #     hidden_dim=self.cultionet_model.temporal_encoder.final_l3.net[
-            #         0
-            #     ]
-            #     .seq.block[0]
-            #     .seq[0]
-            #     .in_channels,
-            #     dim_factor=1,
-            #     activation_type=activation_type,
-            #     final_activation=nn.Softmax(dim=1),
-            #     num_classes=num_classes + 1,
-            # )
-            # self.cultionet_model.temporal_encoder.final_l3.apply(
-            #     init_attention_weights
-            # )
+            self.cultionet_model.temporal_encoder.final_l2 = cunn.FinalConv2dDropout(
+                hidden_dim=self.cultionet_model.temporal_encoder.final_l2.net[
+                    0
+                ]
+                .seq.block[0]
+                .seq[0]
+                .in_channels,
+                dim_factor=1,
+                activation_type=activation_type,
+                final_activation=nn.Softmax(dim=1),
+                num_classes=num_classes,
+            )
+            self.cultionet_model.temporal_encoder.final_l2.apply(
+                init_attention_weights
+            )
+            # Last level (non-crop; crop; edges)
+            self.cultionet_model.temporal_encoder.final_l3 = cunn.FinalConv2dDropout(
+                hidden_dim=self.cultionet_model.temporal_encoder.final_l3.net[
+                    0
+                ]
+                .seq.block[0]
+                .seq[0]
+                .in_channels,
+                dim_factor=1,
+                activation_type=activation_type,
+                final_activation=nn.Softmax(dim=1),
+                num_classes=num_classes + 1,
+            )
+            self.cultionet_model.temporal_encoder.final_l3.apply(
+                init_attention_weights
+            )
             # self.cultionet_model.temporal_encoder.final = nn.Conv2d(
             #     in_channels=self.cultionet_model.temporal_encoder.final.in_channels,
             #     out_channels=self.cultionet_model.temporal_encoder.final.out_channels,
@@ -1031,7 +1040,6 @@ class CultionetLitTransferModel(LightningModuleMixin):
             #     init_attention_weights
             # )
 
-            # self.cultionet_model.mask_model = layers[-1]
             # Update the post-UNet layer with trainable parameters
             self.cultionet_model.mask_model.final_a = cunn.TowerUNetFinal(
                 in_channels=self.cultionet_model.mask_model.final_a.expand.in_channels,
@@ -1039,25 +1047,25 @@ class CultionetLitTransferModel(LightningModuleMixin):
                 mask_activation=nn.Softmax(dim=1),
             )
             self.cultionet_model.mask_model.final_a.apply(init_conv_weights)
-            # if hasattr(self.cultionet_model.mask_model, "final_b"):
-            #     self.cultionet_model.mask_model.final_b = cunn.TowerUNetFinal(
-            #         in_channels=self.cultionet_model.mask_model.final_b.expand.in_channels,
-            #         num_classes=num_classes,
-            #         mask_activation=nn.Softmax(dim=1),
-            #         resample_factor=2,
-            #     )
-            #     self.cultionet_model.mask_model.final_b.apply(
-            #         init_conv_weights
-            #     )
-            #     self.cultionet_model.mask_model.final_c = cunn.TowerUNetFinal(
-            #         in_channels=self.cultionet_model.mask_model.final_c.expand.in_channels,
-            #         num_classes=num_classes,
-            #         mask_activation=nn.Softmax(dim=1),
-            #         resample_factor=4,
-            #     )
-            #     self.cultionet_model.mask_model.final_c.apply(
-            #         init_conv_weights
-            #     )
+            if self.deep_supervision:
+                self.cultionet_model.mask_model.final_b = cunn.TowerUNetFinal(
+                    in_channels=self.cultionet_model.mask_model.final_b.expand.in_channels,
+                    num_classes=num_classes,
+                    mask_activation=nn.Softmax(dim=1),
+                    resample_factor=2,
+                )
+                self.cultionet_model.mask_model.final_b.apply(
+                    init_conv_weights
+                )
+                self.cultionet_model.mask_model.final_c = cunn.TowerUNetFinal(
+                    in_channels=self.cultionet_model.mask_model.final_c.expand.in_channels,
+                    num_classes=num_classes,
+                    mask_activation=nn.Softmax(dim=1),
+                    resample_factor=4,
+                )
+                self.cultionet_model.mask_model.final_c.apply(
+                    init_conv_weights
+                )
 
         self.model_attr = f"{model_name}_{model_type}"
         setattr(
