@@ -835,6 +835,7 @@ class TowerUNet(nn.Module):
             in_channels=up_channels,
             num_classes=num_classes,
             mask_activation=mask_activation,
+            activation_type=activation_type,
         )
 
         if self.deep_supervision:
@@ -842,12 +843,14 @@ class TowerUNet(nn.Module):
                 in_channels=up_channels,
                 num_classes=num_classes,
                 mask_activation=mask_activation,
+                activation_type=activation_type,
                 resample_factor=2,
             )
             self.final_c = cunn.TowerUNetFinal(
                 in_channels=up_channels,
                 num_classes=num_classes,
                 mask_activation=mask_activation,
+                activation_type=activation_type,
                 resample_factor=4,
             )
 
