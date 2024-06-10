@@ -26,6 +26,7 @@ class TowerUNetFinal(nn.Module):
         in_channels: int,
         num_classes: int,
         mask_activation: T.Callable,
+        activation_type: str = "SiLU",
         resample_factor: int = 0,
     ):
         super(TowerUNetFinal, self).__init__()
@@ -39,44 +40,26 @@ class TowerUNetFinal(nn.Module):
                 padding=1,
             )
 
-        self.expand = nn.Conv2d(
-            in_channels, in_channels * 3, kernel_size=1, padding=0
+        self.expand = ConvBlock2d(
+            in_channels=in_channels,
+            out_channels=in_channels * 3,
+            kernel_size=3,
+            padding=1,
+            add_activation=True,
+            activation_type=activation_type,
         )
-        self.final_dist = nn.Sequential(
-            ConvBlock2d(
-                in_channels=in_channels,
-                out_channels=in_channels,
-                kernel_size=3,
-                padding=1,
-                add_activation=True,
-                activation_type="SiLU",
-            ),
-            nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
-            nn.Sigmoid(),
-        )
-        self.final_edge = nn.Sequential(
-            ConvBlock2d(
-                in_channels=in_channels + 1,
-                out_channels=in_channels,
-                kernel_size=3,
-                padding=1,
-                add_activation=True,
-                activation_type="SiLU",
-            ),
-            nn.Conv2d(in_channels, 1, kernel_size=1, padding=0),
-            SigmoidCrisp(),
-        )
-        self.final_mask = nn.Sequential(
-            ConvBlock2d(
-                in_channels=in_channels + 2,
-                out_channels=in_channels,
-                kernel_size=3,
-                padding=1,
-                add_activation=True,
-                activation_type="SiLU",
-            ),
-            nn.Conv2d(in_channels, num_classes, kernel_size=1, padding=0),
-            mask_activation,
+        self.sigmoid = nn.Sigmoid()
+        self.sigmoid_crisp = SigmoidCrisp()
+        self.mask_activation = mask_activation
+
+        self.dist_alpha1 = nn.Parameter(torch.ones(1))
+        self.dist_alpha2 = nn.Parameter(torch.ones(1))
+        self.edge_alpha1 = nn.Parameter(torch.ones(1))
+
+        self.final_dist = nn.Conv2d(in_channels, 1, kernel_size=3, padding=1)
+        self.final_edge = nn.Conv2d(in_channels, 1, kernel_size=3, padding=1)
+        self.final_mask = nn.Conv2d(
+            in_channels, num_classes, kernel_size=3, padding=1
         )
 
     def forward(
@@ -88,18 +71,22 @@ class TowerUNetFinal(nn.Module):
         if size is not None:
             x = self.up_conv(x, size=size)
 
-        dist_connect, edge_connect, mask_connect = torch.chunk(
-            self.expand(x), 3, dim=1
+        dist_h, edge_h, mask_h = torch.chunk(self.expand(x), 3, dim=1)
+
+        dist = self.final_dist(dist_h)
+        edge = self.final_edge(edge_h) + dist * torch.reciprocal(
+            self.dist_alpha1
+        )
+        mask = (
+            self.final_mask(mask_h)
+            + edge * torch.reciprocal(self.edge_alpha1)
+            + dist * torch.reciprocal(self.dist_alpha2)
         )
 
-        dist = self.final_dist(dist_connect)
-        edge = self.final_edge(torch.cat((edge_connect, dist), dim=1))
-        mask = self.final_mask(torch.cat((mask_connect, dist, edge), dim=1))
-
         return {
-            f"dist{suffix}": dist,
-            f"edge{suffix}": edge,
-            f"mask{suffix}": mask,
+            f"dist{suffix}": self.sigmoid(dist),
+            f"edge{suffix}": self.sigmoid_crisp(edge),
+            f"mask{suffix}": self.mask_activation(mask),
         }
 
 
