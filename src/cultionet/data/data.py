@@ -11,7 +11,9 @@ import numpy as np
 import torch
 import xarray as xr
 from pyproj import CRS
+from pyproj.aoi import AreaOfInterest
 from pyproj.crs import CRSError
+from pyproj.database import query_utm_crs_info
 from rasterio.coords import BoundingBox
 from rasterio.transform import from_bounds
 from rasterio.warp import transform_bounds
@@ -221,9 +223,20 @@ class Data:
 
         return fig, axes
 
-    def transform_bounds(
-        self, crs: Optional[Union[int, str]] = None
-    ) -> BoundingBox:
+    def utm_bounds(self) -> CRS:
+        utm_crs_info = query_utm_crs_info(
+            datum_name="WGS 84",
+            area_of_interest=AreaOfInterest(
+                west_lon_degree=self.left[0],
+                south_lat_degree=self.bottom[0],
+                east_lon_degree=self.right[0],
+                north_lat_degree=self.top[0],
+            ),
+        )[0]
+
+        return CRS.from_epsg(utm_crs_info.code)
+
+    def transform_bounds(self, crs: CRS) -> BoundingBox:
         """Transforms a bounding box to a new CRS."""
 
         bounds = transform_bounds(
@@ -268,6 +281,9 @@ class Data:
         crs: Optional[Union[int, str]] = None,
     ) -> xr.Dataset:
         """Converts a PyTorch data batch to an Xarray Dataset."""
+
+        if crs is None:
+            crs = self.utm_bounds()
 
         crs = sanitize_crs(crs)
         dst_bounds = self.transform_bounds(crs)
