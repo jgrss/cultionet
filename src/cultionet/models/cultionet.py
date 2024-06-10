@@ -302,7 +302,7 @@ class CultioNet(nn.Module):
             dropout=0.2,
             num_layers=2,
             d_model=128,
-            time_scaler=100,
+            time_scaler=1_000,
             num_classes_l2=self.num_classes,
             num_classes_last=self.num_classes + 1,
             activation_type=activation_type,
