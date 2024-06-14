@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
+from vit_pytorch.vit_3d import ViT
 
 from .. import nn as cunn
 from ..layers.encodings import get_sinusoid_encoding_table
@@ -233,13 +234,86 @@ class InBlock(nn.Module):
         return self.seq(x) + self.skip(x)
 
 
+class Identity(nn.Module):
+    def __init__(self):
+        super(Identity, self).__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x
+
+
+class ViTransformer(nn.Module):
+    def __init__(
+        self,
+        in_channels: int = 5,
+        in_time: int = 12,
+        image_size: int = 100,
+        image_patch_size: int = 10,
+        frame_patch_size: int = 2,
+        d_model: int = 128,
+        num_layers: int = 2,
+        num_head: int = 8,
+        dropout: float = 0.0,
+    ):
+        super(ViTransformer, self).__init__()
+
+        vit_model = ViT(
+            image_size=image_size,  # image size
+            frames=in_time,  # number of frames
+            image_patch_size=image_patch_size,  # image patch size
+            frame_patch_size=frame_patch_size,  # frame patch size
+            num_classes=1,  # NOTE: ignored
+            dim=d_model,
+            depth=num_layers,
+            heads=num_head,
+            mlp_dim=d_model * 2,
+            dropout=dropout,
+            emb_dropout=dropout,
+        )
+        reduction_size = image_patch_size**2 * in_channels * frame_patch_size
+        vit_model.to_patch_embedding[1] = nn.LayerNorm(
+            reduction_size, eps=1e-05, elementwise_affine=True
+        )
+        vit_model.to_patch_embedding[2] = nn.Linear(
+            in_features=reduction_size, out_features=d_model
+        )
+        vit_model = list(vit_model.children())[:-2]
+        vit_model += [
+            nn.LayerNorm(d_model, eps=1e-05, elementwise_affine=True),
+            nn.Linear(
+                in_features=d_model,
+                out_features=image_patch_size**2
+                * d_model
+                * frame_patch_size,
+            ),
+            Rearrange(
+                'b (f h w) (p1 p2 pf c) -> b c (f pf) (h p1) (w p2)',
+                f=in_time // frame_patch_size,
+                h=image_size // image_patch_size,
+                w=image_size // image_patch_size,
+                p1=image_patch_size,
+                p2=image_patch_size,
+                pf=frame_patch_size,
+                c=d_model,
+            ),
+        ]
+        self.model = nn.Sequential(*vit_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return einops.reduce(
+            self.model(x),
+            'b c t h w -> b c h w',
+            'mean',
+        )
+
+
 class TemporalTransformer(nn.Module):
     def __init__(
         self,
         in_channels: int,
         hidden_channels: int = 128,
         num_head: int = 8,
-        in_time: int = 1,
+        in_time: int = 13,
         d_model: int = 128,
         dropout: float = 0.1,
         num_layers: int = 1,
@@ -262,6 +336,10 @@ class TemporalTransformer(nn.Module):
             time_scaler (int): Period to use for the positional encoding.
         """
         super(TemporalTransformer, self).__init__()
+
+        frame_patch_size = 2
+        if in_time % frame_patch_size != 0:
+            in_time -= 1
 
         self.init_conv = nn.Sequential(
             InBlock(
@@ -306,6 +384,16 @@ class TemporalTransformer(nn.Module):
             dropout=dropout,
         )
 
+        # Vision Transformer
+        # self.vit_model = ViTransformer(
+        #     in_channels=in_channels,
+        #     frame_patch_size=frame_patch_size,
+        #     d_model=d_model,
+        #     num_layers=num_layers,
+        #     num_head=num_head,
+        #     dropout=dropout,
+        # )
+
         self.final = nn.Conv2d(
             in_channels=d_model,
             out_channels=hidden_channels,
@@ -333,6 +421,17 @@ class TemporalTransformer(nn.Module):
 
     def forward(self, x: torch.Tensor) -> dict:
         batch_size, num_channels, num_time, height, width = x.shape
+        if num_time != 12:
+            x = F.interpolate(
+                x,
+                size=(12, height, width),
+                mode="trilinear",
+                align_corners=True,
+            )
+            batch_size, num_channels, num_time, height, width = x.shape
+
+        # ViT embedding
+        # x_vit = self.vit_model(x)
 
         x = self.init_conv(x)
 
@@ -356,8 +455,13 @@ class TemporalTransformer(nn.Module):
             h=height,
             w=width,
         )
+
         # Reduce the time dimension
-        encoded = einops.reduce(encoded, 'b c t h w -> b c h w', 'mean')
+        encoded = einops.reduce(
+            encoded,
+            'b c t h w -> b c h w',
+            'mean',
+        )
 
         # Get the target classes
         l2 = self.final_l2(encoded)
@@ -378,7 +482,7 @@ if __name__ == '__main__':
     hidden_channels = 64
     num_head = 8
     d_model = 128
-    in_time = 12
+    in_time = 13
     height = 100
     width = 100
 
@@ -386,8 +490,6 @@ if __name__ == '__main__':
         (batch_size, num_channels, in_time, height, width),
         dtype=torch.float32,
     )
-    lon = torch.distributions.uniform.Uniform(-180, 180).sample([batch_size])
-    lat = torch.distributions.uniform.Uniform(-90, 90).sample([batch_size])
 
     model = TemporalTransformer(
         in_channels=num_channels,
@@ -396,8 +498,4 @@ if __name__ == '__main__':
         d_model=d_model,
         in_time=in_time,
     )
-    logits_hidden, classes_l2, classes_last = model(x, lon, lat)
-
-    assert logits_hidden.shape == (batch_size, d_model, height, width)
-    assert classes_l2.shape == (batch_size, 2, height, width)
-    assert classes_last.shape == (batch_size, 3, height, width)
+    output = model(x)
