@@ -1,6 +1,7 @@
 from .losses import (
-    FieldOfJunctionsLoss,
+    BoundaryLoss,
     LossPreprocessing,
     TanimotoComplementLoss,
     TanimotoDistLoss,
+    TopologyLoss,
 )
