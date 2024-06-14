@@ -695,8 +695,6 @@ class TowerUNet(nn.Module):
     ):
         super(TowerUNet, self).__init__()
 
-        attention_weights = None
-
         if dilations is None:
             dilations = [1, 2]
 
@@ -721,11 +719,15 @@ class TowerUNet(nn.Module):
         backbone_kwargs = dict(
             dropout=dropout,
             activation_type=activation_type,
-            attention_weights=attention_weights if pool_attention else None,
             res_block_type=res_block_type,
             batchnorm_first=batchnorm_first,
             pool_by_max=pool_by_max,
             concat_resid=concat_resid,
+            natten_num_heads=8,
+            natten_kernel_size=3,
+            natten_dilation=1,
+            natten_attn_drop=dropout,
+            natten_proj_drop=dropout,
         )
         self.down_a = cunn.PoolResidualConv(
             in_channels=channels[0],
@@ -733,6 +735,7 @@ class TowerUNet(nn.Module):
             dilations=dilations,
             repeat_resa_kernel=repeat_resa_kernel,
             pool_first=False,
+            attention_weights=attention_weights if pool_attention else None,
             **backbone_kwargs,
         )
         self.down_b = cunn.PoolResidualConv(
@@ -740,6 +743,7 @@ class TowerUNet(nn.Module):
             out_channels=channels[1],
             dilations=dilations,
             repeat_resa_kernel=repeat_resa_kernel,
+            attention_weights=attention_weights if pool_attention else None,
             **backbone_kwargs,
         )
         self.down_c = cunn.PoolResidualConv(
@@ -747,6 +751,7 @@ class TowerUNet(nn.Module):
             channels[2],
             dilations=dilations[:2],
             repeat_resa_kernel=repeat_resa_kernel,
+            attention_weights=attention_weights if pool_attention else None,
             **backbone_kwargs,
         )
         self.down_d = cunn.PoolResidualConv(
@@ -756,6 +761,7 @@ class TowerUNet(nn.Module):
             num_blocks=1,
             dilations=[1],
             repeat_resa_kernel=repeat_resa_kernel,
+            attention_weights=None,
             **backbone_kwargs,
         )
 
@@ -766,6 +772,9 @@ class TowerUNet(nn.Module):
             repeat_resa_kernel=repeat_resa_kernel,
             batchnorm_first=batchnorm_first,
             concat_resid=concat_resid,
+            natten_num_heads=8,
+            natten_attn_drop=dropout,
+            natten_proj_drop=dropout,
         )
         self.over_d = cunn.UNetUpBlock(
             in_channels=channels[3],
@@ -782,6 +791,8 @@ class TowerUNet(nn.Module):
             out_channels=up_channels,
             attention_weights=attention_weights,
             dilations=dilations[:2],
+            natten_kernel_size=3,
+            natten_dilation=1,
             **up_kwargs,
         )
         self.up_bu = cunn.UNetUpBlock(
@@ -789,6 +800,8 @@ class TowerUNet(nn.Module):
             out_channels=up_channels,
             attention_weights=attention_weights,
             dilations=dilations,
+            natten_kernel_size=5,
+            natten_dilation=2,
             **up_kwargs,
         )
         self.up_au = cunn.UNetUpBlock(
@@ -796,6 +809,8 @@ class TowerUNet(nn.Module):
             out_channels=up_channels,
             attention_weights=attention_weights,
             dilations=dilations,
+            natten_kernel_size=7,
+            natten_dilation=3,
             **up_kwargs,
         )
 
@@ -809,11 +824,16 @@ class TowerUNet(nn.Module):
             repeat_resa_kernel=repeat_resa_kernel,
             batchnorm_first=batchnorm_first,
             concat_resid=concat_resid,
+            natten_num_heads=8,
+            natten_attn_drop=dropout,
+            natten_proj_drop=dropout,
         )
         self.tower_c = cunn.TowerUNetBlock(
             backbone_side_channels=channels[2],
             backbone_down_channels=channels[3],
             dilations=dilations[:2],
+            natten_kernel_size=3,
+            natten_dilation=1,
             **tower_kwargs,
         )
         self.tower_b = cunn.TowerUNetBlock(
@@ -821,6 +841,8 @@ class TowerUNet(nn.Module):
             backbone_down_channels=channels[2],
             tower=True,
             dilations=dilations,
+            natten_kernel_size=5,
+            natten_dilation=2,
             **tower_kwargs,
         )
         self.tower_a = cunn.TowerUNetBlock(
@@ -828,6 +850,8 @@ class TowerUNet(nn.Module):
             backbone_down_channels=channels[1],
             tower=True,
             dilations=dilations,
+            natten_kernel_size=7,
+            natten_dilation=3,
             **tower_kwargs,
         )
 
@@ -869,7 +893,7 @@ class TowerUNet(nn.Module):
         Parameters
         ==========
         x
-            Shaped (B x C X T x H x W)
+            Shaped (B x C x T x H x W)
         temporal_encoding
             Shaped (B x C x H X W)
         """
