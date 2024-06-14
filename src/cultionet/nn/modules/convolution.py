@@ -1,8 +1,10 @@
 import typing as T
 
+import natten
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops.layers.torch import Rearrange
 
 from cultionet.enums import AttentionTypes, ResBlockTypes
 
@@ -313,7 +315,7 @@ class ResConvBlock2d(nn.Module):
                 )
             ]
 
-        self.block = nn.Sequential(*conv_layers)
+        self.block = nn.ModuleList(conv_layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.residual_conv is not None:
@@ -321,7 +323,10 @@ class ResConvBlock2d(nn.Module):
         else:
             residual = x
 
-        x = residual + self.block(x)
+        # Nested residual
+        for layer in self.block:
+            x = residual + layer(x)
+            residual = x
 
         return x
 
@@ -474,6 +479,11 @@ class ResidualAConv(nn.Module):
         activation_type: str = "SiLU",
         batchnorm_first: bool = False,
         concat_resid: bool = False,
+        natten_num_heads: int = 8,
+        natten_kernel_size: int = 3,
+        natten_dilation: int = 1,
+        natten_attn_drop: float = 0.0,
+        natten_proj_drop: float = 0.0,
     ):
         super(ResidualAConv, self).__init__()
 
@@ -483,6 +493,7 @@ class ResidualAConv(nn.Module):
         if self.attention_weights is not None:
             assert self.attention_weights in [
                 AttentionTypes.FRACTAL,
+                AttentionTypes.NATTEN,
                 AttentionTypes.SPATIAL_CHANNEL,
             ], "The attention method is not supported."
 
@@ -495,9 +506,26 @@ class ResidualAConv(nn.Module):
                     out_channels=out_channels,
                     activation_type=activation_type,
                 )
+            elif self.attention_weights == AttentionTypes.NATTEN:
+                self.attention_conv = nn.Sequential(
+                    Rearrange('b c h w -> b h w c'),
+                    nn.LayerNorm(out_channels),
+                    natten.NeighborhoodAttention2D(
+                        dim=out_channels,
+                        num_heads=natten_num_heads,
+                        kernel_size=natten_kernel_size,
+                        dilation=natten_dilation,
+                        qkv_bias=True,
+                        qk_scale=None,
+                        attn_drop=natten_attn_drop,
+                        proj_drop=natten_proj_drop,
+                    ),
+                    Rearrange('b h w c -> b c h w'),
+                )
 
-            self.gamma = nn.Parameter(torch.ones(1))
-            self.act = SetActivation(activation_type=activation_type)
+            if self.attention_weights != AttentionTypes.NATTEN:
+                self.gamma = nn.Parameter(torch.ones(1))
+                self.act = SetActivation(activation_type=activation_type)
 
         self.res_modules = nn.ModuleList(
             [
@@ -543,6 +571,10 @@ class ResidualAConv(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = x if self.skip is None else self.skip(x)
 
+        if self.attention_weights is not None:
+            residual = out
+
+        # Resunet-a block
         for layer in self.res_modules:
             out = out + layer(x)
 
@@ -550,9 +582,13 @@ class ResidualAConv(nn.Module):
             out = self.resid_connect(out)
 
         if self.attention_weights is not None:
-            attention = self.attention_conv(out)
-            attention = 1.0 + self.gamma * attention
-            out = self.act(out * attention)
+            if self.attention_weights == AttentionTypes.NATTEN:
+                out = residual + self.attention_conv(out)
+            else:
+                attention = self.attention_conv(out)
+                attention = 1.0 + self.gamma * attention
+                out = out * attention
+                out = self.act(out)
 
         return out
 
@@ -587,6 +623,11 @@ class PoolResidualConv(nn.Module):
         pool_by_max: bool = False,
         batchnorm_first: bool = False,
         concat_resid: bool = False,
+        natten_num_heads: int = 8,
+        natten_kernel_size: int = 3,
+        natten_dilation: int = 1,
+        natten_attn_drop: float = 0.0,
+        natten_proj_drop: float = 0.0,
     ):
         super(PoolResidualConv, self).__init__()
 
@@ -642,6 +683,11 @@ class PoolResidualConv(nn.Module):
                 activation_type=activation_type,
                 batchnorm_first=batchnorm_first,
                 concat_resid=concat_resid,
+                natten_num_heads=natten_num_heads,
+                natten_kernel_size=natten_kernel_size,
+                natten_dilation=natten_dilation,
+                natten_attn_drop=natten_attn_drop,
+                natten_proj_drop=natten_proj_drop,
             )
 
         self.dropout_layer = None
