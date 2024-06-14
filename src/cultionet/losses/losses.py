@@ -7,9 +7,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchmetrics
+from kornia.contrib import distance_transform
+
+try:
+    import torch_topological.nn as topnn
+except ImportError:
+    topnn = None
 
 from ..data.data import Data
-from . import topological
+
+# from . import topological
 
 
 class FieldOfJunctionsLoss(nn.Module):
@@ -81,103 +88,103 @@ class LossPreprocessing(nn.Module):
         return inputs, targets
 
 
-class TopologicalLoss(nn.Module):
-    """
-    Reference:
-        https://arxiv.org/abs/1906.05404
-        https://arxiv.org/pdf/1906.05404.pdf
-        https://github.com/HuXiaoling/TopoLoss/blob/5cb98177de50a3694f5886137ff7c6f55fd51493/topoloss_pytorch.py
-    """
+# class TopologicalLoss(nn.Module):
+#     """
+#     Reference:
+#         https://arxiv.org/abs/1906.05404
+#         https://arxiv.org/pdf/1906.05404.pdf
+#         https://github.com/HuXiaoling/TopoLoss/blob/5cb98177de50a3694f5886137ff7c6f55fd51493/topoloss_pytorch.py
+#     """
 
-    def __init__(self):
-        super(TopologicalLoss, self).__init__()
+#     def __init__(self):
+#         super(TopologicalLoss, self).__init__()
 
-    def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor, data: Data
-    ) -> torch.Tensor:
-        height = (
-            int(data.height) if data.batch is None else int(data.height[0])
-        )
-        width = int(data.width) if data.batch is None else int(data.width[0])
-        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
+#     def forward(
+#         self, inputs: torch.Tensor, targets: torch.Tensor, data: Data
+#     ) -> torch.Tensor:
+#         height = (
+#             int(data.height) if data.batch is None else int(data.height[0])
+#         )
+#         width = int(data.width) if data.batch is None else int(data.width[0])
+#         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
-        input_dims = inputs.shape[1]
-        # Probabilities are ether Sigmoid or Softmax
-        input_index = 0 if input_dims == 1 else 1
+#         input_dims = inputs.shape[1]
+#         # Probabilities are ether Sigmoid or Softmax
+#         input_index = 0 if input_dims == 1 else 1
 
-        inputs = self.gc(inputs, batch_size, height, width)
-        targets = self.gc(targets.unsqueeze(1), batch_size, height, width)
-        # Clone tensors before detaching from GPU
-        inputs_clone = inputs.clone()
-        targets_clone = targets.clone()
+#         inputs = self.gc(inputs, batch_size, height, width)
+#         targets = self.gc(targets.unsqueeze(1), batch_size, height, width)
+#         # Clone tensors before detaching from GPU
+#         inputs_clone = inputs.clone()
+#         targets_clone = targets.clone()
 
-        topo_cp_weight_map = np.zeros(
-            inputs_clone[:, input_index].shape, dtype="float32"
-        )
-        topo_cp_ref_map = np.zeros(
-            inputs_clone[:, input_index].shape, dtype="float32"
-        )
-        topo_mask = np.zeros(inputs_clone[:, input_index].shape, dtype="uint8")
+#         topo_cp_weight_map = np.zeros(
+#             inputs_clone[:, input_index].shape, dtype="float32"
+#         )
+#         topo_cp_ref_map = np.zeros(
+#             inputs_clone[:, input_index].shape, dtype="float32"
+#         )
+#         topo_mask = np.zeros(inputs_clone[:, input_index].shape, dtype="uint8")
 
-        # Detach from GPU for gudhi libary
-        inputs_clone = (
-            inputs_clone[:, input_index].float().cpu().detach().numpy()
-        )
-        targets_clone = targets_clone[:, 0].float().cpu().detach().numpy()
+#         # Detach from GPU for gudhi libary
+#         inputs_clone = (
+#             inputs_clone[:, input_index].float().cpu().detach().numpy()
+#         )
+#         targets_clone = targets_clone[:, 0].float().cpu().detach().numpy()
 
-        pd_lh, bcp_lh, dcp_lh, pairs_lh_pa = topological.critical_points(
-            inputs_clone
-        )
-        pd_gt, __, __, pairs_lh_gt = topological.critical_points(targets_clone)
+#         pd_lh, bcp_lh, dcp_lh, pairs_lh_pa = topological.critical_points(
+#             inputs_clone
+#         )
+#         pd_gt, __, __, pairs_lh_gt = topological.critical_points(targets_clone)
 
-        if pairs_lh_pa and pairs_lh_gt:
-            for batch in range(0, batch_size):
-                if (pd_lh[batch].size > 0) and (pd_gt[batch].size > 0):
-                    (
-                        __,
-                        idx_holes_to_fix,
-                        idx_holes_to_remove,
-                    ) = topological.compute_dgm_force(
-                        pd_lh[batch], pd_gt[batch], pers_thresh=0.03
-                    )
-                    (
-                        topo_cp_weight_map[batch],
-                        topo_cp_ref_map[batch],
-                        topo_mask[batch],
-                    ) = topological.set_topology_weights(
-                        likelihood=inputs_clone[batch],
-                        topo_cp_weight_map=topo_cp_weight_map[batch],
-                        topo_cp_ref_map=topo_cp_ref_map[batch],
-                        topo_mask=topo_mask[batch],
-                        bcp_lh=bcp_lh[batch],
-                        dcp_lh=dcp_lh[batch],
-                        idx_holes_to_fix=idx_holes_to_fix,
-                        idx_holes_to_remove=idx_holes_to_remove,
-                        height=inputs.shape[-2],
-                        width=inputs.shape[-1],
-                    )
+#         if pairs_lh_pa and pairs_lh_gt:
+#             for batch in range(0, batch_size):
+#                 if (pd_lh[batch].size > 0) and (pd_gt[batch].size > 0):
+#                     (
+#                         __,
+#                         idx_holes_to_fix,
+#                         idx_holes_to_remove,
+#                     ) = topological.compute_dgm_force(
+#                         pd_lh[batch], pd_gt[batch], pers_thresh=0.03
+#                     )
+#                     (
+#                         topo_cp_weight_map[batch],
+#                         topo_cp_ref_map[batch],
+#                         topo_mask[batch],
+#                     ) = topological.set_topology_weights(
+#                         likelihood=inputs_clone[batch],
+#                         topo_cp_weight_map=topo_cp_weight_map[batch],
+#                         topo_cp_ref_map=topo_cp_ref_map[batch],
+#                         topo_mask=topo_mask[batch],
+#                         bcp_lh=bcp_lh[batch],
+#                         dcp_lh=dcp_lh[batch],
+#                         idx_holes_to_fix=idx_holes_to_fix,
+#                         idx_holes_to_remove=idx_holes_to_remove,
+#                         height=inputs.shape[-2],
+#                         width=inputs.shape[-1],
+#                     )
 
-        topo_cp_weight_map = torch.tensor(
-            topo_cp_weight_map, dtype=inputs.dtype, device=inputs.device
-        )
-        topo_cp_ref_map = torch.tensor(
-            topo_cp_ref_map, dtype=inputs.dtype, device=inputs.device
-        )
-        topo_mask = torch.tensor(topo_mask, dtype=bool, device=inputs.device)
-        if not topo_mask.any():
-            topo_loss = (
-                (inputs[:, input_index] * topo_cp_weight_map) - topo_cp_ref_map
-            ) ** 2
-        else:
-            topo_loss = (
-                (
-                    inputs[:, input_index][topo_mask]
-                    * topo_cp_weight_map[topo_mask]
-                )
-                - topo_cp_ref_map[topo_mask]
-            ) ** 2
+#         topo_cp_weight_map = torch.tensor(
+#             topo_cp_weight_map, dtype=inputs.dtype, device=inputs.device
+#         )
+#         topo_cp_ref_map = torch.tensor(
+#             topo_cp_ref_map, dtype=inputs.dtype, device=inputs.device
+#         )
+#         topo_mask = torch.tensor(topo_mask, dtype=bool, device=inputs.device)
+#         if not topo_mask.any():
+#             topo_loss = (
+#                 (inputs[:, input_index] * topo_cp_weight_map) - topo_cp_ref_map
+#             ) ** 2
+#         else:
+#             topo_loss = (
+#                 (
+#                     inputs[:, input_index][topo_mask]
+#                     * topo_cp_weight_map[topo_mask]
+#                 )
+#                 - topo_cp_ref_map[topo_mask]
+#             ) ** 2
 
-        return topo_loss.mean()
+#         return topo_loss.mean()
 
 
 class TanimotoComplementLoss(nn.Module):
@@ -622,30 +629,52 @@ class BoundaryLoss(nn.Module):
     def __init__(self):
         super(BoundaryLoss, self).__init__()
 
+    def fill_distances(
+        self,
+        distances: torch.Tensor,
+        targets: torch.Tensor,
+    ):
+        dt = distance_transform(
+            F.pad(
+                (targets == 2).long().unsqueeze(1).float(),
+                pad=(
+                    21,
+                    21,
+                    21,
+                    21,
+                ),
+            ),
+            kernel_size=21,
+            h=0.1,
+        ).squeeze(dim=1)[:, 21:-21, 21:-21]
+        dt /= dt.max()
+
+        idist = torch.where(
+            targets == 2, 0, torch.where(targets == 1, distances, 0)
+        )
+        idist = torch.where(targets > 0, idist, dt)
+
+        return idist
+
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor, data: Data
+        self,
+        probs: torch.Tensor,
+        distances: torch.Tensor,
+        targets: torch.Tensor,
     ) -> torch.Tensor:
         """Performs a single forward pass.
 
         Args:
-            inputs: Predicted probabilities.
-            targets: Ground truth inverse distance transform, where distances
-                along edges are 1.
-            data: Data object used to extract dimensions.
+            probs: Predicted probabilities, shaped (B x H x W).
+            distances: Ground truth distance transform, shaped (B x H x W).
+            targets: Ground truth labels, shaped (B x H x W).
 
         Returns:
             Loss (float)
         """
-        height = (
-            int(data.height) if data.batch is None else int(data.height[0])
-        )
-        width = int(data.width) if data.batch is None else int(data.width[0])
-        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
+        distances = self.fill_distances(distances, targets)
 
-        inputs = self.gc(inputs.unsqueeze(1), batch_size, height, width)
-        targets = self.gc(targets.unsqueeze(1), batch_size, height, width)
-
-        return torch.einsum("bchw, bchw -> bchw", inputs, targets).mean()
+        return torch.einsum("bhw, bhw -> bhw", distances, 1.0 - probs).mean()
 
 
 class MultiScaleSSIMLoss(nn.Module):
@@ -688,5 +717,37 @@ class MultiScaleSSIMLoss(nn.Module):
         )
 
         loss = 1.0 - self.msssim(inputs, targets)
+
+        return loss
+
+
+class TopologyLoss(nn.Module):
+    def __init__(self):
+        super(TopologyLoss, self).__init__()
+
+        self.loss_func = topnn.SummaryStatisticLoss("total_persistence", p=2)
+        self.cubical = topnn.CubicalComplex(dim=3)
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Performs a single forward pass.
+
+        Args:
+            inputs: Predictions (probabilities) from model.
+            targets: Ground truth values.
+        """
+        persistence_information_target = self.cubical(targets)
+        persistence_information_target = [persistence_information_target[0]]
+
+        persistence_information = self.cubical(inputs)
+        persistence_information = [persistence_information[0]]
+
+        loss = self.loss_func(
+            persistence_information, persistence_information_target
+        )
 
         return loss
