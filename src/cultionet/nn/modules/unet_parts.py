@@ -105,6 +105,11 @@ class UNetUpBlock(nn.Module):
         batchnorm_first: bool = False,
         concat_resid: bool = False,
         resample_up: bool = True,
+        natten_num_heads: int = 8,
+        natten_kernel_size: int = 3,
+        natten_dilation: int = 1,
+        natten_attn_drop: float = 0.0,
+        natten_proj_drop: float = 0.0,
     ):
         super(UNetUpBlock, self).__init__()
 
@@ -132,6 +137,11 @@ class UNetUpBlock(nn.Module):
                 activation_type=activation_type,
                 batchnorm_first=batchnorm_first,
                 concat_resid=concat_resid,
+                natten_num_heads=natten_num_heads,
+                natten_kernel_size=natten_kernel_size,
+                natten_dilation=natten_dilation,
+                natten_attn_drop=natten_attn_drop,
+                natten_proj_drop=natten_proj_drop,
             )
 
     def forward(self, x: torch.Tensor, size: torch.Size) -> torch.Tensor:
@@ -158,6 +168,11 @@ class TowerUNetBlock(nn.Module):
         activation_type: str = "SiLU",
         batchnorm_first: bool = False,
         concat_resid: bool = False,
+        natten_num_heads: int = 8,
+        natten_kernel_size: int = 3,
+        natten_dilation: int = 1,
+        natten_attn_drop: float = 0.0,
+        natten_proj_drop: float = 0.0,
     ):
         super(TowerUNetBlock, self).__init__()
 
@@ -212,6 +227,11 @@ class TowerUNetBlock(nn.Module):
                 activation_type=activation_type,
                 batchnorm_first=batchnorm_first,
                 concat_resid=concat_resid,
+                natten_num_heads=natten_num_heads,
+                natten_kernel_size=natten_kernel_size,
+                natten_dilation=natten_dilation,
+                natten_attn_drop=natten_attn_drop,
+                natten_proj_drop=natten_proj_drop,
             )
 
     def forward(
