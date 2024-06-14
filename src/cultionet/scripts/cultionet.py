@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import argparse
-import ast
 import asyncio
 import builtins
 import json
@@ -503,7 +502,6 @@ def predict_image(args):
             else "nearest",
             compression=args.compression,
             is_transfer_model=args.process == CLISteps.PREDICT_TRANSFER,
-            refine_pt=ckpt_file.parent / "refine" / "refine.pt",
         )
 
         if args.delete_dataset:
@@ -720,10 +718,7 @@ def create_one_id(
 
     for grid_offset in bbox_offset_list:
 
-        if args.destination == "predict":
-            end_date = pd.to_datetime(args.end_date)
-            end_year = (end_date - pd.DateOffset(months=1)).year
-        else:
+        if args.destination != "predict":
             # Get the grid
             row_region_df = region_df.query(
                 f"{DataColumns.GEOID} == '{row_id}'"
@@ -813,11 +808,17 @@ def create_one_id(
             # Get the requested time slice
             ts_list = model_preprocessing.get_time_series_list(
                 vi_path,
-                end_year=end_year,
+                date_format=args.date_format,
+                start_date=pd.to_datetime(args.start_date)
+                if args.destination == "predict"
+                else None,
+                end_date=pd.to_datetime(args.end_date)
+                if args.destination == "predict"
+                else None,
+                end_year=end_year if args.destination != "predict" else None,
                 start_mmdd=config["start_mmdd"],
                 end_mmdd=config["end_mmdd"],
                 num_months=config["num_months"],
-                date_format=args.date_format,
             )
 
             if args.skip_index > 0:
@@ -1293,7 +1294,6 @@ def train_model(args):
         stochastic_weight_averaging_lr=args.stochastic_weight_averaging_lr,
         stochastic_weight_averaging_start=args.stochastic_weight_averaging_start,
         skip_train=args.skip_train,
-        refine_model=args.refine_model,
         finetune=args.finetune,
         strategy=args.strategy,
     )
