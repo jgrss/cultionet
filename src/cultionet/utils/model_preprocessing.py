@@ -56,11 +56,13 @@ class TrainInputs(object):
 
 def get_time_series_list(
     feature_path: Path,
-    end_year: T.Union[int, str],
-    start_mmdd: str,
-    end_mmdd: str,
-    num_months: int,
     date_format: str = '%Y%j',
+    start_date: T.Optional[pd.Timestamp] = None,
+    end_date: T.Optional[pd.Timestamp] = None,
+    end_year: T.Optional[T.Union[int, str]] = None,
+    start_mmdd: T.Optional[str] = None,
+    end_mmdd: T.Optional[str] = None,
+    num_months: T.Optional[int] = None,
 ) -> T.List[str]:
     """Gets a list of time series paths."""
     # Get the requested time slice
@@ -80,16 +82,22 @@ def get_time_series_list(
         index=list(image_dict.values()),
     )
 
-    end_date_stamp = pd.Timestamp(f"{end_year}-{end_mmdd}") + pd.DateOffset(
-        days=1
-    )
-    start_year = (end_date_stamp - pd.DateOffset(months=num_months)).year
-    start_date_stamp = pd.Timestamp(f"{start_year}-{start_mmdd}")
+    if (start_date is not None) and (end_date is not None):
+        start_date_stamp = start_date
+        end_date_stamp = end_date
+    else:
+        end_date_stamp = pd.Timestamp(
+            f"{end_year}-{end_mmdd}"
+        ) + pd.DateOffset(days=1)
+        start_year = (end_date_stamp - pd.DateOffset(months=num_months)).year
+        start_date_stamp = pd.Timestamp(f"{start_year}-{start_mmdd}")
+
     image_df = df.loc[start_date_stamp:end_date_stamp]
 
-    assert (
-        num_months <= len(image_df.index) <= num_months + 1
-    ), "The image list not the correct length."
+    if num_months is not None:
+        assert (
+            num_months <= len(image_df.index) <= num_months + 1
+        ), "The image list is not the correct length."
 
     # Slice the requested time series from the dataFrame
     ts_list = image_df.name.values.tolist()
