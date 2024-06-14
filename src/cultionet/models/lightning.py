@@ -12,6 +12,7 @@ import torchmetrics
 from lightning import LightningModule
 from torch.optim import lr_scheduler as optim_lr_scheduler
 
+from .. import losses as cnetlosses
 from .. import nn as cunn
 from ..data.data import Data
 from ..enums import (
@@ -21,8 +22,7 @@ from ..enums import (
     ResBlockTypes,
 )
 from ..layers.weights import init_attention_weights, init_conv_weights
-from ..losses import TanimotoComplementLoss, TanimotoDistLoss
-from .cultionet import CultioNet, GeoRefinement
+from .cultionet import CultioNet
 from .maskcrnn import (
     BFasterRCNN,
     ReshapeMaskData,
@@ -37,134 +37,12 @@ logging.getLogger("lightning").addHandler(logging.NullHandler())
 logging.getLogger("lightning").propagate = False
 logging.getLogger("lightning").setLevel(logging.ERROR)
 
-
-def scale_logits(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-    return x / t
-
-
-class RefineLitModel(LightningModule):
-    def __init__(
-        self,
-        in_features: int,
-        num_classes: int = 2,
-        learning_rate: float = 1e-3,
-        weight_decay: float = 0.01,
-        eps: float = 1e-4,
-        edge_class: int = 2,
-        class_counts: T.Optional[torch.Tensor] = None,
-        cultionet_ckpt: T.Optional[T.Union[Path, str]] = None,
-    ):
-        super(RefineLitModel, self).__init__()
-
-        self.save_hyperparameters()
-
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.eps = eps
-        self.edge_class = edge_class
-        self.class_counts = class_counts
-        self.cultionet_ckpt = cultionet_ckpt
-
-        self.cultionet_model = None
-        self.geo_refine_model = GeoRefinement(
-            in_features=in_features, out_channels=num_classes
-        )
-
-        self.configure_loss()
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    def forward(
-        self,
-        predictions: T.Dict[str, torch.Tensor],
-        batch: Data,
-        batch_idx: int = None,
-    ) -> T.Dict[str, torch.Tensor]:
-        return self.geo_refine_model(predictions, data=batch)
-
-    def set_true_labels(self, batch: Data) -> torch.Tensor:
-        # in case of multi-class, `true_crop` = 1, 2, etc.
-        true_crop = torch.where(
-            (batch.y > 0) & (batch.y != self.edge_class), 1, 0
-        ).long()
-
-        return true_crop
-
-    def calc_loss(
-        self,
-        batch: T.Union[Data, T.List],
-        predictions: T.Dict[str, torch.Tensor],
-    ):
-        true_crop = self.set_true_labels(batch)
-        # Predicted crop values are probabilities
-        loss = self.crop_loss(predictions["mask"], true_crop)
-
-        return loss
-
-    def training_step(
-        self, batch: Data, batch_idx: int = None, optimizer_idx: int = None
-    ):
-        """Executes one training step."""
-        # Apply inference with the main cultionet model
-        if (self.cultionet_ckpt is not None) and (
-            self.cultionet_model is None
-        ):
-            self.cultionet_model = CultionetLitModel.load_from_checkpoint(
-                checkpoint_path=str(self.cultionet_ckpt)
-            )
-            self.cultionet_model.to(self.device)
-            self.cultionet_model.eval()
-            self.cultionet_model.freeze()
-        with torch.no_grad():
-            predictions = self.cultionet_model(batch)
-
-        predictions = self(predictions, batch)
-        loss = self.calc_loss(batch, predictions)
-
-        metrics = {"loss": loss}
-        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
-
-        return metrics
-
-    def on_train_epoch_end(self, *args, **kwargs):
-        """Save the scaling parameters on training end."""
-        if self.logger.save_dir is not None:
-            model_file = Path(self.logger.save_dir) / "refine.pt"
-            if model_file.is_file():
-                model_file.unlink()
-            torch.save(self.geo_refine_model.state_dict(), model_file)
-
-    def configure_loss(self):
-        self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            list(self.geo_refine_model.parameters()),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay,
-            eps=self.eps,
-        )
-        lr_scheduler = optim_lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=20, eta_min=1e-5, last_epoch=-1
-        )
-
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": lr_scheduler,
-                "monitor": "loss",
-                "interval": "epoch",
-                "frequency": 1,
-            },
-        }
+torch.set_float32_matmul_precision("medium")
 
 
 class LightningModuleMixin(LightningModule):
     def __init__(self):
         super(LightningModuleMixin, self).__init__()
-
-        torch.set_float32_matmul_precision("high")
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -225,9 +103,6 @@ class LightningModuleMixin(LightningModule):
             predictions = self.forward(
                 batch, training=False, batch_idx=batch_idx
             )
-
-            if self.temperature_lit_model is not None:
-                predictions = self.temperature_lit_model(predictions, batch)
 
             if self.train_maskrcnn:
                 # Apply a forward pass on Mask RCNN
@@ -423,6 +298,14 @@ class LightningModuleMixin(LightningModule):
             mask=true_labels_dict["mask"],
         )
         loss = loss + crop_loss * weights["crop_loss"]
+
+        # Topology loss
+        # topo_loss = self.topo_loss(
+        #     predictions["edge"].squeeze(dim=1),
+        #     true_labels_dict["true_edge"],
+        # )
+        # weights["topo_loss"] = 0.1
+        # loss = loss + topo_loss * weights["topo_loss"]
 
         # if predictions["crop_type"] is not None:
         #     # Upstream (deep) loss on crop-type
@@ -804,6 +687,8 @@ class LightningModuleMixin(LightningModule):
         # Crop mask loss
         self.crop_loss = self.loss_dict[self.loss_name].get("classification")
 
+        # self.topo_loss = self.loss_dict[LossTypes.TOPOLOGY].get("classification")
+
         if self.deep_supervision:
             self.dist_loss_deep_b = self.loss_dict[self.loss_name].get(
                 "regression"
@@ -933,7 +818,6 @@ class CultionetLitTransferModel(LightningModuleMixin):
         batchnorm_first: bool = False,
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
-        temperature_lit_model: T.Optional[GeoRefinement] = None,
         scale_pos_weight: bool = False,
         save_batch_val_metrics: bool = False,
         finetune: bool = False,
@@ -954,7 +838,6 @@ class CultionetLitTransferModel(LightningModuleMixin):
         self.num_classes = num_classes
         self.in_time = in_time
         self.class_counts = class_counts
-        self.temperature_lit_model = temperature_lit_model
         self.scale_pos_weight = scale_pos_weight
         self.save_batch_val_metrics = save_batch_val_metrics
         self.deep_supervision = deep_supervision
@@ -967,13 +850,23 @@ class CultionetLitTransferModel(LightningModuleMixin):
             self.edge_class = num_classes
 
         self.loss_dict = {
+            LossTypes.BOUNDARY: {
+                "classification": cnetlosses.BoundaryLoss(),
+            },
             LossTypes.TANIMOTO_COMPLEMENT: {
-                "classification": TanimotoComplementLoss(),
-                "regression": TanimotoComplementLoss(one_hot_targets=False),
+                "classification": cnetlosses.TanimotoComplementLoss(),
+                "regression": cnetlosses.TanimotoComplementLoss(
+                    one_hot_targets=False
+                ),
             },
             LossTypes.TANIMOTO: {
-                "classification": TanimotoDistLoss(),
-                "regression": TanimotoDistLoss(one_hot_targets=False),
+                "classification": cnetlosses.TanimotoDistLoss(),
+                "regression": cnetlosses.TanimotoDistLoss(
+                    one_hot_targets=False
+                ),
+            },
+            LossTypes.TOPOLOGY: {
+                "classification": cnetlosses.TopologyLoss(),
             },
         }
 
@@ -1117,7 +1010,6 @@ class CultionetLitModel(LightningModuleMixin):
         batchnorm_first: bool = False,
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
-        temperature_lit_model: T.Optional[GeoRefinement] = None,
         scale_pos_weight: bool = False,
         save_batch_val_metrics: bool = False,
         train_maskrcnn: bool = False,
@@ -1140,7 +1032,6 @@ class CultionetLitModel(LightningModuleMixin):
         self.num_classes = num_classes
         self.in_time = in_time
         self.class_counts = class_counts
-        self.temperature_lit_model = temperature_lit_model
         self.scale_pos_weight = scale_pos_weight
         self.save_batch_val_metrics = save_batch_val_metrics
         self.deep_supervision = deep_supervision
@@ -1153,13 +1044,23 @@ class CultionetLitModel(LightningModuleMixin):
             self.edge_class = num_classes
 
         self.loss_dict = {
+            LossTypes.BOUNDARY: {
+                "classification": cnetlosses.BoundaryLoss(),
+            },
             LossTypes.TANIMOTO_COMPLEMENT: {
-                "classification": TanimotoComplementLoss(),
-                "regression": TanimotoComplementLoss(one_hot_targets=False),
+                "classification": cnetlosses.TanimotoComplementLoss(),
+                "regression": cnetlosses.TanimotoComplementLoss(
+                    one_hot_targets=False
+                ),
             },
             LossTypes.TANIMOTO: {
-                "classification": TanimotoDistLoss(),
-                "regression": TanimotoDistLoss(one_hot_targets=False),
+                "classification": cnetlosses.TanimotoDistLoss(),
+                "regression": cnetlosses.TanimotoDistLoss(
+                    one_hot_targets=False
+                ),
+            },
+            LossTypes.TOPOLOGY: {
+                "classification": cnetlosses.TopologyLoss(),
             },
         }
 
