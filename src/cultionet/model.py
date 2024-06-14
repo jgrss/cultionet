@@ -33,16 +33,10 @@ from .enums import (
     AttentionTypes,
     LearningRateSchedulers,
     LossTypes,
-    ModelNames,
     ModelTypes,
     ResBlockTypes,
 )
-from .models.cultionet import GeoRefinement
-from .models.lightning import (
-    CultionetLitModel,
-    CultionetLitTransferModel,
-    RefineLitModel,
-)
+from .models.lightning import CultionetLitModel, CultionetLitTransferModel
 from .utils.logging import set_color_logger
 from .utils.normalize import NormValues
 from .utils.reshape import ModelOutputs
@@ -112,7 +106,6 @@ class CultionetParams:
     )
     model_pruning: bool = attr.ib(default=False)
     skip_train: bool = attr.ib(default=False)
-    refine_model: bool = attr.ib(default=False)
     finetune: bool = attr.ib(default=False)
     strategy: str = attr.ib(converter=str, default="ddp")
 
@@ -327,82 +320,6 @@ def fit(cultionet_params: CultionetParams) -> None:
                 else None,
             )
 
-        if cultionet_params.refine_model:
-            refine_data_module = EdgeDataModule(
-                train_ds=cultionet_params.dataset,
-                batch_size=cultionet_params.batch_size,
-                num_workers=cultionet_params.load_batch_workers,
-                shuffle=True,
-                # For each epoch, train on a random
-                # subset of 50% of the data.
-                sampler=EpochRandomSampler(
-                    cultionet_params.dataset,
-                    num_samples=int(len(cultionet_params.dataset) * 0.5),
-                ),
-            )
-            refine_ckpt_file = (
-                cultionet_params.ckpt_file.parent
-                / "refine"
-                / cultionet_params.ckpt_file.name
-            )
-            refine_ckpt_file.parent.mkdir(parents=True, exist_ok=True)
-            # refine checkpoints
-            refine_cb_train_loss = ModelCheckpoint(
-                dirpath=refine_ckpt_file.parent,
-                filename=refine_ckpt_file.stem,
-                save_last=True,
-                save_top_k=1,
-                mode="min",
-                monitor="loss",
-                every_n_train_steps=0,
-                every_n_epochs=1,
-            )
-            # Early stopping
-            refine_early_stop_callback = EarlyStopping(
-                monitor="loss",
-                min_delta=0.1,
-                patience=5,
-                mode="min",
-                check_on_train_epoch_end=False,
-            )
-            refine_callbacks = [
-                lr_monitor,
-                refine_cb_train_loss,
-                refine_early_stop_callback,
-            ]
-            refine_trainer = L.Trainer(
-                default_root_dir=str(refine_ckpt_file.parent),
-                callbacks=refine_callbacks,
-                enable_checkpointing=True,
-                gradient_clip_val=cultionet_params.gradient_clip_val,
-                gradient_clip_algorithm="value",
-                check_val_every_n_epoch=1,
-                min_epochs=1
-                if cultionet_params.epochs >= 1
-                else cultionet_params.epochs,
-                max_epochs=10,
-                precision=32,
-                devices=cultionet_params.devices,
-                accelerator=cultionet_params.device,
-                log_every_n_steps=50,
-                deterministic=False,
-                benchmark=False,
-            )
-            # Calibrate the logits
-            refine_model = RefineLitModel(
-                in_features=data_module.train_ds.num_features,
-                num_classes=cultionet_params.num_classes,
-                edge_class=cultionet_params.edge_class,
-                class_counts=cultionet_params.class_counts,
-                cultionet_ckpt=cultionet_params.ckpt_file,
-            )
-            refine_trainer.fit(
-                model=refine_model,
-                datamodule=refine_data_module,
-                ckpt_path=refine_ckpt_file
-                if refine_ckpt_file.is_file()
-                else None,
-            )
         if cultionet_params.test_dataset is not None:
             trainer.test(
                 model=lit_model,
@@ -503,7 +420,6 @@ def predict_lightning(
     resampling: str = "nearest",
     compression: str = "lzw",
     is_transfer_model: bool = False,
-    refine_pt: T.Optional[Path] = None,
 ):
     reference_image = Path(reference_image)
     out_path = Path(out_path)
@@ -543,17 +459,6 @@ def predict_lightning(
         cultionet_lit_model = CultionetLitModel.load_from_checkpoint(
             checkpoint_path=str(ckpt_file)
         )
-
-    geo_refine_model = None
-    if refine_pt is not None:
-        if refine_pt.is_file():
-            geo_refine_model = GeoRefinement(
-                in_features=dataset.num_features, out_channels=num_classes
-            )
-            geo_refine_model.load_state_dict(torch.load(refine_pt))
-            geo_refine_model.eval()
-
-    setattr(cultionet_lit_model, "temperature_lit_model", geo_refine_model)
 
     # Make predictions
     trainer.predict(
