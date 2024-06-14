@@ -211,8 +211,8 @@ train_predict:
     long: attention-weights
     help: The attention weights
     kwargs:
-      default: 'spatial_channel'
-      choices: ['spatial_channel', 'fractal']
+      default: !!null
+      choices: ['fractal', 'natten', 'spatial_channel']
   hidden_channels:
     short: ''
     long: hidden-channels
@@ -552,12 +552,6 @@ train:
     short: ''
     long: save-batch-val-metrics
     help: Whether to save batch validation metrics
-    kwargs:
-      action: store_true
-  refine_model:
-    short: ''
-    long: refine-model
-    help: Whether to refine a trained model
     kwargs:
       action: store_true
   skip_train:
