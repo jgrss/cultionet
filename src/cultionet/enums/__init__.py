@@ -21,6 +21,7 @@ class DataColumns(StrEnum):
 
 class AttentionTypes(StrEnum):
     FRACTAL = "fractal"
+    NATTEN = "natten"
     SPATIAL_CHANNEL = "spatial_channel"
 
 
@@ -49,8 +50,10 @@ class Destinations(StrEnum):
 
 
 class LossTypes(StrEnum):
+    BOUNDARY = "BoundaryLoss"
     TANIMOTO_COMPLEMENT = "TanimotoComplementLoss"
     TANIMOTO = "TanimotoDistLoss"
+    TOPOLOGY = "TopologyLoss"
 
 
 class ModelNames(StrEnum):
