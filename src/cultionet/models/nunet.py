@@ -878,7 +878,7 @@ class TowerUNet(nn.Module):
                 resample_factor=4,
             )
 
-        # Initialise weights
+        # Initialize weights
         self.apply(init_conv_weights)
 
     def forward(

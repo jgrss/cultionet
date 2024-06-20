@@ -1,4 +1,3 @@
-import enum
 import typing as T
 from abc import abstractmethod
 from dataclasses import dataclass, replace
@@ -8,12 +7,13 @@ import einops
 import joblib
 import numpy as np
 import torch
+from frozendict import frozendict
 from torchvision.transforms import InterpolationMode, v2
 from torchvision.transforms.v2 import functional as VF
 from tsaug import AddNoise, Drift, TimeWarp
 
 from ..data.data import Data
-from .augmenter_utils import augment_time, roll_time
+from .augmenter_utils import augment_time, generate_perlin_noise_3d, roll_time
 
 
 @dataclass
@@ -28,7 +28,7 @@ class AugmenterArgs:
     kwargs: dict
 
 
-class AugmenterModule(object):
+class AugmenterModule:
     """Prepares, augments, and finalizes data."""
 
     prefix: str = "data_"
@@ -162,6 +162,30 @@ class Roll(AugmenterModule):
         return cdata
 
 
+class PerlinNoise(AugmenterModule):
+    def __init__(self):
+        self.name_ = "perlin"
+
+    def forward(
+        self,
+        cdata: Data,
+        aug_args: AugmenterArgs = None,
+    ) -> Data:
+        res = aug_args.rng.choice([2, 5, 10])
+        noise = generate_perlin_noise_3d(
+            shape=cdata.x.shape[2:],
+            res=(1, res, res),
+            tileable=(False, False, False),
+            out_range=(-0.03, 0.03),
+            rng=aug_args.rng,
+        )
+
+        noise = einops.rearrange(noise, 't h w -> 1 1 t h w')
+        cdata.x = cdata.x + noise
+
+        return cdata
+
+
 class Rotate(AugmenterModule):
     def __init__(self, deg: int):
         self.name_ = f"rotate-{deg}"
@@ -234,10 +258,10 @@ class RandomCropResize(AugmenterModule):
         aug_args: AugmenterArgs = None,
     ) -> DataCopies:
 
-        div = np.random.choice([2, 4])
+        div = aug_args.rng.choice([2, 4])
         size = (cdata.y.shape[-2] // div, cdata.y.shape[-1] // div)
 
-        random_seed = np.random.randint(2147483647)
+        random_seed = aug_args.rng.integers(low=0, high=2147483647)
 
         x = einops.rearrange(cdata.x, 'b c t h w -> b t c h w')
         x = self.random_crop(
@@ -332,26 +356,26 @@ class NoAugmentation(AugmenterModule):
         return cdata
 
 
-class AugmenterMapping(enum.Enum):
-    """Key: Augmenter mappings"""
+AUGMENTER_METHODS = frozendict(
+    tswarp=AugmentTimeWarp(name="tswarp"),
+    tsnoise=AugmentAddTimeNoise(),
+    tsdrift=AugmentTimeDrift(),
+    tspeaks=AugmentTimeWarp(name="tspeaks"),
+    rot90=Rotate(deg=90),
+    rot180=Rotate(deg=180),
+    rot270=Rotate(deg=270),
+    roll=Roll(),
+    fliplr=Flip(direction="fliplr"),
+    flipud=Flip(direction="flipud"),
+    gaussian=GaussianBlur(sigma=(0.2, 0.5)),
+    saltpepper=SaltAndPepperNoise(sigma=0.01),
+    cropresize=RandomCropResize(),
+    perlin=PerlinNoise(),
+    none=NoAugmentation(),
+)
 
-    tswarp = AugmentTimeWarp(name="tswarp")
-    tsnoise = AugmentAddTimeNoise()
-    tsdrift = AugmentTimeDrift()
-    tspeaks = AugmentTimeWarp("tspeaks")
-    rot90 = Rotate(deg=90)
-    rot180 = Rotate(deg=180)
-    rot270 = Rotate(deg=270)
-    roll = Roll()
-    fliplr = Flip(direction="fliplr")
-    flipud = Flip(direction="flipud")
-    gaussian = GaussianBlur(sigma=(0.2, 0.5))
-    saltpepper = SaltAndPepperNoise(sigma=0.01)
-    cropresize = RandomCropResize()
-    none = NoAugmentation()
 
-
-class AugmenterBase(object):
+class AugmenterBase:
     def __init__(
         self,
         augmentations: T.Sequence[str],
@@ -365,7 +389,7 @@ class AugmenterBase(object):
 
     def _init_augmenters(self):
         for augmentation in self.augmentations:
-            self.augmenters_.append(AugmenterMapping[augmentation].value)
+            self.augmenters_.append(AUGMENTER_METHODS[augmentation])
 
     def update_aug_args(self, **kwargs):
         self.aug_args = replace(self.aug_args, **kwargs)
@@ -393,10 +417,8 @@ class Augmenters(AugmenterBase):
                 `torch_geometric.data.Data` object.
 
     Example:
-        >>> aug = Augmenters(augmentations=['tswarp'])
-        >>>
-        >>> for method in aug:
-        >>>     method(ldata, aug_args=aug.aug_args)
+        >>> augmenters = Augmenters(augmentations=['tswarp'])
+        >>> ldata = augmenters(ldata)
     """
 
     def __init__(self, **kwargs):
@@ -404,3 +426,12 @@ class Augmenters(AugmenterBase):
 
     def __iter__(self):
         yield from self.augmenters_
+
+    def __call__(self, batch: Data) -> Data:
+        return self.apply(batch)
+
+    def apply(self, batch: Data) -> Data:
+        for augmenter in self:
+            batch = augmenter(batch, aug_args=self.aug_args)
+
+        return batch

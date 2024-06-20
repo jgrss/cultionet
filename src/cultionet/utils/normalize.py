@@ -73,14 +73,6 @@ class NormValues:
         z = (x - μ) / σ
         """
         batch_copy = batch.copy()
-
-        # if (self.lower_bound is not None) and (self.upper_bound is not None):
-        #     batch_copy.x = (batch_copy.x - self.lower_bound) / self.upper_bound
-        #     # Get a sigmoid transfer of the re-scaled reflectance values.
-        #     batch_copy.x = torch.exp(batch_copy.x * 5.0 - 1)
-        #     batch_copy.x = batch_copy.x / (batch_copy.x + 1.0)
-
-        # else:
         batch_copy.x = (
             batch_copy.x - self.dataset_mean.to(device=batch_copy.x.device)
         ) / self.dataset_std.to(device=batch_copy.x.device)

@@ -17,7 +17,7 @@ from scipy.ndimage import label as nd_label
 from skimage.measure import regionprops
 from threadpoolctl import threadpool_limits
 
-from ..augment.augmenters import AugmenterMapping
+from ..augment.augmenters import AUGMENTER_METHODS
 from ..utils.logging import set_color_logger
 from .data import Data, LabeledData
 from .store import BatchStore
@@ -46,7 +46,7 @@ def is_grid_processed(
 
     batches_stored = []
     for aug in transforms:
-        aug_method = AugmenterMapping[aug].value
+        aug_method = AUGMENTER_METHODS[aug]
         train_id = uid_format.format(
             REGION_ID=region,
             START_DATE=start_date,
@@ -701,7 +701,7 @@ def create_train_batch(
 
         # FIXME: this doesn't support augmentations
         for aug in transforms:
-            aug_method = AugmenterMapping[aug].value
+            aug_method = AUGMENTER_METHODS[aug]
             train_id = uid_format.format(
                 REGION_ID=region,
                 START_DATE=start_date,

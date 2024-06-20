@@ -740,6 +740,10 @@ class TopologyLoss(nn.Module):
             inputs: Predictions (probabilities) from model.
             targets: Ground truth values.
         """
+        if mask is None:
+            targets = targets * mask
+            inputs = inputs * mask
+
         persistence_information_target = self.cubical(targets)
         persistence_information_target = [persistence_information_target[0]]
 
@@ -749,5 +753,73 @@ class TopologyLoss(nn.Module):
         loss = self.loss_func(
             persistence_information, persistence_information_target
         )
+
+        return loss
+
+
+class ClassBalancedMSELoss(nn.Module):
+    r"""
+    References:
+        @article{xia_etal_2024,
+            title={Crop field extraction from high resolution remote sensing images based on semantic edges and spatial structure map},
+            author={Xia, Liegang and Liu, Ruiyan and Su, Yishao and Mi, Shulin and Yang, Dezhi and Chen, Jun and Shen, Zhanfeng},
+            journal={Geocarto International},
+            volume={39},
+            number={1},
+            pages={2302176},
+            year={2024},
+            publisher={Taylor \& Francis}
+        }
+
+        https://github.com/Adillwma/ACB_MSE
+    """
+
+    def __init__(self):
+        super(ClassBalancedMSELoss, self).__init__()
+
+        self.mse_loss = nn.MSELoss(reduction="mean")
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Args:
+            inputs: Predicted probabilities, shaped (B x C x H x W).
+            targets: Ground truth values, shaped (B x C x H x W).
+            mask: Shaped (B x C x H x W).
+        """
+        if mask is not None:
+            neg_mask = (targets == 0) & (mask != 0)
+            pos_mask = (targets == 1) & (mask != 0)
+            target_count = mask.sum()
+        else:
+            neg_mask = targets == 0
+            pos_mask = ~neg_mask
+            target_count = targets.nelement()
+
+        targets_neg = targets[neg_mask]
+        targets_pos = targets[pos_mask]
+
+        inputs_neg = inputs[neg_mask]
+        inputs_pos = inputs[pos_mask]
+
+        beta = targets_pos.sum() / target_count
+
+        neg_loss = self.mse_loss(
+            inputs_neg, targets_neg.to(dtype=inputs.dtype)
+        )
+        pos_loss = self.mse_loss(
+            inputs_pos, targets_pos.to(dtype=inputs.dtype)
+        )
+
+        if torch.isnan(neg_loss):
+            neg_loss = 0.0
+        if torch.isnan(pos_loss):
+            pos_loss = 0.0
+
+        loss = beta * neg_loss + (1.0 - beta) * pos_loss
 
         return loss

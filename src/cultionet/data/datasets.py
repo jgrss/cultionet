@@ -91,6 +91,7 @@ class EdgeDataset(SpatialDataset):
             'gaussian',
             'saltpepper',
             'cropresize',
+            'perlin',
         ]
 
         self.data_list_ = None
@@ -421,11 +422,15 @@ class EdgeDataset(SpatialDataset):
                     batch.props = regionprops(batch.segments)
 
                 # Create the augmenter object
-                augmenters = Augmenters(augmentations=[aug_name])
+                aug_modules = Augmenters(
+                    # NOTE: apply a single augmenter
+                    # TODO: could apply a series of augmenters
+                    augmentations=[aug_name],
+                    rng=self.rng,
+                )
 
                 # Apply the object
-                augmenter = augmenters.augmenters_[0]
-                batch = augmenter(batch, aug_args=augmenters.aug_args)
+                batch = aug_modules(batch)
                 batch.segments = None
                 batch.props = None
 

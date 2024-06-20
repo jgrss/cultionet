@@ -18,6 +18,7 @@ from ..data.data import Data
 from ..enums import (
     LearningRateSchedulers,
     LossTypes,
+    ModelNames,
     ModelTypes,
     ResBlockTypes,
 )
@@ -299,13 +300,25 @@ class LightningModuleMixin(LightningModule):
         )
         loss = loss + crop_loss * weights["crop_loss"]
 
-        # Topology loss
-        # topo_loss = self.topo_loss(
-        #     predictions["edge"].squeeze(dim=1),
-        #     true_labels_dict["true_edge"],
-        # )
-        # weights["topo_loss"] = 0.1
-        # loss = loss + topo_loss * weights["topo_loss"]
+        if self.is_transfer_model:
+            # Class-balanced MSE loss
+            cmse_loss = self.cmse_loss(
+                predictions["edge"].squeeze(dim=1),
+                true_labels_dict["true_edge"],
+                mask=None
+                if true_labels_dict["mask"] is None
+                else true_labels_dict["mask"].squeeze(dim=1),
+            )
+            weights["cmse_loss"] = 0.1
+            loss = loss + cmse_loss * weights["cmse_loss"]
+
+            # Topology loss
+            topo_loss = self.topo_loss(
+                predictions["edge"].squeeze(dim=1),
+                true_labels_dict["true_edge"],
+            )
+            weights["topo_loss"] = 0.1
+            loss = loss + topo_loss * weights["topo_loss"]
 
         # if predictions["crop_type"] is not None:
         #     # Upstream (deep) loss on crop-type
@@ -687,7 +700,13 @@ class LightningModuleMixin(LightningModule):
         # Crop mask loss
         self.crop_loss = self.loss_dict[self.loss_name].get("classification")
 
-        # self.topo_loss = self.loss_dict[LossTypes.TOPOLOGY].get("classification")
+        if self.is_transfer_model:
+            self.cmse_loss = self.loss_dict[LossTypes.CLASS_BALANCED_MSE].get(
+                "classification"
+            )
+            self.topo_loss = self.loss_dict[LossTypes.TOPOLOGY].get(
+                "classification"
+            )
 
         if self.deep_supervision:
             self.dist_loss_deep_b = self.loss_dict[self.loss_name].get(
@@ -809,7 +828,7 @@ class CultionetLitTransferModel(LightningModuleMixin):
         steplr_step_size: int = 5,
         weight_decay: float = 1e-3,
         eps: float = 1e-4,
-        ckpt_name: str = "last_transfer",
+        ckpt_name: str = ModelNames.CKPT_TRANSFER_NAME.replace(".ckpt", ""),
         model_name: str = "cultionet_transfer",
         deep_supervision: bool = False,
         pool_attention: bool = False,
@@ -820,7 +839,7 @@ class CultionetLitTransferModel(LightningModuleMixin):
         edge_class: T.Optional[int] = None,
         scale_pos_weight: bool = False,
         save_batch_val_metrics: bool = False,
-        finetune: bool = False,
+        finetune: T.Optional[str] = None,
     ):
         super(CultionetLitTransferModel, self).__init__()
 
@@ -840,6 +859,7 @@ class CultionetLitTransferModel(LightningModuleMixin):
         self.class_counts = class_counts
         self.scale_pos_weight = scale_pos_weight
         self.save_batch_val_metrics = save_batch_val_metrics
+        self.finetune = finetune
         self.deep_supervision = deep_supervision
         self.train_maskrcnn = None
 
@@ -852,6 +872,9 @@ class CultionetLitTransferModel(LightningModuleMixin):
         self.loss_dict = {
             LossTypes.BOUNDARY: {
                 "classification": cnetlosses.BoundaryLoss(),
+            },
+            LossTypes.CLASS_BALANCED_MSE: {
+                "classification": cnetlosses.ClassBalancedMSELoss(),
             },
             LossTypes.TANIMOTO_COMPLEMENT: {
                 "classification": cnetlosses.TanimotoComplementLoss(),
@@ -872,93 +895,103 @@ class CultionetLitTransferModel(LightningModuleMixin):
 
         self.cultionet_model = CultionetLitModel.load_from_checkpoint(
             checkpoint_path=str(pretrained_ckpt_file)
-        )
+        ).cultionet_model
 
-        # Freeze all parameters
-        self.cultionet_model.freeze()
-        self.cultionet_model = self.cultionet_model.cultionet_model
+        # Freeze all parameters if not finetuning the full model
+        if self.finetune != "all":
+            for name, param in self.cultionet_model.named_parameters():
+                param.requires_grad = False
 
-        if finetune:
-            self.cultionet_model.mask_model.final_a = self.unfreeze_layer(
-                self.cultionet_model.mask_model.final_a
-            )
-            if self.deep_supervision:
-                self.cultionet_model.mask_model.final_b = self.unfreeze_layer(
-                    self.cultionet_model.mask_model.final_b
+            if self.finetune == "fc":
+                # Unfreeze fully connected layers
+                for name, param in self.cultionet_model.named_parameters():
+                    if name.startswith("temporal_encoder.final_"):
+                        param.requires_grad = True
+                    if name.startswith("mask_model.final_"):
+                        param.requires_grad = True
+
+            else:
+                # Set new final layers to learn new weights
+                # Level 2 level (non-crop; crop)
+                self.cultionet_model.temporal_encoder.final_l2 = cunn.FinalConv2dDropout(
+                    hidden_dim=self.cultionet_model.temporal_encoder.final_l2.net[
+                        0
+                    ]
+                    .seq.block[0]
+                    .seq[0]
+                    .in_channels,
+                    dim_factor=1,
+                    activation_type=activation_type,
+                    final_activation=nn.Softmax(dim=1),
+                    num_classes=num_classes,
                 )
-                self.cultionet_model.mask_model.final_c = self.unfreeze_layer(
-                    self.cultionet_model.mask_model.final_c
+                self.cultionet_model.temporal_encoder.final_l2.apply(
+                    init_attention_weights
                 )
-        else:
-            # Set new final layers to learn new weights
-            # Level 2 level (non-crop; crop)
-            self.cultionet_model.temporal_encoder.final_l2 = cunn.FinalConv2dDropout(
-                hidden_dim=self.cultionet_model.temporal_encoder.final_l2.net[
-                    0
-                ]
-                .seq.block[0]
-                .seq[0]
-                .in_channels,
-                dim_factor=1,
-                activation_type=activation_type,
-                final_activation=nn.Softmax(dim=1),
-                num_classes=num_classes,
-            )
-            self.cultionet_model.temporal_encoder.final_l2.apply(
-                init_attention_weights
-            )
-            # Last level (non-crop; crop; edges)
-            self.cultionet_model.temporal_encoder.final_l3 = cunn.FinalConv2dDropout(
-                hidden_dim=self.cultionet_model.temporal_encoder.final_l3.net[
-                    0
-                ]
-                .seq.block[0]
-                .seq[0]
-                .in_channels,
-                dim_factor=1,
-                activation_type=activation_type,
-                final_activation=nn.Softmax(dim=1),
-                num_classes=num_classes + 1,
-            )
-            self.cultionet_model.temporal_encoder.final_l3.apply(
-                init_attention_weights
-            )
-            # self.cultionet_model.temporal_encoder.final = nn.Conv2d(
-            #     in_channels=self.cultionet_model.temporal_encoder.final.in_channels,
-            #     out_channels=self.cultionet_model.temporal_encoder.final.out_channels,
-            #     kernel_size=self.cultionet_model.temporal_encoder.final.kernel_size,
-            #     padding=self.cultionet_model.temporal_encoder.final.padding,
-            # )
-            # self.cultionet_model.temporal_encoder.final.apply(
-            #     init_attention_weights
-            # )
+                # Last level (non-crop; crop; edges)
+                self.cultionet_model.temporal_encoder.final_l3 = cunn.FinalConv2dDropout(
+                    hidden_dim=self.cultionet_model.temporal_encoder.final_l3.net[
+                        0
+                    ]
+                    .seq.block[0]
+                    .seq[0]
+                    .in_channels,
+                    dim_factor=1,
+                    activation_type=activation_type,
+                    final_activation=nn.Softmax(dim=1),
+                    num_classes=num_classes + 1,
+                )
+                self.cultionet_model.temporal_encoder.final_l3.apply(
+                    init_attention_weights
+                )
+                self.cultionet_model.temporal_encoder.final = nn.Conv2d(
+                    in_channels=self.cultionet_model.temporal_encoder.final.in_channels,
+                    out_channels=self.cultionet_model.temporal_encoder.final.out_channels,
+                    kernel_size=self.cultionet_model.temporal_encoder.final.kernel_size,
+                    padding=self.cultionet_model.temporal_encoder.final.padding,
+                )
+                self.cultionet_model.temporal_encoder.final.apply(
+                    init_attention_weights
+                )
 
-            # Update the post-UNet layer with trainable parameters
-            self.cultionet_model.mask_model.final_a = cunn.TowerUNetFinal(
-                in_channels=self.cultionet_model.mask_model.final_a.expand.in_channels,
-                num_classes=num_classes,
-                mask_activation=nn.Softmax(dim=1),
-            )
-            self.cultionet_model.mask_model.final_a.apply(init_conv_weights)
-            if self.deep_supervision:
-                self.cultionet_model.mask_model.final_b = cunn.TowerUNetFinal(
-                    in_channels=self.cultionet_model.mask_model.final_b.expand.in_channels,
+                # Update the post-UNet layer with trainable parameters
+                self.cultionet_model.mask_model.final_a = cunn.TowerUNetFinal(
+                    in_channels=self.cultionet_model.mask_model.final_a.expand.seq[
+                        0
+                    ].in_channels,
                     num_classes=num_classes,
                     mask_activation=nn.Softmax(dim=1),
-                    resample_factor=2,
+                    activation_type=activation_type,
                 )
-                self.cultionet_model.mask_model.final_b.apply(
+
+                self.cultionet_model.mask_model.final_a.apply(
                     init_conv_weights
                 )
-                self.cultionet_model.mask_model.final_c = cunn.TowerUNetFinal(
-                    in_channels=self.cultionet_model.mask_model.final_c.expand.in_channels,
-                    num_classes=num_classes,
-                    mask_activation=nn.Softmax(dim=1),
-                    resample_factor=4,
-                )
-                self.cultionet_model.mask_model.final_c.apply(
-                    init_conv_weights
-                )
+                if self.deep_supervision:
+                    self.cultionet_model.mask_model.final_b = cunn.TowerUNetFinal(
+                        in_channels=self.cultionet_model.mask_model.final_b.expand.seq[
+                            0
+                        ].in_channels,
+                        num_classes=num_classes,
+                        mask_activation=nn.Softmax(dim=1),
+                        activation_type=activation_type,
+                        resample_factor=2,
+                    )
+                    self.cultionet_model.mask_model.final_b.apply(
+                        init_conv_weights
+                    )
+                    self.cultionet_model.mask_model.final_c = cunn.TowerUNetFinal(
+                        in_channels=self.cultionet_model.mask_model.final_c.expand.seq[
+                            0
+                        ].in_channels,
+                        num_classes=num_classes,
+                        mask_activation=nn.Softmax(dim=1),
+                        activation_type=activation_type,
+                        resample_factor=4,
+                    )
+                    self.cultionet_model.mask_model.final_c.apply(
+                        init_conv_weights
+                    )
 
         self.model_attr = f"{model_name}_{model_type}"
         setattr(
@@ -1046,6 +1079,9 @@ class CultionetLitModel(LightningModuleMixin):
         self.loss_dict = {
             LossTypes.BOUNDARY: {
                 "classification": cnetlosses.BoundaryLoss(),
+            },
+            LossTypes.CLASS_BALANCED_MSE: {
+                "classification": cnetlosses.ClassBalancedMSELoss(),
             },
             LossTypes.TANIMOTO_COMPLEMENT: {
                 "classification": cnetlosses.TanimotoComplementLoss(),

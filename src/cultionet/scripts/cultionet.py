@@ -478,17 +478,10 @@ def predict_image(args):
             pattern=f"{args.region}_{args.start_date.replace('-', '')}_{args.end_date.replace('-', '')}*.pt",
         )
 
-        # FIXME: could these be loaded from the model?
-        if args.process == CLISteps.PREDICT_TRANSFER:
-            # Transfer learning model checkpoint
-            ckpt_file = ppaths.ckpt_path / ModelNames.CKPT_TRANSFER_NAME
-        else:
-            ckpt_file = ppaths.ckpt_path / ModelNames.CKPT_NAME
-
         cultionet.predict_lightning(
             reference_image=args.reference_image,
             out_path=args.out_path,
-            ckpt=ckpt_file,
+            ckpt=ppaths.ckpt_path / ModelNames.CKPT_NAME,
             dataset=ds,
             num_classes=num_classes,
             device=args.device,
@@ -1247,7 +1240,7 @@ def train_model(args):
         ckpt_file=ppaths.ckpt_file,
         model_name="cultionet_transfer"
         if args.process == CLISteps.TRAIN_TRANSFER
-        else "cultionet_transfer",
+        else "cultionet",
         dataset=ds,
         test_dataset=test_ds,
         val_frac=args.val_frac,
@@ -1420,18 +1413,18 @@ cultionet predict --project-path /projects/data -o estimates.tif --region imagei
                 **process_values["kwargs"],
             )
 
-        if process in (
-            CLISteps.CREATE,
-            CLISteps.CREATE_PREDICT,
-            CLISteps.PREDICT,
-            CLISteps.PREDICT_TRANSFER,
-        ):
-            subparser.add_argument(
-                "--config-file",
-                dest="config_file",
-                help="The configuration YAML file (default: %(default)s)",
-                default=(Path(__file__).parent / "config.yml").absolute(),
-            )
+        # if process in (
+        #     CLISteps.CREATE,
+        #     CLISteps.CREATE_PREDICT,
+        #     CLISteps.PREDICT,
+        #     CLISteps.PREDICT_TRANSFER,
+        # ):
+        subparser.add_argument(
+            "--config-file",
+            dest="config_file",
+            help="The configuration YAML file (default: %(default)s)",
+            default=(Path(__file__).parent / "config.yml").absolute(),
+        )
 
     args = parser.parse_args()
 
@@ -1457,12 +1450,11 @@ cultionet predict --project-path /projects/data -o estimates.tif --region imagei
             )
             setattr(args, "replace_dict", replace_dict)
 
-    # if hasattr(args, "bbox_offsets"):
-    #     if args.bbox_offsets is not None:
-    #         bbox_offsets = list(
-    #             map(lambda x: tuple(map(int, x.split(","))), args.bbox_offsets)
-    #         )
-    #         setattr(args, "bbox_offsets", bbox_offsets)
+    # config = open_config(args.config_file)
+    # for k, v in config["train"].get("trainer").items():
+    #     setattr(args, k, v)
+    # for k, v in config["train"].get("model").items():
+    #     setattr(args, k, v)
 
     project_path = Path(args.project_path) / "ckpt"
     project_path.mkdir(parents=True, exist_ok=True)

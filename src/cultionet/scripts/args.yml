@@ -274,7 +274,7 @@ train_predict:
     help: The model distribution strategy
     kwargs:
       default: 'ddp'
-      choices: ['ddp', 'ddp_spawn', 'fsdp']
+      choices: ['ddp', 'ddp_spawn', 'fsdp', 'ddp_find_unused_parameters_true']
 
 shared_partitions:
   spatial_partitions:
@@ -305,7 +305,7 @@ train:
   val_frac:
     short: ''
     long: val-frac
-    help: the validation fraction
+    help: The validation fraction
     kwargs:
       default: 0.2
       type: '&float'
@@ -321,7 +321,7 @@ train:
     long: random-seed
     help: The random seed
     kwargs:
-      default: 42
+      default: !!null
       type: '&int'
   epochs:
     short: ''
@@ -563,9 +563,12 @@ train:
   finetune:
     short: ''
     long: finetune
-    help: Whether to finetune a transfer model (otherwise, do feature extraction)
+    help: Layers to finetune (if None, do feature extraction)
     kwargs:
-      action: store_true
+      default: !!null
+      choices:
+        - all
+        - fc
 
 predict:
   out_path:

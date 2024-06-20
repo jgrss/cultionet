@@ -7,13 +7,6 @@ import attr
 import lightning as L
 import numpy as np
 import torch
-from lightning.pytorch.callbacks import (
-    EarlyStopping,
-    LearningRateMonitor,
-    ModelCheckpoint,
-    ModelPruning,
-    StochasticWeightAveraging,
-)
 from lightning.pytorch.tuner import Tuner
 from rasterio.windows import Window
 from scipy.stats import mode as sci_mode
@@ -28,11 +21,13 @@ from .data.constant import SCALE_FACTOR
 from .data.data import Data
 from .data.datasets import EdgeDataset
 from .data.modules import EdgeDataModule
-from .data.samplers import EpochRandomSampler
+
+# from .data.samplers import EpochRandomSampler
 from .enums import (
     AttentionTypes,
     LearningRateSchedulers,
     LossTypes,
+    ModelNames,
     ModelTypes,
     ResBlockTypes,
 )
@@ -106,7 +101,7 @@ class CultionetParams:
     )
     model_pruning: bool = attr.ib(default=False)
     skip_train: bool = attr.ib(default=False)
-    finetune: bool = attr.ib(default=False)
+    finetune: str = attr.ib(default=None)
     strategy: str = attr.ib(converter=str, default="ddp")
 
     def check_checkpoint(self) -> None:
@@ -235,7 +230,7 @@ def fit_transfer(cultionet_params: CultionetParams) -> None:
 
     # This file should already exist
     pretrained_ckpt_file = (
-        cultionet_params.ckpt_file.parent / "last_cultionet.ckpt"
+        cultionet_params.ckpt_file.parent / ModelNames.CKPT_TRANSFER_NAME
     )
     assert (
         pretrained_ckpt_file.exists()
@@ -451,9 +446,15 @@ def predict_lightning(
     )
 
     trainer = L.Trainer(**trainer_kwargs)
+
     if is_transfer_model:
+        pretrained_ckpt_file = ckpt.parent / ModelNames.CKPT_TRANSFER_NAME
+
         cultionet_lit_model = CultionetLitTransferModel.load_from_checkpoint(
-            checkpoint_path=str(ckpt_file)
+            checkpoint_path=str(ckpt_file),
+            pretrained_ckpt_file=pretrained_ckpt_file,
+            # in_channels=dataset.num_channels,
+            # in_time=dataset.num_time,
         )
     else:
         cultionet_lit_model = CultionetLitModel.load_from_checkpoint(
