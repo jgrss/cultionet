@@ -159,11 +159,19 @@ def augment_time(
     )
 
 
-def roll_time(ldata: Data, p: T.Any) -> Data:
+def roll_time(
+    ldata: Data,
+    p: object,
+    rng: T.Optional[np.random.Generator] = None,
+    random_seed: T.Optional[int] = None,
+) -> Data:
+    if rng is None:
+        rng = np.random.default_rng(random_seed)
+
     segment_parcel = SegmentParcel.from_prop(ldata=ldata, p=p)
 
     # Get a temporal shift for the object
-    shift = np.random.choice(
+    shift = rng.choice(
         range(-int(ldata.num_time * 0.25), int(ldata.num_time * 0.25) + 1)
     )
 
@@ -205,6 +213,7 @@ def generate_perlin_noise_3d(
     out_range: T.Optional[T.Tuple[float, float]] = None,
     interpolant: T.Callable = interpolant,
     rng: T.Optional[np.random.Generator] = None,
+    random_seed: T.Optional[int] = None,
 ) -> torch.Tensor:
     """Generates a 3D tensor of perlin noise.
 
@@ -236,7 +245,7 @@ def generate_perlin_noise_3d(
         out_range = (-0.1, 0.1)
 
     if rng is None:
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(random_seed)
 
     delta = (res[0] / shape[0], res[1] / shape[1], res[2] / shape[2])
     d = (shape[0] // res[0], shape[1] // res[1], shape[2] // res[2])
