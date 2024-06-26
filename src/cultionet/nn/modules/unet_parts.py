@@ -31,6 +31,10 @@ class TowerUNetFinal(nn.Module):
     ):
         super(TowerUNetFinal, self).__init__()
 
+        self.in_channels = in_channels
+        self.num_classes = num_classes
+        self.mask_activation = mask_activation
+
         if resample_factor > 1:
             self.up_conv = ConvTranspose2d(
                 in_channels=in_channels,
@@ -50,7 +54,6 @@ class TowerUNetFinal(nn.Module):
         )
         self.sigmoid = nn.Sigmoid()
         self.sigmoid_crisp = SigmoidCrisp()
-        self.mask_activation = mask_activation
 
         self.dist_alpha1 = nn.Parameter(torch.ones(1))
         self.dist_alpha2 = nn.Parameter(torch.ones(1))
@@ -149,6 +152,262 @@ class UNetUpBlock(nn.Module):
             x = self.up_conv(x, size=size)
 
         return self.res_conv(x)
+
+
+class TowerUNetEncoder(nn.Module):
+    def __init__(
+        self,
+        channels: T.Sequence[int],
+        dilations: T.Sequence[int] = None,
+        activation_type: str = "SiLU",
+        dropout: float = 0.0,
+        res_block_type: str = ResBlockTypes.RESA,
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
+        pool_attention: bool = False,
+        pool_by_max: bool = False,
+        repeat_resa_kernel: bool = False,
+        batchnorm_first: bool = False,
+        concat_resid: bool = False,
+    ):
+        super(TowerUNetEncoder, self).__init__()
+
+        # Backbone layers
+        backbone_kwargs = dict(
+            dropout=dropout,
+            activation_type=activation_type,
+            res_block_type=res_block_type,
+            batchnorm_first=batchnorm_first,
+            pool_by_max=pool_by_max,
+            concat_resid=concat_resid,
+            natten_num_heads=8,
+            natten_kernel_size=3,
+            natten_dilation=1,
+            natten_attn_drop=dropout,
+            natten_proj_drop=dropout,
+        )
+        self.down_a = PoolResidualConv(
+            in_channels=channels[0],
+            out_channels=channels[0],
+            dilations=dilations,
+            repeat_resa_kernel=repeat_resa_kernel,
+            pool_first=False,
+            attention_weights=attention_weights if pool_attention else None,
+            **backbone_kwargs,
+        )
+        self.down_b = PoolResidualConv(
+            in_channels=channels[0],
+            out_channels=channels[1],
+            dilations=dilations,
+            repeat_resa_kernel=repeat_resa_kernel,
+            attention_weights=attention_weights if pool_attention else None,
+            **backbone_kwargs,
+        )
+        self.down_c = PoolResidualConv(
+            channels[1],
+            channels[2],
+            dilations=dilations[:2],
+            repeat_resa_kernel=repeat_resa_kernel,
+            attention_weights=attention_weights if pool_attention else None,
+            **backbone_kwargs,
+        )
+        self.down_d = PoolResidualConv(
+            channels[2],
+            channels[3],
+            kernel_size=1,
+            num_blocks=1,
+            dilations=[1],
+            repeat_resa_kernel=repeat_resa_kernel,
+            attention_weights=None,
+            **backbone_kwargs,
+        )
+
+    def forward(self, x: torch.Tensor) -> T.Dict[str, torch.Tensor]:
+        # Backbone
+        x_a = self.down_a(x)  # 1/1 of input
+        x_b = self.down_b(x_a)  # 1/2 of input
+        x_c = self.down_c(x_b)  # 1/4 of input
+        x_d = self.down_d(x_c)  # 1/8 of input
+
+        return {
+            "x_a": x_a,
+            "x_b": x_b,
+            "x_c": x_c,
+            "x_d": x_d,
+        }
+
+
+class TowerUNetDecoder(nn.Module):
+    def __init__(
+        self,
+        channels: T.Sequence[int],
+        up_channels: int,
+        dilations: T.Sequence[int] = None,
+        activation_type: str = "SiLU",
+        dropout: float = 0.0,
+        res_block_type: str = ResBlockTypes.RESA,
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
+        repeat_resa_kernel: bool = False,
+        batchnorm_first: bool = False,
+        concat_resid: bool = False,
+    ):
+        super(TowerUNetDecoder, self).__init__()
+
+        # Up layers
+        up_kwargs = dict(
+            activation_type=activation_type,
+            res_block_type=res_block_type,
+            repeat_resa_kernel=repeat_resa_kernel,
+            batchnorm_first=batchnorm_first,
+            concat_resid=concat_resid,
+            natten_num_heads=8,
+            natten_attn_drop=dropout,
+            natten_proj_drop=dropout,
+        )
+        self.over_d = UNetUpBlock(
+            in_channels=channels[3],
+            out_channels=up_channels,
+            kernel_size=1,
+            num_blocks=1,
+            dilations=[1],
+            attention_weights=None,
+            resample_up=False,
+            **up_kwargs,
+        )
+        self.up_cu = UNetUpBlock(
+            in_channels=up_channels,
+            out_channels=up_channels,
+            attention_weights=attention_weights,
+            dilations=dilations[:2],
+            natten_kernel_size=3,
+            natten_dilation=1,
+            **up_kwargs,
+        )
+        self.up_bu = UNetUpBlock(
+            in_channels=up_channels,
+            out_channels=up_channels,
+            attention_weights=attention_weights,
+            dilations=dilations,
+            natten_kernel_size=5,
+            natten_dilation=2,
+            **up_kwargs,
+        )
+        self.up_au = UNetUpBlock(
+            in_channels=up_channels,
+            out_channels=up_channels,
+            attention_weights=attention_weights,
+            dilations=dilations,
+            natten_kernel_size=7,
+            natten_dilation=3,
+            **up_kwargs,
+        )
+
+    def forward(
+        self, x: T.Dict[str, torch.Tensor]
+    ) -> T.Dict[str, torch.Tensor]:
+        x_du = self.over_d(x["x_d"], size=x["x_d"].shape[-2:])
+
+        # Up
+        x_cu = self.up_cu(x_du, size=x["x_c"].shape[-2:])
+        x_bu = self.up_bu(x_cu, size=x["x_b"].shape[-2:])
+        x_au = self.up_au(x_bu, size=x["x_a"].shape[-2:])
+
+        return {
+            "x_au": x_au,
+            "x_bu": x_bu,
+            "x_cu": x_cu,
+            "x_du": x_du,
+        }
+
+
+class TowerUNetFusion(nn.Module):
+    def __init__(
+        self,
+        channels: T.Sequence[int],
+        up_channels: int,
+        dilations: T.Sequence[int] = None,
+        activation_type: str = "SiLU",
+        dropout: float = 0.0,
+        res_block_type: str = ResBlockTypes.RESA,
+        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
+        repeat_resa_kernel: bool = False,
+        batchnorm_first: bool = False,
+        concat_resid: bool = False,
+    ):
+        super(TowerUNetFusion, self).__init__()
+
+        # Towers
+        tower_kwargs = dict(
+            up_channels=up_channels,
+            out_channels=up_channels,
+            attention_weights=attention_weights,
+            activation_type=activation_type,
+            res_block_type=res_block_type,
+            repeat_resa_kernel=repeat_resa_kernel,
+            batchnorm_first=batchnorm_first,
+            concat_resid=concat_resid,
+            natten_num_heads=8,
+            natten_attn_drop=dropout,
+            natten_proj_drop=dropout,
+        )
+        self.tower_c = TowerUNetBlock(
+            backbone_side_channels=channels[2],
+            backbone_down_channels=channels[3],
+            dilations=dilations[:2],
+            natten_kernel_size=3,
+            natten_dilation=1,
+            **tower_kwargs,
+        )
+        self.tower_b = TowerUNetBlock(
+            backbone_side_channels=channels[1],
+            backbone_down_channels=channels[2],
+            tower=True,
+            dilations=dilations,
+            natten_kernel_size=5,
+            natten_dilation=2,
+            **tower_kwargs,
+        )
+        self.tower_a = TowerUNetBlock(
+            backbone_side_channels=channels[0],
+            backbone_down_channels=channels[1],
+            tower=True,
+            dilations=dilations,
+            natten_kernel_size=7,
+            natten_dilation=3,
+            **tower_kwargs,
+        )
+
+    def forward(
+        self,
+        encoded: T.Dict[str, torch.Tensor],
+        decoded: T.Dict[str, torch.Tensor],
+    ) -> T.Dict[str, torch.Tensor]:
+        # Central towers
+        x_tower_c = self.tower_c(
+            backbone_side=encoded["x_c"],
+            backbone_down=encoded["x_d"],
+            decode_side=decoded["x_cu"],
+            decode_down=decoded["x_du"],
+        )
+        x_tower_b = self.tower_b(
+            backbone_side=encoded["x_b"],
+            backbone_down=encoded["x_c"],
+            decode_side=decoded["x_bu"],
+            decode_down=decoded["x_cu"],
+            tower_down=x_tower_c,
+        )
+        x_tower_a = self.tower_a(
+            backbone_side=encoded["x_a"],
+            backbone_down=encoded["x_b"],
+            decode_side=decoded["x_au"],
+            decode_down=decoded["x_bu"],
+            tower_down=x_tower_b,
+        )
+
+        return {
+            "x_tower_a": x_tower_a,
+            "x_tower_b": x_tower_b,
+            "x_tower_c": x_tower_c,
+        }
 
 
 class TowerUNetBlock(nn.Module):
@@ -426,7 +685,7 @@ class ResELUNetPsiBlock(nn.Module):
         }
 
 
-class UNet3Connector(torch.nn.Module):
+class UNet3Connector(nn.Module):
     """Connects layers in a UNet 3+ architecture."""
 
     def __init__(
@@ -808,7 +1067,7 @@ class UNet3Connector(torch.nn.Module):
         return h
 
 
-class UNet3P_3_1(torch.nn.Module):
+class UNet3P_3_1(nn.Module):
     """UNet 3+ connection from backbone to upstream 3,1."""
 
     def __init__(
@@ -851,7 +1110,7 @@ class UNet3P_3_1(torch.nn.Module):
         return h
 
 
-class UNet3P_2_2(torch.nn.Module):
+class UNet3P_2_2(nn.Module):
     """UNet 3+ connection from backbone to upstream 2,2."""
 
     def __init__(
@@ -896,7 +1155,7 @@ class UNet3P_2_2(torch.nn.Module):
         return h
 
 
-class UNet3P_1_3(torch.nn.Module):
+class UNet3P_1_3(nn.Module):
     """UNet 3+ connection from backbone to upstream 1,3."""
 
     def __init__(
@@ -941,7 +1200,7 @@ class UNet3P_1_3(torch.nn.Module):
         return h
 
 
-class UNet3P_0_4(torch.nn.Module):
+class UNet3P_0_4(nn.Module):
     """UNet 3+ connection from backbone to upstream 0,4."""
 
     def __init__(
@@ -986,7 +1245,7 @@ class UNet3P_0_4(torch.nn.Module):
         return h
 
 
-class UNet3_3_1(torch.nn.Module):
+class UNet3_3_1(nn.Module):
     """UNet 3+ connection from backbone to upstream 3,1."""
 
     def __init__(
@@ -1067,7 +1326,7 @@ class UNet3_3_1(torch.nn.Module):
         }
 
 
-class UNet3_2_2(torch.nn.Module):
+class UNet3_2_2(nn.Module):
     """UNet 3+ connection from backbone to upstream 2,2."""
 
     def __init__(
@@ -1150,7 +1409,7 @@ class UNet3_2_2(torch.nn.Module):
         }
 
 
-class UNet3_1_3(torch.nn.Module):
+class UNet3_1_3(nn.Module):
     """UNet 3+ connection from backbone to upstream 1,3."""
 
     def __init__(
@@ -1235,7 +1494,7 @@ class UNet3_1_3(torch.nn.Module):
         }
 
 
-class UNet3_0_4(torch.nn.Module):
+class UNet3_0_4(nn.Module):
     """UNet 3+ connection from backbone to upstream 0,4."""
 
     def __init__(
@@ -1333,7 +1592,7 @@ def get_prev_list(
     return prev
 
 
-class ResUNet3_3_1(torch.nn.Module):
+class ResUNet3_3_1(nn.Module):
     """Residual UNet 3+ connection from backbone to upstream 3,1."""
 
     def __init__(
@@ -1434,7 +1693,7 @@ class ResUNet3_3_1(torch.nn.Module):
         }
 
 
-class ResUNet3_2_2(torch.nn.Module):
+class ResUNet3_2_2(nn.Module):
     """Residual UNet 3+ connection from backbone to upstream 2,2."""
 
     def __init__(
@@ -1544,7 +1803,7 @@ class ResUNet3_2_2(torch.nn.Module):
         }
 
 
-class ResUNet3_1_3(torch.nn.Module):
+class ResUNet3_1_3(nn.Module):
     """Residual UNet 3+ connection from backbone to upstream 1,3."""
 
     def __init__(
@@ -1654,7 +1913,7 @@ class ResUNet3_1_3(torch.nn.Module):
         }
 
 
-class ResUNet3_0_4(torch.nn.Module):
+class ResUNet3_0_4(nn.Module):
     """Residual UNet 3+ connection from backbone to upstream 0,4."""
 
     def __init__(
