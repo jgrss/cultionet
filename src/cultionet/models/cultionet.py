@@ -349,15 +349,15 @@ class CultioNet(nn.Module):
         # Main stream
         out = self.mask_model(
             batch.x,
-            temporal_encoding=transformer_outputs['encoded'],
+            temporal_encoding=transformer_outputs["encoded"],
             training=training,
         )
 
         out.update(
             {
                 "crop_type": None,
-                "classes_l2": transformer_outputs['l2'],
-                "classes_l3": transformer_outputs['l3'],
+                "classes_l2": transformer_outputs["l2"],
+                "classes_l3": transformer_outputs["l3"],
             }
         )
 
