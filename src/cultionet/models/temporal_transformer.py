@@ -6,7 +6,7 @@ TODO:
     https://www.sciencedirect.com/science/article/pii/S0893608023005361
     https://github.com/AzadDeihim/STTRE/blob/main/STTRE.ipynb
 """
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 
 import einops
 import torch
@@ -307,6 +307,53 @@ class ViTransformer(nn.Module):
         )
 
 
+class TemporalTransformerFinal(nn.Module):
+    def __init__(
+        self,
+        hidden_channels: int = 128,
+        d_model: int = 128,
+        num_classes_l2: int = 2,
+        num_classes_last: int = 3,
+        activation_type: str = "SiLU",
+        final_activation: Callable = nn.Softmax(dim=1),
+    ):
+        super(TemporalTransformerFinal, self).__init__()
+
+        # Level 2 level (non-crop; crop)
+        self.final_l2 = cunn.FinalConv2dDropout(
+            hidden_dim=d_model,
+            dim_factor=1,
+            activation_type=activation_type,
+            final_activation=final_activation,
+            num_classes=num_classes_l2,
+        )
+        # Last level (non-crop; crop; edges)
+        self.final_l3 = cunn.FinalConv2dDropout(
+            hidden_dim=d_model + num_classes_l2,
+            dim_factor=1,
+            activation_type=activation_type,
+            final_activation=nn.Softmax(dim=1),
+            num_classes=num_classes_last,
+        )
+        self.hidden_out = nn.Conv2d(
+            in_channels=d_model,
+            out_channels=hidden_channels,
+            kernel_size=3,
+            padding=1,
+        )
+
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        l2 = self.final_l2(x)
+        l3 = self.final_l3(torch.cat([x, l2], dim=1))
+        hidden = self.hidden_out(x)
+
+        return {
+            "l2": l2,
+            "l3": l3,
+            "hidden": hidden,
+        }
+
+
 class TemporalTransformer(nn.Module):
     def __init__(
         self,
@@ -336,6 +383,10 @@ class TemporalTransformer(nn.Module):
             time_scaler (int): Period to use for the positional encoding.
         """
         super(TemporalTransformer, self).__init__()
+
+        self.d_model = d_model
+        self.num_classes_l2 = num_classes_l2
+        self.num_classes_last = num_classes_last
 
         frame_patch_size = 2
         if in_time % frame_patch_size != 0:
@@ -394,27 +445,13 @@ class TemporalTransformer(nn.Module):
         #     dropout=dropout,
         # )
 
-        self.final = nn.Conv2d(
-            in_channels=d_model,
-            out_channels=hidden_channels,
-            kernel_size=3,
-            padding=1,
-        )
-        # Level 2 level (non-crop; crop)
-        self.final_l2 = cunn.FinalConv2dDropout(
-            hidden_dim=d_model,
-            dim_factor=1,
+        self.final = TemporalTransformerFinal(
+            hidden_channels=hidden_channels,
+            d_model=d_model,
+            num_classes_l2=num_classes_l2,
+            num_classes_last=num_classes_last,
             activation_type=activation_type,
             final_activation=final_activation,
-            num_classes=num_classes_l2,
-        )
-        # Last level (non-crop; crop; edges)
-        self.final_l3 = cunn.FinalConv2dDropout(
-            hidden_dim=d_model + num_classes_l2,
-            dim_factor=1,
-            activation_type=activation_type,
-            final_activation=nn.Softmax(dim=1),
-            num_classes=num_classes_last,
         )
 
         self.apply(init_attention_weights)
@@ -464,15 +501,12 @@ class TemporalTransformer(nn.Module):
         )
 
         # Get the target classes
-        l2 = self.final_l2(encoded)
-        l3 = self.final_l3(torch.cat([encoded, l2], dim=1))
-
         encoded = self.final(encoded)
 
         return {
-            'encoded': encoded,
-            'l2': l2,
-            'l3': l3,
+            "l2": encoded["l2"],
+            "l3": encoded["l3"],
+            "encoded": encoded["hidden"],
         }
 
 
