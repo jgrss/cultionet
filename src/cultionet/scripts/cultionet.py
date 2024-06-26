@@ -1289,6 +1289,7 @@ def train_model(args):
         skip_train=args.skip_train,
         finetune=args.finetune,
         strategy=args.strategy,
+        profiler=args.profiler,
     )
 
     # Fit the model
