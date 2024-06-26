@@ -346,6 +346,10 @@ class EdgeDataset(SpatialDataset):
         Returns:
             train dataset, validation dataset
         """
+        # We do not need augmentations when loading batches for
+        # sample splits.
+        augment_prob = deepcopy(self.augment_prob)
+        self.augment_prob = 0.0
 
         if spatial_overlap_allowed:
             self.shuffle()
@@ -366,6 +370,7 @@ class EdgeDataset(SpatialDataset):
                 random_state=self.random_seed,
             )
 
+        train_ds.augment_prob = augment_prob
         val_ds.augment_prob = 0.0
 
         return train_ds, val_ds
