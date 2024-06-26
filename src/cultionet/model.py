@@ -103,6 +103,7 @@ class CultionetParams:
     skip_train: bool = attr.ib(default=False)
     finetune: str = attr.ib(default=None)
     strategy: str = attr.ib(converter=str, default="ddp")
+    profiler: str = attr.ib(default=None)
 
     def check_checkpoint(self) -> None:
         if self.reset_model:
@@ -189,6 +190,7 @@ class CultionetParams:
             deterministic=False,
             benchmark=False,
             strategy=self.strategy,
+            profiler=self.profiler,
         )
 
 
@@ -235,6 +237,10 @@ def fit_transfer(cultionet_params: CultionetParams) -> None:
     assert (
         pretrained_ckpt_file.exists()
     ), "The pretrained checkpoint does not exist."
+
+    # Remove the spatial data because there is no check upstream
+    if cultionet_params.dataset.grid_gpkg_path.exists():
+        cultionet_params.dataset.grid_gpkg_path.unlink()
 
     # Split the dataset into train/validation
     data_module: EdgeDataModule = get_data_module(
