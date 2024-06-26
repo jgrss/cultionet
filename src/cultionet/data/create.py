@@ -46,7 +46,7 @@ def is_grid_processed(
 
     batches_stored = []
     for aug in transforms:
-        aug_method = AUGMENTER_METHODS[aug]
+        aug_method = AUGMENTER_METHODS[aug]()
         train_id = uid_format.format(
             REGION_ID=region,
             START_DATE=start_date,
@@ -432,12 +432,15 @@ class ImageVariables:
                 resampling=resampling,
             ) as src_ts:
                 if grid_size is not None:
-                    assert (src_ts.gw.nrows == grid_size[0]) and (
-                        src_ts.gw.ncols == grid_size[1]
-                    ), (
-                        f"The reference image size is {src_ts.gw.nrows} rows x {src_ts.gw.ncols} columns, but the expected "
-                        f"dimensions are {grid_size[0]} rows x {grid_size[1]} columns"
-                    )
+                    if not (
+                        (src_ts.gw.nrows == grid_size[0])
+                        and (src_ts.gw.ncols == grid_size[1])
+                    ):
+                        logger.warning(
+                            f"The reference image size is {src_ts.gw.nrows} rows x {src_ts.gw.ncols} columns, but the expected "
+                            f"dimensions are {grid_size[0]} rows x {grid_size[1]} columns"
+                        )
+                        return cls()
 
                 # Get the time and band count
                 num_time, num_bands = get_image_list_dims(image, src_ts)
@@ -501,29 +504,6 @@ class ImageVariables:
                             )
                             orientation = reference_arrays.orientation
                             edge_array = reference_arrays.edge_array
-
-                    # import matplotlib.pyplot as plt
-                    # def save_labels(out_fig: Path):
-                    #     fig, axes = plt.subplots(2, 2, figsize=(6, 5), sharey=True, sharex=True, dpi=300)
-                    #     axes = axes.flatten()
-                    #     for ax, im, title in zip(
-                    #         axes,
-                    #         (labels_array_unique, labels_array, boundary_distance, orientation),
-                    #         ('Fields', 'Edges', 'Distance', 'orientationentation')
-                    #     ):
-                    #         ax.imshow(im, interpolation='nearest')
-                    #         ax.set_title(title)
-                    #         ax.axis('off')
-
-                    #     plt.tight_layout()
-                    #     plt.savefig(out_fig, dpi=300)
-                    # import uuid
-                    # fig_dir = Path('figures')
-                    # fig_dir.mkdir(exist_ok=True, parents=True)
-                    # hash_id = uuid.uuid4().hex
-                    # save_labels(
-                    #     out_fig=fig_dir / f'{hash_id}.png'
-                    # )
 
         return cls(
             time_series=time_series,
@@ -614,10 +594,32 @@ def create_train_batch(
         df_polygons = df_grid.copy()
         df_polygons = df_polygons.assign(**{crop_column: 0})
 
-    # Remove empty geometry
+    # Remove empty geometries
     df_polygons = df_polygons.loc[~df_polygons.is_empty]
 
     if not df_polygons.empty:
+        type_mask = df_polygons.geom_type == "GeometryCollection"
+        if type_mask.any():
+            exploded_collections = df_polygons.loc[type_mask].explode(
+                column="geometry"
+            )
+            exploded_collections = exploded_collections.loc[
+                (exploded_collections.geom_type == "Polygon")
+                | (exploded_collections.geom_type == "MultiPolygon")
+            ]
+            df_polygons = pd.concat(
+                (
+                    df_polygons.loc[~type_mask],
+                    exploded_collections.droplevel(1),
+                )
+            )
+
+        df_polygons = df_polygons.reset_index(drop=True)
+        df_polygons = df_polygons.loc[df_polygons.geom_type != "Point"]
+        type_mask = df_polygons.geom_type == "MultiPolygon"
+        if type_mask.any():
+            raise TypeError("MultiPolygons should not exist.")
+
         # Get a mask of valid polygons
         nonzero_mask = df_polygons[crop_column] != 0
 
@@ -701,7 +703,7 @@ def create_train_batch(
 
         # FIXME: this doesn't support augmentations
         for aug in transforms:
-            aug_method = AUGMENTER_METHODS[aug]
+            aug_method = AUGMENTER_METHODS[aug]()
             train_id = uid_format.format(
                 REGION_ID=region,
                 START_DATE=start_date,
