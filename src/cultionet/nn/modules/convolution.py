@@ -1,10 +1,14 @@
 import typing as T
 
-import natten
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
+
+try:
+    import natten
+except ImportError:
+    natten = None
 
 from cultionet.enums import AttentionTypes, ResBlockTypes
 
