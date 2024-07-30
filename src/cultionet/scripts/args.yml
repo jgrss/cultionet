@@ -146,6 +146,12 @@ create:
     help: Whether the non-agricultural background is unknown
     kwargs:
       action: store_true
+  all_touched:
+    short: ''
+    long: all-touched
+    help: Whether to 'burn in' all pixels touched by geometries or only pixels whose center is within the polygon
+    kwargs:
+      action: store_true
 
 create_predict:
   window_size:
@@ -321,7 +327,7 @@ train:
     long: random-seed
     help: The random seed
     kwargs:
-      default: !!null
+      default: 42
       type: '&int'
   epochs:
     short: ''

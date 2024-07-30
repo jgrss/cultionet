@@ -20,7 +20,6 @@ from lightning.pytorch.callbacks.progress.rich_progress import (
 from rasterio.windows import Window
 
 from .data.constant import SCALE_FACTOR
-from .data.data import Data
 
 PROGRESS_BAR_CALLBACK = RichProgressBar(
     refresh_rate=1,

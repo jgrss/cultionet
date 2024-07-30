@@ -346,10 +346,19 @@ class CultioNet(nn.Module):
         # Transformer attention encoder
         transformer_outputs = self.temporal_encoder(batch.x)
 
+        latlon_coords = torch.cat(
+            (batch.lon.unsqueeze(1), batch.lat.unsqueeze(1)),
+            dim=1,
+        ).to(
+            dtype=batch.x.dtype,
+            device=batch.x.device,
+        )
+
         # Main stream
         out = self.mask_model(
             batch.x,
             temporal_encoding=transformer_outputs["encoded"],
+            latlon_coords=latlon_coords,
             training=training,
         )
 

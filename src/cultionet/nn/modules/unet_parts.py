@@ -3,6 +3,8 @@ import typing as T
 
 import torch
 import torch.nn as nn
+from einops import rearrange
+from einops.layers.torch import Rearrange
 
 from cultionet.enums import AttentionTypes, ModelTypes, ResBlockTypes
 
@@ -18,6 +20,28 @@ from .convolution import (
     ResidualConv,
 )
 from .reshape import UpSample
+
+
+class GeoEmbeddings(nn.Module):
+    def __init__(self, channels: int):
+        super(GeoEmbeddings, self).__init__()
+
+        self.coord_embedding = nn.Linear(3, channels)
+
+    @torch.no_grad
+    def decimal_degrees_to_cartesian(
+        self, degrees: torch.Tensor
+    ) -> torch.Tensor:
+        radians = torch.deg2rad(degrees)
+        cosine = torch.cos(radians)
+        sine = torch.sin(radians)
+        x = cosine[:, 1] * cosine[:, 0]
+        y = cosine[:, 1] * sine[:, 0]
+
+        return torch.stack([x, y, sine[:, 1]], dim=-1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.coord_embedding(self.decimal_degrees_to_cartesian(x))
 
 
 class TowerUNetFinal(nn.Module):
@@ -44,6 +68,13 @@ class TowerUNetFinal(nn.Module):
                 padding=1,
             )
 
+        self.geo_embeddings = GeoEmbeddings(in_channels)
+        self.layernorm = nn.Sequential(
+            Rearrange('b c h w -> b h w c'),
+            nn.LayerNorm(in_channels),
+            Rearrange('b h w c -> b c h w'),
+        )
+
         self.expand = ConvBlock2d(
             in_channels=in_channels,
             out_channels=in_channels * 3,
@@ -68,12 +99,18 @@ class TowerUNetFinal(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
+        latlon_coords: T.Optional[torch.Tensor],
         size: T.Optional[torch.Size] = None,
         suffix: str = "",
     ) -> T.Dict[str, torch.Tensor]:
         if size is not None:
             x = self.up_conv(x, size=size)
 
+        # Embed coordinates
+        x = x + rearrange(self.geo_embeddings(latlon_coords), 'b c -> b c 1 1')
+        x = self.layernorm(x)
+
+        # Expand into separate streams
         dist_h, edge_h, mask_h = torch.chunk(self.expand(x), 3, dim=1)
 
         dist = self.final_dist(dist_h)

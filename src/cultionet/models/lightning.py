@@ -301,35 +301,34 @@ class LightningModuleMixin(LightningModule):
         )
         loss = loss + crop_loss * weights["crop_loss"]
 
-        if not self.is_transfer_model:
-            # Class-balanced MSE loss
-            edge_cmse_loss = self.cmse_loss(
-                predictions["edge"].squeeze(dim=1),
-                true_labels_dict["true_edge"],
-                mask=None
-                if true_labels_dict["mask"] is None
-                else true_labels_dict["mask"].squeeze(dim=1),
-            )
-            weights["edge_cmse_loss"] = 0.1
-            loss = loss + edge_cmse_loss * weights["edge_cmse_loss"]
+        # Class-balanced MSE loss
+        edge_cmse_loss = self.cmse_loss(
+            predictions["edge"].squeeze(dim=1),
+            true_labels_dict["true_edge"],
+            mask=None
+            if true_labels_dict["mask"] is None
+            else true_labels_dict["mask"].squeeze(dim=1),
+        )
+        weights["edge_cmse_loss"] = 0.1
+        loss = loss + edge_cmse_loss * weights["edge_cmse_loss"]
 
-            crop_cmse_loss = self.cmse_loss(
-                predictions["mask"].sum(dim=1),
-                true_labels_dict["true_crop"],
-                mask=None
-                if true_labels_dict["mask"] is None
-                else true_labels_dict["mask"].squeeze(dim=1),
-            )
-            weights["crop_cmse_loss"] = 0.1
-            loss = loss + crop_cmse_loss * weights["crop_cmse_loss"]
+        crop_cmse_loss = self.cmse_loss(
+            predictions["mask"].sum(dim=1),
+            true_labels_dict["true_crop"],
+            mask=None
+            if true_labels_dict["mask"] is None
+            else true_labels_dict["mask"].squeeze(dim=1),
+        )
+        weights["crop_cmse_loss"] = 0.1
+        loss = loss + crop_cmse_loss * weights["crop_cmse_loss"]
 
-            # Topology loss
-            # topo_loss = self.topo_loss(
-            #     predictions["edge"].squeeze(dim=1),
-            #     true_labels_dict["true_edge"],
-            # )
-            # weights["topo_loss"] = 0.1
-            # loss = loss + topo_loss * weights["topo_loss"]
+        # Topology loss
+        # topo_loss = self.topo_loss(
+        #     predictions["edge"].squeeze(dim=1),
+        #     true_labels_dict["true_edge"],
+        # )
+        # weights["topo_loss"] = 0.1
+        # loss = loss + topo_loss * weights["topo_loss"]
 
         # if predictions["crop_type"] is not None:
         #     # Upstream (deep) loss on crop-type
@@ -711,13 +710,12 @@ class LightningModuleMixin(LightningModule):
         # Crop mask loss
         self.crop_loss = self.loss_dict[self.loss_name].get("classification")
 
-        if not self.is_transfer_model:
-            self.cmse_loss = self.loss_dict[LossTypes.CLASS_BALANCED_MSE].get(
-                "classification"
-            )
-            # self.topo_loss = self.loss_dict[LossTypes.TOPOLOGY].get(
-            #     "classification"
-            # )
+        self.cmse_loss = self.loss_dict[LossTypes.CLASS_BALANCED_MSE].get(
+            "classification"
+        )
+        # self.topo_loss = self.loss_dict[LossTypes.TOPOLOGY].get(
+        #     "classification"
+        # )
 
         if self.deep_supervision:
             self.dist_loss_deep_b = self.loss_dict[self.loss_name].get(

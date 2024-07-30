@@ -742,7 +742,7 @@ class TowerUNet(nn.Module):
             concat_resid=concat_resid,
         )
 
-        self.tower_decoder = cunn.TowerUNetFusion(
+        self.tower_fusion = cunn.TowerUNetFusion(
             channels=channels,
             up_channels=up_channels,
             dilations=dilations,
@@ -785,6 +785,7 @@ class TowerUNet(nn.Module):
         self,
         x: torch.Tensor,
         temporal_encoding: T.Optional[torch.Tensor] = None,
+        latlon_coords: T.Optional[torch.Tensor] = None,
         training: bool = True,
     ) -> T.Dict[str, torch.Tensor]:
 
@@ -804,20 +805,25 @@ class TowerUNet(nn.Module):
 
         encoded = self.encoder(embeddings)
         decoded = self.decoder(encoded)
-        towers_decoded = self.tower_decoder(encoded=encoded, decoded=decoded)
+        towers_fused = self.tower_fusion(encoded=encoded, decoded=decoded)
 
         # Final outputs
-        out = self.final_a(towers_decoded["x_tower_a"])
+        out = self.final_a(
+            towers_fused["x_tower_a"],
+            latlon_coords=latlon_coords,
+        )
 
         if training and self.deep_supervision:
             out_c = self.final_c(
-                towers_decoded["x_tower_c"],
-                size=towers_decoded["x_tower_a"].shape[-2:],
+                towers_fused["x_tower_c"],
+                latlon_coords=latlon_coords,
+                size=towers_fused["x_tower_a"].shape[-2:],
                 suffix="_c",
             )
             out_b = self.final_b(
-                towers_decoded["x_tower_b"],
-                size=towers_decoded["x_tower_a"].shape[-2:],
+                towers_fused["x_tower_b"],
+                latlon_coords=latlon_coords,
+                size=towers_fused["x_tower_a"].shape[-2:],
                 suffix="_b",
             )
 

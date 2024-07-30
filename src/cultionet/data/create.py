@@ -233,6 +233,7 @@ class ReferenceArrays:
         keep_crop_classes: bool,
         data_array: xr.DataArray,
         nonag_is_unknown: bool = False,
+        all_touched: bool = True,
     ) -> "ReferenceArrays":
         # Polygon label array, where each polygon has a
         # unique raster value.
@@ -274,7 +275,7 @@ class ReferenceArrays:
             ),
             reference_data=data_array,
             column=crop_column,
-            all_touched=True,
+            all_touched=all_touched,
         )
 
         if not edge_array.flags["WRITEABLE"]:
@@ -390,6 +391,7 @@ class ImageVariables:
         keep_crop_classes: bool = False,
         replace_dict: T.Optional[T.Dict[int, int]] = None,
         nonag_is_unknown: bool = False,
+        all_touched: bool = True,
     ) -> "ImageVariables":
         """Creates the initial image training data."""
 
@@ -494,6 +496,7 @@ class ImageVariables:
                                 keep_crop_classes=keep_crop_classes,
                                 data_array=src_ts,
                                 nonag_is_unknown=nonag_is_unknown,
+                                all_touched=all_touched,
                             )
                         )
 
@@ -536,6 +539,7 @@ def create_train_batch(
     keep_crop_classes: T.Optional[bool] = False,
     replace_dict: T.Optional[T.Dict[int, int]] = None,
     nonag_is_unknown: bool = False,
+    all_touched: bool = True,
     compress_method: T.Union[int, str] = 'zlib',
 ) -> None:
     """Creates a batch file for training.
@@ -562,6 +566,7 @@ def create_train_batch(
             non-zero classes to crop (False).
         replace_dict: A dictionary of crop class remappings.
         nonag_is_unknown: Whether the non-agricultural background is unknown.
+        all_touched: Rasterio/Shapely rasterization flag.
     """
     start_date = pd.to_datetime(
         Path(image_list[0]).stem, format=date_format
@@ -639,6 +644,7 @@ def create_train_batch(
             keep_crop_classes=keep_crop_classes,
             replace_dict=replace_dict,
             nonag_is_unknown=nonag_is_unknown,
+            all_touched=all_touched,
         )
 
         if image_variables.time_series is None:

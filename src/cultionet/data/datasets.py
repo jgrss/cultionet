@@ -13,6 +13,7 @@ import pygrts
 import torch
 from joblib import delayed, parallel_backend
 from scipy.ndimage.measurements import label as nd_label
+from shapely.geometry import box
 from skimage.measure import regionprops
 from tqdm.auto import tqdm
 
@@ -443,5 +444,15 @@ class EdgeDataset(SpatialDataset):
 
         if self.norm_values is not None:
             batch = self.norm_values(batch)
+
+        # Get the centroid
+        centroid = box(
+            float(batch.left),
+            float(batch.bottom),
+            float(batch.right),
+            float(batch.top),
+        ).centroid
+        batch.lon = torch.tensor([centroid.x])
+        batch.lat = torch.tensor([centroid.y])
 
         return batch
