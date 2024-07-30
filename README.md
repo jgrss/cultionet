@@ -248,7 +248,7 @@ pyenv activate venv.cultionet
 3. Install PyTorch 2.2.1 for CUDA 11.4 and 11.8
 ```commandline
 (venv.cultionet) pip install -U setuptools
-(venv.cultionet) pip install torch==2.2.1 torchvision==0.17.1 torchaudio==2.2.1 --index-url https://download.pytorch.org/whl/cu118
+(venv.cultionet) pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cu118
 ```
 
 The command below should print `True` if PyTorch can access a GPU.
