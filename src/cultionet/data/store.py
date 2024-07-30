@@ -4,6 +4,7 @@ from typing import Union
 import dask.array as da
 import einops
 import numpy as np
+import pandas as pd
 import torch
 import xarray as xr
 from dask.delayed import Delayed
@@ -97,10 +98,24 @@ class BatchStore:
 
         batch_id = f"{self.region}_{self.start_date}_{self.end_date}_{w.row_off}_{w.col_off}"
 
+        # Get the upper left lat/lon
+        (
+            lat_left,
+            lat_bottom,
+            lat_right,
+            lat_top,
+        ) = self.data.gw.geodataframe.to_crs("epsg:4326").total_bounds.tolist()
+
         batch = Data(
             x=x,
-            start_year=[self.start_date],
-            end_year=[self.end_date],
+            start_year=torch.tensor(
+                [pd.Timestamp(self.start_date).year],
+                dtype=torch.int32,
+            ),
+            end_year=torch.tensor(
+                [pd.Timestamp(self.end_date).year],
+                dtype=torch.int32,
+            ),
             padding=[self.padding],
             window_row_off=[w.row_off],
             window_col_off=[w.col_off],
@@ -108,10 +123,10 @@ class BatchStore:
             window_width=[w.width],
             res=[self.res],
             resampling=[self.resampling],
-            left=[self.data.gw.left],
-            bottom=[self.data.gw.bottom],
-            right=[self.data.gw.right],
-            top=[self.data.gw.top],
+            left=torch.tensor([lat_left], dtype=torch.float32),
+            bottom=torch.tensor([lat_bottom], dtype=torch.float32),
+            right=torch.tensor([lat_right], dtype=torch.float32),
+            top=torch.tensor([lat_top], dtype=torch.float32),
             batch_id=[batch_id],
         )
 
