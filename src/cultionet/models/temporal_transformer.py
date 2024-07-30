@@ -13,7 +13,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
-from vit_pytorch.vit_3d import ViT
 
 from .. import nn as cunn
 from ..layers.encodings import get_sinusoid_encoding_table
@@ -242,71 +241,6 @@ class Identity(nn.Module):
         return x
 
 
-class ViTransformer(nn.Module):
-    def __init__(
-        self,
-        in_channels: int = 5,
-        in_time: int = 12,
-        image_size: int = 100,
-        image_patch_size: int = 10,
-        frame_patch_size: int = 2,
-        d_model: int = 128,
-        num_layers: int = 2,
-        num_head: int = 8,
-        dropout: float = 0.0,
-    ):
-        super(ViTransformer, self).__init__()
-
-        vit_model = ViT(
-            image_size=image_size,  # image size
-            frames=in_time,  # number of frames
-            image_patch_size=image_patch_size,  # image patch size
-            frame_patch_size=frame_patch_size,  # frame patch size
-            num_classes=1,  # NOTE: ignored
-            dim=d_model,
-            depth=num_layers,
-            heads=num_head,
-            mlp_dim=d_model * 2,
-            dropout=dropout,
-            emb_dropout=dropout,
-        )
-        reduction_size = image_patch_size**2 * in_channels * frame_patch_size
-        vit_model.to_patch_embedding[1] = nn.LayerNorm(
-            reduction_size, eps=1e-05, elementwise_affine=True
-        )
-        vit_model.to_patch_embedding[2] = nn.Linear(
-            in_features=reduction_size, out_features=d_model
-        )
-        vit_model = list(vit_model.children())[:-2]
-        vit_model += [
-            nn.LayerNorm(d_model, eps=1e-05, elementwise_affine=True),
-            nn.Linear(
-                in_features=d_model,
-                out_features=image_patch_size**2
-                * d_model
-                * frame_patch_size,
-            ),
-            Rearrange(
-                'b (f h w) (p1 p2 pf c) -> b c (f pf) (h p1) (w p2)',
-                f=in_time // frame_patch_size,
-                h=image_size // image_patch_size,
-                w=image_size // image_patch_size,
-                p1=image_patch_size,
-                p2=image_patch_size,
-                pf=frame_patch_size,
-                c=d_model,
-            ),
-        ]
-        self.model = nn.Sequential(*vit_model)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return einops.reduce(
-            self.model(x),
-            'b c t h w -> b c h w',
-            'mean',
-        )
-
-
 class TemporalTransformerFinal(nn.Module):
     def __init__(
         self,
@@ -434,16 +368,6 @@ class TemporalTransformer(nn.Module):
             num_layers=num_layers,
             dropout=dropout,
         )
-
-        # Vision Transformer
-        # self.vit_model = ViTransformer(
-        #     in_channels=in_channels,
-        #     frame_patch_size=frame_patch_size,
-        #     d_model=d_model,
-        #     num_layers=num_layers,
-        #     num_head=num_head,
-        #     dropout=dropout,
-        # )
 
         self.final = TemporalTransformerFinal(
             hidden_channels=hidden_channels,
