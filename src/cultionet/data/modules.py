@@ -63,6 +63,7 @@ class EdgeDataModule(LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             collate_fn=collate_fn,
+            persistent_workers=self.persistent_workers,
             generator=self.generator,
         )
 
@@ -74,6 +75,7 @@ class EdgeDataModule(LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             collate_fn=collate_fn,
+            persistent_workers=self.persistent_workers,
             generator=self.generator,
         )
 
@@ -85,5 +87,6 @@ class EdgeDataModule(LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             collate_fn=collate_fn,
+            persistent_workers=self.persistent_workers,
             generator=self.generator,
         )
