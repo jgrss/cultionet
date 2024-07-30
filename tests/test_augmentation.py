@@ -59,8 +59,10 @@ def test_augmenter_loading():
         'gaussian',
         'saltpepper',
     ]
-    aug = Augmenters(augmentations=augmentations, max_crop_class=1)
-    for i, method in enumerate(aug):
+
+    for i, aug_name in enumerate(augmentations):
+        aug_modules = Augmenters(augmentations=[aug_name], rng=RNG)
+
         batch = create_batch(
             num_channels=3,
             num_time=12,
@@ -74,7 +76,7 @@ def test_augmenter_loading():
 
         batch.segments = np.uint8(nd_label(batch.y.squeeze().numpy() == 1)[0])
         batch.props = regionprops(batch.segments)
-        aug_batch = method(batch.copy(), aug_args=aug.aug_args)
+        aug_batch = aug_modules(batch.copy())
 
         assert not torch.allclose(aug_batch.x, batch.x)
         assert torch.allclose(aug_batch.y, batch.y)
@@ -87,9 +89,11 @@ def test_augmenter_loading():
         'fliplr',
         'flipud',
         'cropresize',
+        'perlin',
     ]
-    aug = Augmenters(augmentations=augmentations, max_crop_class=1)
-    for i, method in enumerate(aug):
+    for i, aug_name in enumerate(augmentations):
+        aug_modules = Augmenters(augmentations=[aug_name], rng=RNG)
+
         batch = create_batch(
             num_channels=3,
             num_time=12,
@@ -101,9 +105,9 @@ def test_augmenter_loading():
         assert batch.x.max() <= 1
         assert batch.y.min() == -1
 
-        aug_batch = method(batch.copy(), aug_args=aug.aug_args)
+        aug_batch = aug_modules(batch.copy())
 
-        if method.name_ == 'rotate-90':
+        if aug_name == 'rotate-90':
             assert torch.allclose(
                 batch.x[0, 0, :, 0, 0],
                 aug_batch.x[0, 0, :, -1, 0],
@@ -130,7 +134,7 @@ def test_augmenter_loading():
                 batch.bdist[0, 0, -1],
                 aug_batch.bdist[0, 0, 0],
             )
-        elif method.name_ == 'fliplr':
+        elif aug_name == 'fliplr':
             assert torch.allclose(
                 batch.x[0, 0, :, 0, 0],
                 aug_batch.x[0, 0, :, 0, -1],
@@ -157,7 +161,7 @@ def test_augmenter_loading():
                 batch.bdist[0, -1, 0],
                 aug_batch.bdist[0, -1, -1],
             )
-        elif method.name_ == 'flipud':
+        elif aug_name == 'flipud':
             assert torch.allclose(
                 batch.x[0, 0, :, 0, 0],
                 aug_batch.x[0, 0, :, -1, 0],
@@ -190,8 +194,9 @@ def test_augmenter_loading():
         assert not torch.allclose(aug_batch.bdist, batch.bdist)
 
     augmentations = ['none']
-    aug = Augmenters(augmentations=augmentations, max_crop_class=1)
-    for i, method in enumerate(aug):
+    for i, aug_name in enumerate(augmentations):
+        aug_modules = Augmenters(augmentations=[aug_name], rng=RNG)
+
         batch = create_batch(
             num_channels=3,
             num_time=12,
@@ -199,7 +204,7 @@ def test_augmenter_loading():
             width=50,
         )
 
-        aug_batch = method(batch.copy(), aug_args=aug.aug_args)
+        aug_batch = aug_modules(batch.copy())
 
         assert torch.allclose(aug_batch.x, batch.x)
         assert torch.allclose(aug_batch.y, batch.y)
