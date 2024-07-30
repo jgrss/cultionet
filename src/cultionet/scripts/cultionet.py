@@ -859,6 +859,7 @@ def create_one_id(
                     keep_crop_classes=args.keep_crop_classes,
                     replace_dict=args.replace_dict,
                     nonag_is_unknown=args.nonag_is_unknown,
+                    all_touched=args.all_touched,
                 )
 
 
