@@ -27,7 +27,7 @@ class ConvTranspose2d(nn.Module):
         stride: int = 2,
         padding: int = 1,
     ):
-        super(ConvTranspose2d, self).__init__()
+        super().__init__()
 
         self.up_conv = nn.ConvTranspose2d(
             in_channels=in_channels,
@@ -57,7 +57,7 @@ class ConvBlock2d(nn.Module):
         activation_type: str = "SiLU",
         batchnorm_first: bool = False,
     ):
-        super(ConvBlock2d, self).__init__()
+        super().__init__()
 
         layers = []
 
@@ -111,7 +111,7 @@ class DoubleConv(nn.Module):
         double_dilation: int = 1,
         activation_type: str = "SiLU",
     ):
-        super(DoubleConv, self).__init__()
+        super().__init__()
 
         layers = []
 
@@ -161,7 +161,7 @@ class AtrousPyramidPooling(nn.Module):
         dilation_c: int = 3,
         dilation_d: int = 4,
     ):
-        super(AtrousPyramidPooling, self).__init__()
+        super().__init__()
 
         self.up = UpSample()
 
@@ -239,7 +239,7 @@ class PoolConv(nn.Module):
         activation_type: str = "SiLU",
         dropout: T.Optional[float] = None,
     ):
-        super(PoolConv, self).__init__()
+        super().__init__()
 
         layers = [nn.MaxPool2d(pool_size)]
         if dropout is not None:
@@ -273,7 +273,7 @@ class ResConvBlock2d(nn.Module):
         repeat_kernel: bool = False,
         batchnorm_first: bool = False,
     ):
-        super(ResConvBlock2d, self).__init__()
+        super().__init__()
 
         assert (
             0 < num_blocks < 3
@@ -348,7 +348,7 @@ class ResidualConv(nn.Module):
         activation_type: str = "SiLU",
         batchnorm_first: bool = False,
     ):
-        super(ResidualConv, self).__init__()
+        super().__init__()
 
         self.attention_weights = attention_weights
 
@@ -489,7 +489,7 @@ class ResidualAConv(nn.Module):
         natten_attn_drop: float = 0.0,
         natten_proj_drop: float = 0.0,
     ):
-        super(ResidualAConv, self).__init__()
+        super().__init__()
 
         self.attention_weights = attention_weights
         self.concat_resid = concat_resid
@@ -633,7 +633,7 @@ class PoolResidualConv(nn.Module):
         natten_attn_drop: float = 0.0,
         natten_proj_drop: float = 0.0,
     ):
-        super(PoolResidualConv, self).__init__()
+        super().__init__()
 
         assert res_block_type in (
             ResBlockTypes.RES,
@@ -727,7 +727,7 @@ class SingleConv(nn.Module):
         out_channels: int,
         activation_type: str = "SiLU",
     ):
-        super(SingleConv, self).__init__()
+        super().__init__()
 
         self.seq = ConvBlock2d(
             in_channels=in_channels,
@@ -750,7 +750,7 @@ class FinalConv2dDropout(nn.Module):
         final_activation: T.Callable,
         num_classes: int,
     ):
-        super(FinalConv2dDropout, self).__init__()
+        super().__init__()
 
         self.net = nn.Sequential(
             ResidualConv(

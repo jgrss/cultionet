@@ -25,7 +25,7 @@ from einops import rearrange
 
 class Trend3d(torch.nn.Module):
     def __init__(self, kernel_size: int, direction: str = "positive"):
-        super(Trend3d, self).__init__()
+        super().__init__()
 
         assert direction in (
             "positive",
@@ -63,7 +63,7 @@ class Trend3d(torch.nn.Module):
 
 class Peaks3d(torch.nn.Module):
     def __init__(self, kernel_size: int, radius: int = 9, sigma: float = 1.5):
-        super(Peaks3d, self).__init__()
+        super().__init__()
 
         self.padding = (kernel_size // 2, 0, 0)
         x = torch.linspace(-radius, radius + 1, kernel_size)

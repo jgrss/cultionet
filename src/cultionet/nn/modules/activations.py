@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 class LogSoftmax(nn.Module):
     def __init__(self, dim: int = 1):
-        super(LogSoftmax, self).__init__()
+        super().__init__()
 
         self.dim = dim
 
@@ -17,7 +17,7 @@ class LogSoftmax(nn.Module):
 
 class Softmax(nn.Module):
     def __init__(self, dim: int = 1):
-        super(Softmax, self).__init__()
+        super().__init__()
 
         self.dim = dim
 
@@ -27,7 +27,7 @@ class Softmax(nn.Module):
 
 class Swish(nn.Module):
     def __init__(self, channels: int, dims: int):
-        super(Swish, self).__init__()
+        super().__init__()
 
         self.sigmoid = nn.Sigmoid()
         self.beta = nn.Parameter(torch.ones(1))
@@ -57,7 +57,7 @@ class SetActivation(nn.Module):
             >>> act = SetActivation('Swish', channels=32)
             >>> act(x)
         """
-        super(SetActivation, self).__init__()
+        super().__init__()
 
         if activation_type == "Swish":
             assert isinstance(
@@ -118,7 +118,7 @@ class SigmoidCrisp(nn.Module):
     """
 
     def __init__(self, smooth: float = 1e-2):
-        super(SigmoidCrisp, self).__init__()
+        super().__init__()
 
         self.smooth = smooth
         self.gamma = nn.Parameter(torch.ones(1))

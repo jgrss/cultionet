@@ -19,7 +19,7 @@ class ConvBlock2d(nn.Module):
         add_activation: bool = True,
         activation_type: str = "SiLU",
     ):
-        super(ConvBlock2d, self).__init__()
+        super().__init__()
 
         layers = [
             nn.Conv2d(
@@ -45,7 +45,7 @@ class ConvBlock2d(nn.Module):
 
 class AttentionAdd(nn.Module):
     def __init__(self):
-        super(AttentionAdd, self).__init__()
+        super().__init__()
 
         self.up = UpSample()
 
@@ -58,7 +58,7 @@ class AttentionAdd(nn.Module):
 
 class AttentionGate(nn.Module):
     def __init__(self, high_channels: int, low_channels: int):
-        super(AttentionGate, self).__init__()
+        super().__init__()
 
         conv_x = nn.Conv2d(
             high_channels, high_channels, kernel_size=1, padding=0
@@ -143,7 +143,7 @@ class TanimotoComplement(nn.Module):
         dim: T.Union[int, T.Sequence[int]] = 0,
         targets_are_labels: bool = True,
     ):
-        super(TanimotoComplement, self).__init__()
+        super().__init__()
 
         self.smooth = smooth
         self.depth = depth
@@ -250,7 +250,7 @@ class TanimotoDist(nn.Module):
         weight: T.Optional[torch.Tensor] = None,
         dim: T.Union[int, T.Sequence[int]] = 0,
     ):
-        super(TanimotoDist, self).__init__()
+        super().__init__()
 
         self.smooth = smooth
         self.weight = weight
@@ -318,7 +318,7 @@ class FractalAttention(nn.Module):
     """
 
     def __init__(self, in_channels: int, out_channels: int):
-        super(FractalAttention, self).__init__()
+        super().__init__()
 
         self.query = nn.Sequential(
             ConvBlock2d(
@@ -374,7 +374,7 @@ class FractalAttention(nn.Module):
 
 class ChannelAttention(nn.Module):
     def __init__(self, out_channels: int, activation_type: str):
-        super(ChannelAttention, self).__init__()
+        super().__init__()
 
         # Channel attention
         self.channel_adaptive_avg = nn.AdaptiveAvgPool2d(1)
@@ -409,7 +409,7 @@ class ChannelAttention(nn.Module):
 
 class SpatialAttention(nn.Module):
     def __init__(self):
-        super(SpatialAttention, self).__init__()
+        super().__init__()
 
         self.conv = nn.Conv2d(
             in_channels=2,
@@ -442,7 +442,7 @@ class SpatialChannelAttention(nn.Module):
     """
 
     def __init__(self, out_channels: int, activation_type: str):
-        super(SpatialChannelAttention, self).__init__()
+        super().__init__()
 
         self.channel_attention = ChannelAttention(
             out_channels=out_channels, activation_type=activation_type
