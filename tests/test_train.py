@@ -80,7 +80,7 @@ def test_train():
             edge_class=2,
             model_type=ModelTypes.TOWERUNET,
             res_block_type=ResBlockTypes.RESA,
-            attention_weights=AttentionTypes.SPATIAL_CHANNEL,
+            attention_weights=AttentionTypes.NATTEN,
             activation_type="SiLU",
             dilations=[1, 2],
             dropout=0.2,
