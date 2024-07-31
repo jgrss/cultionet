@@ -73,7 +73,7 @@ def test_dataset(class_info: dict) -> EdgeDataModule:
             'data_012624_2023_none.pt',
         ]
         assert first_val_batch.batch_id == [
-            'data_034049_2022_none.pt',
+            'data_051349_2022_none.pt',
             'data_094721_2022_none.pt',
         ]
         data_module = EdgeDataModule(
@@ -86,11 +86,11 @@ def test_dataset(class_info: dict) -> EdgeDataModule:
         first_train_batch = next(iter(data_module.train_dataloader()))
         first_val_batch = next(iter(data_module.val_dataloader()))
         assert first_train_batch.batch_id == [
-            'data_041544_2020_none.pt',
-            'data_051349_2022_none.pt',
+            'data_034049_2022_none.pt',
+            'data_050552_2023_none.pt',
         ]
         assert first_val_batch.batch_id == [
-            'data_034049_2022_none.pt',
+            'data_051349_2022_none.pt',
             'data_094721_2022_none.pt',
         ]
 
@@ -105,7 +105,7 @@ def test_dataset(class_info: dict) -> EdgeDataModule:
         assert ds.data_list[-1].name == 'data_094721_2022_none.pt'
         ds.shuffle()
         assert ds.data_list[0].name == 'data_032192_2020_none.pt'
-        assert ds.data_list[-1].name == 'data_068216_2023_none.pt'
+        assert ds.data_list[-1].name == 'data_022792_2023_none.pt'
 
         ds.cleanup()
         assert len(ds) == 0
