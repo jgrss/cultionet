@@ -71,7 +71,7 @@ class CultioNet(nn.Module):
             final_activation=nn.Softmax(dim=1),
         )
 
-        unet3_kwargs = {
+        mask_model_kwargs = {
             "in_channels": self.in_channels,
             "in_time": self.in_time,
             "hidden_channels": self.hidden_channels,
@@ -93,7 +93,7 @@ class CultioNet(nn.Module):
             ModelTypes.TOWERUNET
         ), "The model type is not supported."
 
-        self.mask_model = TowerUNet(**unet3_kwargs)
+        self.mask_model = TowerUNet(**mask_model_kwargs)
 
     def forward(
         self, batch: Data, training: bool = True
