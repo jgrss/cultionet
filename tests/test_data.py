@@ -21,10 +21,11 @@ def test_assign_x():
     assert batch.x.shape == (1, num_channels, num_time, height, width)
     assert batch.y is None
     assert torch.allclose(x, batch.x)
+    assert batch.num_samples == 1
     assert batch.num_channels == num_channels
     assert batch.num_time == num_time
-    assert batch.num_rows == height
-    assert batch.num_cols == width
+    assert batch.height == height
+    assert batch.width == width
 
 
 def test_assign_xy():
@@ -40,10 +41,11 @@ def test_assign_xy():
     assert batch.y.shape == (1, height, width)
     assert torch.allclose(x, batch.x)
     assert torch.allclose(y, batch.y)
+    assert batch.num_samples == 1
     assert batch.num_channels == num_channels
     assert batch.num_time == num_time
-    assert batch.num_rows == height
-    assert batch.num_cols == width
+    assert batch.height == height
+    assert batch.width == width
 
 
 def test_assign_xy_kwargs():
@@ -62,10 +64,11 @@ def test_assign_xy_kwargs():
     assert torch.allclose(x, batch.x)
     assert torch.allclose(y, batch.y)
     assert torch.allclose(bdist, batch.bdist)
+    assert batch.num_samples == 1
     assert batch.num_channels == num_channels
     assert batch.num_time == num_time
-    assert batch.num_rows == height
-    assert batch.num_cols == width
+    assert batch.height == height
+    assert batch.width == width
 
 
 def test_create_data():
@@ -98,10 +101,11 @@ def test_create_data():
         assert torch.allclose(x, loaded_batch.x)
         assert torch.allclose(y, loaded_batch.y)
         assert torch.allclose(bdist, loaded_batch.bdist)
+        assert loaded_batch.num_samples == 1
         assert loaded_batch.num_channels == num_channels
         assert loaded_batch.num_time == num_time
-        assert loaded_batch.num_rows == height
-        assert loaded_batch.num_cols == width
+        assert loaded_batch.height == height
+        assert loaded_batch.width == width
 
 
 def test_copy_data(data_batch: Data):
