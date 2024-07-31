@@ -191,7 +191,7 @@ train_predict:
   res_block_type:
     short: rb
     long: res-block-type
-    help: The residual block type (only relevant when --model-type=ResUNet3Psi)
+    help: The residual block type)
     kwargs:
       default: 'resa'
       choices: ['res', 'resa']
