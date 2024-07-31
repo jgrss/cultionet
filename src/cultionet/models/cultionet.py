@@ -328,17 +328,10 @@ class CultioNet(nn.Module):
         }
 
         assert model_type in (
-            ModelTypes.UNET3PSI,
-            ModelTypes.RESUNET3PSI,
-            ModelTypes.TOWERUNET,
+            ModelTypes.TOWERUNET
         ), "The model type is not supported."
 
-        if model_type == ModelTypes.UNET3PSI:
-            self.mask_model = UNet3Psi(**unet3_kwargs)
-        elif model_type == ModelTypes.RESUNET3PSI:
-            self.mask_model = ResUNet3Psi(**unet3_kwargs)
-        else:
-            self.mask_model = TowerUNet(**unet3_kwargs)
+        self.mask_model = TowerUNet(**unet3_kwargs)
 
     def forward(
         self, batch: Data, training: bool = True

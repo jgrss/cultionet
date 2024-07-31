@@ -181,8 +181,6 @@ train_predict:
     kwargs:
       default: 'TowerUNet'
       choices:
-        - 'UNet3Psi'
-        - 'ResUNet3Psi'
         - 'TowerUNet'
   activation_type:
     short: ''

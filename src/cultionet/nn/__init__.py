@@ -12,20 +12,11 @@ from .modules.convolution import (
 from .modules.kernels import Peaks3d, Trend3d
 from .modules.reshape import UpSample
 from .modules.unet_parts import (
-    ResELUNetPsiBlock,
-    ResUNet3_0_4,
-    ResUNet3_1_3,
-    ResUNet3_2_2,
-    ResUNet3_3_1,
     TowerUNetBlock,
     TowerUNetDecoder,
     TowerUNetEncoder,
     TowerUNetFinal,
     TowerUNetFusion,
-    UNet3_0_4,
-    UNet3_1_3,
-    UNet3_2_2,
-    UNet3_3_1,
     UNetUpBlock,
 )
 
@@ -49,13 +40,4 @@ __all__ = [
     'TowerUNetEncoder',
     'TowerUNetDecoder',
     'TowerUNetFusion',
-    'ResELUNetPsiBlock',
-    'ResUNet3_0_4',
-    'ResUNet3_1_3',
-    'ResUNet3_2_2',
-    'ResUNet3_3_1',
-    'UNet3_0_4',
-    'UNet3_1_3',
-    'UNet3_2_2',
-    'UNet3_3_1',
 ]
