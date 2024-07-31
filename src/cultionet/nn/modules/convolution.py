@@ -356,6 +356,7 @@ class ResidualConv(nn.Module):
             assert self.attention_weights in [
                 AttentionTypes.FRACTAL,
                 AttentionTypes.SPATIAL_CHANNEL,
+                AttentionTypes.NATTEN,
             ], "The attention method is not supported."
 
             self.gamma = nn.Parameter(torch.ones(1))
