@@ -45,7 +45,8 @@ from cultionet.enums import CLISteps, DataColumns, ModelNames
 from cultionet.errors import TensorShapeError
 from cultionet.model import CultionetParams
 from cultionet.utils import model_preprocessing
-from cultionet.utils.logging import ParallelProgress, set_color_logger
+from cultionet.utils.logging import set_color_logger
+from cultionet.utils.model_preprocessing import ParallelProgress
 from cultionet.utils.normalize import NormValues
 from cultionet.utils.project_paths import ProjectPaths, setup_paths
 

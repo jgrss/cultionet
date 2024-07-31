@@ -65,12 +65,7 @@ class ModelNames(StrEnum):
 
 
 class ModelTypes(StrEnum):
-    UNET = 'unet'
-    RESUNET = 'resunet'
-    UNET3PSI = 'UNet3Psi'
-    RESUNET3PSI = 'ResUNet3Psi'
     TOWERUNET = 'TowerUNet'
-    TRESAUNET = 'TemporalResAUNet'
 
 
 class ResBlockTypes(StrEnum):

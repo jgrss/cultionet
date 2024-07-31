@@ -30,7 +30,7 @@ class ScaledDotProductAttention(nn.Module):
         scale: float,
         dropout: float = 0.1,
     ):
-        super(ScaledDotProductAttention, self).__init__()
+        super().__init__()
 
         self.dropout = None
         if dropout > 0:
@@ -64,7 +64,7 @@ class MultiHeadAttention(nn.Module):
     """
 
     def __init__(self, d_model: int, num_head: int, dropout: float = 0.1):
-        super(MultiHeadAttention, self).__init__()
+        super().__init__()
 
         self.num_head = num_head
         d_k = d_model // num_head
@@ -118,7 +118,7 @@ class MultiHeadAttention(nn.Module):
 
 class PositionWiseFeedForward(nn.Module):
     def __init__(self, d_model: int, hidden_channels: int):
-        super(PositionWiseFeedForward, self).__init__()
+        super().__init__()
 
         self.fc1 = nn.Linear(d_model, hidden_channels)
         self.fc2 = nn.Linear(hidden_channels, d_model)
@@ -135,7 +135,7 @@ class EncoderLayer(nn.Module):
         num_head: int,
         dropout: float = 0.1,
     ):
-        super(EncoderLayer, self).__init__()
+        super().__init__()
 
         self.self_attn = MultiHeadAttention(
             d_model=d_model, num_head=num_head, dropout=dropout
@@ -162,7 +162,7 @@ class Transformer(nn.Module):
         num_layers: int,
         dropout: float = 0.1,
     ):
-        super(Transformer, self).__init__()
+        super().__init__()
 
         self.encoder_layers = nn.ModuleList(
             [
@@ -190,7 +190,7 @@ class Transformer(nn.Module):
 
 class InLayer(nn.Module):
     def __init__(self, in_channels: int, out_channels: int):
-        super(InLayer, self).__init__()
+        super().__init__()
 
         self.seq = nn.Sequential(
             nn.Conv3d(
@@ -217,7 +217,7 @@ class InBlock(nn.Module):
         hidden_channels: int,
         out_channels: int,
     ):
-        super(InBlock, self).__init__()
+        super().__init__()
 
         self.seq = nn.Sequential(
             InLayer(in_channels=in_channels, out_channels=hidden_channels),
@@ -235,7 +235,7 @@ class InBlock(nn.Module):
 
 class Identity(nn.Module):
     def __init__(self):
-        super(Identity, self).__init__()
+        super().__init__()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x
@@ -251,7 +251,7 @@ class TemporalTransformerFinal(nn.Module):
         activation_type: str = "SiLU",
         final_activation: Callable = nn.Softmax(dim=1),
     ):
-        super(TemporalTransformerFinal, self).__init__()
+        super().__init__()
 
         # Level 2 level (non-crop; crop)
         self.final_l2 = cunn.FinalConv2dDropout(
@@ -316,7 +316,7 @@ class TemporalTransformer(nn.Module):
                 to project them into a feature space of dimension d_model.
             time_scaler (int): Period to use for the positional encoding.
         """
-        super(TemporalTransformer, self).__init__()
+        super().__init__()
 
         self.d_model = d_model
         self.num_classes_l2 = num_classes_l2
@@ -432,28 +432,3 @@ class TemporalTransformer(nn.Module):
             "l3": encoded["l3"],
             "encoded": encoded["hidden"],
         }
-
-
-if __name__ == '__main__':
-    batch_size = 2
-    num_channels = 3
-    hidden_channels = 64
-    num_head = 8
-    d_model = 128
-    in_time = 13
-    height = 100
-    width = 100
-
-    x = torch.rand(
-        (batch_size, num_channels, in_time, height, width),
-        dtype=torch.float32,
-    )
-
-    model = TemporalTransformer(
-        in_channels=num_channels,
-        hidden_channels=hidden_channels,
-        num_head=num_head,
-        d_model=d_model,
-        in_time=in_time,
-    )
-    output = model(x)

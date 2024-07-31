@@ -2,51 +2,15 @@ import typing as T
 import warnings
 
 import einops
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchmetrics
 from kornia.contrib import distance_transform
 
 try:
     import torch_topological.nn as topnn
 except ImportError:
     topnn = None
-
-from ..data.data import Data
-
-
-class FieldOfJunctionsLoss(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(
-        self,
-        patches: torch.Tensor,
-        image_patches: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compute the objective of our model (see Equation 8 of the paper)."""
-
-        # Compute negative log-likelihood for each patch (shape [N, H', W'])
-        loss_per_patch = einops.reduce(
-            (
-                einops.rearrange(image_patches, 'b c p k h w -> b 1 c p k h w')
-                - patches
-            )
-            ** 2,
-            'b n c p k h w -> b n c h w',
-            'mean',
-        )
-        loss_per_patch = einops.reduce(
-            loss_per_patch, 'b n c h w -> b n h w', 'sum'
-        )
-        # Reduce to the batch mean
-        loss_per_patch = einops.reduce(
-            loss_per_patch, 'b n h w -> n h w', 'mean'
-        )
-
-        return loss_per_patch.mean()
 
 
 class LossPreprocessing(nn.Module):
@@ -391,108 +355,6 @@ class CrossEntropyLoss(nn.Module):
         return self.loss_func(inputs, targets)
 
 
-class FocalLoss(nn.Module):
-    """Focal loss.
-
-    Reference:
-        https://www.kaggle.com/code/bigironsphere/loss-function-library-keras-pytorch/notebook
-    """
-
-    def __init__(
-        self,
-        alpha: float = 0.8,
-        gamma: float = 2.0,
-        weight: T.Optional[torch.Tensor] = None,
-        label_smoothing: T.Optional[float] = 0.1,
-    ):
-        super().__init__()
-
-        self.alpha = alpha
-        self.gamma = gamma
-
-        self.preprocessor = LossPreprocessing(
-            inputs_are_logits=True, apply_transform=True
-        )
-        self.cross_entropy_loss = nn.CrossEntropyLoss(
-            weight=weight, reduction="none", label_smoothing=label_smoothing
-        )
-
-    def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
-    ) -> torch.Tensor:
-        inputs, targets = self.preprocessor(inputs, targets)
-        ce_loss = self.cross_entropy_loss(inputs, targets.half())
-        ce_exp = torch.exp(-ce_loss)
-        focal_loss = self.alpha * (1.0 - ce_exp) ** self.gamma * ce_loss
-
-        return focal_loss.mean()
-
-
-class QuantileLoss(nn.Module):
-    """Loss function for quantile regression.
-
-    Reference:
-        https://pytorch-forecasting.readthedocs.io/en/latest/_modules/pytorch_forecasting/metrics.html#QuantileLoss
-
-    THE MIT License
-
-    Copyright 2020 Jan Beitner
-    """
-
-    def __init__(self, quantiles: T.Tuple[float, float, float]):
-        super().__init__()
-
-        self.quantiles = quantiles
-
-    def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
-    ) -> torch.Tensor:
-        """Performs a single forward pass.
-
-        Args:
-            inputs: Predictions from model (probabilities, logits or labels).
-            targets: Ground truth values.
-
-        Returns:
-            Quantile loss (float)
-        """
-        losses = []
-        for i, q in enumerate(self.quantiles):
-            errors = targets - inputs[:, i]
-            losses.append(torch.max((q - 1) * errors, q * errors).unsqueeze(1))
-        loss = torch.cat(losses, dim=1).sum(dim=1).mean()
-
-        return loss
-
-
-class WeightedL1Loss(nn.Module):
-    """Weighted L1Loss loss."""
-
-    def __init__(self):
-        super().__init__()
-
-    def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
-    ) -> torch.Tensor:
-        """Performs a single forward pass.
-
-        Args:
-            inputs: Predictions from model.
-            targets: Ground truth values.
-
-        Returns:
-            Loss (float)
-        """
-        inputs = inputs.contiguous().view(-1)
-        targets = targets.contiguous().view(-1)
-
-        mae = torch.abs(inputs - targets)
-        weight = inputs + targets
-        loss = (mae * weight).mean()
-
-        return loss
-
-
 class MSELoss(nn.Module):
     """MSE loss."""
 
@@ -574,50 +436,6 @@ class BoundaryLoss(nn.Module):
         distances = self.fill_distances(distances, targets)
 
         return torch.einsum("bhw, bhw -> bhw", distances, 1.0 - probs).mean()
-
-
-class MultiScaleSSIMLoss(nn.Module):
-    """Multi-scale Structural Similarity Index Measure loss."""
-
-    def __init__(self):
-        super().__init__()
-
-        self.msssim = torchmetrics.MultiScaleStructuralSimilarityIndexMeasure(
-            gaussian_kernel=False,
-            kernel_size=3,
-            data_range=1.0,
-            k1=1e-4,
-            k2=9e-4,
-        )
-
-    def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor, data: Data
-    ) -> torch.Tensor:
-        """Performs a single forward pass.
-
-        Args:
-            inputs: Predicted probabilities.
-            targets: Ground truth inverse distance transform, where distances
-                along edges are 1.
-            data: Data object used to extract dimensions.
-
-        Returns:
-            Loss (float)
-        """
-        height = (
-            int(data.height) if data.batch is None else int(data.height[0])
-        )
-        width = int(data.width) if data.batch is None else int(data.width[0])
-        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
-
-        inputs = self.gc(inputs.unsqueeze(1), batch_size, height, width)
-        targets = self.gc(targets.unsqueeze(1), batch_size, height, width).to(
-            dtype=inputs.dtype
-        )
-
-        loss = 1.0 - self.msssim(inputs, targets)
-
-        return loss
 
 
 class TopologyLoss(nn.Module):
