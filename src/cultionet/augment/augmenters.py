@@ -394,7 +394,7 @@ class Augmenters:
                         each labeled parcel in `y`.
 
             aug_args: Additional keyword arguments passed to the
-                `torch_geometric.data.Data` object.
+                `Data` object.
 
     Example:
         >>> augmenters = Augmenters(augmentations=['tswarp'])
