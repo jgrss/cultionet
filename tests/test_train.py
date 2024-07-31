@@ -80,7 +80,7 @@ def test_train():
             edge_class=2,
             model_type=ModelTypes.TOWERUNET,
             res_block_type=ResBlockTypes.RESA,
-            attention_weights=AttentionTypes.NATTEN,
+            attention_weights=AttentionTypes.SPATIAL_CHANNEL,
             activation_type="SiLU",
             dilations=[1, 2],
             dropout=0.2,
@@ -121,7 +121,7 @@ def test_train_cli():
             "--val-frac 0.2 --augment-prob 0.5 --epochs 1 --hidden-channels 16 "
             "--processes 1 --load-batch-workers 0 --batch-size 2 --dropout 0.2 "
             "--deep-sup --dilations 1 2 --pool-by-max --learning-rate 0.01 "
-            "--weight-decay 1e-4 --attention-weights natten --device cpu"
+            "--weight-decay 1e-4 --attention-weights spatial_channel --device cpu"
         )
 
         try:
