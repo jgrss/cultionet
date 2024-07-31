@@ -66,7 +66,7 @@ class NormValues:
         r"""Normalizes data by the Dynamic World log method or by z-scores.
 
         Args:
-            batch (Data): A `torch_geometric` data object.
+            batch (Data): A tensor data object.
             data_means (Tensor): The data feature-wise means.
             data_stds (Tensor): The data feature-wise standard deviations.
 
