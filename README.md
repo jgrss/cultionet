@@ -5,16 +5,22 @@
 
 ## Cultionet
 
-**cultionet** is a library for semantic segmentation of cultivated land using a neural network. The base architecture is a UNet variant, inspired by [UNet 3+](https://arxiv.org/abs/2004.08790) and [Psi-Net](https://arxiv.org/abs/1902.04099), with convolution blocks following [ResUNet-a](https://arxiv.org/abs/1904.00592). The library is built on [PyTorch Lightning](https://www.pytorchlightning.ai/) and the segmentation objectives (class targets and losses) were designed following [previous work in the remote sensing community](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301115).
+**cultionet** is a library for semantic segmentation of cultivated land with a neural network. The base architecture is a UNet variant, inspired by [UNet 3+](https://arxiv.org/abs/2004.08790) and [Psi-Net](https://arxiv.org/abs/1902.04099), with convolution blocks following [ResUNet-a](https://arxiv.org/abs/1904.00592). The library is built on [PyTorch Lightning](https://www.pytorchlightning.ai/) and the segmentation objectives (class targets and losses) were designed following [previous work in the remote sensing community](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301115).
 
-Below are highlights of **cultionet**:
+**Cultionet** uses:
 
-* Satellite image time series instead of individual dates for training and inference
-* [Transformer](https://arxiv.org/abs/1706.03762) time series embeddings
-* UNet architecture with dense skip connections and deep supervision similar to [UNet 3+](https://arxiv.org/abs/2004.08790)
-* Multi-stream outputs inspired by [Psi-Net](https://arxiv.org/abs/1902.04099)
-* Residual in residual [ResUNet-a](https://arxiv.org/abs/1904.00592) blocks with [Dilated Neighborhood Attention](https://arxiv.org/abs/2209.15001)
+* satellite image time series instead of individual dates for training and inference
+* a [Transformer](https://arxiv.org/abs/1706.03762) time series embeddings
+* a UNet architecture with dense skip connections and deep supervision similar to [UNet 3+](https://arxiv.org/abs/2004.08790)
+* multi-stream outputs inspired by [Psi-Net](https://arxiv.org/abs/1902.04099)
+* residual in residual [ResUNet-a](https://arxiv.org/abs/1904.00592) blocks with [Dilated Neighborhood Attention](https://arxiv.org/abs/2209.15001)
 * [Tanimoto loss](https://www.mdpi.com/2072-4292/13/18/3707)
+
+---
+
+To get started, see the [installation section](#installation).
+
+---
 
 ## Data format
 
@@ -200,37 +206,9 @@ After a model has been fit, the best/last checkpoint file can be found at `/proj
 
 ## Installation
 
-### (Option 1) Build Docker images
+#### Install Cultionet (assumes a working CUDA installation)
 
-If using a GPU with CUDA 11.3, see the cultionet [Dockerfile](https://github.com/jgrss/cultionet/blob/main/Dockerfile)
-and [dockerfiles/README.md](https://github.com/jgrss/cultionet/blob/main/dockerfiles/README.md) to build a Docker image.
-
-If installing from scratch locally, see the instructions below.
-
-### (Option 2) Install locally with GPU
-
-#### Install CUDA driver, if necessary
-
-1. Install NVIDIA driver
-
-```commandline
-sudo add-apt-repository ppa:graphics-drivers/ppa
-sudo apt-get update
-sudo apt install ubuntu-drivers-common
-ubuntu-drivers devices
-sudo apt install nvidia-driver-465
-```
-
-`reboot machine`
-
-2. Install CUDA toolkit
-> See https://developer.nvidia.com/cuda-11.3.0-download-archive?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_local
-
-`reboot machine`
-
-#### Install Cultionet
-
-1. Create a new virtual environment (example using `pyenv`)
+1. Create a new virtual environment (example using [pyenv](https://github.com/pyenv/pyenv))
 ```commandline
 pyenv virtualenv 3.10.14 venv.cultionet
 pyenv activate venv.cultionet
@@ -240,14 +218,15 @@ pyenv activate venv.cultionet
 ```commandline
 (venv.cultionet) pip install -U pip
 (venv.cultionet) pip install -U setuptools wheel
-(venv.cultionet) pip install -U numpy cython
+pip install -U numpy==1.24.4
 (venv.cultionet) pip install setuptools==57.5.0
-(venv.cultionet) pip install GDAL==$(gdal-config --version | awk -F'[.]' '{print $1"."$2"."$3}') --no-binary=gdal
+(venv.cultionet) GDAL_VERSION=$(gdal-config --version | awk -F'[.]' '{print $1"."$2"."$3}')
+(venv.cultionet) pip install GDAL==$GDAL_VERSION --no-binary=gdal
 ```
 
 3. Install PyTorch 2.2.1 for CUDA 11.4 and 11.8
 ```commandline
-(venv.cultionet) pip install -U setuptools
+(venv.cultionet) pip install -U --no-cache-dir setuptools>=65.5.1
 (venv.cultionet) pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cu118
 ```
 
@@ -267,3 +246,7 @@ python -c "import torch;print(torch.cuda.is_available())"
 ```commandline
 (venv.cultionet) pip install git@github.com:jgrss/cultionet.git
 ```
+
+### Installing CUDA on Ubuntu
+
+See [CUDA installation](docs/cuda_installation.md)
