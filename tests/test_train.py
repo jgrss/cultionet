@@ -3,9 +3,9 @@ import tempfile
 import joblib
 import pytorch_lightning as pl
 import torch
-from torch_geometric.data import Data
 
 import cultionet
+from cultionet.data.data import Data
 from cultionet.data.datasets import EdgeDataset
 from cultionet.enums import AttentionTypes, ModelTypes, ResBlockTypes
 from cultionet.model import CultionetParams
