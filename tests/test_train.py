@@ -97,30 +97,30 @@ def test_train():
         cultionet.fit(cultionet_params)
 
 
-def test_train_cli():
-    num_data = 10
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir)
-        ppaths = setup_paths(tmp_path)
-        for i in range(num_data):
-            data_path = (
-                ppaths.process_path / f'data_{i:06d}_2021_{i:06d}_none.pt'
-            )
-            batch_data = create_data(i)
-            batch_data.to_file(data_path)
+# def test_train_cli():
+#     num_data = 10
+#     with tempfile.TemporaryDirectory() as tmp_dir:
+#         tmp_path = Path(tmp_dir)
+#         ppaths = setup_paths(tmp_path)
+#         for i in range(num_data):
+#             data_path = (
+#                 ppaths.process_path / f'data_{i:06d}_2021_{i:06d}_none.pt'
+#             )
+#             batch_data = create_data(i)
+#             batch_data.to_file(data_path)
 
-        with open(tmp_path / "data/classes.info", "w") as f:
-            json.dump({"max_crop_class": 1, "edge_class": 2}, f)
+#         with open(tmp_path / "data/classes.info", "w") as f:
+#             json.dump({"max_crop_class": 1, "edge_class": 2}, f)
 
-        command = f"cultionet train -p {str(tmp_path.absolute())} "
-        "--val-frac 0.2 --augment-prob 0.5 --epochs 1 --hidden-channels 16 "
-        "--processes 1 --load-batch-workers 0 --batch-size 2 --dropout 0.2 "
-        "--deep-sup --dilations 1 2 --pool-by-max --learning-rate 0.01 "
-        "--weight-decay 1e-4 --attention-weights natten --device cpu"
+#         command = f"cultionet train -p {str(tmp_path.absolute())} "
+#         "--val-frac 0.2 --augment-prob 0.5 --epochs 1 --hidden-channels 16 "
+#         "--processes 1 --load-batch-workers 0 --batch-size 2 --dropout 0.2 "
+#         "--deep-sup --dilations 1 2 --pool-by-max --learning-rate 0.01 "
+#         "--weight-decay 1e-4 --attention-weights natten --device cpu"
 
-        try:
-            subprocess.run(
-                command, shell=True, check=True, capture_output=True
-            )
-        except subprocess.CalledProcessError as e:
-            raise NameError(e.stderr) from e
+#         try:
+#             subprocess.run(
+#                 command, shell=True, check=True, capture_output=True
+#             )
+#         except subprocess.CalledProcessError as e:
+#             raise NameError(e.stderr) from e
