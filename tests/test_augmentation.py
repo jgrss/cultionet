@@ -58,9 +58,10 @@ def test_augmenter_loading():
         'tsdrift',
         'gaussian',
         'saltpepper',
+        'perlin',
     ]
 
-    for i, aug_name in enumerate(augmentations):
+    for aug_name in augmentations:
         aug_modules = Augmenters(augmentations=[aug_name], rng=RNG)
 
         batch = create_batch(
@@ -89,9 +90,8 @@ def test_augmenter_loading():
         'fliplr',
         'flipud',
         'cropresize',
-        'perlin',
     ]
-    for i, aug_name in enumerate(augmentations):
+    for aug_name in augmentations:
         aug_modules = Augmenters(augmentations=[aug_name], rng=RNG)
 
         batch = create_batch(
@@ -194,7 +194,7 @@ def test_augmenter_loading():
         assert not torch.allclose(aug_batch.bdist, batch.bdist)
 
     augmentations = ['none']
-    for i, aug_name in enumerate(augmentations):
+    for aug_name in augmentations:
         aug_modules = Augmenters(augmentations=[aug_name], rng=RNG)
 
         batch = create_batch(
