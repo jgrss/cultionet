@@ -77,8 +77,7 @@ of the training labels for a grid.
 > for partial labels.
 
 **Configuration file**
-> The configuration file (`cultionet/scripts/config.yml`) is used to create training datasets. This file is only meant
-> to be a template. For each project, copy this template and modify it accordingly.
+> The configuration file is used to create training datasets. Copy the [config template](scripts/config.yml) and modify it accordingly.
 
 **Training data requirements**
 > The polygon vector file should have a field with values for crop fields set equal to 1. Other crop classes are allowed and
@@ -165,7 +164,7 @@ project_dir:
 
 After training data and image time series have been created, the training data PyTorch files (.pt) can be generated using the commands below.
 
-> **Note:** Modify a copy of `cultionet/scripts/config.yml` as needed and save in the project directory. The command below assumes image time series are saved under /project_dir/time_series_vars. The training polygon and grid paths are taken from the config.yml file.
+> **Note:** Modify a copy of the [config template](scripts/config.yml) as needed and save in the project directory. The command below assumes image time series are saved under `/project_dir/time_series_vars`. The training polygon and grid paths are taken from the config.yml file.
 
 This command would generate .pt files with image time series of 100 x 100 height/width and a spatial resolution of 10 meters.
 
