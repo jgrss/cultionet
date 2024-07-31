@@ -684,13 +684,13 @@ def create_train_batch(
                 torch.from_numpy(labeled_data.y).to(
                     dtype=torch.int16 if nonag_is_unknown else torch.uint8
                 ),
-                'b w -> 1 b w',
+                'h w -> 1 h w',
             ),
             bdist=einops.rearrange(
                 torch.from_numpy(labeled_data.bdist / gain).to(
                     dtype=torch.int32
                 ),
-                'b w -> 1 b w',
+                'h w -> 1 h w',
             ),
             start_year=torch.tensor(
                 [pd.Timestamp(Path(image_list[0]).stem).year],
