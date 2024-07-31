@@ -5,26 +5,32 @@
 
 ## Cultionet
 
-**cultionet** is a library for semantic segmentation of cultivated land with a neural network. The base architecture is a UNet variant, inspired by [UNet 3+](https://arxiv.org/abs/2004.08790) and [Psi-Net](https://arxiv.org/abs/1902.04099), with convolution blocks following [ResUNet-a](https://arxiv.org/abs/1904.00592). The library is built on [PyTorch Lightning](https://www.pytorchlightning.ai/) and the segmentation objectives (class targets and losses) were designed following [previous work in the remote sensing community](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301115).
+Cultionet is a library for semantic segmentation of cultivated land with a neural network. The base architecture is a UNet variant, inspired by [UNet 3+](https://arxiv.org/abs/2004.08790) and [Psi-Net](https://arxiv.org/abs/1902.04099), with convolution blocks following [ResUNet-a](https://arxiv.org/abs/1904.00592). The library is built on [PyTorch Lightning](https://www.pytorchlightning.ai/) and the segmentation objectives (class targets and losses) were designed following [previous work in the remote sensing community](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301115).
 
-**Cultionet** uses:
+Key features of Cultionet:
 
-* satellite image time series instead of individual dates for training and inference
-* a [Transformer](https://arxiv.org/abs/1706.03762) time series embeddings
-* a UNet architecture with dense skip connections and deep supervision similar to [UNet 3+](https://arxiv.org/abs/2004.08790)
-* multi-stream outputs inspired by [Psi-Net](https://arxiv.org/abs/1902.04099)
-* residual in residual [ResUNet-a](https://arxiv.org/abs/1904.00592) blocks with [Dilated Neighborhood Attention](https://arxiv.org/abs/2209.15001)
-* [Tanimoto loss](https://www.mdpi.com/2072-4292/13/18/3707)
+* uses satellite image time series instead of individual dates for training and inference
+* uses a [Transformer](https://arxiv.org/abs/1706.03762) time series embeddings
+* uses a UNet architecture with dense skip connections and deep supervision similar to [UNet 3+](https://arxiv.org/abs/2004.08790)
+* uses multi-stream outputs inspired by [Psi-Net](https://arxiv.org/abs/1902.04099)
+* uses residual in residual [ResUNet-a](https://arxiv.org/abs/1904.00592) blocks with [Dilated Neighborhood Attention](https://arxiv.org/abs/2209.15001)
+* uses the [Tanimoto loss](https://www.mdpi.com/2072-4292/13/18/3707)
 
----
+## Install Cultionet
 
-To get started, see the [installation section](#installation).
+If PyTorch is installed
+
+```commandline
+pip install git@github.com:jgrss/cultionet.git
+```
+
+See the [installation section](#installation) for more detailed instructions.
 
 ---
 
 ## Data format
 
-The model inputs are satellite time series (e.g., bands or spectral indices). Data are stored in a PyTorch [Data](https://github.com/jgrss/cultionet/blob/99fb16797f2d84b812c47dd9d03aea92b6b7aefa/src/cultionet/data/data.py#L51) object. For example, **cultionet** datasets will have data that look something like the following.
+The model inputs are satellite time series (e.g., bands or spectral indices). Data are stored in a PyTorch [Data](https://github.com/jgrss/cultionet/blob/99fb16797f2d84b812c47dd9d03aea92b6b7aefa/src/cultionet/data/data.py#L51) object. For example, Cultionet datasets will have data that look something like the following.
 
 ```python
 Data(
@@ -123,8 +129,8 @@ poly_df.head(2)
 
 ### Create the image time series
 
-This must be done outside of **cultionet**. Essentially, a directory with band or VI time series must be generated before
-using **cultionet**.
+This must be done outside of Cultionet. Essentially, a directory with band or VI time series must be generated before
+using Cultionet.
 
 - The raster files should be stored as GeoTiffs with names that follow a date format (e.g., `yyyyddd.tif` or `yyymmdd.tif`).
   - The date format can be specified at the CLI.
