@@ -74,7 +74,7 @@ of the training labels for a grid.
 **What is a training label?**
 > Training labels are __polygons__ of delineated cropland (i.e., crop fields). The training labels will be clipped to the
 > training grid (described above). Thus, it is important to digitize all crop fields within a grid unless data are to be used
-> for partial labels (more on this later).
+> for partial labels.
 
 **Configuration file**
 > The configuration file (`cultionet/scripts/config.yml`) is used to create training datasets. This file is only meant
