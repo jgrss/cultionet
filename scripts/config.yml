@@ -1,21 +1,51 @@
+# The bands or band indices to use
+#
+# Time series should be store din `time_series_vars` under the project directory.
+# E.g.,
+#   time_series_vars/<site id>/evi2/20210101.tif
+#   ...
+#   time_series_vars/<site id>/evi2/20220101.tif
+#
+# See the README.md for more details.
 image_vis:
+  - avi
   - evi2
   - gcvi
   - kndvi
+  - sipi1
 
-# The regions to process (start, end)
-regions:
-  - 161
-  - 171
+# The training region/grid file path
+#
+# This file should contain each training site as a polygon feature.
+# There should be a 'geo_id' column that contains the unique site id. This site id should
+# match the corresponding time series variables (e.g., time_series_vars/<site id>/evi2/20210101.tif).
+#
+#          geo_id  year       geometry
+# 0     site_id_1  2019  POLYGON ((...
+# ...         ...   ...            ...
+# N     site_id_n  2021  POLYGON ((...
+region_id_file:
+  - /home/grids-train.gpkg
 
-# End years (i.e., 2020 = 2019 planting/harvest year)
-# 2019 = 2018 CDL
-# 2020 = 2019 CDL
-# 2021 = 2020 CDL
-# 2022 = 2021 CDL
-years:
-  - 2020
-  - 2021
-  - 2022
+# The training field/boundaries file path
+#
+# This file should field polygons. The fields do not need to be clipped to the grids.
+# Note that grids with no intersecting polygons will be used in training as treated as
+# entirely non-cultivated (i.e., all zeros). There should be a column that defines the
+# crop class. For a binary model (crop|not crop), this column can be filled with 1s.
+#
+#           geo_id  year  crop       geometry
+# 0      poly_id_1  2020     1  POLYGON ((...
+# ...          ...   ...   ...            ...
+# N      poly_id_n  2019     1  POLYGON ((...
+polygon_file:
+  - /home/fields-train.gpkg
 
-lc_path: !!null
+# Each year in `region_id_file` should correspond to the year of harvest
+# For US harvest year 2019, an end date of 12-31 would mean 2019-01-01 to 2020-01-01
+# For Argentina harvest year 2019, an end date of 07-01 would mean 2018-07-01 to 2019-07-01
+start_mmdd: '01-01'
+end_mmdd: '12-31'
+
+# The length of the time series
+num_months: 12
