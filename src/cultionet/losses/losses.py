@@ -16,12 +16,10 @@ except ImportError:
 
 from ..data.data import Data
 
-# from . import topological
-
 
 class FieldOfJunctionsLoss(nn.Module):
     def __init__(self):
-        super(FieldOfJunctionsLoss, self).__init__()
+        super().__init__()
 
     def forward(
         self,
@@ -55,7 +53,7 @@ class LossPreprocessing(nn.Module):
     def __init__(
         self, transform_logits: bool = False, one_hot_targets: bool = True
     ):
-        super(LossPreprocessing, self).__init__()
+        super().__init__()
 
         self.transform_logits = transform_logits
         self.one_hot_targets = one_hot_targets
@@ -86,105 +84,6 @@ class LossPreprocessing(nn.Module):
             targets = einops.rearrange(targets, 'b h w -> b 1 h w')
 
         return inputs, targets
-
-
-# class TopologicalLoss(nn.Module):
-#     """
-#     Reference:
-#         https://arxiv.org/abs/1906.05404
-#         https://arxiv.org/pdf/1906.05404.pdf
-#         https://github.com/HuXiaoling/TopoLoss/blob/5cb98177de50a3694f5886137ff7c6f55fd51493/topoloss_pytorch.py
-#     """
-
-#     def __init__(self):
-#         super(TopologicalLoss, self).__init__()
-
-#     def forward(
-#         self, inputs: torch.Tensor, targets: torch.Tensor, data: Data
-#     ) -> torch.Tensor:
-#         height = (
-#             int(data.height) if data.batch is None else int(data.height[0])
-#         )
-#         width = int(data.width) if data.batch is None else int(data.width[0])
-#         batch_size = 1 if data.batch is None else data.batch.unique().size(0)
-
-#         input_dims = inputs.shape[1]
-#         # Probabilities are ether Sigmoid or Softmax
-#         input_index = 0 if input_dims == 1 else 1
-
-#         inputs = self.gc(inputs, batch_size, height, width)
-#         targets = self.gc(targets.unsqueeze(1), batch_size, height, width)
-#         # Clone tensors before detaching from GPU
-#         inputs_clone = inputs.clone()
-#         targets_clone = targets.clone()
-
-#         topo_cp_weight_map = np.zeros(
-#             inputs_clone[:, input_index].shape, dtype="float32"
-#         )
-#         topo_cp_ref_map = np.zeros(
-#             inputs_clone[:, input_index].shape, dtype="float32"
-#         )
-#         topo_mask = np.zeros(inputs_clone[:, input_index].shape, dtype="uint8")
-
-#         # Detach from GPU for gudhi libary
-#         inputs_clone = (
-#             inputs_clone[:, input_index].float().cpu().detach().numpy()
-#         )
-#         targets_clone = targets_clone[:, 0].float().cpu().detach().numpy()
-
-#         pd_lh, bcp_lh, dcp_lh, pairs_lh_pa = topological.critical_points(
-#             inputs_clone
-#         )
-#         pd_gt, __, __, pairs_lh_gt = topological.critical_points(targets_clone)
-
-#         if pairs_lh_pa and pairs_lh_gt:
-#             for batch in range(0, batch_size):
-#                 if (pd_lh[batch].size > 0) and (pd_gt[batch].size > 0):
-#                     (
-#                         __,
-#                         idx_holes_to_fix,
-#                         idx_holes_to_remove,
-#                     ) = topological.compute_dgm_force(
-#                         pd_lh[batch], pd_gt[batch], pers_thresh=0.03
-#                     )
-#                     (
-#                         topo_cp_weight_map[batch],
-#                         topo_cp_ref_map[batch],
-#                         topo_mask[batch],
-#                     ) = topological.set_topology_weights(
-#                         likelihood=inputs_clone[batch],
-#                         topo_cp_weight_map=topo_cp_weight_map[batch],
-#                         topo_cp_ref_map=topo_cp_ref_map[batch],
-#                         topo_mask=topo_mask[batch],
-#                         bcp_lh=bcp_lh[batch],
-#                         dcp_lh=dcp_lh[batch],
-#                         idx_holes_to_fix=idx_holes_to_fix,
-#                         idx_holes_to_remove=idx_holes_to_remove,
-#                         height=inputs.shape[-2],
-#                         width=inputs.shape[-1],
-#                     )
-
-#         topo_cp_weight_map = torch.tensor(
-#             topo_cp_weight_map, dtype=inputs.dtype, device=inputs.device
-#         )
-#         topo_cp_ref_map = torch.tensor(
-#             topo_cp_ref_map, dtype=inputs.dtype, device=inputs.device
-#         )
-#         topo_mask = torch.tensor(topo_mask, dtype=bool, device=inputs.device)
-#         if not topo_mask.any():
-#             topo_loss = (
-#                 (inputs[:, input_index] * topo_cp_weight_map) - topo_cp_ref_map
-#             ) ** 2
-#         else:
-#             topo_loss = (
-#                 (
-#                     inputs[:, input_index][topo_mask]
-#                     * topo_cp_weight_map[topo_mask]
-#                 )
-#                 - topo_cp_ref_map[topo_mask]
-#             ) ** 2
-
-#         return topo_loss.mean()
 
 
 class TanimotoComplementLoss(nn.Module):
@@ -225,7 +124,7 @@ class TanimotoComplementLoss(nn.Module):
         transform_logits: bool = False,
         one_hot_targets: bool = True,
     ):
-        super(TanimotoComplementLoss, self).__init__()
+        super().__init__()
 
         self.smooth = smooth
         self.depth = depth
@@ -403,7 +302,7 @@ class TanimotoDistLoss(nn.Module):
         transform_logits: bool = False,
         one_hot_targets: bool = True,
     ):
-        super(TanimotoDistLoss, self).__init__()
+        super().__init__()
 
         if scale_pos_weight and (class_counts is None):
             warnings.warn(
@@ -471,7 +370,7 @@ class CrossEntropyLoss(nn.Module):
         reduction: T.Optional[str] = "mean",
         label_smoothing: T.Optional[float] = 0.1,
     ):
-        super(CrossEntropyLoss, self).__init__()
+        super().__init__()
 
         self.loss_func = nn.CrossEntropyLoss(
             weight=weight, reduction=reduction, label_smoothing=label_smoothing
@@ -506,7 +405,7 @@ class FocalLoss(nn.Module):
         weight: T.Optional[torch.Tensor] = None,
         label_smoothing: T.Optional[float] = 0.1,
     ):
-        super(FocalLoss, self).__init__()
+        super().__init__()
 
         self.alpha = alpha
         self.gamma = gamma
@@ -541,7 +440,7 @@ class QuantileLoss(nn.Module):
     """
 
     def __init__(self, quantiles: T.Tuple[float, float, float]):
-        super(QuantileLoss, self).__init__()
+        super().__init__()
 
         self.quantiles = quantiles
 
@@ -570,7 +469,7 @@ class WeightedL1Loss(nn.Module):
     """Weighted L1Loss loss."""
 
     def __init__(self):
-        super(WeightedL1Loss, self).__init__()
+        super().__init__()
 
     def forward(
         self, inputs: torch.Tensor, targets: torch.Tensor
@@ -598,7 +497,7 @@ class MSELoss(nn.Module):
     """MSE loss."""
 
     def __init__(self):
-        super(MSELoss, self).__init__()
+        super().__init__()
 
         self.loss_func = nn.MSELoss()
 
@@ -627,7 +526,7 @@ class BoundaryLoss(nn.Module):
     """
 
     def __init__(self):
-        super(BoundaryLoss, self).__init__()
+        super().__init__()
 
     def fill_distances(
         self,
@@ -681,7 +580,7 @@ class MultiScaleSSIMLoss(nn.Module):
     """Multi-scale Structural Similarity Index Measure loss."""
 
     def __init__(self):
-        super(MultiScaleSSIMLoss, self).__init__()
+        super().__init__()
 
         self.msssim = torchmetrics.MultiScaleStructuralSimilarityIndexMeasure(
             gaussian_kernel=False,
@@ -723,10 +622,13 @@ class MultiScaleSSIMLoss(nn.Module):
 
 class TopologyLoss(nn.Module):
     def __init__(self):
-        super(TopologyLoss, self).__init__()
+        super().__init__()
 
-        self.loss_func = topnn.SummaryStatisticLoss("total_persistence", p=2)
-        self.cubical = topnn.CubicalComplex(dim=3)
+        if topnn is not None:
+            self.loss_func = topnn.SummaryStatisticLoss(
+                "total_persistence", p=2
+            )
+            self.cubical = topnn.CubicalComplex(dim=3)
 
     def forward(
         self,
@@ -775,7 +677,7 @@ class ClassBalancedMSELoss(nn.Module):
     """
 
     def __init__(self):
-        super(ClassBalancedMSELoss, self).__init__()
+        super().__init__()
 
         self.mse_loss = nn.MSELoss(reduction="mean")
 
