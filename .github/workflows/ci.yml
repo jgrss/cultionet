@@ -40,7 +40,7 @@ jobs:
           # Install Python GDAL
           pip install -U pip
           pip install -U setuptools wheel
-          pip install -U numpy==1.26.4
+          pip install -U numpy==1.24.4
           pip install setuptools==57.5.0
           GDAL_VERSION=$(gdal-config --version | awk -F'[.]' '{print $1"."$2"."$3}')
           pip install GDAL==$GDAL_VERSION --no-binary=gdal
