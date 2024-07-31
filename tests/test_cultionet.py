@@ -1,16 +1,5 @@
 import tempfile
 
-import natten
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch_topological.nn as topnn
-from einops import rearrange, repeat
-from torch.distributions import Dirichlet
-from vit_pytorch import ViT
-from vit_pytorch.vit import Transformer
-
 from cultionet.data.modules import EdgeDataModule
 from cultionet.enums import AttentionTypes, ModelTypes, ResBlockTypes
 from cultionet.models.cultionet import CultioNet
@@ -62,100 +51,63 @@ def get_train_dataset(
     )
 
 
-def test_topo_loss():
+def test_cultionet(class_info: dict):
+    num_channels = 5
+    in_time = 13
+    height = 100
+    width = 100
+    batch_size = 2
+    num_samples = 12
+    val_frac = 0.2
 
-    inputs = Dirichlet(torch.tensor([0.5, 0.5, 0.5])).sample((2 * 100 * 100,))
-    inputs = rearrange(inputs, '(b h w) c -> b c h w', h=100, w=100)[:, 1:]
-    targets = torch.randint(low=0, high=2, size=(2, 100, 100))
-
-    loss_fn = topnn.SummaryStatisticLoss("total_persistence", p=2)
-
-    cubical = topnn.CubicalComplex(dim=4)
-    persistence_information_target = cubical(targets)
-    persistence_information_target = [persistence_information_target[0]]
-
-    persistence_information = cubical(inputs)
-    persistence_information = [persistence_information[0]]
-
-    loss = loss_fn(persistence_information, persistence_information_target)
-
-
-def test_neighbor_attention():
-    x = torch.randn(1, 100, 100, 8)
-
-    attn = natten.NeighborhoodAttention2D(
-        dim=8,
-        num_heads=8,
-        kernel_size=3,
-        dilation=2,
-        attn_drop=0.1,
-        proj_drop=0.1,
+    kwargs = dict(
+        in_channels=num_channels,
+        in_time=in_time,
+        hidden_channels=32,
+        num_classes=2,
+        model_type=ModelTypes.TOWERUNET,
+        activation_type="SiLU",
+        dilations=[1, 2],
+        dropout=0.2,
+        res_block_type=ResBlockTypes.RESA,
+        attention_weights=AttentionTypes.SPATIAL_CHANNEL,
+        deep_supervision=True,
+        pool_attention=False,
+        pool_by_max=True,
+        repeat_resa_kernel=False,
+        batchnorm_first=True,
     )
 
-    import ipdb
+    model = CultioNet(**kwargs)
 
-    ipdb.set_trace()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        data_module = get_train_dataset(
+            class_nums=class_info,
+            temp_dir=temp_dir,
+            batch_kwargs=dict(
+                num_channels=num_channels,
+                num_time=in_time,
+                height=height,
+                width=width,
+            ),
+            batch_size=batch_size,
+            num_samples=num_samples,
+            val_frac=val_frac,
+        )
 
-    attn(x)
+        assert data_module.train_ds.augment_prob == 0.1
+        assert data_module.val_ds.augment_prob == 0.0
 
+        for batch in data_module.train_dataloader():
+            output = model(batch)
 
-# def test_cultionet(class_info: dict):
-#     num_channels = 5
-#     in_time = 13
-#     height = 100
-#     width = 100
-#     batch_size = 2
-#     num_samples = 12
-#     val_frac = 0.2
-
-#     kwargs = dict(
-#         in_channels=num_channels,
-#         in_time=in_time,
-#         hidden_channels=32,
-#         num_classes=2,
-#         model_type=ModelTypes.TOWERUNET,
-#         activation_type="SiLU",
-#         dilations=[1, 2],
-#         dropout=0.2,
-#         res_block_type=ResBlockTypes.RESA,
-#         attention_weights=AttentionTypes.SPATIAL_CHANNEL,
-#         deep_supervision=False,
-#         pool_attention=False,
-#         pool_by_max=False,
-#         repeat_resa_kernel=False,
-#         batchnorm_first=True,
-#     )
-
-#     model = CultioNet(**kwargs)
-
-#     with tempfile.TemporaryDirectory() as temp_dir:
-#         data_module = get_train_dataset(
-#             class_nums=class_info,
-#             temp_dir=temp_dir,
-#             batch_kwargs=dict(
-#                 num_channels=num_channels,
-#                 num_time=in_time,
-#                 height=height,
-#                 width=width,
-#             ),
-#             batch_size=batch_size,
-#             num_samples=num_samples,
-#             val_frac=val_frac,
-#         )
-
-#         assert data_module.train_ds.augment_prob == 0.1
-#         assert data_module.val_ds.augment_prob == 0.0
-
-#         for batch in data_module.train_dataloader():
-#             output = model(batch)
-
-#             assert output["dist"].shape == (batch_size, 1, height, width)
-#             assert output["edge"].shape == (batch_size, 1, height, width)
-#             assert output["mask"].shape == (batch_size, 2, height, width)
-#             assert output["classes_l2"].shape == (batch_size, 2, height, width)
-#             assert output["classes_l3"].shape == (
-#                 batch_size,
-#                 class_info["edge_class"] + 1,
-#                 height,
-#                 width,
-#             )
+            assert output["dist"].shape == (batch_size, 1, height, width)
+            assert output["edge"].shape == (batch_size, 1, height, width)
+            assert output["mask"].shape == (batch_size, 2, height, width)
+            assert output["classes_l2"].shape == (batch_size, 2, height, width)
+            assert output["classes_l3"].shape == (
+                batch_size,
+                class_info["edge_class"] + 1,
+                height,
+                width,
+            )
