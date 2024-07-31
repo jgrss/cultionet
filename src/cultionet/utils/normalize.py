@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from ..data.data import Data
 from ..data.utils import collate_fn
-from .model_preprocessing import TqdmParallel
+from .model_preprocessing import ParallelProgress
 from .stats import Quantile, Variance, cache_load_enabled, tally_stats
 
 
@@ -276,7 +276,7 @@ class NormValues:
                     n_jobs=processes,
                     inner_max_num_threads=threads_per_worker,
                 ):
-                    with TqdmParallel(
+                    with ParallelProgress(
                         tqdm_kwargs={
                             'total': int(len(dataset) / batch_size),
                             'desc': 'Calculating means',
@@ -309,7 +309,7 @@ class NormValues:
                     n_jobs=processes,
                     inner_max_num_threads=threads_per_worker,
                 ):
-                    with TqdmParallel(
+                    with ParallelProgress(
                         tqdm_kwargs={
                             'total': int(len(dataset) / batch_size),
                             'desc': 'Calculating SSEs',

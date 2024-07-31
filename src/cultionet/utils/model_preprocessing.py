@@ -8,7 +8,7 @@ from joblib import Parallel
 from tqdm.auto import tqdm
 
 
-class TqdmParallel(Parallel):
+class ParallelProgress(Parallel):
     """A tqdm progress bar for joblib Parallel tasks.
 
     Reference:

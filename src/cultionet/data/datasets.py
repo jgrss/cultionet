@@ -20,7 +20,7 @@ from tqdm.auto import tqdm
 from ..augment.augmenters import Augmenters
 from ..errors import TensorShapeError
 from ..utils.logging import set_color_logger
-from ..utils.model_preprocessing import TqdmParallel
+from ..utils.model_preprocessing import ParallelProgress
 from ..utils.normalize import NormValues
 from .data import Data
 from .spatial_dataset import SpatialDataset
@@ -257,7 +257,7 @@ class EdgeDataset(SpatialDataset):
             backend="loky",
             n_jobs=self.processes,
         ):
-            with TqdmParallel(
+            with ParallelProgress(
                 tqdm_kwargs={
                     "total": len(self),
                     "desc": "Checking dimensions",

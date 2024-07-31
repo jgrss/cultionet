@@ -7,7 +7,7 @@ from joblib import delayed, parallel_backend
 from shapely.geometry import box
 from torch.utils.data import Dataset
 
-from ..utils.model_preprocessing import TqdmParallel
+from ..utils.model_preprocessing import ParallelProgress
 
 
 def get_box_id(data_id: str, *bounds) -> tuple:
@@ -34,7 +34,7 @@ class SpatialDataset(Dataset):
         """Converts the Dataset to a GeoDataFrame."""
 
         with parallel_backend(backend="loky", n_jobs=n_jobs):
-            with TqdmParallel(
+            with ParallelProgress(
                 tqdm_kwargs={
                     "total": len(self),
                     "desc": "Building GeoDataFrame",
