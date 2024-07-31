@@ -6,7 +6,7 @@ import torch.nn as nn
 from .. import nn as cunn
 from ..data.data import Data
 from ..enums import AttentionTypes, ModelTypes, ResBlockTypes
-from .nunet import ResUNet3Psi, TowerUNet, UNet3Psi
+from .nunet import TowerUNet
 from .temporal_transformer import TemporalTransformer
 
 
@@ -141,12 +141,6 @@ class GeoRefinement(nn.Module):
 
         Edge and crop inputs should be probabilities
         """
-        height = (
-            int(data.height) if data.batch is None else int(data.height[0])
-        )
-        width = int(data.width) if data.batch is None else int(data.width[0])
-        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
-
         latitude_norm = scale_min_max(
             data.top - ((data.top - data.bottom) * 0.5), -90.0, 90.0, 0.0, 1.0
         )

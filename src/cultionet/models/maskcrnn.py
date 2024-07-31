@@ -225,7 +225,7 @@ class BFasterRCNN(nn.Module):
         min_image_size: int = 800,
         max_image_size: int = 1333,
     ) -> None:
-        super(BFasterRCNN, self).__init__()
+        super().__init__()
 
         if sizes is None:
             sizes = (32, 64, 128, 256, 512)

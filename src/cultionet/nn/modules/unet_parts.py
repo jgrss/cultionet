@@ -63,6 +63,7 @@ class TowerUNetFinal(nn.Module):
                 padding=1,
             )
 
+        # TODO: make optional
         self.geo_embeddings = GeoEmbeddings(in_channels)
         self.layernorm = nn.Sequential(
             Rearrange('b c h w -> b h w c'),
@@ -94,7 +95,7 @@ class TowerUNetFinal(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        latlon_coords: T.Optional[torch.Tensor],
+        latlon_coords: T.Optional[torch.Tensor] = None,
         size: T.Optional[torch.Size] = None,
         suffix: str = "",
     ) -> T.Dict[str, torch.Tensor]:
@@ -102,7 +103,11 @@ class TowerUNetFinal(nn.Module):
             x = self.up_conv(x, size=size)
 
         # Embed coordinates
-        x = x + rearrange(self.geo_embeddings(latlon_coords), 'b c -> b c 1 1')
+        if latlon_coords is not None:
+            x = x + rearrange(
+                self.geo_embeddings(latlon_coords), 'b c -> b c 1 1'
+            )
+
         x = self.layernorm(x)
 
         # Expand into separate streams

@@ -24,7 +24,7 @@ class FieldOfJunctions(nn.Module):
         delta: float = 0.05,
         eta: float = 0.01,
     ):
-        super(FieldOfJunctions, self).__init__()
+        super().__init__()
 
         self.height = height
         self.width = width
