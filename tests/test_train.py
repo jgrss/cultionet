@@ -21,8 +21,8 @@ RNG = np.random.default_rng(200)
 def create_data(group: int) -> Data:
     num_channels = 2
     num_time = 12
-    height = 10
-    width = 10
+    height = 100
+    width = 100
 
     x = torch.rand(
         (1, num_channels, num_time, height, width),
@@ -80,7 +80,7 @@ def test_train():
             edge_class=2,
             model_type=ModelTypes.TOWERUNET,
             res_block_type=ResBlockTypes.RESA,
-            attention_weights=AttentionTypes.SPATIAL_CHANNEL,
+            attention_weights=AttentionTypes.NATTEN,
             activation_type="SiLU",
             dilations=[1, 2],
             dropout=0.2,
@@ -94,33 +94,47 @@ def test_train():
             devices=1,
             precision="16-mixed",
         )
-        cultionet.fit(cultionet_params)
+
+        try:
+            cultionet.fit(cultionet_params)
+        except Exception as e:
+            raise RuntimeError(e)
 
 
-# def test_train_cli():
-#     num_data = 10
-#     with tempfile.TemporaryDirectory() as tmp_dir:
-#         tmp_path = Path(tmp_dir)
-#         ppaths = setup_paths(tmp_path)
-#         for i in range(num_data):
-#             data_path = (
-#                 ppaths.process_path / f'data_{i:06d}_2021_{i:06d}_none.pt'
-#             )
-#             batch_data = create_data(i)
-#             batch_data.to_file(data_path)
+def test_train_cli():
+    num_data = 10
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        ppaths = setup_paths(tmp_path)
+        for i in range(num_data):
+            data_path = (
+                ppaths.process_path / f'data_{i:06d}_2021_{i:06d}_none.pt'
+            )
+            batch_data = create_data(i)
+            batch_data.to_file(data_path)
 
-#         with open(tmp_path / "data/classes.info", "w") as f:
-#             json.dump({"max_crop_class": 1, "edge_class": 2}, f)
+        with open(tmp_path / "data/classes.info", "w") as f:
+            json.dump({"max_crop_class": 1, "edge_class": 2}, f)
 
-#         command = f"cultionet train -p {str(tmp_path.absolute())} "
-#         "--val-frac 0.2 --augment-prob 0.5 --epochs 1 --hidden-channels 16 "
-#         "--processes 1 --load-batch-workers 0 --batch-size 2 --dropout 0.2 "
-#         "--deep-sup --dilations 1 2 --pool-by-max --learning-rate 0.01 "
-#         "--weight-decay 1e-4 --attention-weights natten --device cpu"
+        command = (
+            f"cultionet train -p {str(tmp_path.absolute())} "
+            "--val-frac 0.2 --augment-prob 0.5 --epochs 1 --hidden-channels 16 "
+            "--processes 1 --load-batch-workers 0 --batch-size 2 --dropout 0.2 "
+            "--deep-sup --dilations 1 2 --pool-by-max --learning-rate 0.01 "
+            "--weight-decay 1e-4 --attention-weights natten --device cpu"
+        )
 
-#         try:
-#             subprocess.run(
-#                 command, shell=True, check=True, capture_output=True
-#             )
-#         except subprocess.CalledProcessError as e:
-#             raise NameError(e.stderr) from e
+        try:
+            subprocess.run(
+                command,
+                shell=True,
+                check=True,
+                capture_output=True,
+                universal_newlines=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise NameError(
+                "Exit code:\n{}\n\nstdout:\n{}\n\nstderr:\n{}".format(
+                    e.returncode, e.output, e.stderr
+                )
+            )
