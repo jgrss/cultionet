@@ -461,8 +461,8 @@ train:
     long: loss-name
     help: The loss method name
     kwargs:
-      default: 'TanimotoComplementLoss'
-      choices: ['TanimotoDistLoss', 'TanimotoComplementLoss']
+      default: 'TanimotoCombined'
+      choices: ['TanimotoDistLoss', 'TanimotoComplementLoss', 'TanimotoCombined']
   learning_rate:
     short: lr
     long: learning-rate
@@ -609,7 +609,7 @@ predict:
     long: padding
     help: The read padding around the window (padding is sliced off before writing)
     kwargs:
-      default: 101
+      default: 20
       type: '&int'
   mode:
     short: ''

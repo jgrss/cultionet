@@ -150,7 +150,7 @@ class LightningModuleMixin(LightningModule):
         mask = None
         if batch.y.min() == -1:
             mask = torch.where(batch.y == -1, 0, 1).to(
-                dtype=torch.uint8, device=batch.y.device
+                dtype=torch.long, device=batch.y.device
             )
             mask = einops.rearrange(mask, 'b h w -> b 1 h w')
 
@@ -162,14 +162,6 @@ class LightningModuleMixin(LightningModule):
             "true_crop_type": true_crop_type,
             "mask": mask,
         }
-
-    # def on_validation_epoch_end(self, *args, **kwargs):
-    #     """Save the model on validation end."""
-    #     if self.logger.save_dir is not None:
-    #         model_file = Path(self.logger.save_dir) / f"{self.model_name}.pt"
-    #         if model_file.is_file():
-    #             model_file.unlink()
-    #         torch.save(self.state_dict(), model_file)
 
     def calc_loss(
         self,
@@ -321,27 +313,6 @@ class LightningModuleMixin(LightningModule):
         )
         weights["crop_cmse_loss"] = 0.1
         loss = loss + crop_cmse_loss * weights["crop_cmse_loss"]
-
-        # Topology loss
-        # topo_loss = self.topo_loss(
-        #     predictions["edge"].squeeze(dim=1),
-        #     true_labels_dict["true_edge"],
-        # )
-        # weights["topo_loss"] = 0.1
-        # loss = loss + topo_loss * weights["topo_loss"]
-
-        # if predictions["crop_type"] is not None:
-        #     # Upstream (deep) loss on crop-type
-        #     crop_type_star_loss = self.crop_type_star_loss(
-        #         predictions["crop_type_star"],
-        #         true_labels_dict["true_crop_type"],
-        #     )
-        #     loss = loss + crop_type_star_loss
-        #     # Loss on crop-type
-        #     crop_type_loss = self.crop_type_loss(
-        #         predictions["crop_type"], true_labels_dict["true_crop_type"]
-        #     )
-        #     loss = loss + crop_type_loss
 
         return loss / sum(weights.values())
 
@@ -897,6 +868,22 @@ class CultionetLitTransferModel(LightningModuleMixin):
                     one_hot_targets=False
                 ),
             },
+            LossTypes.TANIMOTO_COMBINED: {
+                "classification": cnetlosses.CombinedLoss(
+                    losses=[
+                        cnetlosses.TanimotoDistLoss(),
+                        cnetlosses.TanimotoComplementLoss(),
+                    ],
+                ),
+                "regression": cnetlosses.CombinedLoss(
+                    losses=[
+                        cnetlosses.TanimotoDistLoss(one_hot_targets=False),
+                        cnetlosses.TanimotoComplementLoss(
+                            one_hot_targets=False
+                        ),
+                    ],
+                ),
+            },
             LossTypes.TOPOLOGY: {
                 "classification": cnetlosses.TopologyLoss(),
             },
@@ -906,17 +893,10 @@ class CultionetLitTransferModel(LightningModuleMixin):
             checkpoint_path=str(pretrained_ckpt_file)
         ).cultionet_model
 
-        # import torchinfo
-        # torchinfo.summary(
-        #     model=self.cultionet_model.mask_model,
-        #     input_size=[(1, 5, 13, 100, 100), (1, 64, 100, 100)],
-        #     device="cuda",
-        # )
-
-        # Freeze all parameters if not finetuning the full model
         if self.finetune != "all":
-            for name, param in self.cultionet_model.named_parameters():
-                param.requires_grad = False
+
+            # Freeze all parameters if not finetuning the full model
+            self.freeze(self.cultionet_model)
 
             if self.finetune == "fc":
                 # Unfreeze fully connected layers
@@ -987,6 +967,10 @@ class CultionetLitTransferModel(LightningModuleMixin):
     @property
     def is_transfer_model(self) -> bool:
         return True
+
+    def freeze(self, layer):
+        for param in layer.parameters():
+            param.requires_grad = False
 
     def unfreeze(self, layer):
         for param in layer.parameters():
@@ -1074,6 +1058,22 @@ class CultionetLitModel(LightningModuleMixin):
                 "classification": cnetlosses.TanimotoDistLoss(),
                 "regression": cnetlosses.TanimotoDistLoss(
                     one_hot_targets=False
+                ),
+            },
+            LossTypes.TANIMOTO_COMBINED: {
+                "classification": cnetlosses.CombinedLoss(
+                    losses=[
+                        cnetlosses.TanimotoDistLoss(),
+                        cnetlosses.TanimotoComplementLoss(),
+                    ],
+                ),
+                "regression": cnetlosses.CombinedLoss(
+                    losses=[
+                        cnetlosses.TanimotoDistLoss(one_hot_targets=False),
+                        cnetlosses.TanimotoComplementLoss(
+                            one_hot_targets=False
+                        ),
+                    ],
                 ),
             },
             LossTypes.TOPOLOGY: {

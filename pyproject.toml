@@ -1,6 +1,6 @@
 [build-system]
 requires = [
-  'setuptools>=65.5.1',
+  'setuptools>=70',
   'wheel',
   'numpy<2,>=1.22',
 ]

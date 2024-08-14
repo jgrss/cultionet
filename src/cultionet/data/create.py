@@ -1,3 +1,4 @@
+import logging
 import typing as T
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pandas as pd
 import torch
 import xarray as xr
 from affine import Affine
+from dask.diagnostics import ProgressBar
 from dask.distributed import Client, LocalCluster, progress
 from rasterio.windows import Window, from_bounds
 from scipy.ndimage import label as nd_label
@@ -71,11 +73,14 @@ def reshape_and_mask_array(
     num_bands: int,
     gain: float,
     offset: int,
+    apply_gain: bool = True,
 ) -> xr.DataArray:
     """Reshapes an array and masks no-data values."""
 
-    src_ts_stack = xr.DataArray(
-        # Date are stored [(band x time) x height x width]
+    dtype = 'float32' if apply_gain else 'int16'
+
+    time_series = xr.DataArray(
+        # Data are stored [(band x time) x height x width]
         (
             data.data.reshape(
                 num_bands,
@@ -83,7 +88,7 @@ def reshape_and_mask_array(
                 data.gw.nrows,
                 data.gw.ncols,
             ).transpose(1, 0, 2, 3)
-        ).astype('float32'),
+        ).astype(dtype),
         dims=('time', 'band', 'y', 'x'),
         coords={
             'time': range(num_time),
@@ -94,12 +99,18 @@ def reshape_and_mask_array(
         attrs=data.attrs.copy(),
     )
 
-    with xr.set_options(keep_attrs=True):
-        time_series = (src_ts_stack.gw.mask_nodata() * gain + offset).fillna(0)
+    if apply_gain:
+
+        with xr.set_options(keep_attrs=True):
+            # Mask and scale the data
+            time_series = (
+                time_series.gw.mask_nodata() * gain + offset
+            ).fillna(0)
 
     return time_series
 
 
+@threadpool_limits.wrap(limits=1, user_api="blas")
 def create_predict_dataset(
     image_list: T.List[T.List[T.Union[str, Path]]],
     region: str,
@@ -113,8 +124,17 @@ def create_predict_dataset(
     padding: int = 101,
     num_workers: int = 1,
     compress_method: T.Union[int, str] = 'zlib',
+    use_cluster: bool = True,
 ):
     """Creates a prediction dataset for an image."""
+
+    # Read windows larger than the re-chunk window size
+    read_chunksize = 1024
+    while True:
+        if read_chunksize < window_size:
+            read_chunksize *= 2
+        else:
+            break
 
     with gw.config.update(ref_res=ref_res):
         with gw.open(
@@ -122,17 +142,18 @@ def create_predict_dataset(
             stack_dim="band",
             band_names=list(range(1, len(image_list) + 1)),
             resampling=resampling,
-            chunks=512,
+            chunks=read_chunksize,
         ) as src_ts:
-
+            # Get the time and band count
             num_time, num_bands = get_image_list_dims(image_list, src_ts)
 
-            time_series: xr.DataArray = reshape_and_mask_array(
+            time_series = reshape_and_mask_array(
                 data=src_ts,
                 num_time=num_time,
                 num_bands=num_bands,
                 gain=gain,
                 offset=offset,
+                apply_gain=False,
             )
 
             # Chunk the array into the windows
@@ -172,42 +193,77 @@ def create_predict_dataset(
                 trim=False,
             )
 
-            with dask.config.set(
-                {
-                    "distributed.worker.memory.terminate": False,
-                    "distributed.comm.retry.count": 10,
-                    "distributed.comm.timeouts.connect": 5,
-                    "distributed.scheduler.allowed-failures": 20,
-                }
-            ):
-                with LocalCluster(
-                    processes=True,
-                    n_workers=num_workers,
-                    threads_per_worker=1,
-                    memory_target_fraction=0.97,
-                    memory_limit="4GB",  # per worker limit
-                ) as cluster:
-                    with Client(cluster) as client:
-                        with BatchStore(
-                            data=time_series,
-                            write_path=process_path,
-                            res=ref_res,
-                            resampling=resampling,
-                            region=region,
-                            start_date=pd.to_datetime(
-                                Path(image_list[0]).stem, format=date_format
-                            ).strftime("%Y%m%d"),
-                            end_date=pd.to_datetime(
-                                Path(image_list[-1]).stem, format=date_format
-                            ).strftime("%Y%m%d"),
-                            window_size=window_size,
-                            padding=padding,
-                            compress_method=compress_method,
-                            gain=gain,
-                        ) as batch_store:
-                            save_tasks = batch_store.save(time_series_array)
-                            results = client.persist(save_tasks)
-                            progress(results)
+            if use_cluster:
+                with dask.config.set(
+                    {
+                        "distributed.worker.memory.terminate": False,
+                        "distributed.comm.retry.count": 10,
+                        "distributed.comm.timeouts.connect": 5,
+                        "distributed.scheduler.allowed-failures": 20,
+                        "distributed.worker.memory.pause": 0.95,
+                        "distributed.worker.memory.target": 0.97,
+                        "distributed.worker.memory.spill": False,
+                        "distributed.scheduler.worker-saturation": 1.0,
+                    }
+                ):
+                    with LocalCluster(
+                        processes=True,
+                        n_workers=num_workers,
+                        threads_per_worker=1,
+                        memory_limit="6GB",  # per worker limit
+                        silence_logs=logging.ERROR,
+                    ) as cluster:
+                        with Client(cluster) as client:
+                            with BatchStore(
+                                data=time_series,
+                                write_path=process_path,
+                                res=ref_res,
+                                resampling=resampling,
+                                region=region,
+                                start_date=pd.to_datetime(
+                                    Path(image_list[0]).stem,
+                                    format=date_format,
+                                ).strftime("%Y%m%d"),
+                                end_date=pd.to_datetime(
+                                    Path(image_list[-1]).stem,
+                                    format=date_format,
+                                ).strftime("%Y%m%d"),
+                                window_size=window_size,
+                                padding=padding,
+                                compress_method=compress_method,
+                            ) as batch_store:
+                                save_tasks = batch_store.save(
+                                    time_series_array
+                                )
+                                results = client.gather(
+                                    client.persist(save_tasks)
+                                )
+                                progress(results)
+
+            else:
+
+                with dask.config.set(
+                    scheduler='processes', num_workers=num_workers
+                ):
+                    with BatchStore(
+                        data=time_series,
+                        write_path=process_path,
+                        res=ref_res,
+                        resampling=resampling,
+                        region=region,
+                        start_date=pd.to_datetime(
+                            Path(image_list[0]).stem, format=date_format
+                        ).strftime("%Y%m%d"),
+                        end_date=pd.to_datetime(
+                            Path(image_list[-1]).stem, format=date_format
+                        ).strftime("%Y%m%d"),
+                        window_size=window_size,
+                        padding=padding,
+                        compress_method=compress_method,
+                    ) as batch_store:
+                        save_tasks = batch_store.save(time_series_array)
+                        with ProgressBar():
+                            save_tasks.compute()
 
 
 class ReferenceArrays:

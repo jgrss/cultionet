@@ -54,6 +54,7 @@ class LossTypes(StrEnum):
     CLASS_BALANCED_MSE = "ClassBalancedMSELoss"
     TANIMOTO_COMPLEMENT = "TanimotoComplementLoss"
     TANIMOTO = "TanimotoDistLoss"
+    TANIMOTO_COMBINED = "TanimotoCombined"
     TOPOLOGY = "TopologyLoss"
 
 

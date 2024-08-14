@@ -31,7 +31,6 @@ class BatchStore:
         window_size: int,
         padding: int,
         compress_method: Union[int, str],
-        gain: float,
     ):
         self.data = data
         self.res = res
@@ -43,7 +42,6 @@ class BatchStore:
         self.window_size = window_size
         self.padding = padding
         self.compress_method = compress_method
-        self.gain = gain
 
     def __setitem__(self, key: tuple, item: np.ndarray) -> None:
         time_range, index_range, y, x = key
@@ -87,7 +85,7 @@ class BatchStore:
             )
 
         x = einops.rearrange(
-            torch.from_numpy(x / self.gain).to(dtype=torch.int32),
+            torch.from_numpy(x.astype('int32')).to(dtype=torch.int32),
             't c h w -> 1 c t h w',
         )
 

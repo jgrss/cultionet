@@ -1,5 +1,4 @@
 import typing as T
-import warnings
 
 import einops
 import torch
@@ -23,7 +22,10 @@ class LossPreprocessing(nn.Module):
         self.one_hot_targets = one_hot_targets
 
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
     ) -> T.Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass to transform logits.
 
@@ -47,7 +49,48 @@ class LossPreprocessing(nn.Module):
         else:
             targets = einops.rearrange(targets, 'b h w -> b 1 h w')
 
+        if mask is not None:
+            # Apply a mask to zero-out weight
+            inputs = inputs * mask
+            targets = targets * mask
+
         return inputs, targets
+
+
+class CombinedLoss(nn.Module):
+    def __init__(self, losses: T.List[T.Callable]):
+        super().__init__()
+
+        self.losses = losses
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Performs a single forward pass.
+
+        Args:
+            inputs: Predictions from model (probabilities or labels), shaped (B, C, H, W).
+            targets: Ground truth values, shaped (B, C, H, W).
+            mask: Values to mask (0) or keep (1), shaped (B, 1, H, W).
+
+        Returns:
+            Average distance loss (float)
+        """
+
+        loss = 0.0
+        for loss_func in self.losses:
+            loss = loss + loss_func(
+                inputs=inputs,
+                targets=targets,
+                mask=mask,
+            )
+
+        loss = loss / len(self.losses)
+
+        return loss
 
 
 class TanimotoComplementLoss(nn.Module):
@@ -102,37 +145,27 @@ class TanimotoComplementLoss(nn.Module):
         self,
         y: torch.Tensor,
         yhat: torch.Tensor,
-        mask: T.Optional[torch.Tensor] = None,
-        weights: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         scale = 1.0 / self.depth
-
-        if mask is not None:
-            y = y * mask
-            yhat = yhat * mask
 
         tpl = y * yhat
         sq_sum = y**2 + yhat**2
 
-        tpl = tpl.sum(dim=(2, 3))
-        sq_sum = sq_sum.sum(dim=(2, 3))
-
-        if weights is not None:
-            tpl = tpl * weights
-            sq_sum = sq_sum * weights
+        tpl = tpl.sum(dim=(1, 2, 3))
+        sq_sum = sq_sum.sum(dim=(1, 2, 3))
 
         denominator = 0.0
         for d in range(0, self.depth):
             a = 2.0**d
             b = -(2.0 * a - 1.0)
             denominator = denominator + torch.reciprocal(
-                (a * sq_sum) + (b * tpl)
-            )
-            denominator = torch.nan_to_num(
-                denominator, nan=0.0, posinf=0.0, neginf=0.0
+                ((a * sq_sum) + (b * tpl)) + self.smooth
             )
 
-        return ((tpl * denominator) * scale).sum(dim=1)
+        numerator = tpl + self.smooth
+        distance = (numerator * denominator) * scale
+
+        return 1.0 - distance
 
     def forward(
         self,
@@ -143,19 +176,20 @@ class TanimotoComplementLoss(nn.Module):
         """Performs a single forward pass.
 
         Args:
-            inputs: Predictions from model (probabilities or labels).
-            targets: Ground truth values.
+            inputs: Predictions from model (probabilities or labels), shaped (B, C, H, W).
+            targets: Ground truth values, shaped (B, C, H, W).
+            mask: Values to mask (0) or keep (1), shaped (B, 1, H, W).
 
         Returns:
             Tanimoto distance loss (float)
         """
-        inputs, targets = self.preprocessor(inputs, targets)
-
-        loss = 1.0 - self.tanimoto_distance(targets, inputs, mask=mask)
-        compl_loss = 1.0 - self.tanimoto_distance(
-            1.0 - targets, 1.0 - inputs, mask=mask
+        inputs, targets = self.preprocessor(
+            inputs=inputs, targets=targets, mask=mask
         )
-        loss = (loss + compl_loss) * 0.5
+
+        loss1 = self.tanimoto_distance(targets, inputs)
+        loss2 = self.tanimoto_distance(1.0 - targets, 1.0 - inputs)
+        loss = (loss1 + loss2) * 0.5
 
         return loss.mean()
 
@@ -163,14 +197,11 @@ class TanimotoComplementLoss(nn.Module):
 def tanimoto_dist(
     ypred: torch.Tensor,
     ytrue: torch.Tensor,
-    scale_pos_weight: bool,
-    class_counts: T.Union[None, torch.Tensor],
-    beta: float,
     smooth: float,
-    mask: T.Optional[torch.Tensor] = None,
     weights: T.Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Tanimoto distance."""
+
     ytrue = ytrue.to(dtype=ypred.dtype)
 
     # Take the batch mean of the channel sums
@@ -187,20 +218,6 @@ def tanimoto_dist(
         batch_weight,
     )
 
-    if scale_pos_weight:
-        if class_counts is None:
-            class_counts = ytrue.sum(dim=0)
-        else:
-            class_counts = class_counts
-        effective_num = 1.0 - beta**class_counts
-        weights = (1.0 - beta) / effective_num
-        weights = weights / weights.sum() * class_counts.shape[0]
-
-    # Apply a mask to zero-out gradients where mask == 0
-    if mask is not None:
-        ytrue = ytrue * mask
-        ypred = ypred * mask
-
     tpl = ypred * ytrue
     sq_sum = ypred**2 + ytrue**2
 
@@ -208,13 +225,17 @@ def tanimoto_dist(
     tpl = tpl.sum(dim=(2, 3))
     sq_sum = sq_sum.sum(dim=(2, 3))
 
-    if weights is not None:
-        tpl = tpl * weights
-        sq_sum = sq_sum * weights
-
-    numerator = (tpl * batch_weight + smooth).sum(dim=1)
-    denominator = ((sq_sum - tpl) * batch_weight + smooth).sum(dim=1)
+    numerator = (tpl * batch_weight) + smooth
+    denominator = ((sq_sum - tpl) * batch_weight) + smooth
     distance = numerator / denominator
+
+    loss = 1.0 - distance
+
+    # Apply weights
+    if weights is not None:
+        loss = (loss * weights).sum(dim=1) / weights.sum()
+    else:
+        loss = loss.mean(dim=1)
 
     return distance
 
@@ -262,22 +283,14 @@ class TanimotoDistLoss(nn.Module):
         smooth: float = 1e-5,
         beta: T.Optional[float] = 0.999,
         class_counts: T.Optional[torch.Tensor] = None,
-        scale_pos_weight: bool = False,
         transform_logits: bool = False,
         one_hot_targets: bool = True,
     ):
         super().__init__()
 
-        if scale_pos_weight and (class_counts is None):
-            warnings.warn(
-                "Cannot balance classes without class weights. Weights will be derived for each batch.",
-                UserWarning,
-            )
-
         self.smooth = smooth
         self.beta = beta
         self.class_counts = class_counts
-        self.scale_pos_weight = scale_pos_weight
 
         self.preprocessor = LossPreprocessing(
             transform_logits=transform_logits,
@@ -293,34 +306,29 @@ class TanimotoDistLoss(nn.Module):
         """Performs a single forward pass.
 
         Args:
-            inputs: Predictions from model (probabilities, logits or labels).
-            targets: Ground truth values.
+            inputs: Predictions from model (probabilities or labels), shaped (B, C, H, W).
+            targets: Ground truth values, shaped (B, C, H, W).
+            mask: Values to mask (0) or keep (1), shaped (B, 1, H, W).
 
         Returns:
             Tanimoto distance loss (float)
         """
 
-        inputs, targets = self.preprocessor(inputs, targets)
+        inputs, targets = self.preprocessor(
+            inputs=inputs, targets=targets, mask=mask
+        )
 
-        loss = 1.0 - tanimoto_dist(
+        loss1 = tanimoto_dist(
             inputs,
             targets,
-            scale_pos_weight=self.scale_pos_weight,
-            class_counts=self.class_counts,
-            beta=self.beta,
             smooth=self.smooth,
-            mask=mask,
         )
-        compl_loss = 1.0 - tanimoto_dist(
+        loss2 = tanimoto_dist(
             1.0 - inputs,
             1.0 - targets,
-            scale_pos_weight=self.scale_pos_weight,
-            class_counts=self.class_counts,
-            beta=self.beta,
             smooth=self.smooth,
-            mask=mask,
         )
-        loss = (loss + compl_loss) * 0.5
+        loss = (loss1 + loss2) * 0.5
 
         return loss.mean()
 
