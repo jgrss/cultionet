@@ -198,7 +198,6 @@ def tanimoto_dist(
     ypred: torch.Tensor,
     ytrue: torch.Tensor,
     smooth: float,
-    weights: T.Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Tanimoto distance."""
 
@@ -225,17 +224,13 @@ def tanimoto_dist(
     tpl = tpl.sum(dim=(2, 3))
     sq_sum = sq_sum.sum(dim=(2, 3))
 
-    numerator = (tpl * batch_weight) + smooth
-    denominator = ((sq_sum - tpl) * batch_weight) + smooth
+    numerator = (tpl * batch_weight).sum(dim=-1) + smooth
+    denominator = ((sq_sum - tpl) * batch_weight).sum(dim=-1) + smooth
     distance = numerator / denominator
 
     loss = 1.0 - distance
 
-    # Apply weights
-    if weights is not None:
-        loss = loss * weights
-
-    return loss.sum(dim=-1)
+    return loss
 
 
 class TanimotoDistLoss(nn.Module):
@@ -279,16 +274,12 @@ class TanimotoDistLoss(nn.Module):
     def __init__(
         self,
         smooth: float = 1e-5,
-        beta: T.Optional[float] = 0.999,
-        class_counts: T.Optional[torch.Tensor] = None,
         transform_logits: bool = False,
         one_hot_targets: bool = True,
     ):
         super().__init__()
 
         self.smooth = smooth
-        self.beta = beta
-        self.class_counts = class_counts
 
         self.preprocessor = LossPreprocessing(
             transform_logits=transform_logits,
