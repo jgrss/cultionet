@@ -233,11 +233,9 @@ def tanimoto_dist(
 
     # Apply weights
     if weights is not None:
-        loss = (loss * weights).sum(dim=1) / weights.sum()
-    else:
-        loss = loss.mean(dim=1)
+        loss = loss * weights
 
-    return distance
+    return loss.sum(dim=-1)
 
 
 class TanimotoDistLoss(nn.Module):
