@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from einops import rearrange
 
 from cultionet.losses import (
+    CombinedLoss,
     LossPreprocessing,
     TanimotoComplementLoss,
     TanimotoDistLoss,
@@ -109,23 +110,35 @@ def test_tanimoto_classification_loss():
     loss_func = TanimotoDistLoss()
 
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS)
-    assert round(float(loss.item()), 3) == 0.61
+    assert round(float(loss.item()), 3) == 0.389
 
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS, mask=MASK)
-    assert round(float(loss.item()), 3) == 0.608
+    assert round(float(loss.item()), 3) == 0.569
 
     loss_func = TanimotoComplementLoss()
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS)
-    assert round(float(loss.item()), 3) == 0.649
+    assert round(float(loss.item()), 3) == 0.824
 
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS, mask=MASK)
-    assert round(float(loss.item()), 3) == 0.647
+    assert round(float(loss.item()), 3) == 0.692
+
+    loss_func = CombinedLoss(
+        losses=[
+            TanimotoDistLoss(),
+            TanimotoComplementLoss(),
+        ]
+    )
+    loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS)
+    assert round(float(loss.item()), 3) == 0.606
+
+    loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS, mask=MASK)
+    assert round(float(loss.item()), 3) == 0.63
 
 
 def test_tanimoto_regression_loss():
     loss_func = TanimotoDistLoss(one_hot_targets=False)
     loss = loss_func(INPUTS_DIST, DIST_TARGETS)
-    assert round(float(loss.item()), 3) == 0.417
+    assert round(float(loss.item()), 3) == 0.583
 
     loss_func = TanimotoComplementLoss(one_hot_targets=False)
     loss = loss_func(INPUTS_DIST, DIST_TARGETS)
