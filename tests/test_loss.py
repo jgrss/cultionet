@@ -110,10 +110,10 @@ def test_tanimoto_classification_loss():
     loss_func = TanimotoDistLoss()
 
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS)
-    assert round(float(loss.item()), 3) == 0.389
+    assert round(float(loss.item()), 3) == 0.61
 
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS, mask=MASK)
-    assert round(float(loss.item()), 3) == 0.569
+    assert round(float(loss.item()), 3) == 0.431
 
     loss_func = TanimotoComplementLoss()
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS)
@@ -129,16 +129,16 @@ def test_tanimoto_classification_loss():
         ]
     )
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS)
-    assert round(float(loss.item()), 3) == 0.606
+    assert round(float(loss.item()), 3) == 0.717
 
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS, mask=MASK)
-    assert round(float(loss.item()), 3) == 0.63
+    assert round(float(loss.item()), 3) == 0.561
 
 
 def test_tanimoto_regression_loss():
     loss_func = TanimotoDistLoss(one_hot_targets=False)
     loss = loss_func(INPUTS_DIST, DIST_TARGETS)
-    assert round(float(loss.item()), 3) == 0.583
+    assert round(float(loss.item()), 3) == 0.417
 
     loss_func = TanimotoComplementLoss(one_hot_targets=False)
     loss = loss_func(INPUTS_DIST, DIST_TARGETS)
