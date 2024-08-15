@@ -12,11 +12,10 @@ import ray
 import torch
 import xarray as xr
 from affine import Affine
-from dask.diagnostics import ProgressBar
 from psutil._common import bytes2human
 from rasterio.windows import Window, from_bounds
 from ray.exceptions import RayTaskError
-from ray.util.dask import enable_dask_on_ray, ray_dask_get
+from ray.util.dask import ray_dask_get
 from scipy.ndimage import label as nd_label
 from skimage.measure import regionprops
 from threadpoolctl import threadpool_limits
