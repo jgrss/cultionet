@@ -1,5 +1,4 @@
 from .losses import (
-    BoundaryLoss,
     ClassBalancedMSELoss,
     CombinedLoss,
     LossPreprocessing,

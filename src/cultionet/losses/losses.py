@@ -5,16 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-try:
-    from kornia.contrib import distance_transform
-except ImportError:
-    distance_transform = None
-
-try:
-    import torch_topological.nn as topnn
-except ImportError:
-    topnn = None
-
 
 class LossPreprocessing(nn.Module):
     def __init__(
@@ -379,105 +369,6 @@ class MSELoss(nn.Module):
         return self.loss_func(
             inputs.contiguous().view(-1), targets.contiguous().view(-1)
         )
-
-
-class BoundaryLoss(nn.Module):
-    """Boundary (surface) loss.
-
-    Reference:
-        https://github.com/LIVIAETS/boundary-loss
-    """
-
-    def __init__(self):
-        super().__init__()
-
-        assert distance_transform is not None
-
-    def fill_distances(
-        self,
-        distances: torch.Tensor,
-        targets: torch.Tensor,
-    ):
-        dt = distance_transform(
-            F.pad(
-                (targets == 2).long().unsqueeze(1).float(),
-                pad=(
-                    21,
-                    21,
-                    21,
-                    21,
-                ),
-            ),
-            kernel_size=21,
-            h=0.1,
-        ).squeeze(dim=1)[:, 21:-21, 21:-21]
-        dt /= dt.max()
-
-        idist = torch.where(
-            targets == 2, 0, torch.where(targets == 1, distances, 0)
-        )
-        idist = torch.where(targets > 0, idist, dt)
-
-        return idist
-
-    def forward(
-        self,
-        probs: torch.Tensor,
-        distances: torch.Tensor,
-        targets: torch.Tensor,
-    ) -> torch.Tensor:
-        """Performs a single forward pass.
-
-        Args:
-            probs: Predicted probabilities, shaped (B x H x W).
-            distances: Ground truth distance transform, shaped (B x H x W).
-            targets: Ground truth labels, shaped (B x H x W).
-
-        Returns:
-            Loss (float)
-        """
-        distances = self.fill_distances(distances, targets)
-
-        return torch.einsum("bhw, bhw -> bhw", distances, 1.0 - probs).mean()
-
-
-class TopologyLoss(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        if topnn is not None:
-            self.loss_func = topnn.SummaryStatisticLoss(
-                "total_persistence", p=2
-            )
-            self.cubical = topnn.CubicalComplex(dim=3)
-
-    def forward(
-        self,
-        inputs: torch.Tensor,
-        targets: torch.Tensor,
-        mask: T.Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        """Performs a single forward pass.
-
-        Args:
-            inputs: Predictions (probabilities) from model.
-            targets: Ground truth values.
-        """
-        if mask is None:
-            targets = targets * mask
-            inputs = inputs * mask
-
-        persistence_information_target = self.cubical(targets)
-        persistence_information_target = [persistence_information_target[0]]
-
-        persistence_information = self.cubical(inputs)
-        persistence_information = [persistence_information[0]]
-
-        loss = self.loss_func(
-            persistence_information, persistence_information_target
-        )
-
-        return loss
 
 
 class ClassBalancedMSELoss(nn.Module):

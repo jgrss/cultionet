@@ -50,7 +50,6 @@ class Destinations(StrEnum):
 
 
 class LossTypes(StrEnum):
-    BOUNDARY = "BoundaryLoss"
     CLASS_BALANCED_MSE = "ClassBalancedMSELoss"
     TANIMOTO_COMPLEMENT = "TanimotoComplementLoss"
     TANIMOTO = "TanimotoDistLoss"

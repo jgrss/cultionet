@@ -850,9 +850,6 @@ class CultionetLitTransferModel(LightningModuleMixin):
             self.edge_class = num_classes
 
         self.loss_dict = {
-            LossTypes.BOUNDARY: {
-                "classification": cnetlosses.BoundaryLoss(),
-            },
             LossTypes.CLASS_BALANCED_MSE: {
                 "classification": cnetlosses.ClassBalancedMSELoss(),
             },
@@ -1042,9 +1039,6 @@ class CultionetLitModel(LightningModuleMixin):
             self.edge_class = num_classes
 
         self.loss_dict = {
-            LossTypes.BOUNDARY: {
-                "classification": cnetlosses.BoundaryLoss(),
-            },
             LossTypes.CLASS_BALANCED_MSE: {
                 "classification": cnetlosses.ClassBalancedMSELoss(),
             },
