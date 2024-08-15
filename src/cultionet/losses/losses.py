@@ -4,7 +4,11 @@ import einops
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from kornia.contrib import distance_transform
+
+try:
+    from kornia.contrib import distance_transform
+except ImportError:
+    distance_transform = None
 
 try:
     import torch_topological.nn as topnn
@@ -198,7 +202,6 @@ def tanimoto_dist(
     ypred: torch.Tensor,
     ytrue: torch.Tensor,
     smooth: float,
-    weights: T.Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Tanimoto distance."""
 
@@ -225,19 +228,13 @@ def tanimoto_dist(
     tpl = tpl.sum(dim=(2, 3))
     sq_sum = sq_sum.sum(dim=(2, 3))
 
-    numerator = (tpl * batch_weight) + smooth
-    denominator = ((sq_sum - tpl) * batch_weight) + smooth
+    numerator = (tpl * batch_weight).sum(dim=-1) + smooth
+    denominator = ((sq_sum - tpl) * batch_weight).sum(dim=-1) + smooth
     distance = numerator / denominator
 
     loss = 1.0 - distance
 
-    # Apply weights
-    if weights is not None:
-        loss = (loss * weights).sum(dim=1) / weights.sum()
-    else:
-        loss = loss.mean(dim=1)
-
-    return distance
+    return loss
 
 
 class TanimotoDistLoss(nn.Module):
@@ -281,16 +278,12 @@ class TanimotoDistLoss(nn.Module):
     def __init__(
         self,
         smooth: float = 1e-5,
-        beta: T.Optional[float] = 0.999,
-        class_counts: T.Optional[torch.Tensor] = None,
         transform_logits: bool = False,
         one_hot_targets: bool = True,
     ):
         super().__init__()
 
         self.smooth = smooth
-        self.beta = beta
-        self.class_counts = class_counts
 
         self.preprocessor = LossPreprocessing(
             transform_logits=transform_logits,
@@ -397,6 +390,8 @@ class BoundaryLoss(nn.Module):
 
     def __init__(self):
         super().__init__()
+
+        assert distance_transform is not None
 
     def fill_distances(
         self,

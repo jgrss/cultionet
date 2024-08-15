@@ -377,7 +377,7 @@ class EdgeDataset(SpatialDataset):
         return train_ds, val_ds
 
     def load_file(self, filename: T.Union[str, Path]) -> Data:
-        return joblib.load(filename)
+        return Data.from_file(filename)
 
     def __getitem__(
         self, idx: T.Union[int, np.ndarray]
@@ -400,7 +400,7 @@ class EdgeDataset(SpatialDataset):
             idx (int): The dataset index position.
         """
 
-        batch = Data.from_file(self.data_list_[idx])
+        batch = self.load_file(self.data_list_[idx])
 
         batch.x = (batch.x * 1e-4).clip(1e-9, 1)
 

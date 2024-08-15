@@ -1,20 +1,22 @@
-import logging
 import typing as T
 from pathlib import Path
 
-import dask
 import dask.array as da
 import einops
 import geopandas as gpd
 import geowombat as gw
 import numpy as np
 import pandas as pd
+import psutil
+import ray
 import torch
 import xarray as xr
 from affine import Affine
 from dask.diagnostics import ProgressBar
-from dask.distributed import Client, LocalCluster, progress
+from psutil._common import bytes2human
 from rasterio.windows import Window, from_bounds
+from ray.exceptions import RayTaskError
+from ray.util.dask import enable_dask_on_ray, ray_dask_get
 from scipy.ndimage import label as nd_label
 from skimage.measure import regionprops
 from threadpoolctl import threadpool_limits
@@ -110,7 +112,6 @@ def reshape_and_mask_array(
     return time_series
 
 
-@threadpool_limits.wrap(limits=1, user_api="blas")
 def create_predict_dataset(
     image_list: T.List[T.List[T.Union[str, Path]]],
     region: str,
@@ -121,130 +122,102 @@ def create_predict_dataset(
     ref_res: T.Union[float, T.Tuple[float, float]] = 10.0,
     resampling: str = "nearest",
     window_size: int = 100,
-    padding: int = 101,
+    padding: int = 20,
     num_workers: int = 1,
     compress_method: T.Union[int, str] = 'zlib',
-    use_cluster: bool = True,
 ):
     """Creates a prediction dataset for an image."""
 
     # Read windows larger than the re-chunk window size
-    read_chunksize = 1024
+    read_chunksize = 256
     while True:
-        if read_chunksize < window_size:
+        if read_chunksize < window_size + padding:
             read_chunksize *= 2
         else:
             break
 
-    with gw.config.update(ref_res=ref_res):
-        with gw.open(
-            image_list,
-            stack_dim="band",
-            band_names=list(range(1, len(image_list) + 1)),
-            resampling=resampling,
-            chunks=read_chunksize,
-        ) as src_ts:
-            # Get the time and band count
-            num_time, num_bands = get_image_list_dims(image_list, src_ts)
+    total_cpus = psutil.cpu_count(logical=True)
+    threads_per_worker = total_cpus // num_workers
 
-            time_series = reshape_and_mask_array(
-                data=src_ts,
-                num_time=num_time,
-                num_bands=num_bands,
-                gain=gain,
-                offset=offset,
-                apply_gain=False,
-            )
+    logger.info(f"Opening images with window chunk sizes of {read_chunksize}.")
+    logger.info(
+        f"Re-chunking image arrays to chunk sizes of {window_size} with padding of {padding}."
+    )
+    logger.info(
+        f"Virtual memory available is {bytes2human(psutil.virtual_memory().available)}."
+    )
+    logger.info(
+        f"Creating PyTorch dataset with {num_workers} processes and {threads_per_worker} threads."
+    )
 
-            # Chunk the array into the windows
-            time_series_array = time_series.chunk(
-                {"time": -1, "band": -1, "y": window_size, "x": window_size}
-            ).data
+    with threadpool_limits(limits=threads_per_worker, user_api="blas"):
 
-            # Check if the array needs to be padded
-            # First, get the end chunk size of rows and columns
-            height_end_chunk = time_series_array.chunks[-2][-1]
-            width_end_chunk = time_series_array.chunks[-1][-1]
+        with gw.config.update(ref_res=ref_res):
+            with gw.open(
+                image_list,
+                stack_dim="band",
+                band_names=list(range(1, len(image_list) + 1)),
+                resampling=resampling,
+                chunks=read_chunksize,
+            ) as src_ts:
+                # Get the time and band count
+                num_time, num_bands = get_image_list_dims(image_list, src_ts)
 
-            height_padding = 0
-            width_padding = 0
-            if padding > height_end_chunk:
-                height_padding = padding - height_end_chunk
-            if padding > width_end_chunk:
-                width_padding = padding - width_end_chunk
+                time_series = reshape_and_mask_array(
+                    data=src_ts,
+                    num_time=num_time,
+                    num_bands=num_bands,
+                    gain=gain,
+                    offset=offset,
+                    apply_gain=False,
+                )
 
-            if (height_padding > 0) or (width_padding > 0):
-                # Pad the full array if the end chunk is smaller than the padding
-                time_series_array = da.pad(
-                    time_series_array,
-                    pad_width=(
-                        (0, 0),
-                        (0, 0),
-                        (0, height_padding),
-                        (0, width_padding),
-                    ),
-                ).rechunk({0: -1, 1: -1, 2: window_size, 3: window_size})
-
-            # Add the padding to each chunk
-            time_series_array = time_series_array.map_overlap(
-                lambda x: x,
-                depth={0: 0, 1: 0, 2: padding, 3: padding},
-                boundary=0,
-                trim=False,
-            )
-
-            if use_cluster:
-                with dask.config.set(
+                # Chunk the array into the windows
+                time_series_array = time_series.chunk(
                     {
-                        "distributed.worker.memory.terminate": False,
-                        "distributed.comm.retry.count": 10,
-                        "distributed.comm.timeouts.connect": 5,
-                        "distributed.scheduler.allowed-failures": 20,
-                        "distributed.worker.memory.pause": 0.95,
-                        "distributed.worker.memory.target": 0.97,
-                        "distributed.worker.memory.spill": False,
-                        "distributed.scheduler.worker-saturation": 1.0,
+                        "time": -1,
+                        "band": -1,
+                        "y": window_size,
+                        "x": window_size,
                     }
-                ):
-                    with LocalCluster(
-                        processes=True,
-                        n_workers=num_workers,
-                        threads_per_worker=1,
-                        memory_limit="6GB",  # per worker limit
-                        silence_logs=logging.ERROR,
-                    ) as cluster:
-                        with Client(cluster) as client:
-                            with BatchStore(
-                                data=time_series,
-                                write_path=process_path,
-                                res=ref_res,
-                                resampling=resampling,
-                                region=region,
-                                start_date=pd.to_datetime(
-                                    Path(image_list[0]).stem,
-                                    format=date_format,
-                                ).strftime("%Y%m%d"),
-                                end_date=pd.to_datetime(
-                                    Path(image_list[-1]).stem,
-                                    format=date_format,
-                                ).strftime("%Y%m%d"),
-                                window_size=window_size,
-                                padding=padding,
-                                compress_method=compress_method,
-                            ) as batch_store:
-                                save_tasks = batch_store.save(
-                                    time_series_array
-                                )
-                                results = client.gather(
-                                    client.persist(save_tasks)
-                                )
-                                progress(results)
+                ).data
 
-            else:
+                # Check if the array needs to be padded
+                # First, get the end chunk size of rows and columns
+                height_end_chunk = time_series_array.chunks[-2][-1]
+                width_end_chunk = time_series_array.chunks[-1][-1]
 
-                with dask.config.set(
-                    scheduler='processes', num_workers=num_workers
-                ):
+                height_padding = 0
+                width_padding = 0
+                if padding > height_end_chunk:
+                    height_padding = padding - height_end_chunk
+                if padding > width_end_chunk:
+                    width_padding = padding - width_end_chunk
+
+                if (height_padding > 0) or (width_padding > 0):
+                    # Pad the full array if the end chunk is smaller than the padding
+                    time_series_array = da.pad(
+                        time_series_array,
+                        pad_width=(
+                            (0, 0),
+                            (0, 0),
+                            (0, height_padding),
+                            (0, width_padding),
+                        ),
+                    ).rechunk({0: -1, 1: -1, 2: window_size, 3: window_size})
+
+                # Add the padding to each chunk
+                time_series_array = time_series_array.map_overlap(
+                    lambda x: x,
+                    depth={0: 0, 1: 0, 2: padding, 3: padding},
+                    boundary=0,
+                    trim=False,
+                )
+
+                if not ray.is_initialized():
+                    ray.init(num_cpus=num_workers)
+
+                try:
                     with BatchStore(
                         data=time_series,
                         write_path=process_path,
@@ -261,9 +234,17 @@ def create_predict_dataset(
                         padding=padding,
                         compress_method=compress_method,
                     ) as batch_store:
-                        save_tasks = batch_store.save(time_series_array)
-                        with ProgressBar():
-                            save_tasks.compute()
+                        batch_store.save(
+                            time_series_array,
+                            scheduler=ray_dask_get,
+                        )
+
+                except RayTaskError as e:
+                    logger.warning(e)
+                    ray.shutdown()
+
+                if ray.is_initialized():
+                    ray.shutdown()
 
 
 class ReferenceArrays:

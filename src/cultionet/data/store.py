@@ -10,8 +10,12 @@ import xarray as xr
 from dask.delayed import Delayed
 from dask.utils import SerializableLock
 from rasterio.windows import Window
+from retry import retry
 
+from ..utils.logging import set_color_logger
 from .data import Data
+
+logger = set_color_logger(__name__)
 
 
 class BatchStore:
@@ -61,6 +65,7 @@ class BatchStore:
 
         self.write_batch(item, w=item_window, w_pad=pad_window)
 
+    @retry(IOError, tries=5, delay=1)
     def write_batch(self, x: np.ndarray, w: Window, w_pad: Window):
         image_height = self.window_size + self.padding * 2
         image_width = self.window_size + self.padding * 2
@@ -133,8 +138,14 @@ class BatchStore:
             compress=self.compress_method,
         )
 
+        try:
+            _ = batch.from_file(self.write_path / f"{batch_id}.pt")
+        except EOFError:
+            raise IOError
+
     def __enter__(self) -> "BatchStore":
         self.closed = False
+
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -143,5 +154,5 @@ class BatchStore:
     def _open(self) -> "BatchStore":
         return self
 
-    def save(self, data: da.Array) -> Delayed:
-        return da.store(data, self, lock=self.lock_, compute=False)
+    def save(self, data: da.Array, **kwargs) -> Delayed:
+        da.store(data, self, lock=self.lock_, compute=True, **kwargs)
