@@ -4,7 +4,11 @@ import einops
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from kornia.contrib import distance_transform
+
+try:
+    from kornia.contrib import distance_transform
+except ImportError:
+    distance_transform = None
 
 try:
     import torch_topological.nn as topnn
@@ -386,6 +390,8 @@ class BoundaryLoss(nn.Module):
 
     def __init__(self):
         super().__init__()
+
+        assert distance_transform is not None
 
     def fill_distances(
         self,
