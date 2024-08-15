@@ -54,7 +54,6 @@ class LossTypes(StrEnum):
     TANIMOTO_COMPLEMENT = "TanimotoComplementLoss"
     TANIMOTO = "TanimotoDistLoss"
     TANIMOTO_COMBINED = "TanimotoCombined"
-    TOPOLOGY = "TopologyLoss"
 
 
 class ModelNames(StrEnum):

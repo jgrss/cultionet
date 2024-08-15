@@ -4,5 +4,4 @@ from .losses import (
     LossPreprocessing,
     TanimotoComplementLoss,
     TanimotoDistLoss,
-    TopologyLoss,
 )

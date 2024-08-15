@@ -881,9 +881,6 @@ class CultionetLitTransferModel(LightningModuleMixin):
                     ],
                 ),
             },
-            LossTypes.TOPOLOGY: {
-                "classification": cnetlosses.TopologyLoss(),
-            },
         }
 
         self.cultionet_model = CultionetLitModel.load_from_checkpoint(
@@ -1069,9 +1066,6 @@ class CultionetLitModel(LightningModuleMixin):
                         ),
                     ],
                 ),
-            },
-            LossTypes.TOPOLOGY: {
-                "classification": cnetlosses.TopologyLoss(),
             },
         }
 
