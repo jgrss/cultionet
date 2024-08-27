@@ -145,6 +145,9 @@ class TanimotoComplementLoss(nn.Module):
         tpl = y * yhat
         sq_sum = y**2 + yhat**2
 
+        # Prior
+        # tpl = tpl.sum(dim=(2, 3))
+        # sq_sum = sq_sum.sum(dim=(2, 3))
         tpl = tpl.sum(dim=(1, 2, 3))
         sq_sum = sq_sum.sum(dim=(1, 2, 3))
 
@@ -156,6 +159,8 @@ class TanimotoComplementLoss(nn.Module):
                 ((a * sq_sum) + (b * tpl)) + self.smooth
             )
 
+        # Prior
+        # ((tpl * denominator) * scale).sum(dim=1)
         numerator = tpl + self.smooth
         distance = (numerator * denominator) * scale
 
