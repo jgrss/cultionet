@@ -461,7 +461,7 @@ train:
     long: loss-name
     help: The loss method name
     kwargs:
-      default: 'TanimotoCombined'
+      default: 'TanimotoComplementLoss'
       choices: ['TanimotoDistLoss', 'TanimotoComplementLoss', 'TanimotoCombined']
   learning_rate:
     short: lr
