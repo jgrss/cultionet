@@ -2,12 +2,12 @@ import typing as T
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
 from einops.layers.torch import Rearrange
 
-from cultionet.enums import AttentionTypes, ResBlockTypes
+from cultionet.enums import AttentionTypes, InferenceNames, ResBlockTypes
 
-from .activations import SigmoidCrisp
 from .convolution import (
     ConvBlock2d,
     ConvTranspose2d,
@@ -15,6 +15,88 @@ from .convolution import (
     ResidualAConv,
     ResidualConv,
 )
+from .geo_encoding import SphericalHarmonics
+
+NATTEN_PARAMS = {
+    "a": {
+        "natten_num_heads": 2,
+        "natten_kernel_size": 7,
+        "natten_dilation": 3,
+    },
+    "b": {
+        "natten_num_heads": 4,
+        "natten_kernel_size": 5,
+        "natten_dilation": 3,
+    },
+    "c": {
+        "natten_num_heads": 8,
+        "natten_kernel_size": 3,
+        "natten_dilation": 2,
+    },
+    "d": {
+        "natten_num_heads": 8,
+        "natten_kernel_size": 1,
+        "natten_dilation": 1,
+    },
+}
+
+
+class SigmoidCrisp(nn.Module):
+    r"""Sigmoid crisp.
+
+    Adapted from publication and source code below:
+
+        CSIRO BSTD/MIT LICENSE
+
+        Redistribution and use in source and binary forms, with or without modification, are permitted provided that
+        the following conditions are met:
+
+        1. Redistributions of source code must retain the above copyright notice, this list of conditions and the
+            following disclaimer.
+        2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and
+            the following disclaimer in the documentation and/or other materials provided with the distribution.
+        3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or
+            promote products derived from this software without specific prior written permission.
+
+        THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+        INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+        DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+        SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+        SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+        WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+        USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+        Citation:
+            @article{diakogiannis_etal_2021,
+                title={Looking for change? Roll the dice and demand attention},
+                author={Diakogiannis, Foivos I and Waldner, Fran{\c{c}}ois and Caccetta, Peter},
+                journal={Remote Sensing},
+                volume={13},
+                number={18},
+                pages={3707},
+                year={2021},
+                publisher={MDPI}
+            }
+
+        Reference:
+            https://www.mdpi.com/2072-4292/13/18/3707
+            https://arxiv.org/pdf/2009.02062.pdf
+            https://github.com/waldnerf/decode/blob/main/FracTAL_ResUNet/nn/activations/sigmoid_crisp.py
+    """
+
+    def __init__(self, smooth: float = 1e-2):
+        super().__init__()
+
+        self.smooth = smooth
+        self.gamma = nn.Parameter(torch.ones(1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.smooth + F.sigmoid(self.gamma)
+        out = torch.reciprocal(out)
+        out = x * out
+        out = F.sigmoid(out)
+
+        return out
 
 
 class GeoEmbeddings(nn.Module):
@@ -39,12 +121,93 @@ class GeoEmbeddings(nn.Module):
         return self.coord_embedding(self.decimal_degrees_to_cartesian(x))
 
 
+class TowerUNetFinalCombine(nn.Module):
+    """Final output by fusing all tower outputs."""
+
+    def __init__(
+        self,
+        edge_activation: bool = True,
+        mask_activation: bool = True,
+    ):
+        super().__init__()
+
+        edge_activation_layer = (
+            SigmoidCrisp() if edge_activation else nn.Identity()
+        )
+        mask_activation_layer = (
+            nn.Softmax(dim=1) if mask_activation else nn.Identity()
+        )
+
+        self.final_dist = torch.nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=1, kernel_size=3, padding=1),
+            nn.Sigmoid(),
+        )
+
+        self.final_edge = torch.nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=1, kernel_size=3, padding=1),
+            edge_activation_layer,
+        )
+
+        self.final_crop = torch.nn.Sequential(
+            nn.Conv2d(in_channels=6, out_channels=2, kernel_size=3, padding=1),
+            mask_activation_layer,
+        )
+
+    def forward(
+        self,
+        out_a: T.Dict[str, torch.Tensor],
+        out_b: T.Dict[str, torch.Tensor],
+        out_c: T.Dict[str, torch.Tensor],
+        suffixes: T.Sequence[str],
+    ) -> T.Dict[str, torch.Tensor]:
+
+        distance = self.final_dist(
+            torch.cat(
+                [
+                    out_a[f"{InferenceNames.DISTANCE}{suffixes[0]}"],
+                    out_b[f"{InferenceNames.DISTANCE}{suffixes[1]}"],
+                    out_c[f"{InferenceNames.DISTANCE}{suffixes[2]}"],
+                ],
+                dim=1,
+            )
+        )
+
+        edge = self.final_edge(
+            torch.cat(
+                [
+                    out_a[f"{InferenceNames.EDGE}{suffixes[0]}"],
+                    out_b[f"{InferenceNames.EDGE}{suffixes[1]}"],
+                    out_c[f"{InferenceNames.EDGE}{suffixes[2]}"],
+                ],
+                dim=1,
+            )
+        )
+
+        crop = self.final_crop(
+            torch.cat(
+                [
+                    out_a[f"{InferenceNames.CROP}{suffixes[0]}"],
+                    out_b[f"{InferenceNames.CROP}{suffixes[1]}"],
+                    out_c[f"{InferenceNames.CROP}{suffixes[2]}"],
+                ],
+                dim=1,
+            )
+        )
+
+        return {
+            InferenceNames.DISTANCE: distance,
+            InferenceNames.EDGE: edge,
+            InferenceNames.CROP: crop,
+        }
+
+
 class TowerUNetFinal(nn.Module):
+    """Output of an individual tower fusion."""
+
     def __init__(
         self,
         in_channels: int,
         num_classes: int,
-        mask_activation: T.Callable,
         activation_type: str = "SiLU",
         resample_factor: int = 0,
     ):
@@ -52,7 +215,6 @@ class TowerUNetFinal(nn.Module):
 
         self.in_channels = in_channels
         self.num_classes = num_classes
-        self.mask_activation = mask_activation
 
         if resample_factor > 1:
             self.up_conv = ConvTranspose2d(
@@ -65,6 +227,9 @@ class TowerUNetFinal(nn.Module):
 
         # TODO: make optional
         self.geo_embeddings = GeoEmbeddings(in_channels)
+        # self.geo_embeddings4 = SphericalHarmonics(out_channels=in_channels, legendre_polys=4)
+        # self.geo_embeddings8 = SphericalHarmonics(out_channels=in_channels, legendre_polys=8)
+
         self.layernorm = nn.Sequential(
             Rearrange('b c h w -> b h w c'),
             nn.LayerNorm(in_channels),
@@ -79,8 +244,6 @@ class TowerUNetFinal(nn.Module):
             add_activation=True,
             activation_type=activation_type,
         )
-        self.sigmoid = nn.Sigmoid()
-        self.sigmoid_crisp = SigmoidCrisp()
 
         self.dist_alpha1 = nn.Parameter(torch.ones(1))
         self.dist_alpha2 = nn.Parameter(torch.ones(1))
@@ -104,9 +267,16 @@ class TowerUNetFinal(nn.Module):
 
         # Embed coordinates
         if latlon_coords is not None:
+            latlon_coords = latlon_coords.to(dtype=x.dtype)
             x = x + rearrange(
                 self.geo_embeddings(latlon_coords), 'b c -> b c 1 1'
             )
+            # x = x + rearrange(
+            #     self.geo_embeddings4(latlon_coords), 'b c -> b c 1 1'
+            # )
+            # x = x + rearrange(
+            #     self.geo_embeddings8(latlon_coords), 'b c -> b c 1 1'
+            # )
 
         x = self.layernorm(x)
 
@@ -124,9 +294,9 @@ class TowerUNetFinal(nn.Module):
         )
 
         return {
-            f"dist{suffix}": self.sigmoid(dist),
-            f"edge{suffix}": self.sigmoid_crisp(edge),
-            f"mask{suffix}": self.mask_activation(mask),
+            f"{InferenceNames.DISTANCE}{suffix}": dist,
+            f"{InferenceNames.EDGE}{suffix}": edge,
+            f"{InferenceNames.CROP}{suffix}": mask,
         }
 
 
@@ -143,7 +313,6 @@ class UNetUpBlock(nn.Module):
         dilations: T.Sequence[int] = None,
         repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
-        concat_resid: bool = False,
         resample_up: bool = True,
         natten_num_heads: int = 8,
         natten_kernel_size: int = 3,
@@ -153,10 +322,16 @@ class UNetUpBlock(nn.Module):
     ):
         super().__init__()
 
+        assert res_block_type in (
+            ResBlockTypes.RES,
+            ResBlockTypes.RESA,
+        )
+
         if resample_up:
             self.up_conv = ConvTranspose2d(in_channels, in_channels)
 
         if res_block_type == ResBlockTypes.RES:
+
             self.res_conv = ResidualConv(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -166,7 +341,9 @@ class UNetUpBlock(nn.Module):
                 activation_type=activation_type,
                 batchnorm_first=batchnorm_first,
             )
+
         else:
+
             self.res_conv = ResidualAConv(
                 in_channels,
                 out_channels,
@@ -176,7 +353,6 @@ class UNetUpBlock(nn.Module):
                 attention_weights=attention_weights,
                 activation_type=activation_type,
                 batchnorm_first=batchnorm_first,
-                concat_resid=concat_resid,
                 natten_num_heads=natten_num_heads,
                 natten_kernel_size=natten_kernel_size,
                 natten_dilation=natten_dilation,
@@ -199,12 +375,10 @@ class TowerUNetEncoder(nn.Module):
         activation_type: str = "SiLU",
         dropout: float = 0.0,
         res_block_type: str = ResBlockTypes.RESA,
-        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
-        pool_attention: bool = False,
+        attention_weights: str = AttentionTypes.NATTEN,
         pool_by_max: bool = False,
         repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
-        concat_resid: bool = False,
     ):
         super().__init__()
 
@@ -215,10 +389,6 @@ class TowerUNetEncoder(nn.Module):
             res_block_type=res_block_type,
             batchnorm_first=batchnorm_first,
             pool_by_max=pool_by_max,
-            concat_resid=concat_resid,
-            natten_num_heads=8,
-            natten_kernel_size=3,
-            natten_dilation=1,
             natten_attn_drop=dropout,
             natten_proj_drop=dropout,
         )
@@ -228,24 +398,27 @@ class TowerUNetEncoder(nn.Module):
             dilations=dilations,
             repeat_resa_kernel=repeat_resa_kernel,
             pool_first=False,
-            attention_weights=attention_weights if pool_attention else None,
-            **backbone_kwargs,
+            # Attention applied at 1/1 spatial resolution
+            attention_weights=attention_weights,
+            **{**backbone_kwargs, **NATTEN_PARAMS["a"]},
         )
         self.down_b = PoolResidualConv(
             in_channels=channels[0],
             out_channels=channels[1],
             dilations=dilations,
             repeat_resa_kernel=repeat_resa_kernel,
-            attention_weights=attention_weights if pool_attention else None,
-            **backbone_kwargs,
+            # Attention applied at 1/2 spatial resolution
+            attention_weights=attention_weights,
+            **{**backbone_kwargs, **NATTEN_PARAMS["b"]},
         )
         self.down_c = PoolResidualConv(
             channels[1],
             channels[2],
             dilations=dilations[:2],
             repeat_resa_kernel=repeat_resa_kernel,
-            attention_weights=attention_weights if pool_attention else None,
-            **backbone_kwargs,
+            # Attention applied at 1/4 spatial resolution
+            attention_weights=attention_weights,
+            **{**backbone_kwargs, **NATTEN_PARAMS["c"]},
         )
         self.down_d = PoolResidualConv(
             channels[2],
@@ -254,6 +427,7 @@ class TowerUNetEncoder(nn.Module):
             num_blocks=1,
             dilations=[1],
             repeat_resa_kernel=repeat_resa_kernel,
+            # Attention applied at 1/8 spatial resolution
             attention_weights=None,
             **backbone_kwargs,
         )
@@ -282,10 +456,9 @@ class TowerUNetDecoder(nn.Module):
         activation_type: str = "SiLU",
         dropout: float = 0.0,
         res_block_type: str = ResBlockTypes.RESA,
-        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
+        attention_weights: str = AttentionTypes.NATTEN,
         repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
-        concat_resid: bool = False,
     ):
         super().__init__()
 
@@ -295,8 +468,6 @@ class TowerUNetDecoder(nn.Module):
             res_block_type=res_block_type,
             repeat_resa_kernel=repeat_resa_kernel,
             batchnorm_first=batchnorm_first,
-            concat_resid=concat_resid,
-            natten_num_heads=8,
             natten_attn_drop=dropout,
             natten_proj_drop=dropout,
         )
@@ -306,36 +477,34 @@ class TowerUNetDecoder(nn.Module):
             kernel_size=1,
             num_blocks=1,
             dilations=[1],
-            attention_weights=None,
             resample_up=False,
+            # Attention applied at 1/8 spatial resolution
+            attention_weights=None,
             **up_kwargs,
         )
         self.up_cu = UNetUpBlock(
             in_channels=up_channels,
             out_channels=up_channels,
-            attention_weights=attention_weights,
             dilations=dilations[:2],
-            natten_kernel_size=3,
-            natten_dilation=1,
-            **up_kwargs,
+            # Attention applied at 1/4 spatial resolution
+            attention_weights=attention_weights,
+            **{**up_kwargs, **NATTEN_PARAMS["c"]},
         )
         self.up_bu = UNetUpBlock(
             in_channels=up_channels,
             out_channels=up_channels,
-            attention_weights=attention_weights,
             dilations=dilations,
-            natten_kernel_size=5,
-            natten_dilation=2,
-            **up_kwargs,
+            # Attention applied at 1/2 spatial resolution
+            attention_weights=attention_weights,
+            **{**up_kwargs, **NATTEN_PARAMS["b"]},
         )
         self.up_au = UNetUpBlock(
             in_channels=up_channels,
             out_channels=up_channels,
-            attention_weights=attention_weights,
             dilations=dilations,
-            natten_kernel_size=7,
-            natten_dilation=3,
-            **up_kwargs,
+            # Attention applied at 1/1 spatial resolution
+            attention_weights=attention_weights,
+            **{**up_kwargs, **NATTEN_PARAMS["a"]},
         )
 
     def forward(
@@ -365,10 +534,9 @@ class TowerUNetFusion(nn.Module):
         activation_type: str = "SiLU",
         dropout: float = 0.0,
         res_block_type: str = ResBlockTypes.RESA,
-        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
+        attention_weights: str = AttentionTypes.NATTEN,
         repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
-        concat_resid: bool = False,
     ):
         super().__init__()
 
@@ -376,13 +544,11 @@ class TowerUNetFusion(nn.Module):
         tower_kwargs = dict(
             up_channels=up_channels,
             out_channels=up_channels,
-            attention_weights=attention_weights,
             activation_type=activation_type,
             res_block_type=res_block_type,
             repeat_resa_kernel=repeat_resa_kernel,
             batchnorm_first=batchnorm_first,
-            concat_resid=concat_resid,
-            natten_num_heads=8,
+            attention_weights=attention_weights,
             natten_attn_drop=dropout,
             natten_proj_drop=dropout,
         )
@@ -390,27 +556,21 @@ class TowerUNetFusion(nn.Module):
             backbone_side_channels=channels[2],
             backbone_down_channels=channels[3],
             dilations=dilations[:2],
-            natten_kernel_size=3,
-            natten_dilation=1,
-            **tower_kwargs,
+            **{**tower_kwargs, **NATTEN_PARAMS["c"]},
         )
         self.tower_b = TowerUNetBlock(
             backbone_side_channels=channels[1],
             backbone_down_channels=channels[2],
             tower=True,
             dilations=dilations,
-            natten_kernel_size=5,
-            natten_dilation=2,
-            **tower_kwargs,
+            **{**tower_kwargs, **NATTEN_PARAMS["b"]},
         )
         self.tower_a = TowerUNetBlock(
             backbone_side_channels=channels[0],
             backbone_down_channels=channels[1],
             tower=True,
             dilations=dilations,
-            natten_kernel_size=7,
-            natten_dilation=3,
-            **tower_kwargs,
+            **{**tower_kwargs, **NATTEN_PARAMS["a"]},
         )
 
     def forward(
@@ -463,7 +623,6 @@ class TowerUNetBlock(nn.Module):
         repeat_resa_kernel: bool = False,
         activation_type: str = "SiLU",
         batchnorm_first: bool = False,
-        concat_resid: bool = False,
         natten_num_heads: int = 8,
         natten_kernel_size: int = 3,
         natten_dilation: int = 1,
@@ -471,6 +630,11 @@ class TowerUNetBlock(nn.Module):
         natten_proj_drop: float = 0.0,
     ):
         super().__init__()
+
+        assert res_block_type in (
+            ResBlockTypes.RES,
+            ResBlockTypes.RESA,
+        )
 
         in_channels = (
             backbone_side_channels + backbone_down_channels + up_channels * 2
@@ -483,6 +647,7 @@ class TowerUNetBlock(nn.Module):
             stride=2,
             padding=1,
         )
+
         self.decode_down_conv = ConvTranspose2d(
             in_channels=up_channels,
             out_channels=up_channels,
@@ -502,6 +667,7 @@ class TowerUNetBlock(nn.Module):
             in_channels += up_channels
 
         if res_block_type == ResBlockTypes.RES:
+
             self.res_conv = ResidualConv(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -511,7 +677,9 @@ class TowerUNetBlock(nn.Module):
                 activation_type=activation_type,
                 batchnorm_first=batchnorm_first,
             )
+
         else:
+
             self.res_conv = ResidualAConv(
                 in_channels,
                 out_channels,
@@ -522,7 +690,6 @@ class TowerUNetBlock(nn.Module):
                 attention_weights=attention_weights,
                 activation_type=activation_type,
                 batchnorm_first=batchnorm_first,
-                concat_resid=concat_resid,
                 natten_num_heads=natten_num_heads,
                 natten_kernel_size=natten_kernel_size,
                 natten_dilation=natten_dilation,
