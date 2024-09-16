@@ -249,7 +249,7 @@ class TemporalTransformerFinal(nn.Module):
         num_classes_l2: int = 2,
         num_classes_last: int = 3,
         activation_type: str = "SiLU",
-        final_activation: Callable = nn.Softmax(dim=1),
+        final_activation: Callable = nn.Identity(),
     ):
         super().__init__()
 
@@ -266,7 +266,7 @@ class TemporalTransformerFinal(nn.Module):
             hidden_dim=d_model + num_classes_l2,
             dim_factor=1,
             activation_type=activation_type,
-            final_activation=nn.Softmax(dim=1),
+            final_activation=final_activation,
             num_classes=num_classes_last,
         )
         self.hidden_out = nn.Conv2d(
@@ -302,7 +302,7 @@ class TemporalTransformer(nn.Module):
         num_classes_l2: int = 2,
         num_classes_last: int = 3,
         activation_type: str = "SiLU",
-        final_activation: Callable = nn.Softmax(dim=1),
+        final_activation: Callable = nn.Identity(),
     ):
         """Transformer Self-Attention.
 
