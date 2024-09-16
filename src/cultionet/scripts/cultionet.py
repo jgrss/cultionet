@@ -26,7 +26,7 @@ from fiona.errors import DriverError
 from geowombat.core import sort_images_by_date
 from geowombat.core.windows import get_window_offsets
 from joblib import delayed, parallel_config
-from pytorch_lightning import seed_everything
+from lightning import seed_everything
 from rasterio.windows import Window
 from ray.actor import ActorHandle
 from rich.markdown import Markdown
@@ -1143,6 +1143,7 @@ def train_model(args):
     ):
         ds = EdgeDataset(
             root=ppaths.train_path,
+            pattern=args.data_pattern,
             processes=args.processes,
             threads_per_worker=args.threads,
             random_seed=args.random_seed,
@@ -1163,6 +1164,7 @@ def train_model(args):
 
         ds = EdgeDataset(
             root=ppaths.train_path,
+            pattern=args.data_pattern,
             processes=args.processes,
             threads_per_worker=args.threads,
             random_seed=args.random_seed,
@@ -1206,6 +1208,7 @@ def train_model(args):
     # the means and standard deviation tensors
     ds = EdgeDataset(
         root=ppaths.train_path,
+        pattern=args.data_pattern,
         norm_values=norm_values,
         augment_prob=args.augment_prob,
         random_seed=args.random_seed,
@@ -1233,10 +1236,17 @@ def train_model(args):
                 random_seed=args.random_seed,
             )
 
+    # Combine edge counts with crop counts
+    class_counts = torch.zeros(len(norm_values.dataset_crop_counts) + 1)
+    class_counts[1:-1] = norm_values.dataset_crop_counts[1:]
+    class_counts[-1] = norm_values.dataset_edge_counts[1]
+    class_counts[0] = (
+        norm_values.dataset_edge_counts[0]
+        - norm_values.dataset_crop_counts[1:].sum()
+    )
+
     if torch.cuda.is_available():
-        class_counts = norm_values.dataset_crop_counts.to(device="cuda")
-    else:
-        class_counts = norm_values.dataset_crop_counts
+        class_counts = class_counts.to(device="cuda")
 
     cultionet_params = CultionetParams(
         ckpt_file=ppaths.ckpt_file,
@@ -1269,9 +1279,7 @@ def train_model(args):
         lr_scheduler=args.lr_scheduler,
         steplr_step_size=args.steplr_step_size,
         weight_decay=args.weight_decay,
-        deep_supervision=args.deep_supervision,
         pool_by_max=args.pool_by_max,
-        pool_attention=args.pool_attention,
         repeat_resa_kernel=args.repeat_resa_kernel,
         batchnorm_first=args.batchnorm_first,
         scale_pos_weight=args.scale_pos_weight,
