@@ -61,12 +61,12 @@ class CultionetParams:
     dilations: T.Union[int, T.Sequence[int]] = attr.ib(
         converter=list, default=None
     )
-    res_block_type: str = attr.ib(converter=str, default=ResBlockTypes.RES)
-    attention_weights: str = attr.ib(
-        converter=str, default=AttentionTypes.SPATIAL_CHANNEL
-    )
+    res_block_type: str = attr.ib(converter=str, default=ResBlockTypes.RESA)
+    attention_weights: str = attr.ib(default=None)
     optimizer: str = attr.ib(converter=str, default="AdamW")
-    loss_name: str = attr.ib(converter=str, default=LossTypes.TANIMOTO)
+    loss_name: str = attr.ib(
+        converter=str, default=LossTypes.TANIMOTO_COMPLEMENT
+    )
     learning_rate: float = attr.ib(converter=float, default=0.01)
     lr_scheduler: str = attr.ib(
         converter=str, default=LearningRateSchedulers.ONE_CYCLE_LR
@@ -76,9 +76,7 @@ class CultionetParams:
     eps: float = attr.ib(converter=float, default=1e-4)
     ckpt_name: str = attr.ib(converter=str, default="last")
     model_name: str = attr.ib(converter=str, default="cultionet")
-    deep_supervision: bool = attr.ib(default=False)
     pool_by_max: bool = attr.ib(default=False)
-    pool_attention: bool = attr.ib(default=False)
     repeat_resa_kernel: bool = attr.ib(default=False)
     batchnorm_first: bool = attr.ib(default=False)
     scale_pos_weight: bool = attr.ib(default=False)
@@ -162,9 +160,7 @@ class CultionetParams:
             eps=self.eps,
             ckpt_name=self.ckpt_name,
             model_name=self.model_name,
-            deep_supervision=self.deep_supervision,
             pool_by_max=self.pool_by_max,
-            pool_attention=self.pool_attention,
             repeat_resa_kernel=self.repeat_resa_kernel,
             batchnorm_first=self.batchnorm_first,
             class_counts=self.class_counts,
@@ -459,8 +455,6 @@ def predict_lightning(
         cultionet_lit_model = CultionetLitTransferModel.load_from_checkpoint(
             checkpoint_path=str(ckpt_file),
             pretrained_ckpt_file=pretrained_ckpt_file,
-            # in_channels=dataset.num_channels,
-            # in_time=dataset.num_time,
         )
     else:
         cultionet_lit_model = CultionetLitModel.load_from_checkpoint(
