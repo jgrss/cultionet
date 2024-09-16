@@ -2,7 +2,7 @@ import torch
 from torch import nn
 
 from .spherical_harmonics_closed_form import SHClosedForm
-from .spherical_harmonics_ylm import SH as SH_analytic
+from .spherical_harmonics_ylm import SHAnalytic
 
 
 class Sine(nn.Module):
@@ -54,7 +54,7 @@ class SphericalHarmonics(nn.Module):
         if harmonics_calculation == "closed-form":
             self.sh_func = SHClosedForm()
         elif harmonics_calculation == "analytic":
-            self.sh_func = SH_analytic
+            self.sh_func = SHAnalytic()
 
         self.final = nn.Sequential(
             nn.Linear(self.embedding_dim, out_channels),
