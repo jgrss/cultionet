@@ -70,8 +70,8 @@ class SphericalHarmonics(nn.Module):
 
         Y = []
         for l_param in range(self.legendre_polys_l):
-            for m in range(-l_param, l_param + 1):
-                y = self.sh_func(m, l_param, phi, theta)
+            for m_param in range(-l_param, l_param + 1):
+                y = self.sh_func(m_param, l_param, phi, theta)
                 if isinstance(y, float):
                     y = y * torch.ones_like(phi)
 
