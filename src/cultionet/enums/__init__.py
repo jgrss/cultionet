@@ -49,7 +49,24 @@ class Destinations(StrEnum):
     USER_TRAIN = 'user_train'
 
 
+class InferenceNames(StrEnum):
+    CLASSES_L2 = 'classes_l2'
+    CLASSES_L3 = 'classes_l3'
+    CROP_TYPE = 'crop_type'
+    DISTANCE = 'distance'
+    EDGE = 'edge'
+    CROP = 'crop'
+    DISTANCE_B = 'distance_b'
+    EDGE_B = 'edge_b'
+    CROP_B = 'crop_b'
+    DISTANCE_C = 'distance_c'
+    EDGE_C = 'edge_c'
+    CROP_C = 'crop_c'
+
+
 class LossTypes(StrEnum):
+    BOUNDARY = "BoundaryLoss"
+    CENTERLINE_DICE = "CLDiceLoss"
     CLASS_BALANCED_MSE = "ClassBalancedMSELoss"
     TANIMOTO_COMPLEMENT = "TanimotoComplementLoss"
     TANIMOTO = "TanimotoDistLoss"
@@ -77,3 +94,12 @@ class LearningRateSchedulers(StrEnum):
     EXPONENTIAL_LR = 'ExponentialLR'
     ONE_CYCLE_LR = 'OneCycleLR'
     STEP_LR = 'StepLR'
+
+
+class ValidationNames(StrEnum):
+    TRUE_CROP = 'true_crop'
+    TRUE_EDGE = 'true_edge'
+    TRUE_CROP_AND_EDGE = 'true_crop_and_edge'
+    TRUE_CROP_OR_EDGE = 'true_crop_or_edge'
+    TRUE_CROP_TYPE = 'true_crop_type'
+    MASK = 'mask'  # 1|0 mask
