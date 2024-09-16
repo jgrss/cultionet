@@ -71,8 +71,6 @@ def test_cultionet(class_info: dict):
         dropout=0.2,
         res_block_type=ResBlockTypes.RESA,
         attention_weights=AttentionTypes.SPATIAL_CHANNEL,
-        deep_supervision=True,
-        pool_attention=False,
         pool_by_max=True,
         repeat_resa_kernel=False,
         batchnorm_first=True,

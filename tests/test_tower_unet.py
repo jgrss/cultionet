@@ -28,12 +28,9 @@ def test_tower_unet():
         dropout=0.2,
         res_block_type=ResBlockTypes.RESA,
         attention_weights=AttentionTypes.SPATIAL_CHANNEL,
-        deep_supervision=False,
-        pool_attention=False,
         pool_by_max=False,
         repeat_resa_kernel=False,
         batchnorm_first=True,
-        concat_resid=False,
     )
 
     logits = model(x, temporal_encoding=logits_hidden)

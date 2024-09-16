@@ -84,8 +84,6 @@ def test_train():
             activation_type="SiLU",
             dilations=[1, 2],
             dropout=0.2,
-            deep_supervision=True,
-            pool_attention=False,
             pool_by_max=True,
             repeat_resa_kernel=False,
             batchnorm_first=True,
