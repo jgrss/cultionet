@@ -213,6 +213,13 @@ def create_predict_dataset(
                     trim=False,
                 )
 
+                from ray.experimental import tqdm_ray
+
+                remote_tqdm = ray.remote(tqdm_ray.tqdm)
+                bar = remote_tqdm.remote(
+                    total=len(time_series.chunks), desc='Saving .pt chunks'
+                )
+
                 if not ray.is_initialized():
                     ray.init(num_cpus=num_workers)
 
@@ -232,6 +239,7 @@ def create_predict_dataset(
                         window_size=window_size,
                         padding=padding,
                         compress_method=compress_method,
+                        bar=bar,
                     ) as batch_store:
                         batch_store.save(
                             time_series_array,
@@ -241,6 +249,9 @@ def create_predict_dataset(
                 except RayTaskError as e:
                     logger.warning(e)
                     ray.shutdown()
+
+                bar.close.remote()
+                bar = None
 
                 if ray.is_initialized():
                     ray.shutdown()
