@@ -20,6 +20,7 @@ from lightning.pytorch.callbacks.progress.rich_progress import (
 from rasterio.windows import Window
 
 from .data.constant import SCALE_FACTOR
+from .enums import InferenceNames
 
 PROGRESS_BAR_CALLBACK = RichProgressBar(
     refresh_rate=1,
@@ -127,10 +128,10 @@ class LightningGTiffWriter(BasePredictionWriter):
         crop_type_batch = torch.zeros_like(edge_batch)
 
         return {
-            "dist": distance_batch,
-            "edge": edge_batch,
-            "mask": crop_batch,
-            "crop_type": crop_type_batch,
+            InferenceNames.DISTANCE: distance_batch,
+            InferenceNames.EDGE: edge_batch,
+            InferenceNames.CROP: crop_batch,
+            InferenceNames.CROP_TYPE: crop_type_batch,
         }
 
     def get_batch_slice(self, padding: int, window: Window) -> tuple:
@@ -170,10 +171,10 @@ class LightningGTiffWriter(BasePredictionWriter):
                     driver="GPKG",
                 )
 
-        distance = prediction["dist"]
-        edge = prediction["edge"]
-        crop = prediction["mask"]
-        crop_type = prediction.get("crop_type")
+        distance = prediction[InferenceNames.DISTANCE]
+        edge = prediction[InferenceNames.EDGE]
+        crop = prediction[InferenceNames.CROP]
+        crop_type = prediction.get(InferenceNames.CROP_TYPE)
 
         for batch_index in range(batch.x.shape[0]):
             window_row_off = int(batch.window_row_off[batch_index])
@@ -210,10 +211,10 @@ class LightningGTiffWriter(BasePredictionWriter):
             stack = (
                 torch.cat(
                     (
-                        batch_dict["dist"],
-                        batch_dict["edge"],
-                        batch_dict["mask"],
-                        batch_dict["crop_type"],
+                        batch_dict[InferenceNames.DISTANCE],
+                        batch_dict[InferenceNames.EDGE],
+                        batch_dict[InferenceNames.CROP],
+                        batch_dict[InferenceNames.CROP_TYPE],
                     ),
                     dim=0,
                 )
