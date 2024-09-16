@@ -426,22 +426,10 @@ train:
       choices:
         - 'AdamW'
         - 'SGD'
-  deep_supervision:
-    short: ''
-    long: deep-sup
-    help: Whether to use deep supervision
-    kwargs:
-      action: store_true
   pool_by_max:
     short: ''
     long: pool-by-max
     help: Whether to apply max pooling before convolution (otherwise, use strided convolution)
-    kwargs:
-      action: store_true
-  pool_attention:
-    short: ''
-    long: pool-attention
-    help: Whether to apply attention along the backbone pooling layers
     kwargs:
       action: store_true
   repeat_resa_kernel:
@@ -573,6 +561,12 @@ train:
       choices:
         - all
         - fc
+  data_pattern:
+    short: ''
+    long: data-pattern
+    help: A glob pattern for data train files
+    kwargs:
+      default: 'data*.pt'
 
 predict:
   out_path:
