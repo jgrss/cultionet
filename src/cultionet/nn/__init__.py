@@ -1,4 +1,4 @@
-from .modules.activations import SetActivation, SigmoidCrisp
+from .modules.activations import SetActivation
 from .modules.attention import SpatialChannelAttention
 from .modules.convolution import (
     ConvBlock2d,
@@ -9,6 +9,7 @@ from .modules.convolution import (
     ResidualAConv,
     ResidualConv,
 )
+from .modules.dropout import DropPath
 from .modules.kernels import Peaks3d, Trend3d
 from .modules.reshape import UpSample
 from .modules.unet_parts import (
@@ -16,6 +17,7 @@ from .modules.unet_parts import (
     TowerUNetDecoder,
     TowerUNetEncoder,
     TowerUNetFinal,
+    TowerUNetFinalCombine,
     TowerUNetFusion,
     UNetUpBlock,
 )
@@ -23,6 +25,7 @@ from .modules.unet_parts import (
 __all__ = [
     'ConvBlock2d',
     'ConvTranspose2d',
+    'DropPath',
     'FinalConv2dDropout',
     'Peaks3d',
     'PoolConv',
@@ -30,11 +33,11 @@ __all__ = [
     'ResidualAConv',
     'ResidualConv',
     'SetActivation',
-    'SigmoidCrisp',
     'SpatialChannelAttention',
     'Trend3d',
     'UpSample',
     'TowerUNetFinal',
+    'TowerUNetFinalCombine',
     'UNetUpBlock',
     'TowerUNetBlock',
     'TowerUNetEncoder',
