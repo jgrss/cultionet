@@ -50,7 +50,6 @@ class LightningGTiffWriter(BasePredictionWriter):
         self,
         reference_image: Path,
         out_path: Path,
-        num_classes: int,
         resampling,
         compression: str,
         write_interval: str = "batch",
@@ -88,9 +87,8 @@ class LightningGTiffWriter(BasePredictionWriter):
                 "transform": src.gw.transform,
                 "height": src.gw.nrows,
                 "width": src.gw.ncols,
-                # distance (+1) + edge (+1) + crop (+1) crop types (+N)
-                # `num_classes` includes background
-                "count": 3 + num_classes - 1,
+                # distance (+1) + edge (+1) + crop (+1)
+                "count": 3,
                 "dtype": "uint16",
                 "blockxsize": src.gw.col_chunks,
                 "blockysize": src.gw.row_chunks,
@@ -119,19 +117,19 @@ class LightningGTiffWriter(BasePredictionWriter):
         distance_batch: torch.Tensor,
         edge_batch: torch.Tensor,
         crop_batch: torch.Tensor,
-        crop_type_batch: T.Union[torch.Tensor, None],
     ) -> T.Dict[str, torch.Tensor]:
 
         distance_batch = distance_batch[batch_slice]
         edge_batch = edge_batch[batch_slice]
-        crop_batch = crop_batch[batch_slice][1].unsqueeze(0)
-        crop_type_batch = torch.zeros_like(edge_batch)
+        crop_batch = crop_batch[batch_slice]
+
+        if crop_batch.shape[0] > 1:
+            crop_batch = crop_batch[[1]]
 
         return {
             InferenceNames.DISTANCE: distance_batch,
             InferenceNames.EDGE: edge_batch,
             InferenceNames.CROP: crop_batch,
-            InferenceNames.CROP_TYPE: crop_type_batch,
         }
 
     def get_batch_slice(self, padding: int, window: Window) -> tuple:
@@ -174,13 +172,13 @@ class LightningGTiffWriter(BasePredictionWriter):
         distance = prediction[InferenceNames.DISTANCE]
         edge = prediction[InferenceNames.EDGE]
         crop = prediction[InferenceNames.CROP]
-        crop_type = prediction.get(InferenceNames.CROP_TYPE)
 
         for batch_index in range(batch.x.shape[0]):
             window_row_off = int(batch.window_row_off[batch_index])
             window_height = int(batch.window_height[batch_index])
             window_col_off = int(batch.window_col_off[batch_index])
             window_width = int(batch.window_width[batch_index])
+
             if window_row_off + window_height > self.profile["height"]:
                 window_height = self.profile["height"] - window_row_off
             if window_col_off + window_width > self.profile["width"]:
@@ -203,9 +201,6 @@ class LightningGTiffWriter(BasePredictionWriter):
                 distance_batch=distance[batch_index],
                 edge_batch=edge[batch_index],
                 crop_batch=crop[batch_index],
-                crop_type_batch=crop_type[batch_index]
-                if crop_type is not None
-                else None,
             )
 
             stack = (
@@ -214,7 +209,6 @@ class LightningGTiffWriter(BasePredictionWriter):
                         batch_dict[InferenceNames.DISTANCE],
                         batch_dict[InferenceNames.EDGE],
                         batch_dict[InferenceNames.CROP],
-                        batch_dict[InferenceNames.CROP_TYPE],
                     ),
                     dim=0,
                 )
