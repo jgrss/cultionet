@@ -14,7 +14,6 @@ from pathlib import Path
 
 import filelock
 import geopandas as gpd
-import geowombat as gw
 import numpy as np
 import pandas as pd
 import rasterio as rio
@@ -24,7 +23,6 @@ import xarray as xr
 import yaml
 from fiona.errors import DriverError
 from geowombat.core import sort_images_by_date
-from geowombat.core.windows import get_window_offsets
 from joblib import delayed, parallel_config
 from lightning import seed_everything
 from rasterio.windows import Window
@@ -34,13 +32,12 @@ from rich_argparse import RichHelpFormatter
 from shapely.errors import GEOSException
 from shapely.geometry import box
 from tqdm import tqdm
-from tqdm.dask import TqdmCallback
 
 import cultionet
 from cultionet.data.constant import SCALE_FACTOR
 from cultionet.data.create import create_predict_dataset, create_train_batch
 from cultionet.data.datasets import EdgeDataset
-from cultionet.data.utils import get_image_list_dims, split_multipolygons
+from cultionet.data.utils import split_multipolygons
 from cultionet.enums import CLISteps, DataColumns, ModelNames
 from cultionet.errors import TensorShapeError
 from cultionet.model import CultionetParams
@@ -453,8 +450,6 @@ class SerialWriter(WriterModule):
 def predict_image(args):
     logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
 
-    config = open_config(args.config_file)
-
     # This is a helper function to manage paths
     ppaths = setup_paths(
         args.project_path, append_ts=True if args.append_ts == "y" else False
@@ -463,220 +458,32 @@ def predict_image(args):
     # Load the z-score norm values
     norm_values = NormValues.from_file(ppaths.norm_file)
 
-    with open(ppaths.classes_info_path, mode="r") as f:
-        class_info = json.load(f)
-
-    num_classes = (
-        args.num_classes
-        if args.num_classes is not None
-        else class_info["max_crop_class"] + 1
+    ds = EdgeDataset(
+        root=ppaths.predict_path,
+        norm_values=norm_values,
+        pattern=f"{args.region}_{args.start_date.replace('-', '')}_{args.end_date.replace('-', '')}*.pt",
     )
 
-    if args.data_path is not None:
-        ds = EdgeDataset(
-            root=ppaths.predict_path,
-            norm_values=norm_values,
-            pattern=f"{args.region}_{args.start_date.replace('-', '')}_{args.end_date.replace('-', '')}*.pt",
-        )
+    cultionet.predict_lightning(
+        reference_image=args.reference_image,
+        out_path=args.out_path,
+        ckpt=ppaths.ckpt_path / ModelNames.CKPT_NAME,
+        dataset=ds,
+        device=args.device,
+        devices=args.devices,
+        strategy=args.strategy,
+        batch_size=args.batch_size,
+        load_batch_workers=args.load_batch_workers,
+        precision=args.precision,
+        resampling=ds[0].resampling[0]
+        if hasattr(ds[0], "resampling")
+        else "nearest",
+        compression=args.compression,
+        is_transfer_model=args.process == CLISteps.PREDICT_TRANSFER,
+    )
 
-        cultionet.predict_lightning(
-            reference_image=args.reference_image,
-            out_path=args.out_path,
-            ckpt=ppaths.ckpt_path / ModelNames.CKPT_NAME,
-            dataset=ds,
-            num_classes=num_classes,
-            device=args.device,
-            devices=args.devices,
-            strategy=args.strategy,
-            batch_size=args.batch_size,
-            load_batch_workers=args.load_batch_workers,
-            precision=args.precision,
-            resampling=ds[0].resampling[0]
-            if hasattr(ds[0], "resampling")
-            else "nearest",
-            compression=args.compression,
-            is_transfer_model=args.process == CLISteps.PREDICT_TRANSFER,
-        )
-
-        if args.delete_dataset:
-            ds.cleanup()
-
-    else:
-        try:
-            tmp = int(args.grid_id)
-            region = f"{tmp:06d}"
-        except ValueError:
-            region = args.grid_id
-
-        # Get the image list
-        image_list = get_image_list(
-            ppaths,
-            region=region,
-            predict_year=args.predict_year,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            config=config,
-            date_format=args.date_format,
-            skip_index=args.skip_index,
-        )
-
-        with gw.open(
-            image_list,
-            stack_dim="band",
-            band_names=list(range(1, len(image_list) + 1)),
-        ) as src_ts:
-            time_series = (
-                (src_ts * args.gain + args.offset).astype("float64").clip(0, 1)
-            )
-            if args.preload_data:
-                with TqdmCallback(desc="Loading data"):
-                    time_series.load(num_workers=args.processes)
-
-            # Get the image dimensions
-            nvars = len(config["image_vis"])
-            nfeas, height, width = time_series.shape
-            ntime = int(nfeas / nvars)
-            windows = get_window_offsets(
-                height,
-                width,
-                args.window_size,
-                args.window_size,
-                padding=(
-                    args.padding,
-                    args.padding,
-                    args.padding,
-                    args.padding,
-                ),
-            )
-
-            profile = {
-                "crs": src_ts.crs,
-                "transform": src_ts.gw.transform,
-                "height": height,
-                "width": width,
-                # Orientation (+1) + distance (+1) + edge (+1) + crop (+1) crop types (+N)
-                # `num_classes` includes background
-                "count": 3 + num_classes - 1,
-                "dtype": "uint16",
-                "blockxsize": 64 if 64 < width else width,
-                "blockysize": 64 if 64 < height else height,
-                "driver": "GTiff",
-                "sharing": False,
-                "compress": args.compression,
-            }
-            profile["tiled"] = (
-                True
-                if max(profile["blockxsize"], profile["blockysize"]) >= 16
-                else False
-            )
-
-            # Get the time and band count
-            ntime, nbands = get_image_list_dims(image_list, time_series)
-
-            if args.processes == 1:
-                serial_writer = SerialWriter(
-                    out_path=args.out_path,
-                    mode=args.mode,
-                    profile=profile,
-                    ntime=ntime,
-                    nbands=nbands,
-                    hidden_channels=args.hidden_channels,
-                    num_classes=num_classes,
-                    ts=time_series,
-                    data_values=norm_values,
-                    ppaths=ppaths,
-                    device=args.device,
-                    scale_factor=SCALE_FACTOR,
-                    include_maskrcnn=args.include_maskrcnn,
-                )
-                try:
-                    with tqdm(
-                        total=len(windows),
-                        desc="Predicting windows",
-                        position=0,
-                    ) as pbar:
-                        results = [
-                            serial_writer.write(w, w_pad, pba=pbar)
-                            for w, w_pad in windows
-                        ]
-                    serial_writer.close()
-                except Exception as e:
-                    serial_writer.close()
-                    logger.exception(f"The predictions failed because {e}.")
-            else:
-                if ray.is_initialized():
-                    logger.warning("The Ray cluster is already running.")
-                else:
-                    if args.device == "gpu":
-                        # TODO: support multiple GPUs through CLI
-                        try:
-                            ray.init(num_cpus=args.processes, num_gpus=1)
-                        except KeyError as e:
-                            logger.exception(
-                                f"Ray could not be instantiated with a GPU because {e}."
-                            )
-                    else:
-                        ray.init(num_cpus=args.processes)
-                assert ray.is_initialized(), "The Ray cluster is not running."
-                # Setup the remote ray writer
-                remote_writer = RemoteWriter.options(
-                    max_concurrency=args.processes
-                ).remote(
-                    out_path=args.out_path,
-                    mode=args.mode,
-                    profile=profile,
-                    ntime=ntime,
-                    nbands=nbands,
-                    hidden_channels=args.hidden_channels,
-                    num_classes=num_classes,
-                    ts=ray.put(time_series),
-                    data_values=norm_values,
-                    ppaths=ppaths,
-                    device=args.device,
-                    devices=args.devices,
-                    scale_factor=SCALE_FACTOR,
-                    include_maskrcnn=args.include_maskrcnn,
-                )
-                actor_chunksize = args.processes * 8
-                try:
-                    with tqdm(
-                        total=len(windows),
-                        desc="Predicting windows",
-                        position=0,
-                    ) as pbar:
-                        for wchunk in range(
-                            0, len(windows) + actor_chunksize, actor_chunksize
-                        ):
-                            chunk_windows = windows[
-                                wchunk : wchunk + actor_chunksize
-                            ]
-                            pbar.set_description(
-                                f"Windows {wchunk:,d}--{wchunk+len(chunk_windows):,d}"
-                            )
-                            # pb = ProgressBar(
-                            #     total=len(chunk_windows),
-                            #     desc=f'Chunks {wchunk}-{wchunk+len(chunk_windows)}',
-                            #     position=1,
-                            #     leave=False
-                            # )
-                            # tqdm_actor = pb.actor
-                            # Write each window concurrently
-                            results = [
-                                remote_writer.write.remote(w, w_pad)
-                                for w, w_pad in chunk_windows
-                            ]
-                            # Initiate the processing
-                            # pb.print_until_done()
-                            ray.get(results)
-                            # Close the file
-                            ray.get(remote_writer.close_open.remote())
-                            pbar.update(len(chunk_windows))
-                    ray.get(remote_writer.close.remote())
-                    ray.shutdown()
-                except Exception as e:
-                    ray.get(remote_writer.close.remote())
-                    ray.shutdown()
-                    logger.exception(f"The predictions failed because {e}.")
+    if args.delete_dataset:
+        ds.cleanup()
 
 
 def create_one_id(

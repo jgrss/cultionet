@@ -215,7 +215,7 @@ train_predict:
     long: attention-weights
     help: The attention weights
     kwargs:
-      default: !!null
+      default: 'natten'
       choices: ['fractal', 'natten', 'spatial_channel']
   hidden_channels:
     short: ''
