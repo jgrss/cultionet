@@ -156,25 +156,21 @@ class TowerUNet(nn.Module):
         in_time: int,
         hidden_channels: int = 64,
         num_classes: int = 2,
-        dilations: T.Sequence[int] = None,
+        dilations: T.Optional[T.Sequence[int]] = None,
         activation_type: str = "SiLU",
         dropout: float = 0.0,
         res_block_type: str = ResBlockTypes.RESA,
-        attention_weights: str = AttentionTypes.SPATIAL_CHANNEL,
-        mask_activation: T.Union[nn.Softmax, nn.Sigmoid] = nn.Softmax(dim=1),
-        deep_supervision: bool = False,
-        pool_attention: bool = False,
+        attention_weights: str = AttentionTypes.NATTEN,
         pool_by_max: bool = False,
         repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
-        concat_resid: bool = False,
+        edge_activation: bool = True,
+        mask_activation: bool = True,
     ):
         super().__init__()
 
         if dilations is None:
             dilations = [1, 2]
-
-        self.deep_supervision = deep_supervision
 
         channels = [
             hidden_channels,  # a
@@ -184,11 +180,13 @@ class TowerUNet(nn.Module):
         ]
         up_channels = int(hidden_channels * len(channels))
 
-        self.pre_unet = PreUnet3Psi(
-            in_channels=in_channels,
-            in_time=in_time,
-            out_channels=channels[0],
-            activation_type=activation_type,
+        self.pre_unet = torch.compile(
+            PreUnet3Psi(
+                in_channels=in_channels,
+                in_time=in_time,
+                out_channels=channels[0],
+                activation_type=activation_type,
+            )
         )
 
         self.encoder = cunn.TowerUNetEncoder(
@@ -198,11 +196,9 @@ class TowerUNet(nn.Module):
             dropout=dropout,
             res_block_type=res_block_type,
             attention_weights=attention_weights,
-            pool_attention=pool_attention,
             pool_by_max=pool_by_max,
             repeat_resa_kernel=repeat_resa_kernel,
             batchnorm_first=batchnorm_first,
-            concat_resid=concat_resid,
         )
 
         self.decoder = cunn.TowerUNetDecoder(
@@ -215,7 +211,6 @@ class TowerUNet(nn.Module):
             attention_weights=attention_weights,
             repeat_resa_kernel=repeat_resa_kernel,
             batchnorm_first=batchnorm_first,
-            concat_resid=concat_resid,
         )
 
         self.tower_fusion = cunn.TowerUNetFusion(
@@ -228,31 +223,33 @@ class TowerUNet(nn.Module):
             attention_weights=attention_weights,
             repeat_resa_kernel=repeat_resa_kernel,
             batchnorm_first=batchnorm_first,
-            concat_resid=concat_resid,
         )
 
         self.final_a = cunn.TowerUNetFinal(
             in_channels=up_channels,
             num_classes=num_classes,
-            mask_activation=mask_activation,
             activation_type=activation_type,
         )
 
-        if self.deep_supervision:
-            self.final_b = cunn.TowerUNetFinal(
-                in_channels=up_channels,
-                num_classes=num_classes,
-                mask_activation=mask_activation,
-                activation_type=activation_type,
-                resample_factor=2,
-            )
-            self.final_c = cunn.TowerUNetFinal(
-                in_channels=up_channels,
-                num_classes=num_classes,
-                mask_activation=mask_activation,
-                activation_type=activation_type,
-                resample_factor=4,
-            )
+        self.final_b = cunn.TowerUNetFinal(
+            in_channels=up_channels,
+            num_classes=num_classes,
+            activation_type=activation_type,
+            resample_factor=2,
+        )
+
+        self.final_c = cunn.TowerUNetFinal(
+            in_channels=up_channels,
+            num_classes=num_classes,
+            activation_type=activation_type,
+            resample_factor=4,
+        )
+
+        self.final_combine = cunn.TowerUNetFinalCombine(
+            num_classes=num_classes,
+            edge_activation=edge_activation,
+            mask_activation=mask_activation,
+        )
 
         # Initialize weights
         self.apply(init_conv_weights)
@@ -262,7 +259,6 @@ class TowerUNet(nn.Module):
         x: torch.Tensor,
         temporal_encoding: T.Optional[torch.Tensor] = None,
         latlon_coords: T.Optional[torch.Tensor] = None,
-        training: bool = True,
     ) -> T.Dict[str, torch.Tensor]:
 
         """Forward pass.
@@ -270,9 +266,9 @@ class TowerUNet(nn.Module):
         Parameters
         ==========
         x
-            Shaped (B x C x T x H x W)
+            The input image time series, shaped (B, C, T, H, W).
         temporal_encoding
-            Shaped (B x C x H X W)
+            Optional reduced temporal encodings, shaped (B, C, H, W).
         """
 
         # Initial temporal reduction and convolutions to
@@ -284,26 +280,31 @@ class TowerUNet(nn.Module):
         towers_fused = self.tower_fusion(encoded=encoded, decoded=decoded)
 
         # Final outputs
-        out = self.final_a(
+        # {f"InferenceNames.DISTANCE", f"InferenceNames.EDGE", f"InferenceNames.CROP"}
+        out_a = self.final_a(
             towers_fused["x_tower_a"],
             latlon_coords=latlon_coords,
+            suffix="_a",
         )
 
-        if training and self.deep_supervision:
-            out_c = self.final_c(
-                towers_fused["x_tower_c"],
-                latlon_coords=latlon_coords,
-                size=towers_fused["x_tower_a"].shape[-2:],
-                suffix="_c",
-            )
-            out_b = self.final_b(
-                towers_fused["x_tower_b"],
-                latlon_coords=latlon_coords,
-                size=towers_fused["x_tower_a"].shape[-2:],
-                suffix="_b",
-            )
+        # {f"InferenceNames.DISTANCE_b", f"InferenceNames.EDGE_b", f"InferenceNames.CROP_b"}
+        out_b = self.final_b(
+            towers_fused["x_tower_b"],
+            latlon_coords=latlon_coords,
+            size=towers_fused["x_tower_a"].shape[-2:],
+            suffix="_b",
+        )
 
-            out.update(out_b)
-            out.update(out_c)
+        # {f"InferenceNames.DISTANCE_c", f"InferenceNames.EDGE_c", f"InferenceNames.CROP_c"}
+        out_c = self.final_c(
+            towers_fused["x_tower_c"],
+            latlon_coords=latlon_coords,
+            size=towers_fused["x_tower_a"].shape[-2:],
+            suffix="_c",
+        )
+
+        out = self.final_combine(
+            out_a, out_b, out_c, suffixes=["_a", "_b", "_c"]
+        )
 
         return out
