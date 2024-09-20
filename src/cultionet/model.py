@@ -407,7 +407,6 @@ def predict_lightning(
     out_path: T.Union[str, Path],
     ckpt: Path,
     dataset: EdgeDataset,
-    num_classes: int,
     device: str = "gpu",
     devices: int = 1,
     strategy: str = "ddp",
@@ -432,7 +431,6 @@ def predict_lightning(
     pred_writer = LightningGTiffWriter(
         reference_image=reference_image,
         out_path=out_path,
-        num_classes=num_classes,
         resampling=resampling,
         compression=compression,
     )
