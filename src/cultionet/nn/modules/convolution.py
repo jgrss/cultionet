@@ -7,15 +7,18 @@ from einops.layers.torch import Rearrange
 
 try:
     import natten
+
+    is_natten_post_017 = hasattr(natten, "context")
 except ImportError:
     natten = None
 
 from cultionet.enums import AttentionTypes, ResBlockTypes
 
+from ..functional import check_upsample
 from .activations import SetActivation
 from .attention import FractalAttention, SpatialChannelAttention
+from .dropout import DropPath
 from .reshape import UpSample
-from .utils import check_upsample
 
 
 class ConvTranspose2d(nn.Module):
@@ -358,7 +361,7 @@ class ResidualConv(nn.Module):
                 AttentionTypes.SPATIAL_CHANNEL,
             ], "The attention method is not supported."
 
-            self.gamma = nn.Parameter(torch.ones(1))
+            self.gamma = nn.Parameter(torch.ones(1, requires_grad=True))
 
             if self.attention_weights == AttentionTypes.FRACTAL:
                 self.attention_conv = FractalAttention(
@@ -482,35 +485,43 @@ class ResidualAConv(nn.Module):
         attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
         batchnorm_first: bool = False,
-        concat_resid: bool = False,
         natten_num_heads: int = 8,
         natten_kernel_size: int = 3,
         natten_dilation: int = 1,
-        natten_attn_drop: float = 0.0,
-        natten_proj_drop: float = 0.0,
+        natten_attn_drop: float = 0.1,
+        natten_proj_drop: float = 0.1,
+        drop_path_p: float = 0.0,
     ):
         super().__init__()
 
         self.attention_weights = attention_weights
-        self.concat_resid = concat_resid
+
+        if in_channels != out_channels:
+            self.skip = ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding=0,
+                add_activation=False,
+            )
+        else:
+            self.skip = nn.Identity()
 
         if self.attention_weights is not None:
+
             assert self.attention_weights in [
                 AttentionTypes.FRACTAL,
                 AttentionTypes.NATTEN,
                 AttentionTypes.SPATIAL_CHANNEL,
             ], "The attention method is not supported."
 
-            if self.attention_weights == AttentionTypes.FRACTAL:
-                self.attention_conv = FractalAttention(
-                    in_channels=in_channels, out_channels=out_channels
+            if self.attention_weights == AttentionTypes.NATTEN:
+
+                extra_kwargs = (
+                    {"rel_pos_bias": True}
+                    if is_natten_post_017
+                    else {"bias": True}
                 )
-            elif self.attention_weights == AttentionTypes.SPATIAL_CHANNEL:
-                self.attention_conv = SpatialChannelAttention(
-                    out_channels=out_channels,
-                    activation_type=activation_type,
-                )
-            elif self.attention_weights == AttentionTypes.NATTEN:
                 self.attention_conv = nn.Sequential(
                     Rearrange('b c h w -> b h w c'),
                     nn.LayerNorm(out_channels),
@@ -523,21 +534,35 @@ class ResidualAConv(nn.Module):
                         qk_scale=None,
                         attn_drop=natten_attn_drop,
                         proj_drop=natten_proj_drop,
+                        **extra_kwargs,
                     ),
                     Rearrange('b h w c -> b c h w'),
                 )
 
-            if self.attention_weights != AttentionTypes.NATTEN:
-                self.gamma = nn.Parameter(torch.ones(1))
-                self.act = SetActivation(activation_type=activation_type)
+            else:
+
+                self.gamma = nn.Parameter(torch.ones(1, requires_grad=True))
+
+                if self.attention_weights == AttentionTypes.FRACTAL:
+                    self.attention_conv = FractalAttention(
+                        in_channels=in_channels,
+                        out_channels=out_channels,
+                    )
+                else:
+                    self.attention_conv = SpatialChannelAttention(
+                        out_channels=out_channels,
+                        activation_type=activation_type,
+                    )
+
+            self.drop_path = (
+                DropPath(p=drop_path_p) if drop_path_p > 0 else nn.Identity()
+            )
 
         self.res_modules = nn.ModuleList(
             [
                 ResConvBlock2d(
                     in_channels=in_channels,
-                    out_channels=in_channels
-                    if self.concat_resid
-                    else out_channels,
+                    out_channels=out_channels,
                     kernel_size=kernel_size,
                     dilation=dilation,
                     activation_type=activation_type,
@@ -549,50 +574,27 @@ class ResidualAConv(nn.Module):
             ]
         )
 
-        self.skip = None
-        self.resid_connect = None
-        if self.concat_resid:
-            if in_channels != out_channels:
-                # Follows the FishNet block
-                self.resid_connect = ConvBlock2d(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=kernel_size,
-                    padding=kernel_size // 2,
-                    activation_type=activation_type,
-                    batchnorm_first=batchnorm_first,
-                )
-        else:
-            if in_channels != out_channels:
-                self.skip = ConvBlock2d(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=1,
-                    padding=0,
-                    add_activation=False,
-                )
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = x if self.skip is None else self.skip(x)
+        out = self.skip(x)
 
         if self.attention_weights is not None:
             residual = out
 
-        # Resunet-a block
+        # Resunet-a block takes the same input and
+        # sums multiple outputs with varying dilations.
         for layer in self.res_modules:
             out = out + layer(x)
 
-        if self.resid_connect is not None:
-            out = self.resid_connect(out)
-
         if self.attention_weights is not None:
             if self.attention_weights == AttentionTypes.NATTEN:
+                # LayerNorm -> Attention
                 out = residual + self.attention_conv(out)
             else:
                 attention = self.attention_conv(out)
-                attention = 1.0 + self.gamma * attention
-                out = out * attention
-                out = self.act(out)
+                out = residual + out
+                out = out * (1.0 + self.gamma * attention)
+
+            out = self.drop_path(out)
 
         return out
 
@@ -626,7 +628,6 @@ class PoolResidualConv(nn.Module):
         pool_first: bool = True,
         pool_by_max: bool = False,
         batchnorm_first: bool = False,
-        concat_resid: bool = False,
         natten_num_heads: int = 8,
         natten_kernel_size: int = 3,
         natten_dilation: int = 1,
@@ -666,6 +667,7 @@ class PoolResidualConv(nn.Module):
                 in_channels = out_channels
 
         if res_block_type == ResBlockTypes.RES:
+
             self.res_conv = ResidualConv(
                 in_channels,
                 out_channels,
@@ -675,7 +677,9 @@ class PoolResidualConv(nn.Module):
                 activation_type=activation_type,
                 batchnorm_first=batchnorm_first,
             )
+
         else:
+
             self.res_conv = ResidualAConv(
                 in_channels,
                 out_channels,
@@ -686,7 +690,6 @@ class PoolResidualConv(nn.Module):
                 attention_weights=attention_weights,
                 activation_type=activation_type,
                 batchnorm_first=batchnorm_first,
-                concat_resid=concat_resid,
                 natten_num_heads=natten_num_heads,
                 natten_kernel_size=natten_kernel_size,
                 natten_dilation=natten_dilation,
@@ -694,9 +697,9 @@ class PoolResidualConv(nn.Module):
                 natten_proj_drop=natten_proj_drop,
             )
 
-        self.dropout_layer = None
-        if dropout > 0:
-            self.dropout_layer = nn.Dropout2d(p=dropout)
+        self.dropout_layer = (
+            nn.Dropout2d(p=dropout) if dropout > 0 else nn.Identity()
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         height, width = x.shape[-2:]
@@ -712,8 +715,8 @@ class PoolResidualConv(nn.Module):
         # Residual convolution
         x = self.res_conv(x)
 
-        if self.dropout_layer is not None:
-            x = self.dropout_layer(x)
+        # Dropout
+        x = self.dropout_layer(x)
 
         return x
 
