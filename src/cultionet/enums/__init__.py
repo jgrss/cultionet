@@ -56,21 +56,20 @@ class InferenceNames(StrEnum):
     DISTANCE = 'distance'
     EDGE = 'edge'
     CROP = 'crop'
-    DISTANCE_B = 'distance_b'
-    EDGE_B = 'edge_b'
-    CROP_B = 'crop_b'
-    DISTANCE_C = 'distance_c'
-    EDGE_C = 'edge_c'
-    CROP_C = 'crop_c'
+    RECONSTRUCTION = 'reconstruction'
 
 
 class LossTypes(StrEnum):
     BOUNDARY = "BoundaryLoss"
     CENTERLINE_DICE = "CLDiceLoss"
     CLASS_BALANCED_MSE = "ClassBalancedMSELoss"
+    CROSS_ENTROPY = "CrossEntropyLoss"
+    LOG_COSH = "LogCoshLoss"
+    FOCAL_TVERSKY = "FocalTverskyLoss"
     TANIMOTO_COMPLEMENT = "TanimotoComplementLoss"
     TANIMOTO = "TanimotoDistLoss"
     TANIMOTO_COMBINED = "TanimotoCombined"
+    TVERSKY = "TverskyLoss"
 
 
 class ModelNames(StrEnum):
