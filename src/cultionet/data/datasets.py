@@ -5,7 +5,6 @@ from pathlib import Path
 
 import attr
 import geopandas as gpd
-import joblib
 import lightning as L
 import numpy as np
 import psutil
