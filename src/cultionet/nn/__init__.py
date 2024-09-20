@@ -1,5 +1,5 @@
 from .modules.activations import SetActivation
-from .modules.attention import SpatialChannelAttention
+from .modules.attention import FractalAttention, SpatialChannelAttention
 from .modules.convolution import (
     ConvBlock2d,
     ConvTranspose2d,
@@ -27,6 +27,7 @@ __all__ = [
     'ConvTranspose2d',
     'DropPath',
     'FinalConv2dDropout',
+    'FractalAttention',
     'Peaks3d',
     'PoolConv',
     'PoolResidualConv',
