@@ -1,8 +1,6 @@
 import typing as T
 
-import cv2
 import einops
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -37,11 +35,18 @@ class LossPreprocessing(nn.Module):
 
             inputs = inputs.clip(0, 1)
 
-        if self.one_hot_targets and (inputs.shape[1] > 1):
-            targets = einops.rearrange(
-                F.one_hot(targets, num_classes=inputs.shape[1]),
-                'b h w c -> b c h w',
-            )
+        if (
+            self.one_hot_targets
+            and (inputs.shape[1] > 1)
+            and (not torch.is_floating_point(inputs))
+        ):
+
+            with torch.no_grad():
+                targets = einops.rearrange(
+                    F.one_hot(targets, num_classes=inputs.shape[1]),
+                    'b h w c -> b c h w',
+                )
+
         else:
             if len(targets.shape) == 3:
                 targets = einops.rearrange(targets, 'b h w -> b 1 h w')
@@ -136,6 +141,7 @@ class TanimotoComplementLoss(nn.Module):
 
         self.smooth = smooth
         self.depth = depth
+        self.one_hot_targets = one_hot_targets
 
         self.preprocessor = LossPreprocessing(
             transform_logits=transform_logits,
@@ -182,13 +188,14 @@ class TanimotoComplementLoss(nn.Module):
         inputs: torch.Tensor,
         targets: torch.Tensor,
         mask: T.Optional[torch.Tensor] = None,
+        dim: T.Optional[T.Tuple[int, ...]] = None,
     ) -> torch.Tensor:
         """Performs a single forward pass.
 
         Args:
             inputs: Predictions from model (probabilities or labels), shaped (B, C, H, W).
             targets: Ground truth values, shaped (B, C, H, W).
-            mask: Values to mask (0) or keep (1), shaped (B, 1, H, W).
+            mask: Values to mask (0) or keep (1), shaped (B, H, W) or (B, 1, H, W).
 
         Returns:
             Tanimoto distance loss (float)
@@ -197,8 +204,8 @@ class TanimotoComplementLoss(nn.Module):
             inputs=inputs, targets=targets, mask=mask
         )
 
-        loss1 = self.tanimoto_distance(targets, inputs)
-        loss2 = self.tanimoto_distance(1.0 - targets, 1.0 - inputs)
+        loss1 = self.tanimoto_distance(targets, inputs, dim=dim)
+        loss2 = self.tanimoto_distance(1.0 - targets, 1.0 - inputs, dim=dim)
         loss = (loss1 + loss2) * 0.5
 
         return loss.mean()
@@ -340,56 +347,104 @@ class TanimotoDistLoss(nn.Module):
 class CrossEntropyLoss(nn.Module):
     """Cross entropy loss."""
 
-    def __init__(
-        self,
-        weight: T.Optional[torch.Tensor] = None,
-        reduction: T.Optional[str] = "mean",
-        label_smoothing: T.Optional[float] = 0.1,
-    ):
-        super().__init__()
-
-        self.loss_func = nn.CrossEntropyLoss(
-            weight=weight, reduction=reduction, label_smoothing=label_smoothing
-        )
-
-    def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
-    ) -> torch.Tensor:
-        """Performs a single forward pass.
-
-        Args:
-            inputs: Predictions from model.
-            targets: Ground truth values.
-
-        Returns:
-            Loss (float)
-        """
-        return self.loss_func(inputs, targets)
-
-
-class MSELoss(nn.Module):
-    """MSE loss."""
-
     def __init__(self):
         super().__init__()
 
-        self.loss_func = nn.MSELoss()
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+        weight: T.Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Args:
+            inputs: Predictions (probabilities), shaped (B, H, W) or (B, C, H, W).
+            targets: Ground truth values, shaped (B, H, W) or (B, C, H, W).
+            mask: Shaped (B, H, W) or (B, C, H, W).
+            weight: Shaped (C,).
+        """
+
+        if len(inputs.shape) == 3:
+            inputs = einops.rearrange(inputs, 'b h w -> b 1 h w')
+
+        if len(targets.shape) == 4:
+            targets = einops.rearrange(targets, 'b 1 h w -> b h w')
+
+        inputs = einops.rearrange(inputs, 'b c h w -> (b h w) c')
+        targets = einops.rearrange(targets, 'b h w -> (b h w)')
+
+        loss = F.nll_loss(
+            inputs.log(),
+            targets,
+            weight=weight,
+            reduction='none' if mask is not None else 'mean',
+        )
+
+        if weight is not None:
+            weight_tensor = weight[targets]
+
+        if mask is not None:
+
+            if len(mask.shape) == 4:
+                mask = einops.rearrange(mask, 'b 1 h w -> b h w')
+
+            mask = einops.rearrange(mask, 'b h w -> (b h w)')
+
+            loss = loss * mask
+
+            if weight is not None:
+                weight_tensor = weight_tensor * mask
+
+        if weight is not None:
+            loss = loss.sum() / weight_tensor.sum()
+        else:
+            loss = loss.mean()
+
+        return loss
+
+
+class LogCoshLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
 
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Performs a single forward pass.
 
         Args:
-            inputs: Predictions from model.
-            targets: Ground truth values.
+            inputs: Predictions from model (real values), shaped (B, H, W) or (B, 1, H, W).
+            targets: Targets (real values), shaped (B, H, W) or (B, 1, H, W).
+            mask: Values to mask (0) or keep (1), shaped (B, H, W) or (B, 1, H, W).
 
         Returns:
-            Loss (float)
+            Log Hyperbolic Cosine loss (float)
         """
-        return self.loss_func(
-            inputs.contiguous().view(-1), targets.contiguous().view(-1)
-        )
+
+        if len(inputs.shape) == 3:
+            inputs = einops.rearrange(inputs, 'b h w -> b 1 h w')
+
+        if len(targets.shape) == 3:
+            targets = einops.rearrange(targets, 'b h w -> b 1 h w')
+
+        loss = torch.log(torch.cosh(inputs - targets))
+
+        if mask is not None:
+
+            if len(mask.shape) == 3:
+                mask = einops.rearrange(mask, 'b h w -> b 1 h w')
+
+            loss = loss * mask
+            loss = loss.sum() / mask.sum()
+
+        else:
+            loss = loss.mean()
+
+        return loss
 
 
 class ClassBalancedMSELoss(nn.Module):
@@ -422,41 +477,33 @@ class ClassBalancedMSELoss(nn.Module):
         self,
         inputs: torch.Tensor,
         targets: torch.Tensor,
-        transform_logits: bool = False,
         mask: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Args:
-            inputs: Predictions (logits or probabilities), shaped (B, C, H , W).
-            targets: Ground truth values, shaped (B, H, W) or (B, C, H , W).
-            mask: Shaped (B, H, W) or (B, 1, H , W).
+            inputs: Predictions (probabilities), shaped (B, H, W) or (B, 1, H, W).
+            targets: Ground truth values, shaped (B, H, W) or (B, 1, H, W).
+            mask: Values to mask (0) or keep (1), shaped (B, H, W) or (B, 1, H, W).
         """
 
-        if inputs.shape[1] == 1:
-            if transform_logits:
-                inputs = F.sigmoid(inputs)
+        if len(inputs.shape) == 4:
+            inputs = einops.rearrange(inputs, 'b 1 h w -> b h w')
 
-        elif inputs.shape[1] > 1:
-            if transform_logits:
-                inputs = F.softmax(inputs, dim=1)
-
-            inputs = inputs[:, [1]]
-
-        if len(targets.shape) == 3:
-            targets = einops.rearrange(targets, 'b h w -> b 1 h w')
+        if len(targets.shape) == 4:
+            targets = einops.rearrange(targets, 'b 1 h w -> b h w')
 
         if mask is not None:
 
-            if len(mask.shape) == 3:
-                mask = einops.rearrange(mask, 'b h w -> b 1 h w')
+            if len(mask.shape) == 4:
+                mask = einops.rearrange(mask, 'b 1 h w -> b h w')
 
-            neg_mask = (targets == 0) & (mask != 0)
-            pos_mask = (targets == 1) & (mask != 0)
+            neg_mask = (targets <= 0.5) & (mask != 0)
+            pos_mask = (targets > 0.5) & (mask != 0)
             target_count = mask.sum()
 
         else:
 
-            neg_mask = targets == 0
+            neg_mask = targets <= 0.5
             pos_mask = ~neg_mask
             target_count = targets.nelement()
 
@@ -493,57 +540,6 @@ class ClassBalancedMSELoss(nn.Module):
         return loss
 
 
-def merge_distances(
-    foreground_distances: torch.Tensor,
-    crop_mask: torch.Tensor,
-    edge_mask: torch.Tensor,
-    inverse: bool = True,
-    beta: float = 7.0,
-):
-    background_mask = (
-        ((crop_mask == 0) & (edge_mask == 0)).detach().cpu().numpy()
-    )
-    background_dist = np.zeros(background_mask.shape, dtype='float32')
-    for midx in range(background_mask.shape[0]):
-        bdist = cv2.distanceTransform(
-            background_mask[midx].squeeze(axis=0).astype('uint8'),
-            cv2.DIST_L2,
-            3,
-        )
-        bdist /= bdist.max()
-
-        if inverse:
-            bdist = 1.0 - bdist
-
-        if beta != 1:
-            bdist = bdist**beta
-            bdist[np.isnan(bdist)] = 0
-
-        background_dist[midx] = bdist[None, None]
-
-    if inverse:
-        foreground_distances = 1.0 - foreground_distances
-
-    if beta != 1:
-        foreground_distances = foreground_distances**beta
-        foreground_distances[torch.isnan(foreground_distances)] = 0
-
-    distance = np.where(
-        background_mask,
-        background_dist,
-        foreground_distances.detach().cpu().numpy(),
-    )
-    targets = torch.tensor(
-        distance,
-        dtype=foreground_distances.dtype,
-        device=foreground_distances.device,
-    )
-
-    targets[edge_mask == 1] = 1.0
-
-    return targets
-
-
 class BoundaryLoss(nn.Module):
     """Boundary loss.
 
@@ -565,67 +561,38 @@ class BoundaryLoss(nn.Module):
         https://github.com/LIVIAETS/boundary-loss/tree/108bd9892adca476e6cdf424124bc6268707498e
     """
 
-    def __init__(
-        self,
-        inverse_distance: bool = True,
-        beta: float = 7.0,
-    ):
+    def __init__(self):
         super().__init__()
-
-        self.inverse_distance = inverse_distance
-        self.beta = beta
 
     def forward(
         self,
-        edge_pred: torch.Tensor,
-        distance: torch.Tensor,
-        crop_mask: torch.Tensor,
-        edge_mask: torch.Tensor,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
         mask: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Performs a single forward pass.
 
         Args:
-            edge_pred: Predictions from model (probabilities), shaped (B, 1, H, W).
-            distance: Distance map, shaped (B, H, W) or (B, 1, H, W).
-            crop_mask: Crop values (1), shaped (B, H, W) or (B, 1, H, W).
-            edge_mask: Edge values (1), shaped (B, H, W) or (B, 1, H, W).
+            inputs: Predictions from model (probabilities), shaped (B, 1, H, W).
+            targets: Target distance map, shaped (B, H, W) or (B, 1, H, W).
             mask: Values to mask (0) or keep (1), shaped (B, H, W) or (B, 1, H, W).
 
         Returns:
             Boundary loss (float)
         """
 
-        if len(distance.shape) == 3:
-            distance = einops.rearrange(distance, 'b h w -> b 1 h w')
-
-        if len(crop_mask.shape) == 3:
-            crop_mask = einops.rearrange(crop_mask, 'b h w -> b 1 h w')
-
-        if len(edge_mask.shape) == 3:
-            edge_mask = einops.rearrange(edge_mask, 'b h w -> b 1 h w')
-
-        with torch.no_grad():
-            # Add the background distance
-            targets = merge_distances(
-                foreground_distances=distance,
-                crop_mask=crop_mask,
-                edge_mask=edge_mask,
-                inverse=self.inverse_distance,
-                beta=self.beta,
-            )
+        if len(targets.shape) == 3:
+            targets = einops.rearrange(targets, 'b h w -> b 1 h w')
 
         if mask is not None:
             if len(mask.shape) == 3:
                 mask = einops.rearrange(mask, 'b h w -> b 1 h w')
 
             # Apply a mask to zero-out weight
-            edge_pred = edge_pred * mask
+            inputs = inputs * mask
             targets = targets * mask
 
-        hadamard_product = torch.einsum(
-            'bchw, bchw -> bchw', edge_pred, targets
-        )
+        hadamard_product = torch.einsum('bchw, bchw -> bchw', inputs, targets)
 
         if mask is not None:
             hadamard_mean = hadamard_product.sum() / mask.sum()
@@ -811,3 +778,121 @@ class CLDiceLoss(nn.Module):
         )
 
         return cl_dice
+
+
+class TverskyLoss(nn.Module):
+    """Tversky loss."""
+
+    def __init__(
+        self,
+        alpha: float = 0.4,
+        beta: float = 0.6,
+        smooth: float = 1.0,
+        transform_logits: bool = False,
+        one_hot_targets: bool = True,
+    ):
+        super().__init__()
+
+        self.alpha = alpha
+        self.beta = beta
+        self.smooth = smooth
+
+        self.preprocessor = LossPreprocessing(
+            transform_logits=transform_logits,
+            one_hot_targets=one_hot_targets,
+        )
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+        dim: T.Optional[T.Tuple[int, ...]] = None,
+    ) -> torch.Tensor:
+        """Performs a single forward pass.
+
+        Args:
+            inputs: Predictions from model (probabilities), shaped (B, H, W) or (B, 1, H, W).
+            targets: Target labels, shaped (B, H, W) or (B, 1, H, W).
+            mask: Values to mask (0) or keep (1), shaped (B, H, W) or (B, 1, H, W).
+
+        Returns:
+            Tversky loss (float)
+        """
+
+        if dim is None:
+            dim = (1, 2, 3)
+
+        inputs, targets = self.preprocessor(
+            inputs=inputs, targets=targets, mask=mask
+        )
+
+        if mask is not None:
+
+            if len(mask.shape) == 3:
+                mask = einops.rearrange(mask, 'b h w -> b 1 h w')
+
+            inputs = inputs * mask
+            targets = targets * mask
+
+        tp = (inputs * targets).sum(dim=dim)
+        fp = ((1 - targets) * inputs).sum(dim=dim)
+        fn = (targets * (1 - inputs)).sum(dim=dim)
+
+        tversky = (tp + self.smooth) / (
+            tp + self.alpha * fp + self.beta * fn + self.smooth
+        )
+
+        loss = 1.0 - tversky
+
+        return loss.mean()
+
+
+class FocalTverskyLoss(nn.Module):
+    """Focal Tversky loss."""
+
+    def __init__(
+        self,
+        alpha: float = 0.2,
+        beta: float = 0.8,
+        gamma: float = 2.0,
+        smooth: float = 1.0,
+    ):
+        super().__init__()
+
+        self.gamma = gamma
+
+        self.tversky_loss = TverskyLoss(
+            alpha=alpha,
+            beta=beta,
+            smooth=smooth,
+        )
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+        dim: T.Optional[T.Tuple[int, ...]] = None,
+    ) -> torch.Tensor:
+        """Performs a single forward pass.
+
+        Args:
+            inputs: Predictions from model (probabilities), shaped (B, H, W) or (B, 1, H, W).
+            targets: Target labels, shaped (B, H, W) or (B, 1, H, W).
+            mask: Values to mask (0) or keep (1), shaped (B, H, W) or (B, 1, H, W).
+
+        Returns:
+            Focal Tversky loss (float)
+        """
+
+        tversky_loss = self.tversky_loss(
+            inputs=inputs,
+            targets=targets,
+            mask=mask,
+            dim=dim,
+        )
+
+        loss = torch.pow(tversky_loss, self.gamma)
+
+        return loss.mean()
