@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from einops.layers.torch import Rearrange
 
 from cultionet.enums import AttentionTypes, InferenceNames, ResBlockTypes
 
@@ -15,23 +14,22 @@ from .convolution import (
     ResidualAConv,
     ResidualConv,
 )
-from .geo_encoding import SphericalHarmonics
 
 NATTEN_PARAMS = {
     "a": {
-        "natten_num_heads": 2,
-        "natten_kernel_size": 7,
-        "natten_dilation": 3,
+        "natten_num_heads": 4,
+        "natten_kernel_size": 3,
+        "natten_dilation": 2,
     },
     "b": {
         "natten_num_heads": 4,
-        "natten_kernel_size": 5,
-        "natten_dilation": 3,
+        "natten_kernel_size": 3,
+        "natten_dilation": 1,
     },
     "c": {
         "natten_num_heads": 8,
         "natten_kernel_size": 3,
-        "natten_dilation": 2,
+        "natten_dilation": 1,
     },
     "d": {
         "natten_num_heads": 8,
@@ -88,7 +86,7 @@ class SigmoidCrisp(nn.Module):
         super().__init__()
 
         self.smooth = smooth
-        self.gamma = nn.Parameter(torch.ones(1))
+        self.gamma = nn.Parameter(torch.ones(1, requires_grad=True))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.smooth + F.sigmoid(self.gamma)
@@ -126,6 +124,7 @@ class TowerUNetFinalCombine(nn.Module):
 
     def __init__(
         self,
+        num_classes: int,
         edge_activation: bool = True,
         mask_activation: bool = True,
     ):
@@ -135,23 +134,37 @@ class TowerUNetFinalCombine(nn.Module):
             SigmoidCrisp() if edge_activation else nn.Identity()
         )
         mask_activation_layer = (
-            nn.Softmax(dim=1) if mask_activation else nn.Identity()
+            nn.Sigmoid() if mask_activation else nn.Identity()
         )
 
-        self.final_dist = torch.nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=1, kernel_size=3, padding=1),
+        self.final_dist = nn.Sequential(
+            nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, padding=0),
             nn.Sigmoid(),
         )
+        self.dist_gamma1 = nn.Parameter(torch.ones(1, requires_grad=True))
+        self.dist_gamma2 = nn.Parameter(torch.ones(1, requires_grad=True))
+        self.dist_gamma3 = nn.Parameter(torch.ones(1, requires_grad=True))
 
-        self.final_edge = torch.nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=1, kernel_size=3, padding=1),
+        self.final_edge = nn.Sequential(
+            nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, padding=0),
             edge_activation_layer,
         )
+        self.edge_gamma1 = nn.Parameter(torch.ones(1, requires_grad=True))
+        self.edge_gamma2 = nn.Parameter(torch.ones(1, requires_grad=True))
+        self.edge_gamma3 = nn.Parameter(torch.ones(1, requires_grad=True))
 
-        self.final_crop = torch.nn.Sequential(
-            nn.Conv2d(in_channels=6, out_channels=2, kernel_size=3, padding=1),
+        self.final_crop = nn.Sequential(
+            nn.Conv2d(
+                in_channels=num_classes,
+                out_channels=num_classes,
+                kernel_size=1,
+                padding=0,
+            ),
             mask_activation_layer,
         )
+        self.crop_gamma1 = nn.Parameter(torch.ones(1, requires_grad=True))
+        self.crop_gamma2 = nn.Parameter(torch.ones(1, requires_grad=True))
+        self.crop_gamma3 = nn.Parameter(torch.ones(1, requires_grad=True))
 
     def forward(
         self,
@@ -162,35 +175,35 @@ class TowerUNetFinalCombine(nn.Module):
     ) -> T.Dict[str, torch.Tensor]:
 
         distance = self.final_dist(
-            torch.cat(
-                [
-                    out_a[f"{InferenceNames.DISTANCE}{suffixes[0]}"],
-                    out_b[f"{InferenceNames.DISTANCE}{suffixes[1]}"],
-                    out_c[f"{InferenceNames.DISTANCE}{suffixes[2]}"],
-                ],
-                dim=1,
+            (
+                torch.reciprocal(self.dist_gamma1)
+                * out_a[f"{InferenceNames.DISTANCE}{suffixes[0]}"]
+                + torch.reciprocal(self.dist_gamma2)
+                * out_b[f"{InferenceNames.DISTANCE}{suffixes[1]}"]
+                + torch.reciprocal(self.dist_gamma3)
+                * out_c[f"{InferenceNames.DISTANCE}{suffixes[2]}"]
             )
         )
 
         edge = self.final_edge(
-            torch.cat(
-                [
-                    out_a[f"{InferenceNames.EDGE}{suffixes[0]}"],
-                    out_b[f"{InferenceNames.EDGE}{suffixes[1]}"],
-                    out_c[f"{InferenceNames.EDGE}{suffixes[2]}"],
-                ],
-                dim=1,
+            (
+                torch.reciprocal(self.edge_gamma1)
+                * out_a[f"{InferenceNames.EDGE}{suffixes[0]}"]
+                + torch.reciprocal(self.edge_gamma2)
+                * out_b[f"{InferenceNames.EDGE}{suffixes[1]}"]
+                + torch.reciprocal(self.edge_gamma3)
+                * out_c[f"{InferenceNames.EDGE}{suffixes[2]}"]
             )
         )
 
         crop = self.final_crop(
-            torch.cat(
-                [
-                    out_a[f"{InferenceNames.CROP}{suffixes[0]}"],
-                    out_b[f"{InferenceNames.CROP}{suffixes[1]}"],
-                    out_c[f"{InferenceNames.CROP}{suffixes[2]}"],
-                ],
-                dim=1,
+            (
+                torch.reciprocal(self.crop_gamma1)
+                * out_a[f"{InferenceNames.CROP}{suffixes[0]}"]
+                + torch.reciprocal(self.crop_gamma2)
+                * out_b[f"{InferenceNames.CROP}{suffixes[1]}"]
+                + torch.reciprocal(self.crop_gamma3)
+                * out_c[f"{InferenceNames.CROP}{suffixes[2]}"]
             )
         )
 
@@ -199,6 +212,37 @@ class TowerUNetFinalCombine(nn.Module):
             InferenceNames.EDGE: edge,
             InferenceNames.CROP: crop,
         }
+
+
+class StreamConv2d(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        hidden_channels: int,
+        out_channels: int,
+        activation_type: str,
+    ):
+        super().__init__()
+
+        self.conv = nn.Sequential(
+            ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=hidden_channels,
+                kernel_size=3,
+                padding=1,
+                add_activation=True,
+                activation_type=activation_type,
+            ),
+            nn.Conv2d(
+                in_channels=hidden_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1,
+            ),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.conv(x)
 
 
 class TowerUNetFinal(nn.Module):
@@ -226,33 +270,38 @@ class TowerUNetFinal(nn.Module):
             )
 
         # TODO: make optional
-        self.geo_embeddings = GeoEmbeddings(in_channels)
+        self.geo_embeddings = torch.compile(GeoEmbeddings(in_channels))
         # self.geo_embeddings4 = SphericalHarmonics(out_channels=in_channels, legendre_polys=4)
         # self.geo_embeddings8 = SphericalHarmonics(out_channels=in_channels, legendre_polys=8)
 
-        self.layernorm = nn.Sequential(
-            Rearrange('b c h w -> b h w c'),
-            nn.LayerNorm(in_channels),
-            Rearrange('b h w c -> b c h w'),
+        # Hidden -> 3 -> 3 -> 1
+        self.dist_conv = StreamConv2d(
+            in_channels=in_channels,
+            hidden_channels=3,
+            out_channels=1,
+            activation_type=activation_type,
+        )
+        self.edge_conv = StreamConv2d(
+            in_channels=in_channels,
+            hidden_channels=3,
+            out_channels=1,
+            activation_type=activation_type,
+        )
+        self.crop_conv = StreamConv2d(
+            in_channels=in_channels,
+            hidden_channels=3,
+            out_channels=1,
+            activation_type=activation_type,
         )
 
-        self.expand = ConvBlock2d(
-            in_channels=in_channels,
-            out_channels=in_channels * 3,
+        # 3 -> 3
+        self.fuse_conv = ConvBlock2d(
+            in_channels=3,
+            out_channels=3,
             kernel_size=3,
             padding=1,
             add_activation=True,
             activation_type=activation_type,
-        )
-
-        self.dist_alpha1 = nn.Parameter(torch.ones(1))
-        self.dist_alpha2 = nn.Parameter(torch.ones(1))
-        self.edge_alpha1 = nn.Parameter(torch.ones(1))
-
-        self.final_dist = nn.Conv2d(in_channels, 1, kernel_size=3, padding=1)
-        self.final_edge = nn.Conv2d(in_channels, 1, kernel_size=3, padding=1)
-        self.final_mask = nn.Conv2d(
-            in_channels, num_classes, kernel_size=3, padding=1
         )
 
     def forward(
@@ -271,32 +320,32 @@ class TowerUNetFinal(nn.Module):
             x = x + rearrange(
                 self.geo_embeddings(latlon_coords), 'b c -> b c 1 1'
             )
-            # x = x + rearrange(
-            #     self.geo_embeddings4(latlon_coords), 'b c -> b c 1 1'
-            # )
-            # x = x + rearrange(
-            #     self.geo_embeddings8(latlon_coords), 'b c -> b c 1 1'
-            # )
 
-        x = self.layernorm(x)
+        # dist_out = self.final_dist(x)
+        # x = torch.cat([x, dist_out], dim=1)
+        # edge_out = self.final_edge(x)
+        # x = torch.cat([x, edge_out], dim=1)
+        # mask_out = self.final_mask(x)
 
-        # Expand into separate streams
-        dist_h, edge_h, mask_h = torch.chunk(self.expand(x), 3, dim=1)
+        # Separate hidden into task streams
+        # H -> 3 -> 1
+        dist_h = self.dist_conv(x)
+        edge_h = self.edge_conv(x)
+        crop_h = self.crop_conv(x)
 
-        dist = self.final_dist(dist_h)
-        edge = self.final_edge(edge_h) + dist * torch.reciprocal(
-            self.dist_alpha1
-        )
-        mask = (
-            self.final_mask(mask_h)
-            + edge * torch.reciprocal(self.edge_alpha1)
-            + dist * torch.reciprocal(self.dist_alpha2)
-        )
+        # [1, 1, 1] -> 3
+        h = torch.cat([dist_h, edge_h, crop_h], dim=1)
+        # 3 -> 3
+        h = self.fuse_conv(h)
+        # -> [1, 1, 1]
+        dist_out, edge_out, mask_out = torch.chunk(h, 3, dim=1)
+
+        # x --> H(3) --> H(1) --> Concat(3) --> Fuse(3) --> Chunk(1,1,1)
 
         return {
-            f"{InferenceNames.DISTANCE}{suffix}": dist,
-            f"{InferenceNames.EDGE}{suffix}": edge,
-            f"{InferenceNames.CROP}{suffix}": mask,
+            f"{InferenceNames.DISTANCE}{suffix}": dist_out,
+            f"{InferenceNames.EDGE}{suffix}": edge_out,
+            f"{InferenceNames.CROP}{suffix}": mask_out,
         }
 
 
