@@ -16,14 +16,16 @@ from .. import losses as cnetlosses
 from .. import nn as cunn
 from ..data.data import Data
 from ..enums import (
+    AttentionTypes,
+    InferenceNames,
     LearningRateSchedulers,
     LossTypes,
     ModelNames,
     ModelTypes,
     ResBlockTypes,
+    ValidationNames,
 )
-from ..layers.weights import init_attention_weights, init_conv_weights
-from ..models.temporal_transformer import TemporalTransformerFinal
+from ..layers.weights import init_conv_weights
 from .cultionet import CultioNet
 from .maskcrnn import (
     BFasterRCNN,
@@ -39,30 +41,87 @@ logging.getLogger("lightning").addHandler(logging.NullHandler())
 logging.getLogger("lightning").propagate = False
 logging.getLogger("lightning").setLevel(logging.ERROR)
 
-torch.set_float32_matmul_precision("medium")
+torch.set_float32_matmul_precision("high")
+
+
+LOSS_DICT = {
+    LossTypes.BOUNDARY: {
+        "classification": cnetlosses.BoundaryLoss(),
+    },
+    LossTypes.CLASS_BALANCED_MSE: {
+        "classification": cnetlosses.ClassBalancedMSELoss(),
+    },
+    LossTypes.CROSS_ENTROPY: {
+        "classification": cnetlosses.CrossEntropyLoss(),
+    },
+    LossTypes.LOG_COSH: {
+        "regression": cnetlosses.LogCoshLoss(),
+    },
+    LossTypes.TANIMOTO_COMPLEMENT: {
+        "classification": cnetlosses.TanimotoComplementLoss(),
+        "regression": cnetlosses.TanimotoComplementLoss(
+            transform_logits=False,
+            one_hot_targets=False,
+        ),
+    },
+    LossTypes.TANIMOTO: {
+        "classification": cnetlosses.TanimotoDistLoss(),
+        "regression": cnetlosses.TanimotoDistLoss(
+            transform_logits=False,
+            one_hot_targets=False,
+        ),
+    },
+    LossTypes.TANIMOTO_COMBINED: {
+        "classification": cnetlosses.CombinedLoss(
+            losses=[
+                cnetlosses.TanimotoDistLoss(),
+                cnetlosses.TanimotoComplementLoss(),
+            ],
+        ),
+        "regression": cnetlosses.CombinedLoss(
+            losses=[
+                cnetlosses.TanimotoDistLoss(
+                    transform_logits=False,
+                    one_hot_targets=False,
+                ),
+                cnetlosses.TanimotoComplementLoss(
+                    transform_logits=False,
+                    one_hot_targets=False,
+                ),
+            ],
+        ),
+    },
+    LossTypes.TVERSKY: {
+        "classification": cnetlosses.TverskyLoss(),
+    },
+    LossTypes.FOCAL_TVERSKY: {
+        "classification": cnetlosses.FocalTverskyLoss(),
+    },
+}
 
 
 class LightningModuleMixin(LightningModule):
     def __init__(self):
-        super(LightningModuleMixin, self).__init__()
+        super().__init__()
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
     def forward(
-        self, batch: Data, training: bool = True, batch_idx: int = None
+        self, batch: Data, batch_idx: int = None
     ) -> T.Dict[str, torch.Tensor]:
         """Performs a single model forward pass.
 
         Returns:
-            distance: Normalized distance transform (from boundaries), [0,1].
-            edge: Probabilities of edge|non-edge, [0,1].
-            crop: Logits of crop|non-crop.
+            distance: Normalized distance transform (from boundaries), [0,1]. Shaped (B, 1, H, W).
+            edge: Edge|non-edge predictions, logits or probabilities. Shaped (B, 1, H, W).
+            crop: Logits of crop|non-crop. Shaped (B, C, H, W).
         """
-        return self.cultionet_model(batch, training=training)
+        return self.cultionet_model(batch)
 
     @property
     def cultionet_model(self) -> CultioNet:
+        """Get the network model name."""
         return getattr(self, self.model_attr)
 
     @staticmethod
@@ -72,12 +131,11 @@ class LightningModuleMixin(LightningModule):
         a = torch.cuda.memory_allocated(0)
         print(f"{t * 1e-6:.02f}MB", f"{r * 1e-6:.02f}MB", f"{a * 1e-6:.02f}MB")
 
-    def softmax(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
-        return F.softmax(x, dim=dim, dtype=x.dtype)
-
     def probas_to_labels(
         self, x: torch.Tensor, thresh: float = 0.5
     ) -> torch.Tensor:
+        """Converts probabilities to class labels."""
+
         if x.shape[1] == 1:
             labels = x.gt(thresh).squeeze(dim=1).long()
         else:
@@ -86,13 +144,15 @@ class LightningModuleMixin(LightningModule):
         return labels
 
     def logits_to_probas(self, x: torch.Tensor) -> T.Union[None, torch.Tensor]:
+        """Transforms logits to probabilities."""
+
         if x is not None:
-            # Single-dimension inputs are sigmoid probabilities
             if x.shape[1] > 1:
-                # Transform logits to probabilities
-                x = self.softmax(x)
+                x = F.softmax(x, dim=1, dtype=x.dtype)
             else:
-                x = self.sigmoid(x)
+                # Single-dimension inputs are sigmoid probabilities
+                x = F.sigmoid(x)
+
             x = x.clip(0, 1)
 
         return x
@@ -101,26 +161,26 @@ class LightningModuleMixin(LightningModule):
         self, batch: Data, batch_idx: int = None
     ) -> T.Dict[str, torch.Tensor]:
         """A prediction step for Lightning."""
-        with torch.no_grad():
-            predictions = self.forward(
-                batch, training=False, batch_idx=batch_idx
-            )
 
-            if self.train_maskrcnn:
-                # Apply a forward pass on Mask RCNN
-                mask_data = self.mask_rcnn_forward(
-                    batch=batch,
-                    predictions=predictions,
-                    mode='predict',
-                )
-                predictions.update(pred_df=mask_data['pred_df'])
+        predictions = self.forward(batch, batch_idx=batch_idx)
+
+        if self.train_maskrcnn:
+            # Apply a forward pass on Mask RCNN
+            mask_data = self.mask_rcnn_forward(
+                batch=batch,
+                predictions=predictions,
+                mode='predict',
+            )
+            predictions.update(pred_df=mask_data['pred_df'])
 
         return predictions
 
+    @torch.no_grad
     def get_true_labels(
         self, batch: Data, crop_type: torch.Tensor = None
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
         """Gets true labels from the data batch."""
+
         true_edge = torch.where(batch.y == self.edge_class, 1, 0).long()
         # Recode all crop classes to 1, otherwise 0
         true_crop = torch.where(
@@ -155,12 +215,12 @@ class LightningModuleMixin(LightningModule):
             mask = einops.rearrange(mask, 'b h w -> b 1 h w')
 
         return {
-            "true_edge": true_edge,
-            "true_crop": true_crop,
-            "true_crop_and_edge": true_crop_and_edge,
-            "true_crop_or_edge": true_crop_or_edge,
-            "true_crop_type": true_crop_type,
-            "mask": mask,
+            ValidationNames.TRUE_EDGE: true_edge,
+            ValidationNames.TRUE_CROP: true_crop,
+            ValidationNames.TRUE_CROP_AND_EDGE: true_crop_and_edge,
+            ValidationNames.TRUE_CROP_OR_EDGE: true_crop_or_edge,
+            ValidationNames.TRUE_CROP_TYPE: true_crop_type,
+            ValidationNames.MASK: mask,
         }
 
     def calc_loss(
@@ -173,17 +233,39 @@ class LightningModuleMixin(LightningModule):
         Returns:
             Total loss
         """
+
         weights = {
-            "l2": 0.25,
-            "l3": 0.5,
-            "dist_loss": 1.0,
-            "edge_loss": 1.0,
-            "crop_loss": 1.0,
+            InferenceNames.DISTANCE: 1.0,
+            InferenceNames.EDGE: 1.0,
+            InferenceNames.CROP: 1.0,
         }
 
-        true_labels_dict = self.get_true_labels(
-            batch, crop_type=predictions.get("crop_type")
-        )
+        with torch.no_grad():
+            true_labels_dict = self.get_true_labels(
+                batch, crop_type=predictions.get(InferenceNames.CROP_TYPE)
+            )
+
+            true_edge_distance = torch.where(
+                true_labels_dict[ValidationNames.TRUE_EDGE] == 1,
+                1,
+                torch.where(
+                    true_labels_dict[ValidationNames.TRUE_CROP] == 1,
+                    (1.0 - batch.bdist) ** 20.0,
+                    0,
+                ),
+            )
+            true_crop_distance = torch.where(
+                true_labels_dict[ValidationNames.TRUE_CROP] != 1,
+                0,
+                1.0 - true_edge_distance,
+            )
+
+            true_edge_distance = einops.rearrange(
+                true_edge_distance, 'b h w -> b 1 h w'
+            )
+            true_crop_distance = einops.rearrange(
+                true_crop_distance, 'b h w -> b 1 h w'
+            )
 
         loss = 0.0
 
@@ -191,78 +273,58 @@ class LightningModuleMixin(LightningModule):
         # Temporal encoding losses
         ##########################
 
-        if predictions["classes_l2"] is not None:
-            if self.classes_l2_loss is not None:
-                # Temporal encoding level 2 loss (non-crop=0; crop|edge=1)
-                classes_l2_loss = self.classes_l2_loss(
-                    predictions["classes_l2"],
-                    true_labels_dict["true_crop_and_edge"],
-                    mask=true_labels_dict["mask"],
+        if predictions[InferenceNames.CLASSES_L2] is not None:
+            # Temporal encoding level 2 loss (non-crop=0; crop|edge=1)
+            classes_l2_loss = F.cross_entropy(
+                predictions[InferenceNames.CLASSES_L2],
+                true_labels_dict[ValidationNames.TRUE_CROP_AND_EDGE],
+                weight=self.crop_and_edge_weights,
+                reduction='none'
+                if true_labels_dict[ValidationNames.MASK] is not None
+                else 'mean',
+            )
+
+            if true_labels_dict[ValidationNames.MASK] is not None:
+                classes_l2_loss = classes_l2_loss * einops.rearrange(
+                    true_labels_dict[ValidationNames.MASK], 'b 1 h w -> b h w'
                 )
-                loss = loss + classes_l2_loss * weights["l2"]
-
-        if predictions["classes_l3"] is not None:
-            if self.classes_last_loss is not None:
-                # Temporal encoding final loss (non-crop=0; crop=1; edge=2)
-                classes_last_loss = self.classes_last_loss(
-                    predictions["classes_l3"],
-                    true_labels_dict["true_crop_or_edge"],
-                    mask=true_labels_dict["mask"],
+                masked_weights = self.crop_and_edge_weights[
+                    true_labels_dict[ValidationNames.TRUE_CROP_AND_EDGE]
+                ] * einops.rearrange(
+                    true_labels_dict[ValidationNames.MASK], 'b 1 h w -> b h w'
                 )
-                loss = loss + classes_last_loss * weights["l3"]
+                classes_l2_loss = classes_l2_loss.sum() / masked_weights.sum()
 
-        #########################
-        # Deep supervision losses
-        #########################
+            weights[InferenceNames.CLASSES_L2] = 0.01
+            loss = loss + classes_l2_loss * weights[InferenceNames.CLASSES_L2]
 
-        if self.deep_supervision:
-            dist_loss_deep_b = self.dist_loss_deep_b(
-                predictions["dist_b"],
-                batch.bdist,
-                mask=true_labels_dict["mask"],
-            )
-            edge_loss_deep_b = self.edge_loss_deep_b(
-                predictions["edge_b"],
-                true_labels_dict["true_edge"],
-                mask=true_labels_dict["mask"],
-            )
-            crop_loss_deep_b = self.crop_loss_deep_b(
-                predictions["mask_b"],
-                true_labels_dict["true_crop"],
-                mask=true_labels_dict["mask"],
-            )
-            dist_loss_deep_c = self.dist_loss_deep_c(
-                predictions["dist_c"],
-                batch.bdist,
-                mask=true_labels_dict["mask"],
-            )
-            edge_loss_deep_c = self.edge_loss_deep_c(
-                predictions["edge_c"],
-                true_labels_dict["true_edge"],
-                mask=true_labels_dict["mask"],
-            )
-            crop_loss_deep_c = self.crop_loss_deep_c(
-                predictions["mask_c"],
-                true_labels_dict["true_crop"],
-                mask=true_labels_dict["mask"],
+        if predictions[InferenceNames.CLASSES_L3] is not None:
+            # Temporal encoding final loss (non-crop=0; crop=1; edge=2)
+            classes_last_loss = F.cross_entropy(
+                predictions[InferenceNames.CLASSES_L3],
+                true_labels_dict[ValidationNames.TRUE_CROP_OR_EDGE],
+                weight=self.crop_or_edge_weights,
+                reduction='none'
+                if true_labels_dict[ValidationNames.MASK] is not None
+                else 'mean',
             )
 
-            weights["dist_loss_deep_b"] = 0.25
-            weights["edge_loss_deep_b"] = 0.25
-            weights["crop_loss_deep_b"] = 0.25
-            weights["dist_loss_deep_c"] = 0.1
-            weights["edge_loss_deep_c"] = 0.1
-            weights["crop_loss_deep_c"] = 0.1
+            if true_labels_dict[ValidationNames.MASK] is not None:
+                classes_last_loss = classes_last_loss * einops.rearrange(
+                    true_labels_dict[ValidationNames.MASK], 'b 1 h w -> b h w'
+                )
+                masked_weights = self.crop_or_edge_weights[
+                    true_labels_dict[ValidationNames.TRUE_CROP_OR_EDGE]
+                ] * einops.rearrange(
+                    true_labels_dict[ValidationNames.MASK], 'b 1 h w -> b h w'
+                )
+                classes_last_loss = (
+                    classes_last_loss.sum() / masked_weights.sum()
+                )
 
-            # Main loss
+            weights[InferenceNames.CLASSES_L3] = 0.1
             loss = (
-                loss
-                + dist_loss_deep_b * weights["dist_loss_deep_b"]
-                + edge_loss_deep_b * weights["edge_loss_deep_b"]
-                + crop_loss_deep_b * weights["crop_loss_deep_b"]
-                + dist_loss_deep_c * weights["dist_loss_deep_c"]
-                + edge_loss_deep_c * weights["edge_loss_deep_c"]
-                + crop_loss_deep_c * weights["crop_loss_deep_c"]
+                loss + classes_last_loss * weights[InferenceNames.CLASSES_L3]
             )
 
         #############
@@ -270,51 +332,66 @@ class LightningModuleMixin(LightningModule):
         #############
 
         # Distance transform loss
-        dist_loss = self.dist_loss(
-            predictions["dist"],
-            batch.bdist,
-            mask=true_labels_dict["mask"],
+        dist_loss = self.reg_loss(
+            # Inputs are 0-1 continuous
+            inputs=predictions[InferenceNames.DISTANCE],
+            # True data are 0-1 continuous
+            targets=batch.bdist,
+            mask=true_labels_dict[ValidationNames.MASK],
         )
-        loss = loss + dist_loss * weights["dist_loss"]
+        loss = loss + dist_loss * weights[InferenceNames.DISTANCE]
 
         # Edge loss
-        edge_loss = self.edge_loss(
-            predictions["edge"],
-            true_labels_dict["true_edge"],
-            mask=true_labels_dict["mask"],
+        edge_loss = self.cls_loss(
+            # Inputs are single-layer logits or probabilities
+            inputs=predictions[InferenceNames.EDGE],
+            # True data are 0|1
+            targets=true_labels_dict[ValidationNames.TRUE_EDGE],
+            mask=true_labels_dict[ValidationNames.MASK],
         )
-        loss = loss + edge_loss * weights["edge_loss"]
+        loss = loss + edge_loss * weights[InferenceNames.EDGE]
 
         # Crop mask loss
-        crop_loss = self.crop_loss(
-            predictions["mask"],
-            true_labels_dict["true_crop"],
-            mask=true_labels_dict["mask"],
+        crop_loss = self.cls_loss(
+            # Inputs are 2-layer logits or probabilities
+            inputs=predictions[InferenceNames.CROP],
+            # True data are 0|1
+            targets=true_labels_dict[ValidationNames.TRUE_CROP],
+            mask=true_labels_dict[ValidationNames.MASK],
         )
-        loss = loss + crop_loss * weights["crop_loss"]
+        loss = loss + crop_loss * weights[InferenceNames.CROP]
 
-        # Class-balanced MSE loss
-        edge_cmse_loss = self.cmse_loss(
-            predictions["edge"].squeeze(dim=1),
-            true_labels_dict["true_edge"],
-            mask=None
-            if true_labels_dict["mask"] is None
-            else true_labels_dict["mask"].squeeze(dim=1),
+        # Boundary loss for edges
+        edge_boundary_loss = self.boundary_loss(
+            # Inputs are probabilities
+            inputs=predictions[InferenceNames.EDGE],
+            # True data are 0-1 continuous
+            targets=true_edge_distance,
+            mask=true_labels_dict[ValidationNames.MASK],
         )
-        weights["edge_cmse_loss"] = 0.1
-        loss = loss + edge_cmse_loss * weights["edge_cmse_loss"]
+        weights["edge_boundary_loss"] = 0.1
+        loss = loss + edge_boundary_loss * weights["edge_boundary_loss"]
 
-        crop_cmse_loss = self.cmse_loss(
-            predictions["mask"].sum(dim=1),
-            true_labels_dict["true_crop"],
-            mask=None
-            if true_labels_dict["mask"] is None
-            else true_labels_dict["mask"].squeeze(dim=1),
+        # Boundary loss for crop
+        crop_boundary_loss = self.boundary_loss(
+            # Inputs are probabilities
+            inputs=predictions[InferenceNames.CROP],
+            # True data are 0-1 continuous
+            targets=true_crop_distance,
+            mask=true_labels_dict[ValidationNames.MASK],
         )
-        weights["crop_cmse_loss"] = 0.1
-        loss = loss + crop_cmse_loss * weights["crop_cmse_loss"]
+        weights["crop_boundary_loss"] = 0.1
+        loss = loss + crop_boundary_loss * weights["crop_boundary_loss"]
 
-        return loss / sum(weights.values())
+        loss_report = {
+            "dloss": dist_loss,
+            "eloss": edge_loss,
+            "closs": crop_loss,
+            "ebloss": edge_boundary_loss,
+            "cbloss": crop_boundary_loss,
+        }
+
+        return loss / sum(weights.values()), loss_report
 
     def mask_rcnn_forward(
         self,
@@ -353,9 +430,9 @@ class LightningModuleMixin(LightningModule):
                 x=torch.cat(
                     (
                         predictions['dist'][bidx].detach(),
-                        predictions['edge'][bidx].detach(),
+                        predictions[InferenceNames.EDGE][bidx].detach(),
                         einops.rearrange(
-                            predictions['mask'][bidx, 1].detach(),
+                            predictions[InferenceNames.CROP][bidx, 1].detach(),
                             'h w -> 1 h w',
                         ),
                     ),
@@ -429,9 +506,10 @@ class LightningModuleMixin(LightningModule):
 
     def training_step(self, batch: Data, batch_idx: int = None):
         """Executes one training step and logs training step metrics."""
+
         predictions = self(batch)
 
-        loss = self.calc_loss(batch, predictions)
+        loss, _ = self.calc_loss(batch, predictions)
 
         if self.train_maskrcnn:
             # Apply a forward pass on Mask RCNN
@@ -455,12 +533,21 @@ class LightningModuleMixin(LightningModule):
         return loss
 
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
+        """Evaluation step shared between validation and testing."""
+
+        # Forward pass to get predictions
         predictions = self(batch)
-        loss = self.calc_loss(batch, predictions)
+
+        # Calculate the loss
+        loss, loss_report = self.calc_loss(batch, predictions)
+
+        # Convert probabilities to class labels
+        edge_ypred = self.probas_to_labels(predictions[InferenceNames.EDGE])
+        crop_ypred = self.probas_to_labels(predictions[InferenceNames.CROP])
 
         # Get the true edge and crop labels
         true_labels_dict = self.get_true_labels(
-            batch, crop_type=predictions["crop_type"]
+            batch, crop_type=predictions.get(InferenceNames.CROP_TYPE)
         )
 
         if self.train_maskrcnn:
@@ -473,101 +560,100 @@ class LightningModuleMixin(LightningModule):
 
             loss = loss + mask_data['loss']
 
-        if true_labels_dict["mask"] is not None:
+        if true_labels_dict[ValidationNames.MASK] is not None:
             # Valid sample = True; Invalid sample = False
-            labels_bool_mask = true_labels_dict["mask"].to(dtype=torch.bool)
-            predictions["dist"] = torch.masked_select(
-                predictions["dist"], labels_bool_mask
+            labels_bool_mask = true_labels_dict[ValidationNames.MASK].to(
+                dtype=torch.bool
             )
-            batch.bdist = torch.masked_select(
+            predictions[InferenceNames.DISTANCE] = torch.masked_select(
+                predictions[InferenceNames.DISTANCE], labels_bool_mask
+            )
+            bdist = torch.masked_select(
                 batch.bdist, labels_bool_mask.squeeze(dim=1)
             )
 
-        dist_score_args = (
-            predictions["dist"].contiguous().view(-1),
-            batch.bdist.contiguous().view(-1),
-        )
+        else:
+            predictions[InferenceNames.DISTANCE] = einops.rearrange(
+                predictions[InferenceNames.DISTANCE], 'b 1 h w -> (b h w)'
+            )
+            bdist = einops.rearrange(batch.bdist, 'b h w -> (b h w)')
 
-        dist_mae = self.dist_mae(*dist_score_args)
-        dist_mse = self.dist_mse(*dist_score_args)
+        dist_score_args = (predictions[InferenceNames.DISTANCE], bdist)
 
-        # Get the class labels
-        edge_ypred = self.probas_to_labels(predictions["edge"])
-        crop_ypred = self.probas_to_labels(predictions["mask"])
+        dist_mae = self.mae_scorer(*dist_score_args)
+        dist_mse = self.mse_scorer(*dist_score_args)
 
-        if true_labels_dict["mask"] is not None:
+        if true_labels_dict[ValidationNames.MASK] is not None:
             edge_ypred = torch.masked_select(
                 edge_ypred, labels_bool_mask.squeeze(dim=1)
             )
             crop_ypred = torch.masked_select(
                 crop_ypred, labels_bool_mask.squeeze(dim=1)
             )
-            true_labels_dict["true_edge"] = torch.masked_select(
-                true_labels_dict["true_edge"], labels_bool_mask.squeeze(dim=1)
+            true_labels_dict[ValidationNames.TRUE_EDGE] = torch.masked_select(
+                true_labels_dict[ValidationNames.TRUE_EDGE],
+                labels_bool_mask.squeeze(dim=1),
             )
-            true_labels_dict["true_crop"] = torch.masked_select(
-                true_labels_dict["true_crop"], labels_bool_mask.squeeze(dim=1)
+            true_labels_dict[ValidationNames.TRUE_CROP] = torch.masked_select(
+                true_labels_dict[ValidationNames.TRUE_CROP],
+                labels_bool_mask.squeeze(dim=1),
             )
 
+        else:
+            edge_ypred = einops.rearrange(edge_ypred, 'b h w -> (b h w)')
+            crop_ypred = einops.rearrange(crop_ypred, 'b h w -> (b h w)')
+            true_labels_dict[ValidationNames.TRUE_EDGE] = einops.rearrange(
+                true_labels_dict[ValidationNames.TRUE_EDGE], 'b h w -> (b h w)'
+            )
+            true_labels_dict[ValidationNames.TRUE_CROP] = einops.rearrange(
+                true_labels_dict[ValidationNames.TRUE_CROP], 'b h w -> (b h w)'
+            )
+
+        # Scorer input args
         edge_score_args = (
-            edge_ypred.contiguous().view(-1),
-            true_labels_dict["true_edge"].contiguous().view(-1),
+            edge_ypred,
+            true_labels_dict[ValidationNames.TRUE_EDGE],
         )
         crop_score_args = (
-            crop_ypred.contiguous().view(-1),
-            true_labels_dict["true_crop"].contiguous().view(-1),
+            crop_ypred,
+            true_labels_dict[ValidationNames.TRUE_CROP],
         )
 
-        # F1-score
-        edge_score = self.edge_f1(*edge_score_args)
-        crop_score = self.crop_f1(*crop_score_args)
+        # Fβ-score
+        edge_fscore = self.f_beta_scorer(*edge_score_args)
+        crop_fscore = self.f_beta_scorer(*crop_score_args)
+
         # MCC
-        edge_mcc = self.edge_mcc(*edge_score_args)
-        crop_mcc = self.crop_mcc(*crop_score_args)
-        # Dice
-        edge_dice = self.edge_dice(*edge_score_args)
-        crop_dice = self.crop_dice(*crop_score_args)
-        # Jaccard/IoU
-        edge_jaccard = self.edge_jaccard(*edge_score_args)
-        crop_jaccard = self.crop_jaccard(*crop_score_args)
+        edge_mcc = self.mcc_scorer(*edge_score_args)
+        crop_mcc = self.mcc_scorer(*crop_score_args)
 
         total_score = (
             loss
-            + (1.0 - edge_score)
-            + (1.0 - crop_score)
+            + (1.0 - edge_fscore)
+            + (1.0 - crop_fscore)
             + dist_mae
-            + (1.0 - edge_mcc)
-            + (1.0 - crop_mcc)
+            + (1.0 - edge_mcc.clamp_min(0))
+            + (1.0 - crop_mcc.clamp_min(0))
         )
 
         metrics = {
             "loss": loss,
             "dist_mae": dist_mae,
             "dist_mse": dist_mse,
-            "edge_f1": edge_score,
-            "crop_f1": crop_score,
+            "edge_f1": edge_fscore,
+            "crop_f1": crop_fscore,
             "edge_mcc": edge_mcc,
             "crop_mcc": crop_mcc,
-            "edge_dice": edge_dice,
-            "crop_dice": crop_dice,
-            "edge_jaccard": edge_jaccard,
-            "crop_jaccard": crop_jaccard,
             "score": total_score,
         }
 
-        if predictions["crop_type"] is not None:
-            crop_type_ypred = self.probas_to_labels(
-                self.logits_to_probas(predictions["crop_type"])
-            )
-            crop_type_score = self.crop_type_f1(
-                crop_type_ypred, true_labels_dict["true_crop_type"]
-            )
-            metrics["crop_type_f1"] = crop_type_score
+        metrics.update(loss_report)
 
         return metrics
 
     def validation_step(self, batch: Data, batch_idx: int = None) -> dict:
         """Executes one valuation step."""
+
         eval_metrics = self._shared_eval_step(batch, batch_idx)
 
         metrics = {
@@ -576,9 +662,12 @@ class LightningModuleMixin(LightningModule):
             "vmae": eval_metrics["dist_mae"],
             "val_score": eval_metrics["score"],
             "val_loss": eval_metrics["loss"],
+            "val_dloss": eval_metrics["dloss"],
+            "val_eloss": eval_metrics["eloss"],
+            "val_closs": eval_metrics["closs"],
+            "val_ebloss": eval_metrics["ebloss"],
+            "val_cbloss": eval_metrics["cbloss"],
         }
-        if "crop_type_f1" in eval_metrics:
-            metrics["vctf1"] = eval_metrics["crop_type_f1"]
 
         self.log_dict(
             metrics,
@@ -619,6 +708,7 @@ class LightningModuleMixin(LightningModule):
 
     def test_step(self, batch: Data, batch_idx: int = None) -> dict:
         """Executes one test step."""
+
         eval_metrics = self._shared_eval_step(batch, batch_idx)
 
         metrics = {
@@ -643,91 +733,62 @@ class LightningModuleMixin(LightningModule):
         return metrics
 
     def configure_scorer(self):
-        self.dist_mae = torchmetrics.MeanAbsoluteError()
-        self.dist_mse = torchmetrics.MeanSquaredError()
-        self.edge_f1 = torchmetrics.F1Score(
-            task="multiclass", num_classes=2, average="weighted"
+        """The fβ value.
+
+        To put equal weight on precision and recall, set to 1. To emphasize
+        minimizing false positives, set to <1. To emphasize minimizing false
+        negatives, set to >1.
+        """
+
+        self.mae_scorer = torchmetrics.MeanAbsoluteError()
+        self.mse_scorer = torchmetrics.MeanSquaredError()
+        self.f_beta_scorer = torchmetrics.FBetaScore(
+            task="multiclass", num_classes=2, beta=2.0
         )
-        self.crop_f1 = torchmetrics.F1Score(
-            task="multiclass", num_classes=2, average="weighted"
-        )
-        self.edge_mcc = torchmetrics.MatthewsCorrCoef(
+        self.mcc_scorer = torchmetrics.MatthewsCorrCoef(
             task="multiclass", num_classes=2
         )
-        self.crop_mcc = torchmetrics.MatthewsCorrCoef(
-            task="multiclass", num_classes=2
-        )
-        self.edge_dice = torchmetrics.Dice(num_classes=2, average="macro")
-        self.crop_dice = torchmetrics.Dice(num_classes=2, average="macro")
-        self.edge_jaccard = torchmetrics.JaccardIndex(
-            task="multiclass", num_classes=2, average="weighted"
-        )
-        self.crop_jaccard = torchmetrics.JaccardIndex(
-            task="multiclass", num_classes=2, average="weighted"
-        )
-        if self.num_classes > 2:
-            self.crop_type_f1 = torchmetrics.F1Score(
-                num_classes=self.num_classes,
-                task="multiclass",
-                average="weighted",
-                ignore_index=0,
-            )
+
+    def calc_weights(self, counts: torch.Tensor) -> torch.Tensor:
+        """Calculates class weights."""
+
+        num_samples = counts.sum()
+        num_classes = len(counts)
+        class_weights = num_samples / (num_classes * counts)
+        weights = torch.nan_to_num(class_weights, nan=0, neginf=0, posinf=0)
+
+        return weights
 
     def configure_loss(self):
-        # Distance loss
-        self.dist_loss = self.loss_dict[self.loss_name].get("regression")
-        # Edge loss
-        self.edge_loss = self.loss_dict[self.loss_name].get("classification")
-        # Crop mask loss
-        self.crop_loss = self.loss_dict[self.loss_name].get("classification")
+        """Configures loss methods."""
 
-        self.cmse_loss = self.loss_dict[LossTypes.CLASS_BALANCED_MSE].get(
+        # # Weights for crop AND edge
+        # crop_and_edge_counts = torch.zeros(2, device=self.class_counts.device)
+        # crop_and_edge_counts[0] = self.class_counts[0]
+        # crop_and_edge_counts[1] = self.class_counts[1:].sum()
+        # self.crop_and_edge_weights = self.calc_weights(crop_and_edge_counts)
+
+        # # Weights for crop OR edge
+        # self.crop_or_edge_weights = self.calc_weights(self.class_counts)
+
+        # # Weights for crop
+        # crop_counts = torch.zeros(2, device=self.class_counts.device)
+        # crop_counts[0] = self.class_counts[0]
+        # crop_counts[1] = self.class_counts[1]
+        # self.crop_weights = self.calc_weights(crop_counts)
+
+        # Main loss
+        self.reg_loss = LOSS_DICT[self.loss_name].get("regression")
+        self.cls_loss = LOSS_DICT[self.loss_name].get("classification")
+
+        # Boundary loss
+        self.boundary_loss = LOSS_DICT[LossTypes.BOUNDARY].get(
             "classification"
         )
-        # self.topo_loss = self.loss_dict[LossTypes.TOPOLOGY].get(
-        #     "classification"
-        # )
-
-        if self.deep_supervision:
-            self.dist_loss_deep_b = self.loss_dict[self.loss_name].get(
-                "regression"
-            )
-            self.edge_loss_deep_b = self.loss_dict[self.loss_name].get(
-                "classification"
-            )
-            self.crop_loss_deep_b = self.loss_dict[self.loss_name].get(
-                "classification"
-            )
-            self.dist_loss_deep_c = self.loss_dict[self.loss_name].get(
-                "regression"
-            )
-            self.edge_loss_deep_c = self.loss_dict[self.loss_name].get(
-                "classification"
-            )
-            self.crop_loss_deep_c = self.loss_dict[self.loss_name].get(
-                "classification"
-            )
-
-        self.classes_l2_loss = None
-        self.classes_last_loss = None
-        if not self.is_transfer_model:
-            # Crop Temporal encoding losses
-            self.classes_l2_loss = self.loss_dict[self.loss_name].get(
-                "classification"
-            )
-            self.classes_last_loss = self.loss_dict[self.loss_name].get(
-                "classification"
-            )
-
-        if self.num_classes > 2:
-            self.crop_type_star_loss = self.loss_dict[self.loss_name].get(
-                "classification"
-            )
-            self.crop_type_loss = self.loss_dict[self.loss_name].get(
-                "classification"
-            )
 
     def configure_optimizers(self):
+        """Configures optimizers."""
+
         params_list = list(self.cultionet_model.parameters())
         interval = 'epoch'
         if self.optimizer == "AdamW":
@@ -800,7 +861,7 @@ class CultionetLitTransferModel(LightningModuleMixin):
         activation_type: str = "SiLU",
         dilations: T.Union[int, T.Sequence[int]] = None,
         res_block_type: str = ResBlockTypes.RESA,
-        attention_weights: str = "spatial_channel",
+        attention_weights: str = AttentionTypes.NATTEN,
         optimizer: str = "AdamW",
         loss_name: str = LossTypes.TANIMOTO_COMPLEMENT,
         learning_rate: float = 0.01,
@@ -810,8 +871,6 @@ class CultionetLitTransferModel(LightningModuleMixin):
         eps: float = 1e-4,
         ckpt_name: str = ModelNames.CKPT_TRANSFER_NAME.replace(".ckpt", ""),
         model_name: str = "cultionet_transfer",
-        deep_supervision: bool = False,
-        pool_attention: bool = False,
         pool_by_max: bool = False,
         repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
@@ -821,7 +880,7 @@ class CultionetLitTransferModel(LightningModuleMixin):
         save_batch_val_metrics: bool = False,
         finetune: T.Optional[str] = None,
     ):
-        super(CultionetLitTransferModel, self).__init__()
+        super().__init__()
 
         self.save_hyperparameters()
 
@@ -840,48 +899,12 @@ class CultionetLitTransferModel(LightningModuleMixin):
         self.scale_pos_weight = scale_pos_weight
         self.save_batch_val_metrics = save_batch_val_metrics
         self.finetune = finetune
-        self.deep_supervision = deep_supervision
         self.train_maskrcnn = None
 
-        self.sigmoid = torch.nn.Sigmoid()
         if edge_class is not None:
             self.edge_class = edge_class
         else:
             self.edge_class = num_classes
-
-        self.loss_dict = {
-            LossTypes.CLASS_BALANCED_MSE: {
-                "classification": cnetlosses.ClassBalancedMSELoss(),
-            },
-            LossTypes.TANIMOTO_COMPLEMENT: {
-                "classification": cnetlosses.TanimotoComplementLoss(),
-                "regression": cnetlosses.TanimotoComplementLoss(
-                    one_hot_targets=False
-                ),
-            },
-            LossTypes.TANIMOTO: {
-                "classification": cnetlosses.TanimotoDistLoss(),
-                "regression": cnetlosses.TanimotoDistLoss(
-                    one_hot_targets=False
-                ),
-            },
-            LossTypes.TANIMOTO_COMBINED: {
-                "classification": cnetlosses.CombinedLoss(
-                    losses=[
-                        cnetlosses.TanimotoDistLoss(),
-                        cnetlosses.TanimotoComplementLoss(),
-                    ],
-                ),
-                "regression": cnetlosses.CombinedLoss(
-                    losses=[
-                        cnetlosses.TanimotoDistLoss(one_hot_targets=False),
-                        cnetlosses.TanimotoComplementLoss(
-                            one_hot_targets=False
-                        ),
-                    ],
-                ),
-            },
-        }
 
         self.cultionet_model = CultionetLitModel.load_from_checkpoint(
             checkpoint_path=str(pretrained_ckpt_file)
@@ -895,58 +918,47 @@ class CultionetLitTransferModel(LightningModuleMixin):
             if self.finetune == "fc":
                 # Unfreeze fully connected layers
                 for name, param in self.cultionet_model.named_parameters():
-                    if name.startswith("temporal_encoder.final_"):
-                        param.requires_grad = True
                     if name.startswith("mask_model.final_"):
                         param.requires_grad = True
 
             else:
-                # Set new final layers to learn new weights
-                temporal_encoder_final = TemporalTransformerFinal(
-                    hidden_channels=hidden_channels,
-                    d_model=self.cultionet_model.temporal_encoder.d_model,
-                    num_classes_l2=self.cultionet_model.temporal_encoder.num_classes_l2,
-                    num_classes_last=self.cultionet_model.temporal_encoder.num_classes_last,
-                    activation_type=activation_type,
-                    final_activation=nn.Softmax(dim=1),
-                )
-                temporal_encoder_final.apply(init_attention_weights)
-                self.cultionet_model.temporal_encoder.final = (
-                    temporal_encoder_final
-                )
 
                 # Update the post-UNet layer with trainable parameters
                 mask_model_final_a = cunn.TowerUNetFinal(
                     in_channels=self.cultionet_model.mask_model.final_a.in_channels,
                     num_classes=self.cultionet_model.mask_model.final_a.num_classes,
-                    mask_activation=self.cultionet_model.mask_model.final_a.mask_activation,
                     activation_type=activation_type,
                 )
                 mask_model_final_a.apply(init_conv_weights)
                 self.cultionet_model.mask_model.final_a = mask_model_final_a
 
-                if self.deep_supervision:
-                    mask_model_final_b = cunn.TowerUNetFinal(
-                        in_channels=self.cultionet_model.mask_model.final_b.in_channels,
-                        num_classes=self.cultionet_model.mask_model.final_b.num_classes,
-                        mask_activation=self.cultionet_model.mask_model.final_b.mask_activation,
-                        activation_type=activation_type,
-                    )
-                    mask_model_final_b.apply(init_conv_weights)
-                    self.cultionet_model.mask_model.final_b = (
-                        mask_model_final_b
-                    )
+                mask_model_final_b = cunn.TowerUNetFinal(
+                    in_channels=self.cultionet_model.mask_model.final_b.in_channels,
+                    num_classes=self.cultionet_model.mask_model.final_b.num_classes,
+                    activation_type=activation_type,
+                    resample_factor=2,
+                )
+                mask_model_final_b.apply(init_conv_weights)
+                self.cultionet_model.mask_model.final_b = mask_model_final_b
 
-                    mask_model_final_c = cunn.TowerUNetFinal(
-                        in_channels=self.cultionet_model.mask_model.final_c.in_channels,
-                        num_classes=self.cultionet_model.mask_model.final_c.num_classes,
-                        mask_activation=self.cultionet_model.mask_model.final_c.mask_activation,
-                        activation_type=activation_type,
-                    )
-                    mask_model_final_c.apply(init_conv_weights)
-                    self.cultionet_model.mask_model.final_c = (
-                        mask_model_final_c
-                    )
+                mask_model_final_c = cunn.TowerUNetFinal(
+                    in_channels=self.cultionet_model.mask_model.final_c.in_channels,
+                    num_classes=self.cultionet_model.mask_model.final_c.num_classes,
+                    activation_type=activation_type,
+                    resample_factor=4,
+                )
+                mask_model_final_c.apply(init_conv_weights)
+                self.cultionet_model.mask_model.final_c = mask_model_final_c
+
+                mask_model_final_combine = cunn.TowerUNetFinalCombine(
+                    num_classes=self.cultionet_model.mask_model.final_combine.num_classes,
+                    edge_activation=self.cultionet_model.mask_model.final_combine.edge_activation,
+                    mask_activation=self.cultionet_model.mask_model.final_combine.mask_activation,
+                )
+                mask_model_final_combine.apply(init_conv_weights)
+                self.cultionet_model.mask_model.final_combine = (
+                    mask_model_final_combine
+                )
 
         self.model_attr = f"{model_name}_{model_type}"
         setattr(
@@ -985,7 +997,7 @@ class CultionetLitModel(LightningModuleMixin):
         activation_type: str = "SiLU",
         dilations: T.Union[int, T.Sequence[int]] = None,
         res_block_type: str = ResBlockTypes.RESA,
-        attention_weights: str = "spatial_channel",
+        attention_weights: str = AttentionTypes.NATTEN,
         optimizer: str = "AdamW",
         loss_name: str = LossTypes.TANIMOTO_COMPLEMENT,
         learning_rate: float = 0.01,
@@ -995,8 +1007,6 @@ class CultionetLitModel(LightningModuleMixin):
         eps: float = 1e-4,
         ckpt_name: str = "last",
         model_name: str = "cultionet",
-        deep_supervision: bool = False,
-        pool_attention: bool = False,
         pool_by_max: bool = False,
         repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
@@ -1008,7 +1018,7 @@ class CultionetLitModel(LightningModuleMixin):
     ):
         """Lightning model."""
 
-        super(CultionetLitModel, self).__init__()
+        super().__init__()
 
         self.save_hyperparameters()
 
@@ -1026,50 +1036,18 @@ class CultionetLitModel(LightningModuleMixin):
         self.class_counts = class_counts
         self.scale_pos_weight = scale_pos_weight
         self.save_batch_val_metrics = save_batch_val_metrics
-        self.deep_supervision = deep_supervision
         self.train_maskrcnn = train_maskrcnn
 
-        self.sigmoid = torch.nn.Sigmoid()
         if edge_class is not None:
             self.edge_class = edge_class
         else:
             self.edge_class = num_classes
 
-        self.loss_dict = {
-            LossTypes.CLASS_BALANCED_MSE: {
-                "classification": cnetlosses.ClassBalancedMSELoss(),
-            },
-            LossTypes.TANIMOTO_COMPLEMENT: {
-                "classification": cnetlosses.TanimotoComplementLoss(),
-                "regression": cnetlosses.TanimotoComplementLoss(
-                    one_hot_targets=False
-                ),
-            },
-            LossTypes.TANIMOTO: {
-                "classification": cnetlosses.TanimotoDistLoss(),
-                "regression": cnetlosses.TanimotoDistLoss(
-                    one_hot_targets=False
-                ),
-            },
-            LossTypes.TANIMOTO_COMBINED: {
-                "classification": cnetlosses.CombinedLoss(
-                    losses=[
-                        cnetlosses.TanimotoDistLoss(),
-                        cnetlosses.TanimotoComplementLoss(),
-                    ],
-                ),
-                "regression": cnetlosses.CombinedLoss(
-                    losses=[
-                        cnetlosses.TanimotoDistLoss(one_hot_targets=False),
-                        cnetlosses.TanimotoComplementLoss(
-                            one_hot_targets=False
-                        ),
-                    ],
-                ),
-            },
-        }
-
         if self.train_maskrcnn:
+            warnings.warn(
+                'RCNN in cultionet is experimental and not well tested.'
+            )
+
             self.mask_rcnn_model = BFasterRCNN(
                 in_channels=3,
                 out_channels=hidden_channels * 2,
@@ -1096,8 +1074,6 @@ class CultionetLitModel(LightningModuleMixin):
                 dilations=dilations,
                 res_block_type=res_block_type,
                 attention_weights=attention_weights,
-                deep_supervision=deep_supervision,
-                pool_attention=pool_attention,
                 pool_by_max=pool_by_max,
                 repeat_resa_kernel=repeat_resa_kernel,
                 batchnorm_first=batchnorm_first,
