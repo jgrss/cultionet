@@ -29,7 +29,6 @@ def test_tower_unet():
         res_block_type=ResBlockTypes.RESA,
         attention_weights=AttentionTypes.SPATIAL_CHANNEL,
         pool_by_max=False,
-        repeat_resa_kernel=False,
         batchnorm_first=True,
     )
 

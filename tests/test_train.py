@@ -85,7 +85,6 @@ def test_train():
             dilations=[1, 2],
             dropout=0.2,
             pool_by_max=True,
-            repeat_resa_kernel=False,
             batchnorm_first=True,
             epochs=1,
             device="cpu",
