@@ -14,6 +14,7 @@ from .convolution import (
     ResidualAConv,
     ResidualConv,
 )
+from .geo_encoding import GeoEmbeddings
 
 NATTEN_PARAMS = {
     "a": {
@@ -95,28 +96,6 @@ class SigmoidCrisp(nn.Module):
         out = F.sigmoid(out)
 
         return out
-
-
-class GeoEmbeddings(nn.Module):
-    def __init__(self, channels: int):
-        super().__init__()
-
-        self.coord_embedding = nn.Linear(3, channels)
-
-    @torch.no_grad
-    def decimal_degrees_to_cartesian(
-        self, degrees: torch.Tensor
-    ) -> torch.Tensor:
-        radians = torch.deg2rad(degrees)
-        cosine = torch.cos(radians)
-        sine = torch.sin(radians)
-        x = cosine[:, 1] * cosine[:, 0]
-        y = cosine[:, 1] * sine[:, 0]
-
-        return torch.stack([x, y, sine[:, 1]], dim=-1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.coord_embedding(self.decimal_degrees_to_cartesian(x))
 
 
 class TowerUNetFinalCombine(nn.Module):
@@ -269,11 +248,6 @@ class TowerUNetFinal(nn.Module):
                 padding=1,
             )
 
-        # TODO: make optional
-        self.geo_embeddings = torch.compile(GeoEmbeddings(in_channels))
-        # self.geo_embeddings4 = SphericalHarmonics(out_channels=in_channels, legendre_polys=4)
-        # self.geo_embeddings8 = SphericalHarmonics(out_channels=in_channels, legendre_polys=8)
-
         # Hidden -> 3 -> 3 -> 1
         self.dist_conv = StreamConv2d(
             in_channels=in_channels,
@@ -307,25 +281,11 @@ class TowerUNetFinal(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        latlon_coords: T.Optional[torch.Tensor] = None,
         size: T.Optional[torch.Size] = None,
         suffix: str = "",
     ) -> T.Dict[str, torch.Tensor]:
         if size is not None:
             x = self.up_conv(x, size=size)
-
-        # Embed coordinates
-        if latlon_coords is not None:
-            latlon_coords = latlon_coords.to(dtype=x.dtype)
-            x = x + rearrange(
-                self.geo_embeddings(latlon_coords), 'b c -> b c 1 1'
-            )
-
-        # dist_out = self.final_dist(x)
-        # x = torch.cat([x, dist_out], dim=1)
-        # edge_out = self.final_edge(x)
-        # x = torch.cat([x, edge_out], dim=1)
-        # mask_out = self.final_mask(x)
 
         # Separate hidden into task streams
         # H -> 3 -> 1
@@ -360,7 +320,6 @@ class UNetUpBlock(nn.Module):
         activation_type: str = "SiLU",
         res_block_type: str = ResBlockTypes.RESA,
         dilations: T.Sequence[int] = None,
-        repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
         resample_up: bool = True,
         natten_num_heads: int = 8,
@@ -398,7 +357,6 @@ class UNetUpBlock(nn.Module):
                 out_channels,
                 kernel_size=kernel_size,
                 dilations=dilations,
-                repeat_kernel=repeat_resa_kernel,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
                 batchnorm_first=batchnorm_first,
@@ -426,7 +384,6 @@ class TowerUNetEncoder(nn.Module):
         res_block_type: str = ResBlockTypes.RESA,
         attention_weights: str = AttentionTypes.NATTEN,
         pool_by_max: bool = False,
-        repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
     ):
         super().__init__()
@@ -445,7 +402,6 @@ class TowerUNetEncoder(nn.Module):
             in_channels=channels[0],
             out_channels=channels[0],
             dilations=dilations,
-            repeat_resa_kernel=repeat_resa_kernel,
             pool_first=False,
             # Attention applied at 1/1 spatial resolution
             attention_weights=attention_weights,
@@ -454,8 +410,7 @@ class TowerUNetEncoder(nn.Module):
         self.down_b = PoolResidualConv(
             in_channels=channels[0],
             out_channels=channels[1],
-            dilations=dilations,
-            repeat_resa_kernel=repeat_resa_kernel,
+            dilations=dilations[:3],
             # Attention applied at 1/2 spatial resolution
             attention_weights=attention_weights,
             **{**backbone_kwargs, **NATTEN_PARAMS["b"]},
@@ -464,7 +419,6 @@ class TowerUNetEncoder(nn.Module):
             channels[1],
             channels[2],
             dilations=dilations[:2],
-            repeat_resa_kernel=repeat_resa_kernel,
             # Attention applied at 1/4 spatial resolution
             attention_weights=attention_weights,
             **{**backbone_kwargs, **NATTEN_PARAMS["c"]},
@@ -475,7 +429,6 @@ class TowerUNetEncoder(nn.Module):
             kernel_size=1,
             num_blocks=1,
             dilations=[1],
-            repeat_resa_kernel=repeat_resa_kernel,
             # Attention applied at 1/8 spatial resolution
             attention_weights=None,
             **backbone_kwargs,
@@ -506,7 +459,6 @@ class TowerUNetDecoder(nn.Module):
         dropout: float = 0.0,
         res_block_type: str = ResBlockTypes.RESA,
         attention_weights: str = AttentionTypes.NATTEN,
-        repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
     ):
         super().__init__()
@@ -515,7 +467,6 @@ class TowerUNetDecoder(nn.Module):
         up_kwargs = dict(
             activation_type=activation_type,
             res_block_type=res_block_type,
-            repeat_resa_kernel=repeat_resa_kernel,
             batchnorm_first=batchnorm_first,
             natten_attn_drop=dropout,
             natten_proj_drop=dropout,
@@ -542,7 +493,7 @@ class TowerUNetDecoder(nn.Module):
         self.up_bu = UNetUpBlock(
             in_channels=up_channels,
             out_channels=up_channels,
-            dilations=dilations,
+            dilations=dilations[:3],
             # Attention applied at 1/2 spatial resolution
             attention_weights=attention_weights,
             **{**up_kwargs, **NATTEN_PARAMS["b"]},
@@ -584,8 +535,8 @@ class TowerUNetFusion(nn.Module):
         dropout: float = 0.0,
         res_block_type: str = ResBlockTypes.RESA,
         attention_weights: str = AttentionTypes.NATTEN,
-        repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
+        use_latlon: bool = False,
     ):
         super().__init__()
 
@@ -595,11 +546,11 @@ class TowerUNetFusion(nn.Module):
             out_channels=up_channels,
             activation_type=activation_type,
             res_block_type=res_block_type,
-            repeat_resa_kernel=repeat_resa_kernel,
             batchnorm_first=batchnorm_first,
             attention_weights=attention_weights,
             natten_attn_drop=dropout,
             natten_proj_drop=dropout,
+            use_latlon=use_latlon,
         )
         self.tower_c = TowerUNetBlock(
             backbone_side_channels=channels[2],
@@ -626,13 +577,16 @@ class TowerUNetFusion(nn.Module):
         self,
         encoded: T.Dict[str, torch.Tensor],
         decoded: T.Dict[str, torch.Tensor],
+        latlon_coords: T.Optional[torch.Tensor] = None,
     ) -> T.Dict[str, torch.Tensor]:
+
         # Central towers
         x_tower_c = self.tower_c(
             backbone_side=encoded["x_c"],
             backbone_down=encoded["x_d"],
             decode_side=decoded["x_cu"],
             decode_down=decoded["x_du"],
+            latlon_coords=latlon_coords,
         )
         x_tower_b = self.tower_b(
             backbone_side=encoded["x_b"],
@@ -640,6 +594,7 @@ class TowerUNetFusion(nn.Module):
             decode_side=decoded["x_bu"],
             decode_down=decoded["x_cu"],
             tower_down=x_tower_c,
+            latlon_coords=latlon_coords,
         )
         x_tower_a = self.tower_a(
             backbone_side=encoded["x_a"],
@@ -647,6 +602,7 @@ class TowerUNetFusion(nn.Module):
             decode_side=decoded["x_au"],
             decode_down=decoded["x_bu"],
             tower_down=x_tower_b,
+            latlon_coords=latlon_coords,
         )
 
         return {
@@ -669,7 +625,6 @@ class TowerUNetBlock(nn.Module):
         attention_weights: T.Optional[str] = None,
         res_block_type: str = ResBlockTypes.RESA,
         dilations: T.Sequence[int] = None,
-        repeat_resa_kernel: bool = False,
         activation_type: str = "SiLU",
         batchnorm_first: bool = False,
         natten_num_heads: int = 8,
@@ -677,8 +632,11 @@ class TowerUNetBlock(nn.Module):
         natten_dilation: int = 1,
         natten_attn_drop: float = 0.0,
         natten_proj_drop: float = 0.0,
+        use_latlon: bool = False,
     ):
         super().__init__()
+
+        self.use_latlon = use_latlon
 
         assert res_block_type in (
             ResBlockTypes.RES,
@@ -715,6 +673,14 @@ class TowerUNetBlock(nn.Module):
             )
             in_channels += up_channels
 
+        if self.use_latlon:
+            # TODO: make optional
+            self.geo_embeddings = torch.compile(GeoEmbeddings(up_channels))
+            # self.geo_embeddings4 = SphericalHarmonics(out_channels=in_channels, legendre_polys=4)
+            # self.geo_embeddings8 = SphericalHarmonics(out_channels=in_channels, legendre_polys=8)
+
+            in_channels += up_channels
+
         if res_block_type == ResBlockTypes.RES:
 
             self.res_conv = ResidualConv(
@@ -735,7 +701,6 @@ class TowerUNetBlock(nn.Module):
                 kernel_size=kernel_size,
                 num_blocks=num_blocks,
                 dilations=dilations,
-                repeat_kernel=repeat_resa_kernel,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
                 batchnorm_first=batchnorm_first,
@@ -753,7 +718,9 @@ class TowerUNetBlock(nn.Module):
         decode_side: torch.Tensor,
         decode_down: torch.Tensor,
         tower_down: T.Optional[torch.Tensor] = None,
+        latlon_coords: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+
         backbone_down = self.backbone_down_conv(
             backbone_down,
             size=decode_side.shape[-2:],
@@ -767,6 +734,20 @@ class TowerUNetBlock(nn.Module):
             (backbone_side, backbone_down, decode_side, decode_down),
             dim=1,
         )
+
+        # Embed coordinates
+        if self.use_latlon:
+            assert latlon_coords is not None, "No lat/lon coordinates given."
+
+            latlon_coords = rearrange(
+                self.geo_embeddings(latlon_coords.to(dtype=x.dtype)),
+                'b c -> b c 1 1',
+            )
+
+            _, _, height, width = x.shape
+            x = torch.cat(
+                (x, latlon_coords.expand(-1, -1, height, width)), dim=1
+            )
 
         if tower_down is not None:
             tower_down = self.tower_conv(
