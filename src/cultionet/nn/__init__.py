@@ -8,9 +8,10 @@ from .modules.convolution import (
     PoolResidualConv,
     ResidualAConv,
     ResidualConv,
+    SqueezeAndExcitation,
 )
 from .modules.dropout import DropPath
-from .modules.kernels import Peaks3d, Trend3d
+from .modules.geo_encoding import GeoEmbeddings
 from .modules.reshape import UpSample
 from .modules.unet_parts import (
     TowerUNetBlock,
@@ -28,14 +29,14 @@ __all__ = [
     'DropPath',
     'FinalConv2dDropout',
     'FractalAttention',
-    'Peaks3d',
+    'GeoEmbeddings',
     'PoolConv',
     'PoolResidualConv',
     'ResidualAConv',
     'ResidualConv',
     'SetActivation',
     'SpatialChannelAttention',
-    'Trend3d',
+    'SqueezeAndExcitation',
     'UpSample',
     'TowerUNetFinal',
     'TowerUNetFinalCombine',
