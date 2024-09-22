@@ -3,6 +3,7 @@ import typing as T
 import einops
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .activations import SetActivation
 from .reshape import UpSample
@@ -199,7 +200,7 @@ class FractalTanimoto(nn.Module):
 
 
 class FractalAttention(nn.Module):
-    """Fractal Tanimoto Attention Layer (FracTAL)
+    r"""Fractal Tanimoto Attention Layer (FracTAL)
 
     Adapted from publication and source code below:
 
@@ -224,7 +225,18 @@ class FractalAttention(nn.Module):
         USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
         Reference:
-            https://www.mdpi.com/2072-4292/13/18/3707
+            @article{diakogiannis_etal_2021,
+                title={Looking for change? Roll the dice and demand attention},
+                author={Diakogiannis, Foivos I and Waldner, Fran{\c{c}}ois and Caccetta, Peter},
+                journal={Remote Sensing},
+                volume={13},
+                number={18},
+                pages={3707},
+                year={2021},
+                publisher={MDPI},
+                url={https://www.mdpi.com/2072-4292/13/18/3707},
+            }
+
             https://arxiv.org/pdf/2009.02062.pdf
             https://github.com/waldnerf/decode/blob/9e922a2082e570e248eaee10f7a1f2f0bd852b42/FracTAL_ResUNet/nn/units/fractal_resnet.py
             https://github.com/waldnerf/decode/blob/9e922a2082e570e248eaee10f7a1f2f0bd852b42/FracTAL_ResUNet/nn/layers/attention.py
@@ -276,12 +288,10 @@ class FractalAttention(nn.Module):
         )
         self.norm = nn.BatchNorm2d(out_channels)
 
-    def forward(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
-    ) -> torch.Tensor:
-        q = self.query(q)
-        k = self.key(k)
-        v = self.value(v)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        q = self.query(x)
+        k = self.key(x)
+        v = self.value(x)
 
         attention_spatial = self.spatial_sim(q, k)
         v_spatial = attention_spatial * v
@@ -296,16 +306,34 @@ class FractalAttention(nn.Module):
 
 
 class ChannelAttention(nn.Module):
-    def __init__(self, out_channels: int, activation_type: str):
+    def __init__(
+        self, in_channels: int, out_channels: int, activation_type: str
+    ):
         super().__init__()
 
         # Channel attention
         self.channel_adaptive_avg = nn.AdaptiveAvgPool2d(1)
         self.channel_adaptive_max = nn.AdaptiveMaxPool2d(1)
-        self.sigmoid = nn.Sigmoid()
-        self.seq = nn.Sequential(
+        self.fc1 = nn.Sequential(
             nn.Conv2d(
-                in_channels=out_channels,
+                in_channels=in_channels,
+                out_channels=out_channels // 2,
+                kernel_size=1,
+                padding=0,
+                bias=False,
+            ),
+            SetActivation(activation_type=activation_type),
+            nn.Conv2d(
+                in_channels=out_channels // 2,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding=0,
+                bias=False,
+            ),
+        )
+        self.fc2 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=in_channels,
                 out_channels=out_channels // 2,
                 kernel_size=1,
                 padding=0,
@@ -322,12 +350,14 @@ class ChannelAttention(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        avg_attention = self.seq(self.channel_adaptive_avg(x))
-        max_attention = self.seq(self.channel_adaptive_max(x))
-        attention = avg_attention + max_attention
-        attention = self.sigmoid(attention)
+        _, _, height, width = x.shape
 
-        return attention.expand_as(x)
+        avg_attention = self.fc1(self.channel_adaptive_avg(x))
+        max_attention = self.fc2(self.channel_adaptive_max(x))
+        attention = avg_attention + max_attention
+        attention = F.sigmoid(attention)
+
+        return attention.expand(-1, -1, height, width)
 
 
 class SpatialAttention(nn.Module):
@@ -342,16 +372,16 @@ class SpatialAttention(nn.Module):
             bias=False,
         )
 
-        self.sigmoid = nn.Sigmoid()
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        _, _, height, width = x.shape
+
         avg_attention = einops.reduce(x, 'b c h w -> b 1 h w', 'mean')
         max_attention = einops.reduce(x, 'b c h w -> b 1 h w', 'max')
         attention = torch.cat([avg_attention, max_attention], dim=1)
         attention = self.conv(attention)
-        attention = self.sigmoid(attention)
+        attention = F.sigmoid(attention)
 
-        return attention.expand_as(x)
+        return attention.expand(-1, -1, height, width)
 
 
 class SpatialChannelAttention(nn.Module):
@@ -364,11 +394,15 @@ class SpatialChannelAttention(nn.Module):
         https://github.com/luuuyi/CBAM.PyTorch/blob/master/model/resnet_cbam.py
     """
 
-    def __init__(self, out_channels: int, activation_type: str):
+    def __init__(
+        self, in_channels: int, out_channels: int, activation_type: str
+    ):
         super().__init__()
 
         self.channel_attention = ChannelAttention(
-            out_channels=out_channels, activation_type=activation_type
+            in_channels=in_channels,
+            out_channels=out_channels,
+            activation_type=activation_type,
         )
         self.spatial_attention = SpatialAttention()
 
