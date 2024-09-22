@@ -77,7 +77,6 @@ class CultionetParams:
     ckpt_name: str = attr.ib(converter=str, default="last")
     model_name: str = attr.ib(converter=str, default="cultionet")
     pool_by_max: bool = attr.ib(default=False)
-    repeat_resa_kernel: bool = attr.ib(default=False)
     batchnorm_first: bool = attr.ib(default=False)
     scale_pos_weight: bool = attr.ib(default=False)
     save_batch_val_metrics: bool = attr.ib(default=False)
@@ -161,7 +160,6 @@ class CultionetParams:
             ckpt_name=self.ckpt_name,
             model_name=self.model_name,
             pool_by_max=self.pool_by_max,
-            repeat_resa_kernel=self.repeat_resa_kernel,
             batchnorm_first=self.batchnorm_first,
             class_counts=self.class_counts,
             edge_class=self.edge_class,
