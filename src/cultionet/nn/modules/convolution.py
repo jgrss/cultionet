@@ -18,7 +18,38 @@ from ..functional import check_upsample
 from .activations import SetActivation
 from .attention import FractalAttention, SpatialChannelAttention
 from .dropout import DropPath
-from .reshape import UpSample
+
+
+class SqueezeAndExcitation(nn.Module):
+    """Squeeze and excitation layer.
+
+    Reference:
+        @inproceedings{hu2018squeeze,
+            title={Squeeze-and-excitation networks},
+            author={Hu, Jie and Shen, Li and Sun, Gang},
+            booktitle={Proceedings of the IEEE conference on computer vision and pattern recognition},
+            pages={7132--7141},
+            year={2018},
+            url={https://arxiv.org/abs/1709.01507},
+        }
+    """
+
+    def __init__(self, in_channels: int, squeeze_channels: int):
+        super().__init__()
+
+        self.squeeze = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(in_channels, squeeze_channels, 1),
+            nn.ReLU(inplace=False),
+            nn.Conv2d(squeeze_channels, in_channels, 1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        scale = self.squeeze(x)
+        out = scale * x
+
+        return out
 
 
 class ConvTranspose2d(nn.Module):
@@ -155,80 +186,6 @@ class DoubleConv(nn.Module):
         return self.seq(x)
 
 
-class AtrousPyramidPooling(nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        dilation_b: int = 2,
-        dilation_c: int = 3,
-        dilation_d: int = 4,
-    ):
-        super().__init__()
-
-        self.up = UpSample()
-
-        self.pool_a = nn.AdaptiveAvgPool2d((1, 1))
-        self.pool_b = nn.AdaptiveAvgPool2d((2, 2))
-        self.pool_c = nn.AdaptiveAvgPool2d((4, 4))
-        self.pool_d = nn.AdaptiveAvgPool2d((8, 8))
-
-        self.conv_a = ConvBlock2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=1,
-            padding=0,
-            add_activation=False,
-        )
-        self.conv_b = ConvBlock2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=3,
-            padding=dilation_b,
-            dilation=dilation_b,
-            add_activation=False,
-        )
-        self.conv_c = ConvBlock2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=3,
-            padding=dilation_c,
-            dilation=dilation_c,
-            add_activation=False,
-        )
-        self.conv_d = ConvBlock2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=3,
-            padding=dilation_d,
-            dilation=dilation_d,
-            add_activation=False,
-        )
-        self.final = ConvBlock2d(
-            in_channels=int(in_channels * 4) + int(out_channels * 4),
-            out_channels=out_channels,
-            kernel_size=3,
-            padding=1,
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out_pa = self.up(self.pool_a(x), size=x.shape[-2:], mode="bilinear")
-        out_pb = self.up(self.pool_b(x), size=x.shape[-2:], mode="bilinear")
-        out_pc = self.up(self.pool_c(x), size=x.shape[-2:], mode="bilinear")
-        out_pd = self.up(self.pool_d(x), size=x.shape[-2:], mode="bilinear")
-        out_ca = self.conv_a(x)
-        out_cb = self.conv_b(x)
-        out_cc = self.conv_c(x)
-        out_cd = self.conv_d(x)
-        out = torch.cat(
-            [out_pa, out_pb, out_pc, out_pd, out_ca, out_cb, out_cc, out_cd],
-            dim=1,
-        )
-        out = self.final(out)
-
-        return out
-
-
 class PoolConv(nn.Module):
     """Max pooling with (optional) dropout."""
 
@@ -273,67 +230,106 @@ class ResConvBlock2d(nn.Module):
         dilation: int = 1,
         activation_type: str = "SiLU",
         num_blocks: int = 2,
-        repeat_kernel: bool = False,
         batchnorm_first: bool = False,
     ):
         super().__init__()
 
-        assert (
-            0 < num_blocks < 3
-        ), "There must be at least one block but no more than 3."
+        assert num_blocks > 0, "There must be at least one block."
 
-        self.residual_conv = None
         if in_channels != out_channels:
-            self.residual_conv = ConvBlock2d(
+            self.residual_conv = nn.Conv2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=1,
                 padding=0,
-                dilation=1,
-                activation_type=activation_type,
-                add_activation=True,
-                batchnorm_first=batchnorm_first,
             )
+        else:
+            self.residual_conv = nn.Identity()
 
-        conv_layers = [
-            ConvBlock2d(
-                in_channels=in_channels,
-                out_channels=out_channels,
-                kernel_size=kernel_size,
-                padding=0 if kernel_size == 1 else dilation,
-                dilation=1 if kernel_size == 1 else dilation,
-                activation_type=activation_type,
-                add_activation=True,
-                batchnorm_first=batchnorm_first,
-            )
-        ]
+        conv_layers = []
+        for layer_idx in range(num_blocks):
+            layer_in_channels = in_channels if layer_idx == 0 else out_channels
 
-        if (kernel_size > 1) and (num_blocks > 1):
-            conv_layers += [
+            if layer_idx == 0:
+                layer_padding = 0 if kernel_size == 1 else max(1, dilation - 1)
+                layer_dilation = (
+                    1 if kernel_size == 1 else max(1, dilation - 1)
+                )
+
+            conv_layers.append(
                 ConvBlock2d(
-                    in_channels=out_channels,
+                    in_channels=layer_in_channels,
                     out_channels=out_channels,
                     kernel_size=kernel_size,
-                    padding=max(1, dilation - 1),
-                    dilation=max(1, dilation - 1),
+                    padding=layer_padding,
+                    dilation=layer_dilation,
                     activation_type=activation_type,
                     add_activation=True,
                     batchnorm_first=batchnorm_first,
                 )
-            ]
+            )
+
+        # conv_layers = [
+        #     ConvBlock2d(
+        #         in_channels=in_channels,
+        #         out_channels=out_channels,
+        #         kernel_size=kernel_size,
+        #         padding=0 if kernel_size == 1 else dilation,
+        #         dilation=1 if kernel_size == 1 else dilation,
+        #         activation_type=activation_type,
+        #         add_activation=True,
+        #         batchnorm_first=batchnorm_first,
+        #     )
+        # ]
+
+        # if (kernel_size > 1) and (num_blocks > 1):
+        #     conv_layers += [
+        #         ConvBlock2d(
+        #             in_channels=out_channels,
+        #             out_channels=out_channels,
+        #             kernel_size=kernel_size,
+        #             padding=max(1, dilation - 1),
+        #             dilation=max(1, dilation - 1),
+        #             activation_type=activation_type,
+        #             add_activation=True,
+        #             batchnorm_first=batchnorm_first,
+        #         )
+        #     ]
 
         self.block = nn.ModuleList(conv_layers)
+        # self.conv_se = nn.Sequential(
+        #     ConvBlock2d(
+        #         in_channels=out_channels,
+        #         out_channels=out_channels,
+        #         kernel_size=1,
+        #         padding=0,
+        #         add_activation=False,
+        #         batchnorm_first=batchnorm_first,
+        #     ),
+        #     SqueezeAndExcitation(
+        #         in_channels=out_channels,
+        #         squeeze_channels=out_channels // 16,
+        #     ),
+        # )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.residual_conv is not None:
-            residual = self.residual_conv(x)
-        else:
-            residual = x
+
+        # Identity or skip convolution
+        skip = self.residual_conv(x)
 
         # Nested residual
-        for layer in self.block:
+        for i, layer in enumerate(self.block):
+            if i == 0:
+                residual = skip
+            else:
+                residual = x
+
             x = residual + layer(x)
-            residual = x
+
+        # x --> layer --> add --> layer --> add --> out
+        # |___layer skip___|___layer skip____|       |
+        # |_________________full skip________________|
+        x = skip + x
 
         return x
 
@@ -479,9 +475,8 @@ class ResidualAConv(nn.Module):
         in_channels: int,
         out_channels: int,
         kernel_size: int = 3,
-        dilations: T.List[int] = None,
         num_blocks: int = 2,
-        repeat_kernel: bool = False,
+        dilations: T.Optional[T.List[int]] = None,
         attention_weights: T.Optional[str] = None,
         activation_type: str = "SiLU",
         batchnorm_first: bool = False,
@@ -493,6 +488,9 @@ class ResidualAConv(nn.Module):
         drop_path_p: float = 0.0,
     ):
         super().__init__()
+
+        if dilations is None:
+            dilations = [1, 2]
 
         self.attention_weights = attention_weights
 
@@ -522,6 +520,7 @@ class ResidualAConv(nn.Module):
                     if is_natten_post_017
                     else {"bias": True}
                 )
+
                 self.attention_conv = nn.Sequential(
                     Rearrange('b c h w -> b h w c'),
                     nn.LayerNorm(out_channels),
@@ -550,13 +549,12 @@ class ResidualAConv(nn.Module):
                     )
                 else:
                     self.attention_conv = SpatialChannelAttention(
+                        in_channels=in_channels,
                         out_channels=out_channels,
                         activation_type=activation_type,
                     )
 
-            self.drop_path = (
-                DropPath(p=drop_path_p) if drop_path_p > 0 else nn.Identity()
-            )
+            self.drop_path = DropPath(p=drop_path_p)
 
         self.res_modules = nn.ModuleList(
             [
@@ -567,7 +565,6 @@ class ResidualAConv(nn.Module):
                     dilation=dilation,
                     activation_type=activation_type,
                     num_blocks=num_blocks,
-                    repeat_kernel=repeat_kernel,
                     batchnorm_first=batchnorm_first,
                 )
                 for dilation in dilations
@@ -577,9 +574,6 @@ class ResidualAConv(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.skip(x)
 
-        if self.attention_weights is not None:
-            residual = out
-
         # Resunet-a block takes the same input and
         # sums multiple outputs with varying dilations.
         for layer in self.res_modules:
@@ -588,10 +582,9 @@ class ResidualAConv(nn.Module):
         if self.attention_weights is not None:
             if self.attention_weights == AttentionTypes.NATTEN:
                 # LayerNorm -> Attention
-                out = residual + self.attention_conv(out)
+                out = self.attention_conv(out)
             else:
-                attention = self.attention_conv(out)
-                out = residual + out
+                attention = self.attention_conv(x)
                 out = out * (1.0 + self.gamma * attention)
 
             out = self.drop_path(out)
@@ -624,7 +617,6 @@ class PoolResidualConv(nn.Module):
         activation_type: str = "SiLU",
         res_block_type: str = ResBlockTypes.RESA,
         dilations: T.Sequence[int] = None,
-        repeat_resa_kernel: bool = False,
         pool_first: bool = True,
         pool_by_max: bool = False,
         batchnorm_first: bool = False,
@@ -686,7 +678,6 @@ class PoolResidualConv(nn.Module):
                 kernel_size=kernel_size,
                 dilations=dilations,
                 num_blocks=num_blocks,
-                repeat_kernel=repeat_resa_kernel,
                 attention_weights=attention_weights,
                 activation_type=activation_type,
                 batchnorm_first=batchnorm_first,
@@ -697,12 +688,10 @@ class PoolResidualConv(nn.Module):
                 natten_proj_drop=natten_proj_drop,
             )
 
-        self.dropout_layer = (
-            nn.Dropout2d(p=dropout) if dropout > 0 else nn.Identity()
-        )
+        self.dropout_layer = nn.Dropout2d(p=dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        height, width = x.shape[-2:]
+        _, _, height, width = x.shape
 
         if self.pool_first:
             if self.pool_by_max:
