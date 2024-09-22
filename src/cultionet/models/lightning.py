@@ -245,27 +245,27 @@ class LightningModuleMixin(LightningModule):
                 batch, crop_type=predictions.get(InferenceNames.CROP_TYPE)
             )
 
-            true_edge_distance = torch.where(
-                true_labels_dict[ValidationNames.TRUE_EDGE] == 1,
-                1,
-                torch.where(
-                    true_labels_dict[ValidationNames.TRUE_CROP] == 1,
-                    (1.0 - batch.bdist) ** 20.0,
-                    0,
-                ),
-            )
-            true_crop_distance = torch.where(
-                true_labels_dict[ValidationNames.TRUE_CROP] != 1,
-                0,
-                1.0 - true_edge_distance,
-            )
+            # true_edge_distance = torch.where(
+            #     true_labels_dict[ValidationNames.TRUE_EDGE] == 1,
+            #     1,
+            #     torch.where(
+            #         true_labels_dict[ValidationNames.TRUE_CROP] == 1,
+            #         (1.0 - batch.bdist) ** 20.0,
+            #         0,
+            #     ),
+            # )
+            # true_crop_distance = torch.where(
+            #     true_labels_dict[ValidationNames.TRUE_CROP] != 1,
+            #     0,
+            #     1.0 - true_edge_distance,
+            # )
 
-            true_edge_distance = einops.rearrange(
-                true_edge_distance, 'b h w -> b 1 h w'
-            )
-            true_crop_distance = einops.rearrange(
-                true_crop_distance, 'b h w -> b 1 h w'
-            )
+            # true_edge_distance = einops.rearrange(
+            #     true_edge_distance, 'b h w -> b 1 h w'
+            # )
+            # true_crop_distance = einops.rearrange(
+            #     true_crop_distance, 'b h w -> b 1 h w'
+            # )
 
         loss = 0.0
 
@@ -361,34 +361,32 @@ class LightningModuleMixin(LightningModule):
         )
         loss = loss + crop_loss * weights[InferenceNames.CROP]
 
-        # Boundary loss for edges
-        edge_boundary_loss = self.boundary_loss(
-            # Inputs are probabilities
-            inputs=predictions[InferenceNames.EDGE],
-            # True data are 0-1 continuous
-            targets=true_edge_distance,
-            mask=true_labels_dict[ValidationNames.MASK],
-        )
-        weights["edge_boundary_loss"] = 0.1
-        loss = loss + edge_boundary_loss * weights["edge_boundary_loss"]
+        # # Boundary loss for edges
+        # edge_boundary_loss = self.boundary_loss(
+        #     # Inputs are probabilities
+        #     inputs=predictions[InferenceNames.EDGE],
+        #     # True data are 0-1 continuous
+        #     targets=true_edge_distance,
+        #     mask=true_labels_dict[ValidationNames.MASK],
+        # )
+        # weights["edge_boundary_loss"] = 0.1
+        # loss = loss + edge_boundary_loss * weights["edge_boundary_loss"]
 
-        # Boundary loss for crop
-        crop_boundary_loss = self.boundary_loss(
-            # Inputs are probabilities
-            inputs=predictions[InferenceNames.CROP],
-            # True data are 0-1 continuous
-            targets=true_crop_distance,
-            mask=true_labels_dict[ValidationNames.MASK],
-        )
-        weights["crop_boundary_loss"] = 0.1
-        loss = loss + crop_boundary_loss * weights["crop_boundary_loss"]
+        # # Boundary loss for crop
+        # crop_boundary_loss = self.boundary_loss(
+        #     # Inputs are probabilities
+        #     inputs=predictions[InferenceNames.CROP],
+        #     # True data are 0-1 continuous
+        #     targets=true_crop_distance,
+        #     mask=true_labels_dict[ValidationNames.MASK],
+        # )
+        # weights["crop_boundary_loss"] = 0.1
+        # loss = loss + crop_boundary_loss * weights["crop_boundary_loss"]
 
         loss_report = {
             "dloss": dist_loss,
             "eloss": edge_loss,
             "closs": crop_loss,
-            "ebloss": edge_boundary_loss,
-            "cbloss": crop_boundary_loss,
         }
 
         return loss / sum(weights.values()), loss_report
@@ -665,8 +663,6 @@ class LightningModuleMixin(LightningModule):
             "val_dloss": eval_metrics["dloss"],
             "val_eloss": eval_metrics["eloss"],
             "val_closs": eval_metrics["closs"],
-            "val_ebloss": eval_metrics["ebloss"],
-            "val_cbloss": eval_metrics["cbloss"],
         }
 
         self.log_dict(
@@ -781,23 +777,33 @@ class LightningModuleMixin(LightningModule):
         self.reg_loss = LOSS_DICT[self.loss_name].get("regression")
         self.cls_loss = LOSS_DICT[self.loss_name].get("classification")
 
-        # Boundary loss
-        self.boundary_loss = LOSS_DICT[LossTypes.BOUNDARY].get(
-            "classification"
-        )
-
     def configure_optimizers(self):
         """Configures optimizers."""
 
         params_list = list(self.cultionet_model.parameters())
         interval = 'epoch'
-        if self.optimizer == "AdamW":
+        if self.optimizer == "Adam":
+            optimizer = torch.optim.Adam(
+                params_list,
+                lr=self.learning_rate,
+                eps=self.eps,
+            )
+        elif self.optimizer == "AdamW":
             optimizer = torch.optim.AdamW(
                 params_list,
                 lr=self.learning_rate,
                 weight_decay=self.weight_decay,
                 eps=self.eps,
                 betas=(0.9, 0.98),
+            )
+        elif self.optimizer == "RAdam":
+            optimizer = torch.optim.RAdam(
+                params_list,
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+                decoupled_weight_decay=True,
+                eps=self.eps,
+                betas=(0.9, 0.99),
             )
         elif self.optimizer == "SGD":
             optimizer = torch.optim.SGD(
@@ -872,7 +878,6 @@ class CultionetLitTransferModel(LightningModuleMixin):
         ckpt_name: str = ModelNames.CKPT_TRANSFER_NAME.replace(".ckpt", ""),
         model_name: str = "cultionet_transfer",
         pool_by_max: bool = False,
-        repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
@@ -1008,7 +1013,6 @@ class CultionetLitModel(LightningModuleMixin):
         ckpt_name: str = "last",
         model_name: str = "cultionet",
         pool_by_max: bool = False,
-        repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
         class_counts: T.Optional[torch.Tensor] = None,
         edge_class: T.Optional[int] = None,
@@ -1075,7 +1079,6 @@ class CultionetLitModel(LightningModuleMixin):
                 res_block_type=res_block_type,
                 attention_weights=attention_weights,
                 pool_by_max=pool_by_max,
-                repeat_resa_kernel=repeat_resa_kernel,
                 batchnorm_first=batchnorm_first,
             ),
         )
