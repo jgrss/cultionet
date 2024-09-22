@@ -439,10 +439,10 @@ class EdgeDataset(SpatialDataset):
                 batch.segments = None
                 batch.props = None
 
-        batch.x = torch.log(batch.x * 50.0 + 1.0).clip(1e-9, float('inf'))
+        # batch.x = torch.log(batch.x * 50.0 + 1.0).clip(1e-9, float('inf'))
 
-        if self.norm_values is not None:
-            batch = self.norm_values(batch)
+        # if self.norm_values is not None:
+        #     batch = self.norm_values(batch)
 
         # Get the centroid
         centroid = box(
