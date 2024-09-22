@@ -1087,7 +1087,6 @@ def train_model(args):
         steplr_step_size=args.steplr_step_size,
         weight_decay=args.weight_decay,
         pool_by_max=args.pool_by_max,
-        repeat_resa_kernel=args.repeat_resa_kernel,
         batchnorm_first=args.batchnorm_first,
         scale_pos_weight=args.scale_pos_weight,
         save_batch_val_metrics=args.save_batch_val_metrics,

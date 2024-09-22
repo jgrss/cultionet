@@ -424,18 +424,14 @@ train:
     kwargs:
       default: 'AdamW'
       choices:
+        - 'Adam'
         - 'AdamW'
+        - 'RAdam'
         - 'SGD'
   pool_by_max:
     short: ''
     long: pool-by-max
     help: Whether to apply max pooling before convolution (otherwise, use strided convolution)
-    kwargs:
-      action: store_true
-  repeat_resa_kernel:
-    short: ''
-    long: repeat-resa-kernel
-    help: Whether to repeat the input res-a kernel (otherwise, the first kernel is always 1x1)
     kwargs:
       action: store_true
   batchnorm_first:
