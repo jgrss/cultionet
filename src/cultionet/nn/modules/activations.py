@@ -48,7 +48,12 @@ class SetActivation(nn.Module):
             ), "Swish requires the tensor dimension."
             self.activation = Swish(channels=channels, dims=dims)
         else:
-            self.activation = getattr(torch.nn, activation_type)(inplace=False)
+            try:
+                self.activation = getattr(torch.nn, activation_type)(
+                    inplace=False
+                )
+            except TypeError:
+                self.activation = getattr(torch.nn, activation_type)()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.activation(x)
