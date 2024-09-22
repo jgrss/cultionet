@@ -23,7 +23,6 @@ class CultioNet(nn.Module):
         res_block_type (str): The residual convolution block type.
         attention_weights (str): The attention weight type.
         pool_by_max (bool): Whether to apply max pooling before residual block.
-        repeat_resa_kernel (bool): Whether to repeat the input res-a kernel (otherwise, the first kernel is always 1x1).
         batchnorm_first (bool): Whether to apply BatchNorm2d -> Activation -> Convolution2d. Otherwise,
             apply Convolution2d -> BatchNorm2d -> Activation.
     """
@@ -41,7 +40,6 @@ class CultioNet(nn.Module):
         res_block_type: str = ResBlockTypes.RESA,
         attention_weights: str = AttentionTypes.NATTEN,
         pool_by_max: bool = False,
-        repeat_resa_kernel: bool = False,
         batchnorm_first: bool = False,
     ):
         super().__init__()
@@ -64,8 +62,8 @@ class CultioNet(nn.Module):
             "edge_activation": True,
             "mask_activation": True,
             "pool_by_max": pool_by_max,
-            "repeat_resa_kernel": repeat_resa_kernel,
             "batchnorm_first": batchnorm_first,
+            "use_latlon": False,
         }
 
         assert model_type in (
