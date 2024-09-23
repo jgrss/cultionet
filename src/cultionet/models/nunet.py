@@ -84,7 +84,7 @@ class TowerUNet(nn.Module):
         in_channels: int,
         in_time: int,
         hidden_channels: int = 64,
-        num_classes: int = 2,
+        num_classes: int = 1,
         dilations: T.Optional[T.Sequence[int]] = None,
         activation_type: str = "SiLU",
         dropout: float = 0.0,
