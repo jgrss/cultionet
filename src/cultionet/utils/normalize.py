@@ -123,8 +123,8 @@ class NormValues:
         class_info: T.Dict[str, int],
         num_workers: int = 0,
         centering: str = 'median',
-        lower_quantile: float = 0.3,
-        upper_quantile: float = 0.7,
+        lower_quantile: float = 0.05,
+        upper_quantile: float = 0.95,
     ) -> "NormValues":
         """Calculates dataset statistics."""
 
