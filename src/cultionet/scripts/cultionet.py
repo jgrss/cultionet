@@ -81,8 +81,9 @@ def get_start_end_dates(
 ) -> T.Tuple[str, str]:
     """Gets the start and end dates from user args or from the filenames.
 
-    Returns:
-        str (mm-dd), str (mm-dd)
+    Returns
+    =======
+    str (mm-dd), str (mm-dd)
     """
 
     image_dict = sort_images_by_date(
@@ -460,6 +461,7 @@ def predict_image(args):
 
     ds = EdgeDataset(
         root=ppaths.predict_path,
+        log_transform=args.log_transform,
         norm_values=norm_values,
         pattern=f"{args.region}_{args.start_date.replace('-', '')}_{args.end_date.replace('-', '')}*.pt",
     )
@@ -497,18 +499,26 @@ def create_one_id(
 ) -> None:
     """Creates a single dataset.
 
-    Args:
-        args: An ``argparse`` ``namedtuple`` of CLI arguments.
-        config: The configuration.
-        ppaths: The project path object.
-        region_df: The region grid ``geopandas.GeoDataFrame``.
-        polygon_df: The region polygon ``geopandas.GeoDataFrame``.
-        processed_path: The time series path.
-        bbox_offsets: Bounding box (x, y) offsets as [(x, y)]. E.g., shifts of
-            [(-1000, 0), (0, 1000)] would shift the grid left by 1,000 meters and
-            then right by 1,000 meters.
+    Parameters
+    ==========
+    args
+        An ``argparse`` ``namedtuple`` of CLI arguments.
+    config
+        The configuration.
+    ppaths
+        The project path object.
+    region_df
+        The region grid ``geopandas.GeoDataFrame``.
+    polygon_df
+        The region polygon ``geopandas.GeoDataFrame``.
+    processed_path
+        The time series path.
+    bbox_offsets
+        Bounding box (x, y) offsets as [(x, y)]. E.g., shifts of
+        [(-1000, 0), (0, 1000)] would shift the grid left by 1,000 meters and
+        then right by 1,000 meters.
 
-            Note that the ``polygon_df`` should support the shifts outside of the grid.
+        Note that the ``polygon_df`` should support the shifts outside of the grid.
     """
 
     row_id = processed_path.name
@@ -820,8 +830,8 @@ def spatial_kfoldcv(args):
 
     ds = EdgeDataset(
         root=ppaths.train_path,
+        log_transform=args.log_transform,
         processes=args.processes,
-        threads_per_worker=args.threads,
         random_seed=args.random_seed,
     )
     # Read or create the spatial partitions (folds)
@@ -840,8 +850,6 @@ def spatial_kfoldcv(args):
             dataset=temp_ds,
             class_info=class_info,
             batch_size=args.batch_size,
-            mean_color=args.mean_color,
-            sse_color=args.sse_color,
         )
         train_ds.norm_values = norm_values
         test_ds.norm_values = norm_values
@@ -896,44 +904,6 @@ def spatial_kfoldcv(args):
         )
 
 
-def generate_model_graph(args):
-    from cultionet.models.convstar import StarRNN
-    from cultionet.models.nunet import ResUNet3Psi
-
-    ppaths = setup_paths(args.project_path)
-    data_values = torch.load(str(ppaths.norm_file))
-    ds = EdgeDataset(
-        root=ppaths.train_path,
-        data_means=data_values.mean,
-        data_stds=data_values.std,
-        crop_counts=data_values.crop_counts,
-        edge_counts=data_values.edge_counts,
-    )
-
-    data = ds[0]
-    xrnn = data.x.reshape(1, data.nbands, data.ntime, data.height, data.width)
-    hidden_channels = 32
-    star_rnn_model = StarRNN(
-        input_dim=data.nbands,
-        hidden_dim=hidden_channels,
-        n_layers=6,
-        num_classes_last=2,
-    )
-    x, __ = star_rnn_model(xrnn)
-    torch.onnx.export(
-        star_rnn_model, xrnn, ppaths.ckpt_path / "cultionet_starrnn.onnx"
-    )
-    resunet_model = ResUNet3Psi(
-        in_channels=int(hidden_channels * 3),
-        init_filter=hidden_channels,
-        num_classes=2,
-        double_dilation=2,
-    )
-    torch.onnx.export(
-        resunet_model, x, ppaths.ckpt_path / "cultionet_resunet.onnx"
-    )
-
-
 def train_model(args):
     seed_everything(args.random_seed, workers=True)
 
@@ -950,9 +920,9 @@ def train_model(args):
     ):
         ds = EdgeDataset(
             root=ppaths.train_path,
+            log_transform=args.log_transform,
             pattern=args.data_pattern,
             processes=args.processes,
-            threads_per_worker=args.threads,
             random_seed=args.random_seed,
         )
 
@@ -971,9 +941,9 @@ def train_model(args):
 
         ds = EdgeDataset(
             root=ppaths.train_path,
+            log_transform=args.log_transform,
             pattern=args.data_pattern,
             processes=args.processes,
-            threads_per_worker=args.threads,
             random_seed=args.random_seed,
         )
 
@@ -1001,10 +971,8 @@ def train_model(args):
         norm_values: NormValues = NormValues.from_dataset(
             dataset=train_ds,
             class_info=class_info,
-            num_workers=args.load_batch_workers,
             batch_size=args.batch_size * 4,
-            mean_color=args.mean_color,
-            sse_color=args.sse_color,
+            num_workers=args.load_batch_workers,
         )
 
         norm_values.to_file(ppaths.norm_file)
@@ -1015,6 +983,7 @@ def train_model(args):
     # the means and standard deviation tensors
     ds = EdgeDataset(
         root=ppaths.train_path,
+        log_transform=args.log_transform,
         pattern=args.data_pattern,
         norm_values=norm_values,
         augment_prob=args.augment_prob,
@@ -1026,6 +995,7 @@ def train_model(args):
     if list((ppaths.test_process_path).glob("*.pt")):
         test_ds = EdgeDataset(
             root=ppaths.test_path,
+            log_transform=args.log_transform,
             norm_values=norm_values,
             random_seed=args.random_seed,
         )
@@ -1039,6 +1009,7 @@ def train_model(args):
 
             test_ds = EdgeDataset(
                 root=ppaths.test_path,
+                log_transform=args.log_transform,
                 norm_values=norm_values,
                 random_seed=args.random_seed,
             )
@@ -1303,8 +1274,6 @@ cultionet predict --project-path /projects/data -o estimates.tif --region imagei
         CLISteps.PREDICT_TRANSFER,
     ):
         predict_image(args)
-    elif args.process == CLISteps.GRAPH:
-        generate_model_graph(args)
 
 
 if __name__ == "__main__":

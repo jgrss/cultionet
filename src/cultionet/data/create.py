@@ -213,13 +213,6 @@ def create_predict_dataset(
                     trim=False,
                 )
 
-                from ray.experimental import tqdm_ray
-
-                remote_tqdm = ray.remote(tqdm_ray.tqdm)
-                bar = remote_tqdm.remote(
-                    total=len(time_series.chunks), desc='Saving .pt chunks'
-                )
-
                 if not ray.is_initialized():
                     ray.init(num_cpus=num_workers)
 
@@ -239,7 +232,6 @@ def create_predict_dataset(
                         window_size=window_size,
                         padding=padding,
                         compress_method=compress_method,
-                        bar=bar,
                     ) as batch_store:
                         batch_store.save(
                             time_series_array,
@@ -249,9 +241,6 @@ def create_predict_dataset(
                 except RayTaskError as e:
                     logger.warning(e)
                     ray.shutdown()
-
-                bar.close.remote()
-                bar = None
 
                 if ray.is_initialized():
                     ray.shutdown()
@@ -591,29 +580,51 @@ def create_train_batch(
 ) -> None:
     """Creates a batch file for training.
 
-    Args:
-        image_list: A list of images.
-        df_grid: The training grid.
-        df_polygons: The training polygons.
-        max_crop_class: The maximum expected crop class value.
-        group_id: A group identifier, used for logging.
-        process_path: The main processing path.
-        gain: A gain factor to apply to the images.
-        offset: An offset factor to apply to the images.
-        ref_res: The reference cell resolution to resample the images to.
-        resampling: The image resampling method.
-        grid_size: The requested grid size, in (rows, columns) or (height, width).
-        lc_path: The land cover image path.
-        n_ts: The number of temporal augmentations.
-        data_type: The target data type.
-        instance_seg: Whether to get instance segmentation mask targets.
-        zero_padding: Zero padding to apply.
-        crop_column: The crop column name in the polygon vector files.
-        keep_crop_classes: Whether to keep the crop classes as they are (True) or recode all
-            non-zero classes to crop (False).
-        replace_dict: A dictionary of crop class remappings.
-        nonag_is_unknown: Whether the non-agricultural background is unknown.
-        all_touched: Rasterio/Shapely rasterization flag.
+    Parameters
+    ==========
+    image_list
+        A list of images.
+    df_grid
+        The training grid.
+    df_polygons
+        The training polygons.
+    max_crop_class
+        The maximum expected crop class value.
+    group_id
+        A group identifier, used for logging.
+    process_path
+        The main processing path.
+    gain
+        A gain factor to apply to the images.
+    offset
+        An offset factor to apply to the images.
+    ref_res
+        The reference cell resolution to resample the images to.
+    resampling
+        The image resampling method.
+    grid_size
+        The requested grid size, in (rows, columns) or (height, width).
+    lc_path
+        The land cover image path.
+    n_ts
+        The number of temporal augmentations.
+    data_type
+        The target data type.
+    instance_seg
+        Whether to get instance segmentation mask targets.
+    zero_padding
+        Zero padding to apply.
+    crop_column
+        The crop column name in the polygon vector files.
+    keep_crop_classes
+        Whether to keep the crop classes as they are (True) or recode all
+        non-zero classes to crop (False).
+    replace_dict
+        A dictionary of crop class remappings.
+    nonag_is_unknown
+        Whether the non-agricultural background is unknown.
+    all_touched
+        Rasterio/Shapely rasterization flag.
     """
     start_date = pd.to_datetime(
         Path(image_list[0]).stem, format=date_format

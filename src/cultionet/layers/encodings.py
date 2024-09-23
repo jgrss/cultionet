@@ -1,7 +1,12 @@
 """
 Source:
     https://github.com/VSainteuf/utae-paps/blob/main/src/backbones/positional_encoding.py
+
+    MIT License
+
+    Copyright (c) 2021 VSainteuf
 """
+
 import numpy as np
 import torch
 

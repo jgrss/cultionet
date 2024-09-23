@@ -720,7 +720,6 @@ def tally_stats(
         ds = EdgeDataset(
             ppaths.train_path,
             processes=4,
-            threads_per_worker=2,
             random_seed=100
         )
         train_ds, val_ds = ds.split_train_val(

@@ -1,11 +1,9 @@
 import typing as T
-from functools import partial
 from pathlib import Path
 
 import joblib
 import torch
 from einops import rearrange
-from joblib import delayed, parallel_backend
 from rich.progress import (
     BarColumn,
     Progress,
@@ -15,11 +13,9 @@ from rich.progress import (
 )
 from rich.style import Style
 from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
 
-from ..data.data import Data
+from ..data import Data
 from ..data.utils import collate_fn
-from .model_preprocessing import ParallelProgress
 from .stats import Quantile, Variance, cache_load_enabled, tally_stats
 
 
@@ -67,10 +63,14 @@ class NormValues:
     def transform(self, batch: Data) -> Data:
         r"""Normalizes data by the Dynamic World log method or by z-scores.
 
-        Args:
-            batch (Data): A tensor data object.
-            data_means (Tensor): The data feature-wise means.
-            data_stds (Tensor): The data feature-wise standard deviations.
+        Parameters
+        ==========
+        batch
+            A tensor data object.
+        data_means
+            The data feature-wise means.
+        data_stds
+            The data feature-wise standard deviations.
 
         z = (x - μ) / σ
         """
@@ -122,13 +122,11 @@ class NormValues:
         batch_size: int,
         class_info: T.Dict[str, int],
         num_workers: int = 0,
-        processes: int = 1,
-        threads_per_worker: int = 1,
         centering: str = 'median',
-        mean_color: str = '#ffffff',
-        sse_color: str = '#ffffff',
+        lower_quantile: float = 0.3,
+        upper_quantile: float = 0.7,
     ) -> "NormValues":
-        """Normalizes a dataset to z-scores."""
+        """Calculates dataset statistics."""
 
         lower_bound = None
         upper_bound = None
@@ -141,137 +139,68 @@ class NormValues:
             collate_fn=collate_fn,
         )
 
-        if centering == 'median':
-            stat_var = Variance(method='median')
-            stat_q = Quantile(r=1024 * 6)
-            tmp_cache_path = Path.home().absolute() / '.cultionet'
-            tmp_cache_path.mkdir(parents=True, exist_ok=True)
-            var_data_cache = tmp_cache_path / '_var.npz'
-            q_data_cache = tmp_cache_path / '_q.npz'
-            crop_counts = torch.zeros(class_info['max_crop_class'] + 1).long()
-            edge_counts = torch.zeros(2).long()
-            with cache_load_enabled(True):
-                with Progress(
-                    TextColumn(
-                        "Calculating stats", style=Style(color="#cacaca")
+        stat_var = Variance(method='median')
+        stat_q = Quantile(r=1024 * 6)
+        tmp_cache_path = Path.home().absolute() / '.cultionet'
+        tmp_cache_path.mkdir(parents=True, exist_ok=True)
+        var_data_cache = tmp_cache_path / '_var.npz'
+        q_data_cache = tmp_cache_path / '_q.npz'
+        crop_counts = torch.zeros(class_info['max_crop_class'] + 1).long()
+        edge_counts = torch.zeros(2).long()
+        with cache_load_enabled(True):
+            with Progress(
+                TextColumn("Calculating stats", style=Style(color="#cacaca")),
+                TextColumn("•", style=Style(color="#cacaca")),
+                BarColumn(
+                    style="#ACFCD6",
+                    complete_style="#AA9439",
+                    finished_style="#ACFCD6",
+                    pulse_style="#FCADED",
+                ),
+                TaskProgressColumn(),
+                TextColumn("•", style=Style(color="#cacaca")),
+                TimeElapsedColumn(),
+            ) as pbar:
+                for batch in pbar.track(
+                    tally_stats(
+                        stats=(stat_var, stat_q),
+                        loader=data_loader,
+                        caches=(var_data_cache, q_data_cache),
                     ),
-                    TextColumn("•", style=Style(color="#cacaca")),
-                    BarColumn(
-                        style="#ACFCD6",
-                        complete_style="#AA9439",
-                        finished_style="#ACFCD6",
-                        pulse_style="#FCADED",
-                    ),
-                    TaskProgressColumn(),
-                    TextColumn("•", style=Style(color="#cacaca")),
-                    TimeElapsedColumn(),
-                ) as pbar:
-                    for batch in pbar.track(
-                        tally_stats(
-                            stats=(stat_var, stat_q),
-                            loader=data_loader,
-                            caches=(var_data_cache, q_data_cache),
-                        ),
-                        total=len(data_loader),
-                    ):
-                        # Stack samples
-                        x = rearrange(batch.x, 'b c t h w -> (b t h w) c')
+                    total=len(data_loader),
+                ):
+                    # Stack samples
+                    x = rearrange(batch.x, 'b c t h w -> (b t h w) c')
 
-                        # Update the stats
-                        stat_var.add(x)
-                        stat_q.add(x)
+                    # Update the stats
+                    stat_var.add(x)
+                    stat_q.add(x)
 
-                        # Update counts
-                        crop_counts[0] += (
-                            (batch.y == 0)
-                            | (batch.y == class_info['edge_class'])
-                        ).sum()
-                        for i in range(1, class_info['edge_class']):
-                            crop_counts[i] += (batch.y == i).sum()
+                    # Update counts
+                    crop_counts[0] += (
+                        (batch.y == 0) | (batch.y == class_info['edge_class'])
+                    ).sum()
+                    for i in range(1, class_info['edge_class']):
+                        crop_counts[i] += (batch.y == i).sum()
 
-                        edge_counts[0] += (
-                            (batch.y >= 0)
-                            & (batch.y != class_info['edge_class'])
-                        ).sum()
-                        edge_counts[1] += (
-                            batch.y == class_info['edge_class']
-                        ).sum()
+                    edge_counts[0] += (
+                        (batch.y >= 0) & (batch.y != class_info['edge_class'])
+                    ).sum()
+                    edge_counts[1] += (
+                        batch.y == class_info['edge_class']
+                    ).sum()
 
-            data_stds = stat_var.std()
-            data_means = stat_q.median()
-            lower_bound = stat_q.quantiles(0.3)
-            upper_bound = stat_q.quantiles(0.7)
-
-            var_data_cache.unlink()
-            q_data_cache.unlink()
-            tmp_cache_path.rmdir()
-
+        data_stds = stat_var.std()
+        if centering == 'mean':
+            data_means = stat_q.mean()
         else:
+            data_means = stat_q.median()
+        lower_bound = stat_q.quantiles(lower_quantile)
+        upper_bound = stat_q.quantiles(upper_quantile)
 
-            def get_info(
-                x: torch.Tensor, y: torch.Tensor
-            ) -> T.Tuple[torch.Tensor, int, torch.Tensor, torch.Tensor]:
-                crop_counts = torch.zeros(class_info['max_crop_class'] + 1)
-                edge_counts = torch.zeros(2)
-                crop_counts[0] = (
-                    (y == 0) | (y == class_info['edge_class'])
-                ).sum()
-                for i in range(1, class_info['edge_class']):
-                    crop_counts[i] = (y == i).sum()
-                edge_counts[0] = (y != class_info['edge_class']).sum()
-                edge_counts[1] = (y == class_info['edge_class']).sum()
-
-                return x.sum(dim=0), x.shape[0], crop_counts, edge_counts
-
-            with parallel_backend(
-                backend='loky',
-                n_jobs=processes,
-                inner_max_num_threads=threads_per_worker,
-            ):
-                with ParallelProgress(
-                    tqdm_kwargs={
-                        'total': int(len(dataset) / batch_size),
-                        'desc': 'Calculating means',
-                        'colour': mean_color,
-                    }
-                ) as pool:
-                    results = pool(
-                        delayed(get_info)(batch.x, batch.y)
-                        for batch in data_loader
-                    )
-            data_sums, pix_count, crop_counts, edge_counts = list(
-                map(list, zip(*results))
-            )
-
-            data_sums = torch.stack(data_sums).sum(dim=0)
-            pix_count = torch.tensor(pix_count).sum()
-            crop_counts = torch.stack(crop_counts).sum(dim=0)
-            edge_counts = torch.stack(edge_counts).sum(dim=0)
-            data_means = data_sums / float(pix_count)
-
-            def get_sse(x_mu: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-                return ((x - x_mu).pow(2)).sum(dim=0)
-
-            sse_partial = partial(get_sse, add_dim(data_means))
-
-            with parallel_backend(
-                backend='loky',
-                n_jobs=processes,
-                inner_max_num_threads=threads_per_worker,
-            ):
-                with ParallelProgress(
-                    tqdm_kwargs={
-                        'total': int(len(dataset) / batch_size),
-                        'desc': 'Calculating SSEs',
-                        'colour': sse_color,
-                    }
-                ) as pool:
-                    sses = pool(
-                        delayed(sse_partial)(batch.x) for batch in data_loader
-                    )
-
-            sses = torch.stack(sses).sum(dim=0)
-            data_stds = torch.sqrt(sses / float(pix_count))
+        var_data_cache.unlink()
+        q_data_cache.unlink()
+        tmp_cache_path.rmdir()
 
         return cls(
             dataset_mean=rearrange(data_means, 'c -> 1 c 1 1 1'),

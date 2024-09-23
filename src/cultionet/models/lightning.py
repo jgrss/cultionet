@@ -6,7 +6,6 @@ from pathlib import Path
 import einops
 import pandas as pd
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torchmetrics
 from lightning import LightningModule
@@ -14,7 +13,7 @@ from torch.optim import lr_scheduler as optim_lr_scheduler
 
 from .. import losses as cnetlosses
 from .. import nn as cunn
-from ..data.data import Data
+from ..data import Data
 from ..enums import (
     AttentionTypes,
     InferenceNames,
@@ -27,14 +26,6 @@ from ..enums import (
 )
 from ..layers.weights import init_conv_weights
 from .cultionet import CultioNet
-from .maskcrnn import (
-    BFasterRCNN,
-    ReshapeMaskData,
-    create_mask_targets,
-    mask_2d_to_3d,
-    mask_to_polygon,
-    nms_masks,
-)
 
 warnings.filterwarnings("ignore")
 logging.getLogger("lightning").addHandler(logging.NullHandler())
@@ -50,9 +41,6 @@ LOSS_DICT = {
     },
     LossTypes.CLASS_BALANCED_MSE: {
         "classification": cnetlosses.ClassBalancedMSELoss(),
-    },
-    LossTypes.CROSS_ENTROPY: {
-        "classification": cnetlosses.CrossEntropyLoss(),
     },
     LossTypes.LOG_COSH: {
         "regression": cnetlosses.LogCoshLoss(),
@@ -112,10 +100,14 @@ class LightningModuleMixin(LightningModule):
     ) -> T.Dict[str, torch.Tensor]:
         """Performs a single model forward pass.
 
-        Returns:
-            distance: Normalized distance transform (from boundaries), [0,1]. Shaped (B, 1, H, W).
-            edge: Edge|non-edge predictions, logits or probabilities. Shaped (B, 1, H, W).
-            crop: Logits of crop|non-crop. Shaped (B, C, H, W).
+        Returns
+        =======
+        distance
+            Normalized distance transform (from boundaries), [0,1]. Shaped (B, 1, H, W).
+        edge
+            Edge|non-edge predictions, logits or probabilities. Shaped (B, 1, H, W).
+        crop
+            Logits of crop|non-crop. Shaped (B, C, H, W).
         """
         return self.cultionet_model(batch)
 
@@ -163,15 +155,6 @@ class LightningModuleMixin(LightningModule):
         """A prediction step for Lightning."""
 
         predictions = self.forward(batch, batch_idx=batch_idx)
-
-        if self.train_maskrcnn:
-            # Apply a forward pass on Mask RCNN
-            mask_data = self.mask_rcnn_forward(
-                batch=batch,
-                predictions=predictions,
-                mode='predict',
-            )
-            predictions.update(pred_df=mask_data['pred_df'])
 
         return predictions
 
@@ -230,8 +213,9 @@ class LightningModuleMixin(LightningModule):
     ):
         """Calculates the loss.
 
-        Returns:
-            Total loss
+        Returns
+        =======
+        Total loss
         """
 
         weights = {
@@ -391,133 +375,12 @@ class LightningModuleMixin(LightningModule):
 
         return loss / sum(weights.values()), loss_report
 
-    def mask_rcnn_forward(
-        self,
-        batch: Data,
-        predictions: T.Dict[str, torch.Tensor],
-        mode: str,
-    ) -> dict:
-        """Mask-RCNN forward."""
-
-        assert mode in (
-            'eval',
-            'predict',
-            'train',
-        ), "Choose 'eval', 'predict', or 'train' mode."
-
-        if mode in (
-            'eval',
-            'train',
-        ):
-            # NOTE: Mask-RCNN does not return loss in eval() mode
-            self.mask_rcnn_model.train()
-        else:
-            self.mask_rcnn_model.eval()
-
-        if mode == 'eval':
-            # Turn off layers
-            for module in self.mask_rcnn_model.modules():
-                if isinstance(module, (nn.Dropout, nn.BatchNorm2d)):
-                    module.eval()
-
-        # Iterate over the batches and create box masks
-        mask_x = []
-        mask_y = []
-        for bidx in range(batch.x.shape[0]):
-            mask_data = ReshapeMaskData.prepare(
-                x=torch.cat(
-                    (
-                        predictions['dist'][bidx].detach(),
-                        predictions[InferenceNames.EDGE][bidx].detach(),
-                        einops.rearrange(
-                            predictions[InferenceNames.CROP][bidx, 1].detach(),
-                            'h w -> 1 h w',
-                        ),
-                    ),
-                    dim=0,
-                ),
-                y=None if mode == 'predict' else batch.y[bidx],
-            )
-
-            if mode == 'predict':
-                mask_x.append(mask_data.x[0])
-            else:
-                mask_data.masks = mask_2d_to_3d(mask_data.masks)
-                mask_data.x, mask_data.masks = create_mask_targets(
-                    mask_data.x, mask_data.masks
-                )
-                mask_x.append(mask_data.x[0])
-                mask_y.append(mask_data.masks)
-
-        # Apply a forward pass on Mask RCNN
-        if mode in (
-            'eval',
-            'predict',
-        ):
-            with torch.no_grad():
-                mask_outputs = self.mask_rcnn_model(
-                    x=mask_x,
-                    y=None if mode == 'predict' else mask_y,
-                )
-        else:
-            mask_outputs = self.mask_rcnn_model(x=mask_x, y=mask_y)
-
-        mask_loss = None
-        pred_df = None
-        if mode in (
-            'eval',
-            'train',
-        ):
-            mask_loss = sum([loss for loss in mask_outputs.values()]) / len(
-                mask_outputs
-            )
-        else:
-            pred_df = []
-            for bidx, batch_output in enumerate(mask_outputs):
-                batch_pred_masks = nms_masks(
-                    boxes=batch_output['boxes'],
-                    scores=batch_output['scores'],
-                    masks=batch_output['masks'],
-                    iou_threshold=0.7,
-                    size=batch.x.shape[-2:],
-                )
-                pred_frame = mask_to_polygon(
-                    batch_pred_masks,
-                    image_left=batch.left[0],
-                    image_top=batch.top[0],
-                    row_off=batch.window_row_off[bidx],
-                    col_off=batch.window_col_off[bidx],
-                    resolution=10.0,
-                    # FIXME: res is currently passing None
-                    # resolution=batch.res[0],
-                    padding=batch.padding[0],
-                )
-                pred_df.append(pred_frame)
-
-            pred_df = pd.concat(pred_df)
-
-        return {
-            'outputs': mask_outputs,
-            'loss': mask_loss,
-            'pred_df': pred_df,
-        }
-
     def training_step(self, batch: Data, batch_idx: int = None):
         """Executes one training step and logs training step metrics."""
 
         predictions = self(batch)
 
         loss, _ = self.calc_loss(batch, predictions)
-
-        if self.train_maskrcnn:
-            # Apply a forward pass on Mask RCNN
-            mask_data = self.mask_rcnn_forward(
-                batch=batch,
-                predictions=predictions,
-                mode='train',
-            )
-
-            loss = loss + mask_data['loss']
 
         self.log(
             "loss",
@@ -547,16 +410,6 @@ class LightningModuleMixin(LightningModule):
         true_labels_dict = self.get_true_labels(
             batch, crop_type=predictions.get(InferenceNames.CROP_TYPE)
         )
-
-        if self.train_maskrcnn:
-            # Apply a forward pass on Mask RCNN
-            mask_data = self.mask_rcnn_forward(
-                batch=batch,
-                predictions=predictions,
-                mode='eval',
-            )
-
-            loss = loss + mask_data['loss']
 
         if true_labels_dict[ValidationNames.MASK] is not None:
             # Valid sample = True; Invalid sample = False
@@ -904,7 +757,6 @@ class CultionetLitTransferModel(LightningModuleMixin):
         self.scale_pos_weight = scale_pos_weight
         self.save_batch_val_metrics = save_batch_val_metrics
         self.finetune = finetune
-        self.train_maskrcnn = None
 
         if edge_class is not None:
             self.edge_class = edge_class
@@ -1018,7 +870,6 @@ class CultionetLitModel(LightningModuleMixin):
         edge_class: T.Optional[int] = None,
         scale_pos_weight: bool = False,
         save_batch_val_metrics: bool = False,
-        train_maskrcnn: bool = False,
     ):
         """Lightning model."""
 
@@ -1040,28 +891,11 @@ class CultionetLitModel(LightningModuleMixin):
         self.class_counts = class_counts
         self.scale_pos_weight = scale_pos_weight
         self.save_batch_val_metrics = save_batch_val_metrics
-        self.train_maskrcnn = train_maskrcnn
 
         if edge_class is not None:
             self.edge_class = edge_class
         else:
             self.edge_class = num_classes
-
-        if self.train_maskrcnn:
-            warnings.warn(
-                'RCNN in cultionet is experimental and not well tested.'
-            )
-
-            self.mask_rcnn_model = BFasterRCNN(
-                in_channels=3,
-                out_channels=hidden_channels * 2,
-                num_classes=2,  # non-cropland and cropland
-                # sizes=(16, 32, 64, 128, 256),
-                # aspect_ratios=(0.5, 1.0, 3.0,),
-                trainable_backbone_layers=1,
-                min_image_size=256,
-                max_image_size=256,
-            )
 
         self.model_attr = f"{model_name}_{model_type}"
         setattr(

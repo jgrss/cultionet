@@ -21,6 +21,7 @@ from ..errors import TensorShapeError
 from ..utils.logging import set_color_logger
 from ..utils.model_preprocessing import ParallelProgress
 from ..utils.normalize import NormValues
+from .constant import SCALE_FACTOR
 from .data import Data
 from .spatial_dataset import SpatialDataset
 
@@ -51,7 +52,40 @@ def _check_shape(
 
 
 class EdgeDataset(SpatialDataset):
-    """An edge dataset."""
+    """An edge dataset.
+
+    Parameters
+    ==========
+    root
+        The root data directory.
+    log_transform
+        Whether to log-transform the data before truncating by Sigmoid. For details, see:
+
+        @article{brown_etal_2022,
+            title={Dynamic World, Near real-time global 10 m land use land cover mapping},
+            author={Brown, Christopher F and Brumby, Steven P and Guzder-Williams, Brookie and Birch, Tanya and Hyde, Samantha Brooks and Mazzariello, Joseph and Czerwinski, Wanda and Pasquarella, Valerie J and Haertel, Robert and Ilyushchenko, Simon and others},
+            journal={Scientific Data},
+            volume={9},
+            number={1},
+            pages={251},
+            year={2022},
+            publisher={Nature Publishing Group UK London},
+            url={https://www.nature.com/articles/s41597-022-01307-4},
+        }
+    normalize
+        Whether to normalize the data by mean and standard deviation, centering the data around the mean or median. Note that if
+        ``log_transform=True``, it is applied before normalization.
+    norm_values
+        The normalization data object.
+    pattern
+        The data search pattern.
+    processes
+        The number of parallel processes.
+    random_seed
+        A random seed value.
+    augment_prob
+        The probability of applying random augmentation.
+    """
 
     data_list_ = None
     grid_id_column = "grid_id"
@@ -59,18 +93,18 @@ class EdgeDataset(SpatialDataset):
     def __init__(
         self,
         root: T.Union[str, Path, bytes] = ".",
+        log_transform: bool = False,
         norm_values: T.Optional[NormValues] = None,
         pattern: str = "data*.pt",
         processes: int = psutil.cpu_count(),
-        threads_per_worker: int = 1,
         random_seed: int = 42,
         augment_prob: float = 0.0,
     ):
         self.root = root
+        self.log_transform = log_transform
         self.norm_values = norm_values
         self.pattern = pattern
         self.processes = processes
-        self.threads_per_worker = threads_per_worker
         self.random_seed = random_seed
         self.augment_prob = augment_prob
 
@@ -340,11 +374,14 @@ class EdgeDataset(SpatialDataset):
     ) -> T.Tuple["EdgeDataset", "EdgeDataset"]:
         """Splits the dataset into train and validation.
 
-        Args:
-            val_frac (float): The validation fraction.
+        Parameters
+        ==========
+        val_frac
+            The validation fraction.
 
-        Returns:
-            train dataset, validation dataset
+        Returns
+        =======
+        train dataset, validation dataset
         """
         # We do not need augmentations when loading batches for
         # sample splits.
@@ -395,16 +432,18 @@ class EdgeDataset(SpatialDataset):
     def get(self, idx: int) -> dict:
         """Gets an individual data object from the dataset.
 
-        Args:
-            idx (int): The dataset index position.
+        Parameters
+        ==========
+        idx
+            The dataset index position.
         """
 
         batch = self.load_file(self.data_list_[idx])
 
-        batch.x = (batch.x * 1e-4).clip(1e-9, 1)
+        batch.x = (batch.x / SCALE_FACTOR).clip(1e-9, 1)
 
         if hasattr(batch, 'bdist'):
-            batch.bdist = (batch.bdist * 1e-4).clip(0, 1)
+            batch.bdist = (batch.bdist / SCALE_FACTOR).clip(1e-9, 1)
 
         if batch.y is not None:
             if self.rng.random() > (1 - self.augment_prob):
@@ -439,10 +478,14 @@ class EdgeDataset(SpatialDataset):
                 batch.segments = None
                 batch.props = None
 
-        # batch.x = torch.log(batch.x * 50.0 + 1.0).clip(1e-9, float('inf'))
+        if self.log_transform:
+            # Dynamic World log transform
+            # NOTE: If inputs are 0-10,000, then (x * 0.005)
+            batch.x = torch.log(batch.x * 50.0 + 1.0).clamp_min(1e-9)
 
-        # if self.norm_values is not None:
-        #     batch = self.norm_values(batch)
+        if self.norm_values is not None:
+            # Center values around the mean or median
+            batch = self.norm_values(batch)
 
         # Get the centroid
         centroid = box(

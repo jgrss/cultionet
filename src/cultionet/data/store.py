@@ -10,7 +10,6 @@ import xarray as xr
 from dask.delayed import Delayed
 from dask.utils import SerializableLock
 from rasterio.windows import Window
-from ray.experimental import tqdm_ray
 from retry import retry
 
 from ..utils.logging import set_color_logger
@@ -36,7 +35,6 @@ class BatchStore:
         window_size: int,
         padding: int,
         compress_method: Union[int, str],
-        bar: tqdm_ray.tqdm,
     ):
         self.data = data
         self.res = res
@@ -48,7 +46,6 @@ class BatchStore:
         self.window_size = window_size
         self.padding = padding
         self.compress_method = compress_method
-        self.bar = bar
 
     def __setitem__(self, key: tuple, item: np.ndarray) -> None:
         time_range, index_range, y, x = key
@@ -145,8 +142,6 @@ class BatchStore:
             _ = batch.from_file(self.write_path / f"{batch_id}.pt")
         except EOFError:
             raise IOError
-
-        self.bar.update.remote(1)
 
     def __enter__(self) -> "BatchStore":
         self.closed = False

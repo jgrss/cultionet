@@ -6,7 +6,7 @@ import torch
 from einops import rearrange
 from tqdm import tqdm
 
-from cultionet.data.data import Data
+from cultionet.data import Data
 
 
 def reshape_batch(filename: Path) -> Data:

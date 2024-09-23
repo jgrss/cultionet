@@ -12,7 +12,7 @@ from torchvision.transforms import InterpolationMode, v2
 from torchvision.transforms.v2 import functional as VF
 from tsaug import AddNoise, Drift, TimeWarp
 
-from ..data.data import Data
+from ..data import Data
 from .augmenter_utils import augment_time, generate_perlin_noise_3d, roll_time
 
 

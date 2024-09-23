@@ -216,7 +216,7 @@ train_predict:
     help: The attention weights
     kwargs:
       default: 'natten'
-      choices: ['fractal', 'natten', 'spatial_channel']
+      choices: ['natten', 'spatial_channel']
   hidden_channels:
     short: ''
     long: hidden-channels
@@ -279,6 +279,18 @@ train_predict:
     kwargs:
       default: 'ddp'
       choices: ['ddp', 'ddp_spawn', 'fsdp', 'ddp_find_unused_parameters_true']
+  data_pattern:
+    short: ''
+    long: data-pattern
+    help: A glob pattern for data train files
+    kwargs:
+      default: 'data*.pt'
+  log_transform:
+    short: ''
+    long: log-transform
+    help: Whether to log-transform the data
+    kwargs:
+      action: store_true
 
 shared_partitions:
   spatial_partitions:
@@ -384,18 +396,6 @@ train:
     short: ''
     long: dim-color
     help: The progress bar color for dimension checks
-    kwargs:
-      default: '#ffffff'
-  mean_color:
-    short: ''
-    long: mean-color
-    help: The progress bar color for means
-    kwargs:
-      default: '#ffffff'
-  sse_color:
-    short: ''
-    long: sse-color
-    help: The progress bar color for sum of squared errors
     kwargs:
       default: '#ffffff'
   auto_lr_find:
@@ -557,12 +557,6 @@ train:
       choices:
         - all
         - fc
-  data_pattern:
-    short: ''
-    long: data-pattern
-    help: A glob pattern for data train files
-    kwargs:
-      default: 'data*.pt'
 
 predict:
   out_path:
@@ -620,12 +614,6 @@ predict:
     help: The compression algorithm to use
     kwargs:
       default: lzw
-  include_maskrcnn:
-    short: ''
-    long: include-maskrcnn
-    help: Whether to include Mask R-CNN
-    kwargs:
-      action: store_true
   delete_dataset:
     short: ''
     long: delete-dataset

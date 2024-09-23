@@ -17,8 +17,8 @@ from .callbacks import (
     LightningGTiffWriter,
     setup_callbacks,
 )
+from .data import Data
 from .data.constant import SCALE_FACTOR
-from .data.data import Data
 from .data.datasets import EdgeDataset
 from .data.modules import EdgeDataModule
 
@@ -345,14 +345,20 @@ def load_model(
 ) -> T.Tuple[T.Union[None, L.Trainer], CultionetLitModel]:
     """Loads a model from file.
 
-    Args:
-        ckpt_file (str | Path): The model checkpoint file.
-        model_file (str | Path): The model file.
-        device (str): The device to apply inference on.
-        lit_model (CultionetLitModel): A model to predict with. If `None`, the model
-            is loaded from file.
-        enable_progress_bar (Optional[bool]): Whether to use the progress bar.
-        return_trainer (Optional[bool]): Whether to return the `lightning` `Trainer`.
+    Parameters
+    ==========
+    ckpt_file
+        The model checkpoint file.
+    model_file
+        The model file.
+    device
+        The device to apply inference on.
+    lit_model
+        A model to predict with. If `None`, the model is loaded from file.
+    enable_progress_bar
+        Whether to use the progress bar.
+    return_trainer
+        Whether to return the `lightning` `Trainer`.
     """
     if ckpt_file is not None:
         ckpt_file = Path(ckpt_file)
@@ -477,14 +483,19 @@ def predict(
 ) -> np.ndarray:
     """Applies a model to predict image labels|values.
 
-    Args:
-        lit_model (CultionetLitModel): A model to predict with.
-        data (Data): The data to predict on.
-        written (ndarray)
-        data_values (Tensor)
-        w (Optional[int]): The ``rasterio.windows.Window`` to write to.
-        w_pad (Optional[int]): The ``rasterio.windows.Window`` to predict on.
-        device (Optional[str])
+    Parameters
+    ==========
+    lit_model
+        A model to predict with.
+    data
+        The data to predict on.
+    written
+    data_values
+    w
+        The ``rasterio.windows.Window`` to write to.
+    w_pad
+        The ``rasterio.windows.Window`` to predict on.
+    device
     """
     norm_batch = norm_values(data)
 

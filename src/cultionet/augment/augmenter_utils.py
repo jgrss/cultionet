@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from tsaug import AddNoise, Drift, TimeWarp
 
-from ..data.data import Data
+from ..data import Data
 
 
 def feature_stack_to_tsaug(x: torch.Tensor) -> torch.Tensor:
@@ -18,8 +18,10 @@ def feature_stack_to_tsaug(x: torch.Tensor) -> torch.Tensor:
         H = height
         W = width
 
-    Args:
-        x: The array to reshape. The input shape is (1 x C x T x H x W).
+    Parameters
+    ==========
+    x
+        The array to reshape. The input shape is (1 x C x T x H x W).
     """
     return rearrange(x, '1 c t h w -> (h w) t c')
 
@@ -35,10 +37,14 @@ def tsaug_to_feature_stack(
         H = height
         W = width
 
-    Args:
-        x: The array to reshape. The input shape is (H*W x T X C).
-        height: The number of array rows (height).
-        width: The number of array columns (width).
+    Parameters
+    ==========
+    x
+        The array to reshape. The input shape is (H*W x T X C).
+    height
+        The number of array rows (height).
+    width
+        The number of array columns (width).
     """
     return rearrange(
         x,
@@ -217,19 +223,23 @@ def generate_perlin_noise_3d(
 ) -> torch.Tensor:
     """Generates a 3D tensor of perlin noise.
 
-    Args:
-        shape: The shape of the generated array (tuple of three ints).
-            This must be a multiple of res.
-        res: The number of periods of noise to generate along each
-            axis (tuple of three ints). Note shape must be a multiple
-            of res.
-        tileable: If the noise should be tileable along each axis
-            (tuple of three bools). Defaults to (False, False, False).
-        interpolant: The interpolation function, defaults to
-            t*t*t*(t*(t*6 - 15) + 10).
+    Parameters
+    ==========
+    shape
+        The shape of the generated array (tuple of three ints). This must
+        be a multiple of res.
+    res
+        The number of periods of noise to generate along each
+        axis (tuple of three ints). Note shape must be a multiple of res.
+    tileable
+        If the noise should be tileable along each axis (tuple of three bools).
+        Defaults to (False, False, False).
+    interpolant
+        The interpolation function, defaults to t*t*t*(t*(t*6 - 15) + 10).
 
-    Returns:
-        A tensor with the generated noise.
+    Returns
+    =======
+    A tensor with the generated noise.
 
     Raises:
         ValueError: If shape is not a multiple of res.
@@ -238,7 +248,6 @@ def generate_perlin_noise_3d(
         https://github.com/pvigier/perlin-numpy/tree/master
 
         MIT License
-
         Copyright (c) 2019 Pierre Vigier
     """
     if out_range is None:

@@ -4,7 +4,7 @@ import einops
 import torch
 import torch.nn as nn
 
-from ..data.data import Data
+from ..data import Data
 from ..enums import AttentionTypes, InferenceNames, ModelTypes, ResBlockTypes
 from .nunet import TowerUNet
 
@@ -12,19 +12,31 @@ from .nunet import TowerUNet
 class CultioNet(nn.Module):
     """The cultionet model framework.
 
-    Args:
-        in_channels (int): The total number of dataset features (bands x time).
-        in_time (int): The number of dataset time features in each band/channel.
-        hidden_channels (int): The number of hidden channels.
-        model_type (str): The model architecture type.
-        activation_type (str): The nonlinear activation.
-        dropout (float): The dropout fraction / probability.
-        dilations (int | list): The convolution dilation or dilations.
-        res_block_type (str): The residual convolution block type.
-        attention_weights (str): The attention weight type.
-        pool_by_max (bool): Whether to apply max pooling before residual block.
-        batchnorm_first (bool): Whether to apply BatchNorm2d -> Activation -> Convolution2d. Otherwise,
-            apply Convolution2d -> BatchNorm2d -> Activation.
+    Parameters
+    ==========
+    in_channels
+        The total number of dataset features (bands x time).
+    in_time
+        The number of dataset time features in each band/channel.
+    hidden_channels
+        The number of hidden channels.
+    model_type
+        The model architecture type.
+    activation_type
+        The nonlinear activation.
+    dropout
+        The dropout fraction / probability.
+    dilations
+        The convolution dilation or dilations.
+    res_block_type
+        The residual convolution block type.
+    attention_weights
+        The attention weight type.
+    pool_by_max
+        Whether to apply max pooling before residual block.
+    batchnorm_first
+        Whether to apply BatchNorm2d -> Activation -> Convolution2d. Otherwise,
+        apply Convolution2d -> BatchNorm2d -> Activation.
     """
 
     def __init__(

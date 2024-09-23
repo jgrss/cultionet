@@ -20,7 +20,6 @@ class DataColumns(StrEnum):
 
 
 class AttentionTypes(StrEnum):
-    FRACTAL = "fractal"
     NATTEN = "natten"
     SPATIAL_CHANNEL = "spatial_channel"
 
@@ -28,7 +27,6 @@ class AttentionTypes(StrEnum):
 class CLISteps(StrEnum):
     CREATE = "create"
     CREATE_PREDICT = "create-predict"
-    GRAPH = "graph"
     SKFOLDCV = "skfoldcv"
     TRAIN = "train"
     TRAIN_TRANSFER = "train-transfer"
@@ -63,7 +61,6 @@ class LossTypes(StrEnum):
     BOUNDARY = "BoundaryLoss"
     CENTERLINE_DICE = "CLDiceLoss"
     CLASS_BALANCED_MSE = "ClassBalancedMSELoss"
-    CROSS_ENTROPY = "CrossEntropyLoss"
     LOG_COSH = "LogCoshLoss"
     FOCAL_TVERSKY = "FocalTverskyLoss"
     TANIMOTO_COMPLEMENT = "TanimotoComplementLoss"
