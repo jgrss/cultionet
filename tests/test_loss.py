@@ -110,7 +110,7 @@ def test_tanimoto_classification_loss():
     loss_func = TanimotoDistLoss()
 
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS)
-    assert round(float(loss.item()), 3) == 0.61
+    assert round(float(loss.item()), 3) == 0.611
 
     loss = loss_func(INPUTS_CROP_PROB, DISCRETE_TARGETS, mask=MASK)
     assert round(float(loss.item()), 3) == 0.431

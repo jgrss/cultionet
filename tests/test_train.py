@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 import cultionet
-from cultionet.data.data import Data
+from cultionet.data import Data
 from cultionet.data.datasets import EdgeDataset
 from cultionet.enums import AttentionTypes, ModelTypes, ResBlockTypes
 from cultionet.model import CultionetParams
@@ -64,7 +64,6 @@ def test_train():
         dataset = EdgeDataset(
             ppaths.train_path,
             processes=0,
-            threads_per_worker=1,
             random_seed=100,
         )
 
@@ -76,20 +75,18 @@ def test_train():
             batch_size=2,
             load_batch_workers=0,
             hidden_channels=16,
-            num_classes=2,
+            num_classes=1,
             edge_class=2,
             model_type=ModelTypes.TOWERUNET,
             res_block_type=ResBlockTypes.RESA,
-            attention_weights=AttentionTypes.SPATIAL_CHANNEL,
             activation_type="SiLU",
             dilations=[1, 2],
             dropout=0.2,
             pool_by_max=True,
-            batchnorm_first=True,
             epochs=1,
             device="cpu",
             devices=1,
-            precision="16-mixed",
+            precision="32",
         )
 
         try:

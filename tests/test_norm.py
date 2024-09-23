@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from cultionet.data.data import Data
+from cultionet.data import Data
 from cultionet.data.utils import collate_fn
 from cultionet.utils.normalize import NormValues
 
@@ -61,6 +61,7 @@ def test_train_dataset(class_info: dict):
         ds = temporary_dataset(
             temp_dir=temp_dir,
             num_samples=num_samples,
+            log_transform=True,
         )
 
         norm_values = NormValues.from_dataset(
@@ -68,7 +69,6 @@ def test_train_dataset(class_info: dict):
             batch_size=batch_size,
             class_info=class_info,
             num_workers=0,
-            centering='median',
         )
 
         norm_path = Path(temp_dir) / 'data.norm'
@@ -103,6 +103,7 @@ def test_train_dataset(class_info: dict):
             temp_dir=temp_dir,
             num_samples=num_samples,
             norm_values=norm_values,
+            log_transform=True,
         )
         data_loader = DataLoader(
             ds,

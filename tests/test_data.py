@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from cultionet.data.data import Data
+from cultionet.data import Data
 from cultionet.data.modules import EdgeDataModule
 
 from .conftest import temporary_dataset

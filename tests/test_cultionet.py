@@ -1,7 +1,12 @@
 import tempfile
 
 from cultionet.data.modules import EdgeDataModule
-from cultionet.enums import AttentionTypes, ModelTypes, ResBlockTypes
+from cultionet.enums import (
+    AttentionTypes,
+    InferenceNames,
+    ModelTypes,
+    ResBlockTypes,
+)
 from cultionet.models.cultionet import CultioNet
 from cultionet.utils.normalize import NormValues
 
@@ -28,7 +33,6 @@ def get_train_dataset(
         batch_size=batch_size,
         class_info=class_nums,
         num_workers=0,
-        centering='median',
     )
     ds = temporary_dataset(
         temp_dir=temp_dir,
@@ -72,7 +76,6 @@ def test_cultionet(class_info: dict):
         res_block_type=ResBlockTypes.RESA,
         attention_weights=AttentionTypes.SPATIAL_CHANNEL,
         pool_by_max=True,
-        batchnorm_first=True,
     )
 
     model = CultioNet(**kwargs)
@@ -98,13 +101,21 @@ def test_cultionet(class_info: dict):
         for batch in data_module.train_dataloader():
             output = model(batch)
 
-            assert output["dist"].shape == (batch_size, 1, height, width)
-            assert output["edge"].shape == (batch_size, 1, height, width)
-            assert output["mask"].shape == (batch_size, 2, height, width)
-            assert output["classes_l2"].shape == (batch_size, 2, height, width)
-            assert output["classes_l3"].shape == (
+            assert output[InferenceNames.DISTANCE].shape == (
                 batch_size,
-                class_info["edge_class"] + 1,
+                1,
+                height,
+                width,
+            )
+            assert output[InferenceNames.EDGE].shape == (
+                batch_size,
+                1,
+                height,
+                width,
+            )
+            assert output[InferenceNames.CROP].shape == (
+                batch_size,
+                1,
                 height,
                 width,
             )

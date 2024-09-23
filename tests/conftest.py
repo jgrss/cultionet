@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from cultionet.data.data import Data
+from cultionet.data import Data
 from cultionet.data.datasets import EdgeDataset
 
 RNG = np.random.default_rng(100)

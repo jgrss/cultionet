@@ -39,7 +39,6 @@ def test_dataset(class_info: dict) -> EdgeDataModule:
             batch_size=batch_size,
             class_info=class_info,
             num_workers=0,
-            centering='median',
         )
         ds = temporary_dataset(
             temp_dir=temp_dir,
