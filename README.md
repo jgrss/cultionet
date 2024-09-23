@@ -1,6 +1,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![python](https://img.shields.io/badge/Python-3.9%20%7C%203.10-3776AB.svg?style=flat&logo=python&logoColor=white)](https://www.python.org)
-[![](https://img.shields.io/github/v/release/jgrss/cultionet?display_name=release)](https://github.com/jgrss/cultionet/releases)
+<!-- [![](https://img.shields.io/github/v/release/jgrss/cultionet?display_name=release)](https://github.com/jgrss/cultionet/releases) -->
+![](https://img.shields.io/badge/Version-v2.0.0b-8A2BE2)
 [![](https://github.com/jgrss/cultionet/actions/workflows/ci.yml/badge.svg)](https://github.com/jgrss/cultionet/actions?query=workflow%3ACI)
 
 ## Cultionet
