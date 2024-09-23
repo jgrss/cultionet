@@ -178,8 +178,9 @@ class TanimotoComplementLoss(nn.Module):
 
         if dim == (2, 3):
             distance = ((numerator * denominator) * scale).sum(dim=1)
+        else:
+            distance = (numerator * denominator) * scale
 
-        distance = (numerator * denominator) * scale
         loss = 1.0 - distance
 
         return loss
