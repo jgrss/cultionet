@@ -345,28 +345,6 @@ class LightningModuleMixin(LightningModule):
         )
         loss = loss + crop_loss * weights[InferenceNames.CROP]
 
-        # # Boundary loss for edges
-        # edge_boundary_loss = self.boundary_loss(
-        #     # Inputs are probabilities
-        #     inputs=predictions[InferenceNames.EDGE],
-        #     # True data are 0-1 continuous
-        #     targets=true_edge_distance,
-        #     mask=true_labels_dict[ValidationNames.MASK],
-        # )
-        # weights["edge_boundary_loss"] = 0.1
-        # loss = loss + edge_boundary_loss * weights["edge_boundary_loss"]
-
-        # # Boundary loss for crop
-        # crop_boundary_loss = self.boundary_loss(
-        #     # Inputs are probabilities
-        #     inputs=predictions[InferenceNames.CROP],
-        #     # True data are 0-1 continuous
-        #     targets=true_crop_distance,
-        #     mask=true_labels_dict[ValidationNames.MASK],
-        # )
-        # weights["crop_boundary_loss"] = 0.1
-        # loss = loss + crop_boundary_loss * weights["crop_boundary_loss"]
-
         loss_report = {
             "dloss": dist_loss,
             "eloss": edge_loss,
