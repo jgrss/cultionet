@@ -11,9 +11,9 @@ Key features of Cultionet:
 
 * uses satellite image time series instead of individual dates for training and inference
 * uses a [Transformer](https://arxiv.org/abs/1706.03762) time series embeddings
-* uses a UNet architecture with dense skip connections and deep supervision similar to [UNet 3+](https://arxiv.org/abs/2004.08790)
+* uses a UNet architecture with skip connections and deep supervision similar to [UNet 3+](https://arxiv.org/abs/2004.08790)
 * uses multi-stream outputs inspired by [Psi-Net](https://arxiv.org/abs/1902.04099)
-* uses residual in residual [ResUNet-a](https://arxiv.org/abs/1904.00592) blocks with [Dilated Neighborhood Attention](https://arxiv.org/abs/2209.15001)
+* uses residual [ResUNet-a](https://arxiv.org/abs/1904.00592) blocks with [Dilated Neighborhood Attention](https://arxiv.org/abs/2209.15001)
 * uses the [Tanimoto loss](https://www.mdpi.com/2072-4292/13/18/3707)
 
 ## Install Cultionet
