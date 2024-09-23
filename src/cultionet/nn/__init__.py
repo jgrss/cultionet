@@ -1,5 +1,5 @@
 from .modules.activations import SetActivation
-from .modules.attention import SpatialChannelAttention
+from .modules.attention import NeighborhoodAttention2D, SpatialChannelAttention
 from .modules.convolution import (
     ConvBlock2d,
     ConvTranspose2d,
@@ -22,6 +22,7 @@ __all__ = [
     'ConvBlock2d',
     'ConvTranspose2d',
     'GeoEmbeddings',
+    'NeighborhoodAttention2D',
     'PoolResidualConv',
     'ResidualAConv',
     'ResidualConv',
