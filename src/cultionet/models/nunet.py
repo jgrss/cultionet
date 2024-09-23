@@ -15,6 +15,48 @@ from ..enums import AttentionTypes, ResBlockTypes
 from ..layers.weights import init_conv_weights
 
 
+class Conv3d(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        in_time: int,
+        out_channels: int,
+        kernel_size: int,
+        activation_type: str,
+    ):
+        super().__init__()
+
+        remaining_time = in_time - kernel_size + 1
+
+        self.seq = nn.Sequential(
+            # Reduce time
+            nn.Conv3d(
+                in_channels=in_channels,
+                out_channels=in_channels,
+                kernel_size=(kernel_size, 1, 1),
+                padding=0,
+                bias=False,
+            ),
+            nn.BatchNorm3d(in_channels),
+            cunn.SetActivation(activation_type=activation_type),
+            # Reduce time to 1
+            nn.Conv3d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=(remaining_time, 1, 1),
+                padding=0,
+                bias=False,
+            ),
+            # c = channels; t = 1
+            Rearrange('b c 1 h w -> b c h w'),
+            nn.BatchNorm2d(out_channels),
+            cunn.SetActivation(activation_type=activation_type),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.seq(x)
+
+
 class PreTimeReduction(nn.Module):
     def __init__(
         self,
@@ -22,45 +64,26 @@ class PreTimeReduction(nn.Module):
         in_time: int,
         out_channels: int,
         activation_type: str,
-        batchnorm_first: bool,
     ):
         super().__init__()
 
-        time_kernel_size = 5
-        remaining_time = (
-            (in_time - time_kernel_size + 1) - time_kernel_size + 1
+        self.conv3 = Conv3d(
+            in_channels=in_channels,
+            in_time=in_time,
+            out_channels=out_channels,
+            kernel_size=3,
+            activation_type=activation_type,
         )
 
-        self.seq = nn.Sequential(
-            nn.Conv3d(
-                in_channels=in_channels,
-                out_channels=in_channels,
-                kernel_size=(time_kernel_size, 1, 1),
-                padding=0,
-            ),
-            nn.Conv3d(
-                in_channels=in_channels,
-                out_channels=in_channels,
-                kernel_size=(time_kernel_size, 1, 1),
-                padding=0,
-            ),
-            nn.Conv3d(
-                in_channels=in_channels,
-                out_channels=in_channels,
-                kernel_size=(remaining_time, 1, 1),
-                padding=0,
-            ),
-            # c = channels; t = 1
-            Rearrange('b c t h w -> b (c t) h w'),
-            cunn.ConvBlock2d(
-                in_channels=in_channels,
-                out_channels=out_channels,
-                kernel_size=1,
-                padding=0,
-                add_activation=True,
-                activation_type=activation_type,
-                batchnorm_first=batchnorm_first,
-            ),
+        self.conv5 = Conv3d(
+            in_channels=in_channels,
+            in_time=in_time,
+            out_channels=out_channels,
+            kernel_size=5,
+            activation_type=activation_type,
+        )
+
+        self.layer_norm = nn.Sequential(
             Rearrange('b c h w -> b h w c'),
             nn.LayerNorm(out_channels),
             Rearrange('b h w c -> b c h w'),
@@ -73,7 +96,13 @@ class PreTimeReduction(nn.Module):
         x
             Input, shaped (B, C, T, H, W).
         """
-        return self.seq(x)
+
+        x3 = self.conv3(x)
+        x5 = self.conv5(x)
+
+        encoded = self.layer_norm(x3 + x5)
+
+        return encoded
 
 
 class TowerUNet(nn.Module):
@@ -115,7 +144,6 @@ class TowerUNet(nn.Module):
                 in_time=in_time,
                 out_channels=channels[0],
                 activation_type=activation_type,
-                batchnorm_first=batchnorm_first,
             )
         )
 
@@ -125,7 +153,7 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             dropout=dropout,
             res_block_type=res_block_type,
-            attention_weights=attention_weights,
+            attention_weights=None,
             pool_by_max=pool_by_max,
             batchnorm_first=batchnorm_first,
         )
@@ -148,7 +176,7 @@ class TowerUNet(nn.Module):
             activation_type=activation_type,
             dropout=dropout,
             res_block_type=res_block_type,
-            attention_weights=attention_weights,
+            attention_weights=None,
             batchnorm_first=batchnorm_first,
             use_latlon=use_latlon,
         )
