@@ -75,7 +75,6 @@ def test_train():
             batch_size=2,
             load_batch_workers=0,
             hidden_channels=16,
-            num_classes=1,
             edge_class=2,
             model_type=ModelTypes.TOWERUNET,
             res_block_type=ResBlockTypes.RESA,

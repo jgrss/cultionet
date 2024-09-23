@@ -1,40 +1,30 @@
 #!/usr/bin/env python
 
 import argparse
-import asyncio
 import builtins
 import json
 import logging
 import typing as T
-from abc import abstractmethod
 from collections import namedtuple
 from datetime import datetime
 from functools import partial
 from pathlib import Path
 
-import filelock
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import rasterio as rio
-import ray
 import torch
-import xarray as xr
 import yaml
 from fiona.errors import DriverError
 from geowombat.core import sort_images_by_date
 from joblib import delayed, parallel_config
 from lightning import seed_everything
-from rasterio.windows import Window
-from ray.actor import ActorHandle
 from rich.markdown import Markdown
 from rich_argparse import RichHelpFormatter
 from shapely.errors import GEOSException
 from shapely.geometry import box
-from tqdm import tqdm
 
 import cultionet
-from cultionet.data.constant import SCALE_FACTOR
 from cultionet.data.create import create_predict_dataset, create_train_batch
 from cultionet.data.datasets import EdgeDataset
 from cultionet.data.utils import split_multipolygons
@@ -163,289 +153,6 @@ def get_image_list(
             image_list += ts_list
 
     return image_list
-
-
-@ray.remote
-class ProgressBarActor:
-    """
-    Reference:
-        https://docs.ray.io/en/releases-1.11.1/ray-core/examples/progress_bar.html
-    """
-
-    counter: int
-    delta: int
-    event: asyncio.Event
-
-    def __init__(self) -> None:
-        self.counter = 0
-        self.delta = 0
-        self.event = asyncio.Event()
-
-    def update(self, num_items_completed: int) -> None:
-        """Updates the ProgressBar with the incremental number of items that
-        were just completed."""
-        self.counter += num_items_completed
-        self.delta += num_items_completed
-        self.event.set()
-
-    async def wait_for_update(self) -> T.Tuple[int, int]:
-        """Blocking call.
-
-        Waits until somebody calls `update`, then returns a tuple of the number
-        of updates since the last call to `wait_for_update`, and the total
-        number of completed items.
-        """
-        await self.event.wait()
-        self.event.clear()
-        saved_delta = self.delta
-        self.delta = 0
-
-        return saved_delta, self.counter
-
-    def get_counter(self) -> int:
-        """Returns the total number of complete items."""
-        return self.counter
-
-
-class ProgressBar:
-    """
-    Reference:
-        https://docs.ray.io/en/releases-1.11.1/ray-core/examples/progress_bar.html
-    """
-
-    progress_actor: ActorHandle
-    total: int
-    desc: str
-    position: int
-    leave: bool
-    pbar: tqdm
-
-    def __init__(
-        self, total: int, desc: str = "", position: int = 0, leave: bool = True
-    ):
-        # Ray actors don't seem to play nice with mypy, generating
-        # a spurious warning for the following line,
-        # which we need to suppress. The code is fine.
-        self.progress_actor = ProgressBarActor.remote()  # type: ignore
-        self.total = total
-        self.desc = desc
-        self.position = position
-        self.leave = leave
-
-    @property
-    def actor(self) -> ActorHandle:
-        """Returns a reference to the remote `ProgressBarActor`.
-
-        When you complete tasks, call `update` on the actor.
-        """
-        return self.progress_actor
-
-    def print_until_done(self) -> None:
-        """Blocking call.
-
-        Do this after starting a series of remote Ray tasks, to which you've
-        passed the actor handle. Each of them calls `update` on the actor. When
-        the progress meter reaches 100%, this method returns.
-        """
-        pbar = tqdm(
-            desc=self.desc,
-            position=self.position,
-            total=self.total,
-            leave=self.leave,
-        )
-        while True:
-            delta, counter = ray.get(self.actor.wait_for_update.remote())
-            pbar.update(delta)
-            if counter >= self.total:
-                pbar.close()
-                return
-
-
-class BlockWriter(object):
-    def _build_slice(self, window: Window) -> tuple:
-        return (
-            slice(0, None),
-            slice(window.row_off, window.row_off + window.height),
-            slice(window.col_off, window.col_off + window.width),
-        )
-
-    def predict_write_block(self, w: Window, w_pad: Window):
-        slc = self._build_slice(w_pad)
-        # Create the data for the chunk
-        # FIXME: read satellite data into Data()
-        data = None
-        # data = create_network_data(
-        #     self.ts[slc].gw.compute(num_workers=1),
-        #     ntime=self.ntime,
-        #     nbands=self.nbands,
-        # )
-        # Apply inference on the chunk
-        stack = cultionet.predict(
-            lit_model=self.lit_model,
-            data=data,
-            written=None,  # self.dst.read(self.bands[-1], window=w_pad),
-            data_values=self.data_values,
-            w=w,
-            w_pad=w_pad,
-            device=self.device,
-            include_maskrcnn=self.include_maskrcnn,
-        )
-        # Write the prediction stack to file
-        with filelock.FileLock("./dst.lock"):
-            self.dst.write(
-                stack,
-                indexes=range(1, self.dst.profile["count"] + 1),
-                window=w,
-            )
-
-
-class WriterModule(BlockWriter):
-    def __init__(
-        self,
-        out_path: T.Union[str, Path],
-        mode: str,
-        profile: dict,
-        ntime: int,
-        nbands: int,
-        hidden_channels: int,
-        num_classes: int,
-        ts: xr.DataArray,
-        data_values: torch.Tensor,
-        ppaths: ProjectPaths,
-        device: str,
-        scale_factor: float,
-        include_maskrcnn: bool,
-    ) -> None:
-        self.out_path = out_path
-        # Create the output file
-        if mode == "w":
-            with rio.open(self.out_path, mode=mode, **profile):
-                pass
-
-        self.dst = rio.open(self.out_path, mode="r+")
-
-        self.ntime = ntime
-        self.nbands = nbands
-        self.ts = ts
-        self.data_values = data_values
-        self.ppaths = ppaths
-        self.device = device
-        self.scale_factor = scale_factor
-        self.include_maskrcnn = include_maskrcnn
-        # self.bands = [1, 2, 3] #+ list(range(4, 4+num_classes-1))
-        # if self.include_maskrcnn:
-        #     self.bands.append(self.bands[-1] + 1)
-
-        self.lit_model = cultionet.load_model(
-            ckpt_file=self.ppaths.ckpt_file,
-            model_file=self.ppaths.ckpt_file.parent / "cultionet.pt",
-            num_features=ntime * nbands,
-            num_time_features=ntime,
-            hidden_channels=hidden_channels,
-            num_classes=num_classes,
-            device=self.device,
-            enable_progress_bar=False,
-        )[1]
-
-    def close_open(self):
-        self.close()
-        self.dst = rio.open(self.out_path, mode="r+")
-
-    def close(self):
-        self.dst.close()
-
-    @abstractmethod
-    def write(
-        self,
-        w: Window,
-        w_pad: Window,
-        pba: T.Optional[T.Union[ActorHandle, int]] = None,
-    ):
-        raise NotImplementedError
-
-
-@ray.remote
-class RemoteWriter(WriterModule):
-    """A concurrent writer with Ray."""
-
-    def __init__(
-        self,
-        out_path: T.Union[str, Path],
-        mode: str,
-        profile: dict,
-        ntime: int,
-        nbands: int,
-        hidden_channels: int,
-        num_classes: int,
-        ts: xr.DataArray,
-        data_values: torch.Tensor,
-        ppaths: ProjectPaths,
-        device: str,
-        scale_factor: float,
-        include_maskrcnn: bool,
-    ) -> None:
-        super().__init__(
-            out_path=out_path,
-            mode=mode,
-            profile=profile,
-            ntime=ntime,
-            nbands=nbands,
-            hidden_channels=hidden_channels,
-            num_classes=num_classes,
-            ts=ts,
-            data_values=data_values,
-            ppaths=ppaths,
-            device=device,
-            scale_factor=scale_factor,
-            include_maskrcnn=include_maskrcnn,
-        )
-
-    def write(self, w: Window, w_pad: Window, pba: ActorHandle = None):
-        self.predict_write_block(w, w_pad)
-        if pba is not None:
-            pba.update.remote(1)
-
-
-class SerialWriter(WriterModule):
-    """A serial writer."""
-
-    def __init__(
-        self,
-        out_path: T.Union[str, Path],
-        mode: str,
-        profile: dict,
-        ntime: int,
-        nbands: int,
-        hidden_channels: int,
-        num_classes: int,
-        ts: xr.DataArray,
-        data_values: torch.Tensor,
-        ppaths: ProjectPaths,
-        device: str,
-        scale_factor: float,
-        include_maskrcnn: bool,
-    ) -> None:
-        super().__init__(
-            out_path=out_path,
-            mode=mode,
-            profile=profile,
-            ntime=ntime,
-            nbands=nbands,
-            hidden_channels=hidden_channels,
-            num_classes=num_classes,
-            ts=ts,
-            data_values=data_values,
-            ppaths=ppaths,
-            device=device,
-            scale_factor=scale_factor,
-            include_maskrcnn=include_maskrcnn,
-        )
-
-    def write(self, w: Window, w_pad: Window, pba: int = None):
-        self.predict_write_block(w, w_pad)
-        self.close_open()
-        if pba is not None:
-            pba.update(1)
 
 
 def predict_image(args):
@@ -1037,9 +744,6 @@ def train_model(args):
         spatial_partitions=args.spatial_partitions,
         batch_size=args.batch_size,
         load_batch_workers=args.load_batch_workers,
-        num_classes=args.num_classes
-        if args.num_classes is not None
-        else class_info["max_crop_class"] + 1,
         edge_class=args.edge_class
         if args.edge_class is not None
         else class_info["edge_class"],

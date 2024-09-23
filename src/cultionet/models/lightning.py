@@ -713,7 +713,6 @@ class CultionetLitTransferModel(LightningModuleMixin):
         pretrained_ckpt_file: T.Union[Path, str],
         in_channels: int,
         in_time: int,
-        num_classes: int = 2,
         hidden_channels: int = 64,
         model_type: str = ModelTypes.TOWERUNET,
         dropout: float = 0.2,
@@ -751,7 +750,6 @@ class CultionetLitTransferModel(LightningModuleMixin):
         self.eps = eps
         self.ckpt_name = ckpt_name
         self.model_name = model_name
-        self.num_classes = num_classes
         self.in_time = in_time
         self.class_counts = class_counts
         self.scale_pos_weight = scale_pos_weight
@@ -761,7 +759,7 @@ class CultionetLitTransferModel(LightningModuleMixin):
         if edge_class is not None:
             self.edge_class = edge_class
         else:
-            self.edge_class = num_classes
+            self.edge_class = 2
 
         self.cultionet_model = CultionetLitModel.load_from_checkpoint(
             checkpoint_path=str(pretrained_ckpt_file)
@@ -847,7 +845,6 @@ class CultionetLitModel(LightningModuleMixin):
         self,
         in_channels: int,
         in_time: int,
-        num_classes: int = 2,
         hidden_channels: int = 64,
         model_type: str = ModelTypes.TOWERUNET,
         dropout: float = 0.2,
@@ -886,7 +883,6 @@ class CultionetLitModel(LightningModuleMixin):
         self.eps = eps
         self.ckpt_name = ckpt_name
         self.model_name = model_name
-        self.num_classes = num_classes
         self.in_time = in_time
         self.class_counts = class_counts
         self.scale_pos_weight = scale_pos_weight
@@ -895,7 +891,7 @@ class CultionetLitModel(LightningModuleMixin):
         if edge_class is not None:
             self.edge_class = edge_class
         else:
-            self.edge_class = num_classes
+            self.edge_class = 2
 
         self.model_attr = f"{model_name}_{model_type}"
         setattr(
@@ -905,7 +901,6 @@ class CultionetLitModel(LightningModuleMixin):
                 in_channels=in_channels,
                 in_time=in_time,
                 hidden_channels=hidden_channels,
-                num_classes=self.num_classes,
                 model_type=model_type,
                 dropout=dropout,
                 activation_type=activation_type,

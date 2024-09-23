@@ -68,7 +68,6 @@ def test_cultionet(class_info: dict):
         in_channels=num_channels,
         in_time=in_time,
         hidden_channels=32,
-        num_classes=2,
         model_type=ModelTypes.TOWERUNET,
         activation_type="SiLU",
         dilations=[1, 2],

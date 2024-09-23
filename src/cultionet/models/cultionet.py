@@ -44,7 +44,6 @@ class CultioNet(nn.Module):
         in_channels: int,
         in_time: int,
         hidden_channels: int = 32,
-        num_classes: int = 2,
         model_type: str = ModelTypes.TOWERUNET,
         activation_type: str = "SiLU",
         dropout: float = 0.1,
@@ -53,13 +52,13 @@ class CultioNet(nn.Module):
         attention_weights: str = AttentionTypes.NATTEN,
         pool_by_max: bool = False,
         batchnorm_first: bool = False,
+        use_latlon: bool = False,
     ):
         super().__init__()
 
         self.in_channels = in_channels
         self.in_time = in_time
         self.hidden_channels = hidden_channels
-        self.num_classes = num_classes
 
         mask_model_kwargs = {
             "in_channels": self.in_channels,
@@ -75,7 +74,7 @@ class CultioNet(nn.Module):
             "mask_activation": True,
             "pool_by_max": pool_by_max,
             "batchnorm_first": batchnorm_first,
-            "use_latlon": False,
+            "use_latlon": use_latlon,
         }
 
         assert model_type in (

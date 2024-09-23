@@ -51,7 +51,6 @@ class CultionetParams:
     val_frac: float = attr.ib(converter=float, default=0.2)
     batch_size: int = attr.ib(converter=int, default=4)
     load_batch_workers: int = attr.ib(converter=int, default=0)
-    num_classes: int = attr.ib(converter=int, default=None)
     edge_class: int = attr.ib(converter=int, default=None)
     class_counts: torch.Tensor = attr.ib(default=None)
     hidden_channels: int = attr.ib(converter=int, default=64)
@@ -142,7 +141,6 @@ class CultionetParams:
         return dict(
             in_channels=self.in_channels,
             in_time=self.in_time,
-            num_classes=self.num_classes,
             hidden_channels=self.hidden_channels,
             model_type=self.model_type,
             dropout=self.dropout,
@@ -335,7 +333,6 @@ def load_model(
     model_file: T.Union[str, Path] = None,
     num_features: T.Optional[int] = None,
     num_time_features: T.Optional[int] = None,
-    num_classes: T.Optional[int] = None,
     filters: T.Optional[int] = None,
     device: T.Union[str, bytes] = "gpu",
     devices: T.Optional[int] = 1,
@@ -392,7 +389,6 @@ def load_model(
                 num_features=num_features,
                 num_time_features=num_time_features,
                 filters=filters,
-                num_classes=num_classes,
             )
             lit_model.load_state_dict(state_dict=torch.load(model_file))
         else:

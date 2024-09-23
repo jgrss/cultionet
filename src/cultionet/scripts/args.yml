@@ -265,13 +265,6 @@ train_predict:
     help: The model data precision
     kwargs:
       default: '16-mixed'
-  num_classes:
-    short: ''
-    long: num-classes
-    help: The number of classes (overrides file info)
-    kwargs:
-      default: !!null
-      type: '&int'
   strategy:
     short: ''
     long: strategy
