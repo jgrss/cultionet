@@ -1,25 +1,29 @@
 import typing as T
-from pathlib import Path
+from copy import deepcopy
 from functools import partial
+from pathlib import Path
 
-import numpy as np
 import attr
-import torch
-from torch_geometric.data import Data, Dataset
-import psutil
-import joblib
-from joblib import delayed, parallel_backend
-import pandas as pd
 import geopandas as gpd
+import lightning as L
+import numpy as np
+import psutil
+import pygrts
+import torch
+from joblib import delayed, parallel_backend
+from scipy.ndimage.measurements import label as nd_label
 from shapely.geometry import box
-from pytorch_lightning import seed_everything
-from geosample import QuadTree
+from skimage.measure import regionprops
 from tqdm.auto import tqdm
 
+from ..augment.augmenters import Augmenters
 from ..errors import TensorShapeError
 from ..utils.logging import set_color_logger
-from ..utils.model_preprocessing import TqdmParallel
-
+from ..utils.model_preprocessing import ParallelProgress
+from ..utils.normalize import NormValues
+from .constant import SCALE_FACTOR
+from .data import Data
+from .spatial_dataset import SpatialDataset
 
 ATTRVINSTANCE = attr.validators.instance_of
 ATTRVIN = attr.validators.in_
@@ -28,123 +32,133 @@ ATTRVOPTIONAL = attr.validators.optional
 logger = set_color_logger(__name__)
 
 
-def add_dims(d: torch.Tensor) -> torch.Tensor:
-    return d.unsqueeze(0)
-
-
-def update_data(
-    batch: Data,
-    idx: T.Optional[int] = None,
-    x: T.Optional[torch.Tensor] = None,
-) -> Data:
-    image_id = None
-    if idx is not None:
-        if hasattr(batch, "boxes"):
-            if batch.boxes is not None:
-                image_id = (
-                    torch.zeros_like(batch.box_labels, dtype=torch.int64) + idx
-                )
-
-    if x is not None:
-        exclusion = ("x",)
-
-        return Data(
-            x=x,
-            image_id=image_id,
-            **{k: getattr(batch, k) for k in batch.keys if k not in exclusion},
-        )
-    else:
-        return Data(
-            image_id=image_id, **{k: getattr(batch, k) for k in batch.keys}
-        )
-
-
-def zscores(
-    batch: Data,
-    data_means: torch.Tensor,
-    data_stds: torch.Tensor,
-    idx: T.Optional[int] = None,
-) -> Data:
-    """Normalizes data to z-scores.
-
-    Args:
-        batch (Data): A `torch_geometric` data object.
-        data_means (Tensor): The data feature-wise means.
-        data_stds (Tensor): The data feature-wise standard deviations.
-
-    z = (x - μ) / σ
-    """
-    x = (batch.x - add_dims(data_means)) / add_dims(data_stds)
-
-    return update_data(batch=batch, idx=idx, x=x)
-
-
 def _check_shape(
-    d1: int, h1: int, w1: int, d2: int, h2: int, w2: int, index: int, uid: str
+    expected_time: int,
+    expected_height: int,
+    expected_width: int,
+    in_time: int,
+    in_height: int,
+    in_width: int,
+    index: int,
+    uid: str,
 ) -> T.Tuple[bool, int, str]:
-    if (d1 != d2) or (h1 != h2) or (w1 != w2):
+    if (
+        (expected_time != in_time)
+        or (expected_height != in_height)
+        or (expected_width != in_width)
+    ):
         return False, index, uid
     return True, index, uid
 
 
-@attr.s
-class EdgeDataset(Dataset):
-    """An edge dataset."""
+class EdgeDataset(SpatialDataset):
+    """An edge dataset.
 
-    root: T.Union[str, Path, bytes] = attr.ib(default=".")
-    transform: T.Any = attr.ib(default=None)
-    pre_transform: T.Any = attr.ib(default=None)
-    data_means: T.Optional[torch.Tensor] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
-    )
-    data_stds: T.Optional[torch.Tensor] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
-    )
-    crop_counts: T.Optional[torch.Tensor] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
-    )
-    edge_counts: T.Optional[torch.Tensor] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(torch.Tensor)), default=None
-    )
-    pattern: T.Optional[str] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(str)), default="data*.pt"
-    )
-    processes: T.Optional[int] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=psutil.cpu_count()
-    )
-    threads_per_worker: T.Optional[int] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=1
-    )
-    random_seed: T.Optional[int] = attr.ib(
-        validator=ATTRVOPTIONAL(ATTRVINSTANCE(int)), default=42
-    )
+    Parameters
+    ==========
+    root
+        The root data directory.
+    log_transform
+        Whether to log-transform the data before truncating by Sigmoid. For details, see:
+
+        @article{brown_etal_2022,
+            title={Dynamic World, Near real-time global 10 m land use land cover mapping},
+            author={Brown, Christopher F and Brumby, Steven P and Guzder-Williams, Brookie and Birch, Tanya and Hyde, Samantha Brooks and Mazzariello, Joseph and Czerwinski, Wanda and Pasquarella, Valerie J and Haertel, Robert and Ilyushchenko, Simon and others},
+            journal={Scientific Data},
+            volume={9},
+            number={1},
+            pages={251},
+            year={2022},
+            publisher={Nature Publishing Group UK London},
+            url={https://www.nature.com/articles/s41597-022-01307-4},
+        }
+    normalize
+        Whether to normalize the data by mean and standard deviation, centering the data around the mean or median. Note that if
+        ``log_transform=True``, it is applied before normalization.
+    norm_values
+        The normalization data object.
+    pattern
+        The data search pattern.
+    processes
+        The number of parallel processes.
+    random_seed
+        A random seed value.
+    augment_prob
+        The probability of applying random augmentation.
+    """
 
     data_list_ = None
     grid_id_column = "grid_id"
 
-    def __attrs_post_init__(self):
-        super(EdgeDataset, self).__init__(
-            str(self.root),
-            transform=self.transform,
-            pre_transform=self.pre_transform,
-        )
-        seed_everything(self.random_seed, workers=True)
+    def __init__(
+        self,
+        root: T.Union[str, Path, bytes] = ".",
+        log_transform: bool = False,
+        norm_values: T.Optional[NormValues] = None,
+        pattern: str = "data*.pt",
+        processes: int = psutil.cpu_count(),
+        random_seed: int = 42,
+        augment_prob: float = 0.0,
+    ):
+        self.root = root
+        self.log_transform = log_transform
+        self.norm_values = norm_values
+        self.pattern = pattern
+        self.processes = processes
+        self.random_seed = random_seed
+        self.augment_prob = augment_prob
+
+        L.seed_everything(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
+
+        self.augmentations_ = [
+            'tswarp',
+            'tsnoise',
+            'tsdrift',
+            'tspeaks',
+            'rot90',
+            'rot180',
+            'rot270',
+            'roll',
+            'fliplr',
+            'flipud',
+            'gaussian',
+            'saltpepper',
+            'cropresize',
+            'perlin',
+        ]
+
+        self.data_list_ = None
+        self.processed_dir = Path(self.root) / 'processed'
+        self.get_data_list()
 
     def get_data_list(self):
         """Gets the list of data files."""
-        self.data_list_ = list(Path(self.processed_dir).glob(self.pattern))
+        data_list_ = sorted(list(Path(self.processed_dir).glob(self.pattern)))
 
-        if not self.data_list_:
+        if not data_list_:
             logger.exception(
                 f"No .pt files were found with pattern {self.pattern}."
             )
+
+        self.data_list_ = np.array(data_list_)
+
+    @property
+    def data_list(self):
+        """Get a list of processed files."""
+        return self.data_list_
+
+    def __len__(self):
+        """Returns the dataset length."""
+        return len(self.data_list)
 
     def cleanup(self):
         for fn in self.data_list_:
             fn.unlink()
 
-    def shuffle_items(self, data: T.Optional[list] = None):
+        self.data_list_ = []
+
+    def shuffle(self, data: T.Optional[list] = None):
         """Applies a random in-place shuffle to the data list."""
         if data is not None:
             self.rng.shuffle(data)
@@ -152,52 +166,13 @@ class EdgeDataset(Dataset):
             self.rng.shuffle(self.data_list_)
 
     @property
-    def num_time_features(self):
-        """Get the number of time features."""
-        data = self[0]
-        return int(data.ntime)
+    def num_channels(self) -> int:
+        return self[0].num_channels
 
     @property
-    def raw_file_names(self):
-        """Get the raw file names."""
-        if not self.data_list_:
-            self.get_data_list()
-
-        return self.data_list_
-
-    def to_frame(self) -> gpd.GeoDataFrame:
-        """Converts the Dataset to a GeoDataFrame."""
-
-        def get_box_id(data_id: str, *bounds):
-            return data_id, box(*bounds).centroid
-
-        with parallel_backend(backend="loky", n_jobs=self.processes):
-            with TqdmParallel(
-                tqdm_kwargs={
-                    "total": len(self),
-                    "desc": "Building GeoDataFrame",
-                }
-            ) as pool:
-                results = pool(
-                    delayed(get_box_id)(
-                        data.train_id,
-                        data.left,
-                        data.bottom,
-                        data.right,
-                        data.top,
-                    )
-                    for data in self
-                )
-
-        ids, geometry = list(map(list, zip(*results)))
-        df = gpd.GeoDataFrame(
-            data=ids,
-            columns=[self.grid_id_column],
-            geometry=geometry,
-            crs="epsg:4326",
-        )
-
-        return df
+    def num_time(self) -> int:
+        """Get the number of time features."""
+        return self[0].num_time
 
     def get_spatial_partitions(
         self,
@@ -205,14 +180,19 @@ class EdgeDataset(Dataset):
         splits: int = 0,
     ) -> None:
         """Gets the spatial partitions."""
-        self.create_spatial_index()
+        self.create_spatial_index(
+            id_column=self.grid_id_column, n_jobs=self.processes
+        )
         if isinstance(spatial_partitions, (str, Path)):
             spatial_partitions = gpd.read_file(spatial_partitions)
         else:
-            spatial_partitions = self.to_frame()
+            spatial_partitions = self.to_frame(
+                id_column=self.grid_id_column,
+                n_jobs=self.processes,
+            )
 
         if splits > 0:
-            qt = QuadTree(spatial_partitions, force_square=False)
+            qt = pygrts.QuadTree(spatial_partitions, force_square=False)
             for __ in range(splits):
                 qt.split()
             spatial_partitions = qt.to_frame()
@@ -276,10 +256,9 @@ class EdgeDataset(Dataset):
             else:
                 return self[indices]
 
-    def spatial_kfoldcv_iter(
-        self, partition_column: str
-    ) -> T.Tuple[str, "EdgeDataset", "EdgeDataset"]:
+    def spatial_kfoldcv_iter(self, partition_column: str):
         """Yield generator to iterate over spatial partitions."""
+
         for kfold in self.spatial_partitions.itertuples():
             # Bounding box and indices of the kth fold
             kfold_indices = self.query_partition_by_name(
@@ -292,31 +271,9 @@ class EdgeDataset(Dataset):
 
             yield str(getattr(kfold, partition_column)), train_ds, test_ds
 
-    def create_spatial_index(self):
-        """Creates the spatial index."""
-        dataset_grid_path = (
-            Path(self.processed_dir).parent.parent / "dataset_grids.gpkg"
-        )
-        if dataset_grid_path.is_file():
-            self.dataset_df = gpd.read_file(dataset_grid_path)
-        else:
-            self.dataset_df = self.to_frame()
-            self.dataset_df.to_file(dataset_grid_path, driver="GPKG")
-
-    def download(self):
-        pass
-
-    def process(self):
-        pass
-
-    @property
-    def processed_file_names(self):
-        """Get a list of processed files."""
-        return self.data_list_
-
     def check_dims(
         self,
-        expected_dim: int,
+        expected_time: int,
         expected_height: int,
         expected_width: int,
         delete_mismatches: bool = False,
@@ -324,15 +281,16 @@ class EdgeDataset(Dataset):
     ):
         """Checks if all tensors in the dataset match in shape dimensions."""
         check_partial = partial(
-            _check_shape, expected_dim, expected_height, expected_width
+            _check_shape,
+            expected_time=expected_time,
+            expected_height=expected_height,
+            expected_width=expected_width,
         )
-
         with parallel_backend(
             backend="loky",
             n_jobs=self.processes,
-            inner_max_num_threads=self.threads_per_worker,
         ):
-            with TqdmParallel(
+            with ParallelProgress(
                 tqdm_kwargs={
                     "total": len(self),
                     "desc": "Checking dimensions",
@@ -341,14 +299,15 @@ class EdgeDataset(Dataset):
             ) as pool:
                 results = pool(
                     delayed(check_partial)(
-                        self[i].x.shape[1],
-                        self[i].height,
-                        self[i].width,
-                        i,
-                        self[i].train_id,
+                        in_time=self[i].num_time,
+                        in_height=self[i].height,
+                        in_width=self[i].width,
+                        index=i,
+                        uid=self[i].batch_id,
                     )
                     for i in range(0, len(self))
                 )
+
         matches, indices, ids = list(map(list, zip(*results)))
         if not all(matches):
             indices = np.array(indices)
@@ -368,10 +327,6 @@ class EdgeDataset(Dataset):
             else:
                 raise TensorShapeError
 
-    def len(self):
-        """Returns the dataset length."""
-        return len(self.processed_file_names)
-
     def split_train_val_by_partition(
         self,
         spatial_partitions: str,
@@ -382,7 +337,7 @@ class EdgeDataset(Dataset):
         self.get_spatial_partitions(spatial_partitions=spatial_partitions)
         train_indices = []
         val_indices = []
-        self.shuffle_items()
+        self.shuffle()
         # self.spatial_partitions is a GeoDataFrame with Point geometry
         for row in tqdm(
             self.spatial_partitions.itertuples(),
@@ -415,96 +370,131 @@ class EdgeDataset(Dataset):
         val_frac: float,
         spatial_overlap_allowed: bool = True,
         spatial_balance: bool = True,
+        crs: str = "EPSG:8857",
     ) -> T.Tuple["EdgeDataset", "EdgeDataset"]:
         """Splits the dataset into train and validation.
 
-        Args:
-            val_frac (float): The validation fraction.
+        Parameters
+        ==========
+        val_frac
+            The validation fraction.
 
-        Returns:
-            train dataset, validation dataset
+        Returns
+        =======
+        train dataset, validation dataset
         """
-        id_column = "common_id"
-        self.shuffle_items()
+        # We do not need augmentations when loading batches for
+        # sample splits.
+        augment_prob = deepcopy(self.augment_prob)
+        self.augment_prob = 0.0
+
         if spatial_overlap_allowed:
+            self.shuffle()
             n_train = int(len(self) * (1.0 - val_frac))
             train_ds = self[:n_train]
             val_ds = self[n_train:]
         else:
-            # Create a GeoDataFrame of every .pt file in
-            # the dataset.
-            self.create_spatial_index()
-            # Create column of each site's common id
-            # (i.e., without the year and augmentation).
-            self.dataset_df[id_column] = self.dataset_df.grid_id.str.split(
-                "_", expand=True
-            ).loc[:, 0]
-            unique_ids = self.dataset_df.common_id.unique()
-            if spatial_balance:
-                # Separate train and validation by spatial location
+            self.create_spatial_index(
+                id_column=self.grid_id_column,
+                n_jobs=self.processes,
+            )
 
-                # Get unique site coordinates
-                # NOTE: We do this becuase augmentations are stacked at
-                # the same site, thus creating multiple files with the
-                # same centroid.
-                df_unique_locations = gpd.GeoDataFrame(
-                    pd.Series(unique_ids)
-                    .to_frame(name=id_column)
-                    .merge(self.dataset_df, on=id_column)
-                    .drop_duplicates(id_column)
-                    .drop(columns=["grid_id"])
-                ).to_crs("EPSG:8858")
-                # Setup a quad-tree using the GRTS method
-                # (see https://github.com/jgrss/geosample for details)
-                qt = QuadTree(df_unique_locations, force_square=False)
-                # Recursively split the quad-tree until each grid has
-                # only one sample.
-                qt.split_recursive(max_samples=1)
-                n_val = int(val_frac * len(df_unique_locations.index))
-                # `qt.sample` random samples from the quad-tree in a
-                # spatially balanced manner. Thus, `df_val_sample` is
-                # a GeoDataFrame with `n_val` sites spatially balanced.
-                df_val_sample = qt.sample(n=n_val)
-                # Since we only took one sample from each coordinate,
-                # we need to find all of the .pt files that share
-                # coordinates with the sampled sites.
-                val_mask = self.dataset_df.common_id.isin(
-                    df_val_sample.common_id
-                )
-            else:
-                # Randomly sample a percentage for validation
-                df_val_ids = (
-                    pd.Series(unique_ids)
-                    .sample(frac=val_frac, random_state=self.random_seed)
-                    .to_frame(name=id_column)
-                )
-                # Get all ids for validation samples
-                val_mask = self.dataset_df.common_id.isin(df_val_ids.common_id)
-            # Get train/val indices
-            val_idx = self.dataset_df.loc[val_mask].index.tolist()
-            train_idx = self.dataset_df.loc[~val_mask].index.tolist()
-            # Slice the dataset
-            train_ds = self[train_idx]
-            val_ds = self[val_idx]
+            train_ds, val_ds = self.spatial_splits(
+                val_frac=val_frac,
+                id_column=self.grid_id_column,
+                spatial_balance=spatial_balance,
+                crs=crs,
+                random_state=self.random_seed,
+            )
+
+        train_ds.augment_prob = augment_prob
+        val_ds.augment_prob = 0.0
 
         return train_ds, val_ds
 
     def load_file(self, filename: T.Union[str, Path]) -> Data:
-        return joblib.load(filename)
+        return Data.from_file(filename)
 
-    def get(self, idx):
+    def __getitem__(
+        self, idx: T.Union[int, np.ndarray]
+    ) -> T.Union[dict, "EdgeDataset"]:
+        if isinstance(idx, (int, np.integer)):
+            return self.get(idx)
+        else:
+            return self.index_select(idx)
+
+    def index_select(self, idx: np.ndarray) -> "EdgeDataset":
+        dataset = deepcopy(self)
+        dataset.data_list_ = self.data_list_[idx]
+
+        return dataset
+
+    def get(self, idx: int) -> dict:
         """Gets an individual data object from the dataset.
 
-        Args:
-            idx (int): The dataset index position.
-
-        Returns:
-            A `torch_geometric` data object.
+        Parameters
+        ==========
+        idx
+            The dataset index position.
         """
+
         batch = self.load_file(self.data_list_[idx])
-        if isinstance(self.data_means, torch.Tensor):
-            batch = zscores(batch, self.data_means, self.data_stds, idx=idx)
-        else:
-            batch = update_data(batch=batch, idx=idx)
+
+        batch.x = (batch.x / SCALE_FACTOR).clip(1e-9, 1)
+
+        if hasattr(batch, 'bdist'):
+            batch.bdist = (batch.bdist / SCALE_FACTOR).clip(1e-9, 1)
+
+        if batch.y is not None:
+            if self.rng.random() > (1 - self.augment_prob):
+                # Choose one augmentation to apply
+                aug_name = self.rng.choice(self.augmentations_)
+
+                if aug_name in (
+                    'roll',
+                    'tswarp',
+                    'tsnoise',
+                    'tsdrift',
+                    'tspeaks',
+                ):
+                    # FIXME: By default, the crop value is 1 (background is 0 and edges are 2).
+                    # But, it would be better to get 1 from an argument.
+                    # Label properties are only used in 5 augmentations
+                    batch.segments = np.uint8(
+                        nd_label(batch.y.squeeze().numpy() == 1)[0]
+                    )
+                    batch.props = regionprops(batch.segments)
+
+                # Create the augmenter object
+                aug_modules = Augmenters(
+                    # NOTE: apply a single augmenter
+                    # TODO: could apply a series of augmenters
+                    augmentations=[aug_name],
+                    rng=self.rng,
+                )
+
+                # Apply the object
+                batch = aug_modules(batch)
+                batch.segments = None
+                batch.props = None
+
+        if self.log_transform:
+            # Dynamic World log transform
+            # NOTE: If inputs are 0-10,000, then (x * 0.005)
+            batch.x = torch.log(batch.x * 50.0 + 1.0).clamp_min(1e-9)
+
+        if self.norm_values is not None:
+            # Center values around the mean or median
+            batch = self.norm_values(batch)
+
+        # Get the centroid
+        centroid = box(
+            float(batch.left),
+            float(batch.bottom),
+            float(batch.right),
+            float(batch.top),
+        ).centroid
+        batch.lon = torch.tensor([centroid.x])
+        batch.lat = torch.tensor([centroid.y])
 
         return batch

@@ -1,10 +1,11 @@
 import typing as T
 
-from torch.utils.data import Sampler
-from pytorch_lightning import LightningDataModule
-from torch_geometric.loader import DataLoader
+import torch
+from lightning import LightningDataModule
+from torch.utils.data import DataLoader, Sampler
 
 from .datasets import EdgeDataset
+from .utils import collate_fn
 
 
 class EdgeDataModule(LightningDataModule):
@@ -16,10 +17,13 @@ class EdgeDataModule(LightningDataModule):
         val_ds: T.Optional[EdgeDataset] = None,
         test_ds: T.Optional[EdgeDataset] = None,
         predict_ds: T.Optional[EdgeDataset] = None,
-        batch_size: int = 5,
+        batch_size: int = 4,
         num_workers: int = 0,
         shuffle: bool = True,
         sampler: T.Optional[Sampler] = None,
+        pin_memory: bool = False,
+        persistent_workers: bool = True,
+        generator: T.Optional[torch.Generator] = None,
     ):
         super().__init__()
 
@@ -31,6 +35,11 @@ class EdgeDataModule(LightningDataModule):
         self.num_workers = num_workers
         self.shuffle = shuffle
         self.sampler = sampler
+        self.pin_memory = pin_memory
+        self.persistent_workers = (
+            False if num_workers == 0 else persistent_workers
+        )
+        self.generator = generator
 
     def train_dataloader(self):
         """Returns a data loader for train data."""
@@ -40,6 +49,10 @@ class EdgeDataModule(LightningDataModule):
             shuffle=None if self.sampler is not None else self.shuffle,
             num_workers=self.num_workers,
             sampler=self.sampler,
+            pin_memory=self.pin_memory,
+            collate_fn=collate_fn,
+            persistent_workers=self.persistent_workers,
+            generator=self.generator,
         )
 
     def val_dataloader(self):
@@ -47,8 +60,11 @@ class EdgeDataModule(LightningDataModule):
         return DataLoader(
             self.val_ds,
             batch_size=self.batch_size,
-            shuffle=self.shuffle,
+            shuffle=False,
             num_workers=self.num_workers,
+            collate_fn=collate_fn,
+            persistent_workers=self.persistent_workers,
+            generator=self.generator,
         )
 
     def test_dataloader(self):
@@ -56,8 +72,11 @@ class EdgeDataModule(LightningDataModule):
         return DataLoader(
             self.test_ds,
             batch_size=self.batch_size,
-            shuffle=self.shuffle,
+            shuffle=False,
             num_workers=self.num_workers,
+            collate_fn=collate_fn,
+            persistent_workers=self.persistent_workers,
+            generator=self.generator,
         )
 
     def predict_dataloader(self):
@@ -65,6 +84,9 @@ class EdgeDataModule(LightningDataModule):
         return DataLoader(
             self.predict_ds,
             batch_size=self.batch_size,
-            shuffle=self.shuffle,
+            shuffle=False,
             num_workers=self.num_workers,
+            collate_fn=collate_fn,
+            persistent_workers=self.persistent_workers,
+            generator=self.generator,
         )

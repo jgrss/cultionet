@@ -1,526 +1,120 @@
-import typing as T
-from pathlib import Path
-import json
-import warnings
 import logging
+import typing as T
+import warnings
+from pathlib import Path
 
+import einops
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from torch.optim import lr_scheduler as optim_lr_scheduler
-from torch_geometric.data import Data
-from pytorch_lightning import LightningModule
-from torchvision.ops import box_iou
-from torchvision import transforms
 import torchmetrics
+from lightning import LightningModule
+from torch.optim import lr_scheduler as optim_lr_scheduler
 
-from . import model_utils
-from .cultio import CultioNet, GeoRefinement
-from .maskcrnn import BFasterRCNN
-from .base_layers import Softmax
-from ..losses import TanimotoDistLoss
-
+from .. import losses as cnetlosses
+from .. import nn as cunn
+from ..data import Data
+from ..enums import (
+    AttentionTypes,
+    InferenceNames,
+    LearningRateSchedulers,
+    LossTypes,
+    ModelNames,
+    ModelTypes,
+    ResBlockTypes,
+    ValidationNames,
+)
+from ..layers.weights import init_conv_weights
+from .cultionet import CultioNet
 
 warnings.filterwarnings("ignore")
 logging.getLogger("lightning").addHandler(logging.NullHandler())
 logging.getLogger("lightning").propagate = False
 logging.getLogger("lightning").setLevel(logging.ERROR)
 
-
-class MaskRCNNLitModel(LightningModule):
-    def __init__(
-        self,
-        cultionet_model_file: Path,
-        cultionet_num_features: int,
-        cultionet_num_time_features: int,
-        cultionet_filters: int,
-        cultionet_num_classes: int,
-        ckpt_name: str = "maskrcnn",
-        model_name: str = "maskrcnn",
-        learning_rate: float = 1e-3,
-        weight_decay: float = 1e-5,
-        resize_height: int = 201,
-        resize_width: int = 201,
-        min_image_size: int = 100,
-        max_image_size: int = 500,
-        trainable_backbone_layers: int = 3,
-    ):
-        """Lightning model.
-
-        Args:
-            num_features
-            num_time_features
-            filters
-            learning_rate
-            weight_decay
-        """
-        super(MaskRCNNLitModel, self).__init__()
-        self.save_hyperparameters()
-
-        self.ckpt_name = ckpt_name
-        self.model_name = model_name
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.num_classes = 2
-        self.resize_height = resize_height
-        self.resize_width = resize_width
-
-        self.cultionet_model = CultioLitModel(
-            num_features=cultionet_num_features,
-            num_time_features=cultionet_num_time_features,
-            filters=cultionet_filters,
-            num_classes=cultionet_num_classes,
-        )
-        self.cultionet_model.load_state_dict(
-            state_dict=torch.load(cultionet_model_file)
-        )
-        self.cultionet_model.eval()
-        self.cultionet_model.freeze()
-        self.model = BFasterRCNN(
-            in_channels=4,
-            out_channels=256,
-            num_classes=self.num_classes,
-            sizes=(16, 32, 64, 128, 256),
-            aspect_ratios=(0.5, 1.0, 3.0),
-            trainable_backbone_layers=trainable_backbone_layers,
-            min_image_size=min_image_size,
-            max_image_size=max_image_size,
-        )
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    def mask_forward(
-        self,
-        distance_ori: torch.Tensor,
-        distance: torch.Tensor,
-        edge: torch.Tensor,
-        crop_r: torch.Tensor,
-        height: T.Union[None, int, torch.Tensor],
-        width: T.Union[None, int, torch.Tensor],
-        batch: T.Union[None, int, torch.Tensor],
-        y: T.Union[None, torch.Tensor] = None,
-    ):
-        height = int(height) if batch is None else int(height[0])
-        width = int(width) if batch is None else int(width[0])
-        batch_size = 1 if batch is None else batch.unique().size(0)
-        x = torch.cat(
-            (
-                distance_ori,
-                distance,
-                edge[:, 1][:, None],
-                crop_r[:, 1][:, None],
-            ),
-            dim=1,
-        )
-        # in x = (H*W x C)
-        # new x = (B x C x H x W)
-        gc = model_utils.GraphToConv()
-        x = gc(x, batch_size, height, width)
-        resizer = transforms.Resize((self.resize_height, self.resize_width))
-        x = [resizer(image) for image in x]
-        targets = None
-        if y is not None:
-            targets = []
-            for bidx in y["image_id"].unique():
-                batch_dict = {}
-                batch_slice = y["image_id"] == bidx
-                for k in y.keys():
-                    if k == "masks":
-                        batch_dict[k] = resizer(y[k][batch_slice])
-                    elif k == "boxes":
-                        # [xmin, ymin, xmax, ymax]
-                        batch_dict[k] = self.scale_boxes(
-                            y[k][batch_slice], batch, [height]
-                        )
-                    else:
-                        batch_dict[k] = y[k][batch_slice]
-                    targets.append(batch_dict)
-        outputs = self.model(x, targets)
-
-        return outputs
-
-    def scale_boxes(
-        self,
-        boxes: torch.Tensor,
-        batch: torch.Tensor,
-        height: T.Union[None, int, T.List[int], torch.Tensor],
-    ):
-        height = int(height) if batch is None else int(height[0])
-        scale = self.resize_height / height
-
-        return boxes * scale
-
-    def forward(
-        self,
-        batch: Data,
-        batch_idx: int = None,
-        y: T.Optional[torch.Tensor] = None,
-    ) -> T.Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
-    ]:
-        """Performs a single model forward pass."""
-        with torch.no_grad():
-            distance_ori, distance, edge, __, crop_r = self.cultionet_model(
-                batch
-            )
-        estimates = self.mask_forward(
-            distance_ori,
-            distance,
-            edge,
-            crop_r,
-            height=batch.height,
-            width=batch.width,
-            batch=batch.batch,
-            y=y,
-        )
-
-        return estimates
-
-    def on_save_checkpoint(self, checkpoint):
-        """Save the checkpoint."""
-        ckpt_file = Path(self.logger.save_dir) / f"{self.ckpt_name}.ckpt"
-        if ckpt_file.is_file():
-            ckpt_file.unlink()
-        torch.save(checkpoint, ckpt_file)
-
-    def on_validation_epoch_end(self, *args, **kwargs):
-        """Save the model on validation end."""
-        model_file = Path(self.logger.save_dir) / f"{self.model_name}.pt"
-        if model_file.is_file():
-            model_file.unlink()
-        torch.save(self.state_dict(), model_file)
-
-    def calc_loss(
-        self, batch: T.Union[Data, T.List], y: T.Optional[torch.Tensor] = None
-    ):
-        """Calculates the loss for each layer.
-
-        Returns:
-            Average loss
-        """
-        losses = self(batch, y=y)
-        loss = sum(loss for loss in losses.values())
-
-        return loss
-
-    def training_step(self, batch: Data, batch_idx: int = None):
-        """Executes one training step."""
-        y = {
-            "boxes": batch.boxes,
-            "labels": batch.box_labels,
-            "masks": batch.box_masks,
-            "image_id": batch.image_id,
-        }
-        loss = self.calc_loss(batch, y=y)
-        self.log("loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-
-        return loss
-
-    def _shared_eval_step(self, batch: Data) -> dict:
-        # Predictions
-        instances = self(batch)
-        # True boxes
-        true_boxes = self.scale_boxes(batch.boxes, batch, batch.height)
-
-        predict_iou_score = torch.tensor(0.0, device=self.device)
-        iou_score = torch.tensor(0.0, device=self.device)
-        box_score = torch.tensor(0.0, device=self.device)
-        for bidx, batch_value in enumerate(batch.image_id.unique()):
-            # This should be low (i.e., low overlap of predicted boxes)
-            predict_iou_score += box_iou(
-                instances[bidx]["boxes"], instances[bidx]["boxes"]
-            ).mean()
-            # This should be high (i.e., high overlap of predictions and true boxes)
-            iou_score += box_iou(
-                true_boxes[batch.image_id == batch_value],
-                instances[bidx]["boxes"],
-            ).mean()
-            # This should be high (i.e., masks should be confident)
-            box_score += instances[bidx]["scores"].mean()
-        predict_iou_score /= batch.image_id.unique().size(0)
-        iou_score /= batch.image_id.unique().size(0)
-        box_score /= batch.image_id.unique().size(0)
-
-        total_iou_score = (predict_iou_score + (1.0 - iou_score)) * 0.5
-        box_score = 1.0 - box_score
-        # Minimize intersection-over-union and maximum score
-        total_score = (total_iou_score + box_score) * 0.5
-
-        metrics = {
-            "predict_iou_score": predict_iou_score,
-            "iou_score": iou_score,
-            "box_score": box_score,
-            "mean_score": total_score,
-        }
-
-        return metrics
-
-    def validation_step(self, batch: Data, batch_idx: int = None) -> dict:
-        """Executes one valuation step."""
-        eval_metrics = self._shared_eval_step(batch)
-
-        metrics = {
-            "val_loss": eval_metrics["mean_score"],
-            "val_piou": eval_metrics["predict_iou_score"],
-            "val_iou": eval_metrics["iou_score"],
-            "val_box": eval_metrics["box_score"],
-        }
-        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
-
-        return metrics
-
-    def test_step(self, batch: Data, batch_idx: int = None) -> dict:
-        """Executes one test step."""
-        eval_metrics = self._shared_eval_step(batch)
-
-        metrics = {
-            "test_loss": eval_metrics["mean_score"],
-            "test_piou": eval_metrics["predict_iou_score"],
-            "test_iou": eval_metrics["iou_score"],
-            "test_box": eval_metrics["box_score"],
-        }
-        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
-
-        return metrics
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            list(self.model.parameters()),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay,
-            eps=1e-4,
-        )
-        lr_scheduler = optim_lr_scheduler.ReduceLROnPlateau(
-            optimizer, factor=0.1, patience=5
-        )
-
-        return {
-            "optimizer": optimizer,
-            "scheduler": lr_scheduler,
-            "monitor": "val_loss",
-        }
+torch.set_float32_matmul_precision("high")
 
 
-def scale_logits(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-    return x / t
+LOSS_DICT = {
+    LossTypes.BOUNDARY: {
+        "classification": cnetlosses.BoundaryLoss(),
+    },
+    LossTypes.CLASS_BALANCED_MSE: {
+        "classification": cnetlosses.ClassBalancedMSELoss(),
+    },
+    LossTypes.LOG_COSH: {
+        "regression": cnetlosses.LogCoshLoss(),
+    },
+    LossTypes.TANIMOTO_COMPLEMENT: {
+        "classification": cnetlosses.TanimotoComplementLoss(),
+        "regression": cnetlosses.TanimotoComplementLoss(
+            transform_logits=False,
+            one_hot_targets=False,
+        ),
+    },
+    LossTypes.TANIMOTO: {
+        "classification": cnetlosses.TanimotoDistLoss(),
+        "regression": cnetlosses.TanimotoDistLoss(
+            transform_logits=False,
+            one_hot_targets=False,
+        ),
+    },
+    LossTypes.TANIMOTO_COMBINED: {
+        "classification": cnetlosses.CombinedLoss(
+            losses=[
+                cnetlosses.TanimotoDistLoss(),
+                cnetlosses.TanimotoComplementLoss(),
+            ],
+        ),
+        "regression": cnetlosses.CombinedLoss(
+            losses=[
+                cnetlosses.TanimotoDistLoss(
+                    transform_logits=False,
+                    one_hot_targets=False,
+                ),
+                cnetlosses.TanimotoComplementLoss(
+                    transform_logits=False,
+                    one_hot_targets=False,
+                ),
+            ],
+        ),
+    },
+    LossTypes.TVERSKY: {
+        "classification": cnetlosses.TverskyLoss(),
+    },
+    LossTypes.FOCAL_TVERSKY: {
+        "classification": cnetlosses.FocalTverskyLoss(),
+    },
+}
 
 
-class RefineLitModel(LightningModule):
-    def __init__(
-        self,
-        in_features: int,
-        num_classes: int = 2,
-        learning_rate: float = 1e-3,
-        weight_decay: float = 0.01,
-        eps: float = 1e-4,
-        edge_class: int = 2,
-        class_counts: T.Optional[torch.Tensor] = None,
-        cultionet_ckpt: T.Optional[T.Union[Path, str]] = None,
-    ):
-        super(RefineLitModel, self).__init__()
-
-        self.save_hyperparameters()
-
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.eps = eps
-        self.edge_class = edge_class
-        self.class_counts = class_counts
-        self.cultionet_ckpt = cultionet_ckpt
-
-        self.cultionet_model = None
-        self.geo_refine_model = GeoRefinement(
-            in_features=in_features, out_channels=num_classes
-        )
-
-        self.configure_loss()
+class LightningModuleMixin(LightningModule):
+    def __init__(self):
+        super().__init__()
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
-
-    def forward(
-        self,
-        predictions: T.Dict[str, torch.Tensor],
-        batch: Data,
-        batch_idx: int = None,
-    ) -> T.Dict[str, torch.Tensor]:
-        return self.geo_refine_model(predictions, data=batch)
-
-    def set_true_labels(self, batch: Data) -> torch.Tensor:
-        # in case of multi-class, `true_crop` = 1, 2, etc.
-        true_crop = torch.where(
-            (batch.y > 0) & (batch.y != self.edge_class), 1, 0
-        ).long()
-
-        return true_crop
-
-    def calc_loss(
-        self,
-        batch: T.Union[Data, T.List],
-        predictions: T.Dict[str, torch.Tensor],
-    ):
-        true_crop = self.set_true_labels(batch)
-        # Predicted crop values are probabilities
-        loss = self.crop_loss(predictions["crop"], true_crop)
-
-        return loss
-
-    def training_step(
-        self, batch: Data, batch_idx: int = None, optimizer_idx: int = None
-    ):
-        """Executes one training step."""
-        # Apply inference with the main cultionet model
-        if (self.cultionet_ckpt is not None) and (
-            self.cultionet_model is None
-        ):
-            self.cultionet_model = CultioLitModel.load_from_checkpoint(
-                checkpoint_path=str(self.cultionet_ckpt)
-            )
-            self.cultionet_model.to(self.device)
-            self.cultionet_model.eval()
-            self.cultionet_model.freeze()
-        with torch.no_grad():
-            predictions = self.cultionet_model(batch)
-
-        predictions = self(predictions, batch)
-        loss = self.calc_loss(batch, predictions)
-
-        metrics = {"loss": loss}
-        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
-
-        return metrics
-
-    def on_train_epoch_end(self, *args, **kwargs):
-        """Save the scaling parameters on training end."""
-        if self.logger.save_dir is not None:
-            model_file = Path(self.logger.save_dir) / "refine.pt"
-            if model_file.is_file():
-                model_file.unlink()
-            torch.save(self.geo_refine_model.state_dict(), model_file)
-
-    def configure_loss(self):
-        self.crop_loss = TanimotoDistLoss(scale_pos_weight=True)
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            list(self.geo_refine_model.parameters()),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay,
-            eps=self.eps,
-        )
-        lr_scheduler = optim_lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=20, eta_min=1e-5, last_epoch=-1
-        )
-
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": lr_scheduler,
-                "monitor": "loss",
-                "interval": "epoch",
-                "frequency": 1,
-            },
-        }
-
-
-class CultioLitModel(LightningModule):
-    def __init__(
-        self,
-        num_features: int = None,
-        num_time_features: int = None,
-        num_classes: int = 2,
-        filters: int = 32,
-        model_type: str = "ResUNet3Psi",
-        activation_type: str = "SiLU",
-        dilations: T.Union[int, T.Sequence[int]] = None,
-        res_block_type: str = "resa",
-        attention_weights: str = "spatial_channel",
-        optimizer: str = "AdamW",
-        learning_rate: float = 1e-3,
-        lr_scheduler: str = "CosineAnnealingLR",
-        steplr_step_size: int = 5,
-        weight_decay: float = 0.01,
-        eps: float = 1e-4,
-        ckpt_name: str = "last",
-        model_name: str = "cultionet",
-        deep_sup_dist: bool = False,
-        deep_sup_edge: bool = False,
-        deep_sup_mask: bool = False,
-        class_counts: T.Optional[torch.Tensor] = None,
-        edge_class: T.Optional[int] = None,
-        temperature_lit_model: T.Optional[GeoRefinement] = None,
-        scale_pos_weight: T.Optional[bool] = True,
-        save_batch_val_metrics: T.Optional[bool] = False,
-    ):
-        """Lightning model."""
-        super(CultioLitModel, self).__init__()
-
-        self.save_hyperparameters()
-
-        self.optimizer = optimizer
-        self.learning_rate = learning_rate
-        self.lr_scheduler = lr_scheduler
-        self.steplr_step_size = steplr_step_size
-        self.weight_decay = weight_decay
-        self.eps = eps
-        self.ckpt_name = ckpt_name
-        self.model_name = model_name
-        self.num_classes = num_classes
-        self.num_time_features = num_time_features
-        self.class_counts = class_counts
-        self.temperature_lit_model = temperature_lit_model
-        self.scale_pos_weight = scale_pos_weight
-        self.save_batch_val_metrics = save_batch_val_metrics
-        self.deep_sup_dist = deep_sup_dist
-        self.deep_sup_edge = deep_sup_edge
-        self.deep_sup_mask = deep_sup_mask
-        self.sigmoid = torch.nn.Sigmoid()
-        if edge_class is not None:
-            self.edge_class = edge_class
-        else:
-            self.edge_class = num_classes
-
-        self.model_attr = f"{model_name}_{model_type}"
-        setattr(
-            self,
-            self.model_attr,
-            CultioNet(
-                ds_features=num_features,
-                ds_time_features=num_time_features,
-                filters=filters,
-                num_classes=self.num_classes,
-                model_type=model_type,
-                activation_type=activation_type,
-                dilations=dilations,
-                res_block_type=res_block_type,
-                attention_weights=attention_weights,
-                deep_sup_dist=deep_sup_dist,
-                deep_sup_edge=deep_sup_edge,
-                deep_sup_mask=deep_sup_mask,
-            ),
-        )
-        self.configure_loss()
-        self.configure_scorer()
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    @property
-    def cultionet_model(self) -> CultioNet:
-        return getattr(self, self.model_attr)
 
     def forward(
         self, batch: Data, batch_idx: int = None
     ) -> T.Dict[str, torch.Tensor]:
         """Performs a single model forward pass.
 
-        Returns:
-            distance: Normalized distance transform (from boundaries), [0,1].
-            edge: Probabilities of edge|non-edge, [0,1].
-            crop: Logits of crop|non-crop.
+        Returns
+        =======
+        distance
+            Normalized distance transform (from boundaries), [0,1]. Shaped (B, 1, H, W).
+        edge
+            Edge|non-edge predictions, logits or probabilities. Shaped (B, 1, H, W).
+        crop
+            Logits of crop|non-crop. Shaped (B, C, H, W).
         """
         return self.cultionet_model(batch)
+
+    @property
+    def cultionet_model(self) -> CultioNet:
+        """Get the network model name."""
+        return getattr(self, self.model_attr)
 
     @staticmethod
     def get_cuda_memory():
@@ -529,20 +123,47 @@ class CultioLitModel(LightningModule):
         a = torch.cuda.memory_allocated(0)
         print(f"{t * 1e-6:.02f}MB", f"{r * 1e-6:.02f}MB", f"{a * 1e-6:.02f}MB")
 
+    def probas_to_labels(
+        self, x: torch.Tensor, thresh: float = 0.5
+    ) -> torch.Tensor:
+        """Converts probabilities to class labels."""
+
+        if x.shape[1] == 1:
+            labels = x.gt(thresh).squeeze(dim=1).long()
+        else:
+            labels = x.argmax(dim=1).long()
+
+        return labels
+
+    def logits_to_probas(self, x: torch.Tensor) -> T.Union[None, torch.Tensor]:
+        """Transforms logits to probabilities."""
+
+        if x is not None:
+            if x.shape[1] > 1:
+                x = F.softmax(x, dim=1, dtype=x.dtype)
+            else:
+                # Single-dimension inputs are sigmoid probabilities
+                x = F.sigmoid(x)
+
+            x = x.clip(0, 1)
+
+        return x
+
     def predict_step(
         self, batch: Data, batch_idx: int = None
     ) -> T.Dict[str, torch.Tensor]:
         """A prediction step for Lightning."""
-        predictions = self.forward(batch, batch_idx)
-        if self.temperature_lit_model is not None:
-            predictions = self.temperature_lit_model(predictions, batch)
+
+        predictions = self.forward(batch, batch_idx=batch_idx)
 
         return predictions
 
+    @torch.no_grad
     def get_true_labels(
         self, batch: Data, crop_type: torch.Tensor = None
     ) -> T.Dict[str, T.Union[None, torch.Tensor]]:
         """Gets true labels from the data batch."""
+
         true_edge = torch.where(batch.y == self.edge_class, 1, 0).long()
         # Recode all crop classes to 1, otherwise 0
         true_crop = torch.where(
@@ -568,53 +189,22 @@ class CultioLitModel(LightningModule):
                 batch.y == self.edge_class, 0, batch.y
             ).long()
 
+        # Weak supervision mask
+        mask = None
+        if batch.y.min() == -1:
+            mask = torch.where(batch.y == -1, 0, 1).to(
+                dtype=torch.long, device=batch.y.device
+            )
+            mask = einops.rearrange(mask, 'b h w -> b 1 h w')
+
         return {
-            "true_edge": true_edge,
-            "true_crop": true_crop,
-            "true_crop_and_edge": true_crop_and_edge,
-            "true_crop_or_edge": true_crop_or_edge,
-            "true_crop_type": true_crop_type,
+            ValidationNames.TRUE_EDGE: true_edge,
+            ValidationNames.TRUE_CROP: true_crop,
+            ValidationNames.TRUE_CROP_AND_EDGE: true_crop_and_edge,
+            ValidationNames.TRUE_CROP_OR_EDGE: true_crop_or_edge,
+            ValidationNames.TRUE_CROP_TYPE: true_crop_type,
+            ValidationNames.MASK: mask,
         }
-
-    def softmax(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
-        return F.softmax(x, dim=dim, dtype=x.dtype)
-
-    def probas_to_labels(
-        self, x: torch.Tensor, thresh: float = 0.5
-    ) -> torch.Tensor:
-        if x.shape[1] == 1:
-            labels = x.gt(thresh).long()
-        else:
-            labels = x.argmax(dim=1).long()
-
-        return labels
-
-    def logits_to_probas(self, x: torch.Tensor) -> T.Union[None, torch.Tensor]:
-        if x is not None:
-            # Single-dimension inputs are sigmoid probabilities
-            if x.shape[1] > 1:
-                # Transform logits to probabilities
-                x = self.softmax(x)
-            else:
-                x = self.sigmoid(x)
-            x = x.clip(0, 1)
-
-        return x
-
-    # def on_train_epoch_start(self):
-    #     # Get the current learning rate from the optimizer
-    #     eps = self.optimizers().optimizer.param_groups[0]['eps']
-    #     weight_decay = self.optimizers().optimizer.param_groups[0]['weight_decay']
-    #     if (weight_decay != self.weight_decay) or (eps != self.eps):
-    #         self.configure_optimizers()
-
-    def on_validation_epoch_end(self, *args, **kwargs):
-        """Save the model on validation end."""
-        if self.logger.save_dir is not None:
-            model_file = Path(self.logger.save_dir) / f"{self.model_name}.pt"
-            if model_file.is_file():
-                model_file.unlink()
-            torch.save(self.state_dict(), model_file)
 
     def calc_loss(
         self,
@@ -623,206 +213,296 @@ class CultioLitModel(LightningModule):
     ):
         """Calculates the loss.
 
-        Returns:
-            Total loss
+        Returns
+        =======
+        Total loss
         """
-        true_labels_dict = self.get_true_labels(
-            batch, crop_type=predictions["crop_type"]
-        )
 
-        # RNN level 2 loss (non-crop=0; crop|edge=1)
-        crop_star_l2_loss = self.crop_star_l2_loss(
-            predictions["crop_star_l2"], true_labels_dict["true_crop_and_edge"]
-        )
-        # RNN final loss (non-crop=0; crop=1; edge=2)
-        crop_star_loss = self.crop_star_loss(
-            predictions["crop_star"], true_labels_dict["true_crop_or_edge"]
-        )
-        # Main loss
-        loss = (
-            # RNN losses
-            0.25 * crop_star_l2_loss
-            + 0.5 * crop_star_loss
-        )
-        # Edge losses
-        if self.deep_sup_dist:
-            dist_loss_3_1 = self.dist_loss_3_1(
-                predictions["dist_3_1"], batch.bdist
+        weights = {
+            InferenceNames.DISTANCE: 1.0,
+            InferenceNames.EDGE: 1.0,
+            InferenceNames.CROP: 1.0,
+        }
+
+        with torch.no_grad():
+            true_labels_dict = self.get_true_labels(
+                batch, crop_type=predictions.get(InferenceNames.CROP_TYPE)
             )
-            dist_loss_2_2 = self.dist_loss_2_2(
-                predictions["dist_2_2"], batch.bdist
+
+            # true_edge_distance = torch.where(
+            #     true_labels_dict[ValidationNames.TRUE_EDGE] == 1,
+            #     1,
+            #     torch.where(
+            #         true_labels_dict[ValidationNames.TRUE_CROP] == 1,
+            #         (1.0 - batch.bdist) ** 20.0,
+            #         0,
+            #     ),
+            # )
+            # true_crop_distance = torch.where(
+            #     true_labels_dict[ValidationNames.TRUE_CROP] != 1,
+            #     0,
+            #     1.0 - true_edge_distance,
+            # )
+
+            # true_edge_distance = einops.rearrange(
+            #     true_edge_distance, 'b h w -> b 1 h w'
+            # )
+            # true_crop_distance = einops.rearrange(
+            #     true_crop_distance, 'b h w -> b 1 h w'
+            # )
+
+        loss = 0.0
+
+        ##########################
+        # Temporal encoding losses
+        ##########################
+
+        if predictions[InferenceNames.CLASSES_L2] is not None:
+            # Temporal encoding level 2 loss (non-crop=0; crop|edge=1)
+            classes_l2_loss = F.cross_entropy(
+                predictions[InferenceNames.CLASSES_L2],
+                true_labels_dict[ValidationNames.TRUE_CROP_AND_EDGE],
+                weight=self.crop_and_edge_weights,
+                reduction='none'
+                if true_labels_dict[ValidationNames.MASK] is not None
+                else 'mean',
             )
-            dist_loss_1_3 = self.dist_loss_1_3(
-                predictions["dist_1_3"], batch.bdist
+
+            if true_labels_dict[ValidationNames.MASK] is not None:
+                classes_l2_loss = classes_l2_loss * einops.rearrange(
+                    true_labels_dict[ValidationNames.MASK], 'b 1 h w -> b h w'
+                )
+                masked_weights = self.crop_and_edge_weights[
+                    true_labels_dict[ValidationNames.TRUE_CROP_AND_EDGE]
+                ] * einops.rearrange(
+                    true_labels_dict[ValidationNames.MASK], 'b 1 h w -> b h w'
+                )
+                classes_l2_loss = classes_l2_loss.sum() / masked_weights.sum()
+
+            weights[InferenceNames.CLASSES_L2] = 0.01
+            loss = loss + classes_l2_loss * weights[InferenceNames.CLASSES_L2]
+
+        if predictions[InferenceNames.CLASSES_L3] is not None:
+            # Temporal encoding final loss (non-crop=0; crop=1; edge=2)
+            classes_last_loss = F.cross_entropy(
+                predictions[InferenceNames.CLASSES_L3],
+                true_labels_dict[ValidationNames.TRUE_CROP_OR_EDGE],
+                weight=self.crop_or_edge_weights,
+                reduction='none'
+                if true_labels_dict[ValidationNames.MASK] is not None
+                else 'mean',
             )
-            # Main loss
+
+            if true_labels_dict[ValidationNames.MASK] is not None:
+                classes_last_loss = classes_last_loss * einops.rearrange(
+                    true_labels_dict[ValidationNames.MASK], 'b 1 h w -> b h w'
+                )
+                masked_weights = self.crop_or_edge_weights[
+                    true_labels_dict[ValidationNames.TRUE_CROP_OR_EDGE]
+                ] * einops.rearrange(
+                    true_labels_dict[ValidationNames.MASK], 'b 1 h w -> b h w'
+                )
+                classes_last_loss = (
+                    classes_last_loss.sum() / masked_weights.sum()
+                )
+
+            weights[InferenceNames.CLASSES_L3] = 0.1
             loss = (
-                loss
-                + 0.1 * dist_loss_3_1
-                + 0.25 * dist_loss_2_2
-                + 0.5 * dist_loss_1_3
+                loss + classes_last_loss * weights[InferenceNames.CLASSES_L3]
             )
+
+        #############
+        # Main losses
+        #############
+
         # Distance transform loss
-        dist_loss = self.dist_loss(predictions["dist"], batch.bdist)
-        # Main loss
-        loss = loss + dist_loss
-        # Distance transform losses
-        if self.deep_sup_edge:
-            edge_loss_3_1 = self.edge_loss_3_1(
-                predictions["edge_3_1"], true_labels_dict["true_edge"]
-            )
-            edge_loss_2_2 = self.edge_loss_2_2(
-                predictions["edge_2_2"], true_labels_dict["true_edge"]
-            )
-            edge_loss_1_3 = self.edge_loss_1_3(
-                predictions["edge_1_3"], true_labels_dict["true_edge"]
-            )
-            # Main loss
-            loss = (
-                loss
-                + 0.1 * edge_loss_3_1
-                + 0.25 * edge_loss_2_2
-                + 0.5 * edge_loss_1_3
-            )
+        dist_loss = self.reg_loss(
+            # Inputs are 0-1 continuous
+            inputs=predictions[InferenceNames.DISTANCE],
+            # True data are 0-1 continuous
+            targets=batch.bdist,
+            mask=true_labels_dict[ValidationNames.MASK],
+        )
+        loss = loss + dist_loss * weights[InferenceNames.DISTANCE]
+
         # Edge loss
-        edge_loss = self.edge_loss(
-            predictions["edge"], true_labels_dict["true_edge"]
+        edge_loss = self.cls_loss(
+            # Inputs are single-layer logits or probabilities
+            inputs=predictions[InferenceNames.EDGE],
+            # True data are 0|1
+            targets=true_labels_dict[ValidationNames.TRUE_EDGE],
+            mask=true_labels_dict[ValidationNames.MASK],
         )
-        # Main loss
-        loss = loss + edge_loss
-        # Crop mask losses
-        if self.deep_sup_mask:
-            crop_loss_3_1 = self.crop_loss_3_1(
-                predictions["crop_3_1"], true_labels_dict["true_crop"]
-            )
-            crop_loss_2_2 = self.crop_loss_2_2(
-                predictions["crop_2_2"], true_labels_dict["true_crop"]
-            )
-            crop_loss_1_3 = self.crop_loss_1_3(
-                predictions["crop_1_3"], true_labels_dict["true_crop"]
-            )
-            # Main loss
-            loss = (
-                loss
-                + 0.1 * crop_loss_3_1
-                + 0.25 * crop_loss_2_2
-                + 0.5 * crop_loss_1_3
-            )
+        loss = loss + edge_loss * weights[InferenceNames.EDGE]
+
         # Crop mask loss
-        crop_loss = self.crop_loss(
-            predictions["crop"], true_labels_dict["true_crop"]
+        crop_loss = self.cls_loss(
+            # Inputs are 2-layer logits or probabilities
+            inputs=predictions[InferenceNames.CROP],
+            # True data are 0|1
+            targets=true_labels_dict[ValidationNames.TRUE_CROP],
+            mask=true_labels_dict[ValidationNames.MASK],
         )
-        # Main loss
-        loss = loss + crop_loss
+        loss = loss + crop_loss * weights[InferenceNames.CROP]
 
-        if predictions["crop_type"] is not None:
-            # Upstream (deep) loss on crop-type
-            crop_type_star_loss = self.crop_type_star_loss(
-                predictions["crop_type_star"],
-                true_labels_dict["true_crop_type"],
-            )
-            loss = loss + crop_type_star_loss
-            # Loss on crop-type
-            crop_type_loss = self.crop_type_loss(
-                predictions["crop_type"], true_labels_dict["true_crop_type"]
-            )
-            loss = loss + crop_type_loss
+        loss_report = {
+            "dloss": dist_loss,
+            "eloss": edge_loss,
+            "closs": crop_loss,
+        }
 
-        return loss
+        return loss / sum(weights.values()), loss_report
 
     def training_step(self, batch: Data, batch_idx: int = None):
         """Executes one training step and logs training step metrics."""
+
         predictions = self(batch)
-        loss = self.calc_loss(batch, predictions)
-        self.log("loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+
+        loss, _ = self.calc_loss(batch, predictions)
+
+        self.log(
+            "loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=batch.num_samples,
+        )
 
         return loss
 
     def _shared_eval_step(self, batch: Data, batch_idx: int = None) -> dict:
-        predictions = self(batch)
-        loss = self.calc_loss(batch, predictions)
+        """Evaluation step shared between validation and testing."""
 
-        dist_mae = self.dist_mae(
-            predictions["dist"].contiguous().view(-1),
-            batch.bdist.contiguous().view(-1),
-        )
-        dist_mse = self.dist_mse(
-            predictions["dist"].contiguous().view(-1),
-            batch.bdist.contiguous().view(-1),
-        )
-        # Get the class labels
-        edge_ypred = self.probas_to_labels(predictions["edge"])
-        crop_ypred = self.probas_to_labels(predictions["crop"])
+        # Forward pass to get predictions
+        predictions = self(batch)
+
+        # Calculate the loss
+        loss, loss_report = self.calc_loss(batch, predictions)
+
+        # Convert probabilities to class labels
+        edge_ypred = self.probas_to_labels(predictions[InferenceNames.EDGE])
+        crop_ypred = self.probas_to_labels(predictions[InferenceNames.CROP])
+
         # Get the true edge and crop labels
         true_labels_dict = self.get_true_labels(
-            batch, crop_type=predictions["crop_type"]
+            batch, crop_type=predictions.get(InferenceNames.CROP_TYPE)
         )
-        # F1-score
-        edge_score = self.edge_f1(edge_ypred, true_labels_dict["true_edge"])
-        crop_score = self.crop_f1(crop_ypred, true_labels_dict["true_crop"])
+
+        if true_labels_dict[ValidationNames.MASK] is not None:
+            # Valid sample = True; Invalid sample = False
+            labels_bool_mask = true_labels_dict[ValidationNames.MASK].to(
+                dtype=torch.bool
+            )
+            predictions[InferenceNames.DISTANCE] = torch.masked_select(
+                predictions[InferenceNames.DISTANCE], labels_bool_mask
+            )
+            bdist = torch.masked_select(
+                batch.bdist, labels_bool_mask.squeeze(dim=1)
+            )
+
+        else:
+            predictions[InferenceNames.DISTANCE] = einops.rearrange(
+                predictions[InferenceNames.DISTANCE], 'b 1 h w -> (b h w)'
+            )
+            bdist = einops.rearrange(batch.bdist, 'b h w -> (b h w)')
+
+        dist_score_args = (predictions[InferenceNames.DISTANCE], bdist)
+
+        dist_mae = self.mae_scorer(*dist_score_args)
+        dist_mse = self.mse_scorer(*dist_score_args)
+
+        if true_labels_dict[ValidationNames.MASK] is not None:
+            edge_ypred = torch.masked_select(
+                edge_ypred, labels_bool_mask.squeeze(dim=1)
+            )
+            crop_ypred = torch.masked_select(
+                crop_ypred, labels_bool_mask.squeeze(dim=1)
+            )
+            true_labels_dict[ValidationNames.TRUE_EDGE] = torch.masked_select(
+                true_labels_dict[ValidationNames.TRUE_EDGE],
+                labels_bool_mask.squeeze(dim=1),
+            )
+            true_labels_dict[ValidationNames.TRUE_CROP] = torch.masked_select(
+                true_labels_dict[ValidationNames.TRUE_CROP],
+                labels_bool_mask.squeeze(dim=1),
+            )
+
+        else:
+            edge_ypred = einops.rearrange(edge_ypred, 'b h w -> (b h w)')
+            crop_ypred = einops.rearrange(crop_ypred, 'b h w -> (b h w)')
+            true_labels_dict[ValidationNames.TRUE_EDGE] = einops.rearrange(
+                true_labels_dict[ValidationNames.TRUE_EDGE], 'b h w -> (b h w)'
+            )
+            true_labels_dict[ValidationNames.TRUE_CROP] = einops.rearrange(
+                true_labels_dict[ValidationNames.TRUE_CROP], 'b h w -> (b h w)'
+            )
+
+        # Scorer input args
+        edge_score_args = (
+            edge_ypred,
+            true_labels_dict[ValidationNames.TRUE_EDGE],
+        )
+        crop_score_args = (
+            crop_ypred,
+            true_labels_dict[ValidationNames.TRUE_CROP],
+        )
+
+        # Fβ-score
+        edge_fscore = self.f_beta_scorer(*edge_score_args)
+        crop_fscore = self.f_beta_scorer(*crop_score_args)
+
         # MCC
-        edge_mcc = self.edge_mcc(edge_ypred, true_labels_dict["true_edge"])
-        crop_mcc = self.crop_mcc(crop_ypred, true_labels_dict["true_crop"])
-        # Dice
-        edge_dice = self.edge_dice(edge_ypred, true_labels_dict["true_edge"])
-        crop_dice = self.crop_dice(crop_ypred, true_labels_dict["true_crop"])
-        # Jaccard/IoU
-        edge_jaccard = self.edge_jaccard(
-            edge_ypred, true_labels_dict["true_edge"]
-        )
-        crop_jaccard = self.crop_jaccard(
-            crop_ypred, true_labels_dict["true_crop"]
-        )
+        edge_mcc = self.mcc_scorer(*edge_score_args)
+        crop_mcc = self.mcc_scorer(*crop_score_args)
 
         total_score = (
             loss
-            + (1.0 - edge_score)
-            + (1.0 - crop_score)
+            + (1.0 - edge_fscore)
+            + (1.0 - crop_fscore)
             + dist_mae
-            + (1.0 - edge_mcc)
-            + (1.0 - crop_mcc)
+            + (1.0 - edge_mcc.clamp_min(0))
+            + (1.0 - crop_mcc.clamp_min(0))
         )
 
         metrics = {
             "loss": loss,
             "dist_mae": dist_mae,
             "dist_mse": dist_mse,
-            "edge_f1": edge_score,
-            "crop_f1": crop_score,
+            "edge_f1": edge_fscore,
+            "crop_f1": crop_fscore,
             "edge_mcc": edge_mcc,
             "crop_mcc": crop_mcc,
-            "edge_dice": edge_dice,
-            "crop_dice": crop_dice,
-            "edge_jaccard": edge_jaccard,
-            "crop_jaccard": crop_jaccard,
             "score": total_score,
         }
-        if predictions["crop_type"] is not None:
-            crop_type_ypred = self.probas_to_labels(
-                self.logits_to_probas(predictions["crop_type"])
-            )
-            crop_type_score = self.crop_type_f1(
-                crop_type_ypred, true_labels_dict["true_crop_type"]
-            )
-            metrics["crop_type_f1"] = crop_type_score
+
+        metrics.update(loss_report)
 
         return metrics
 
     def validation_step(self, batch: Data, batch_idx: int = None) -> dict:
         """Executes one valuation step."""
+
         eval_metrics = self._shared_eval_step(batch, batch_idx)
 
         metrics = {
-            "val_loss": eval_metrics["loss"],
             "vef1": eval_metrics["edge_f1"],
             "vcf1": eval_metrics["crop_f1"],
             "vmae": eval_metrics["dist_mae"],
             "val_score": eval_metrics["score"],
+            "val_loss": eval_metrics["loss"],
+            "val_dloss": eval_metrics["dloss"],
+            "val_eloss": eval_metrics["eloss"],
+            "val_closs": eval_metrics["closs"],
         }
-        if "crop_type_f1" in eval_metrics:
-            metrics["vctf1"] = eval_metrics["crop_type_f1"]
 
-        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
+        self.log_dict(
+            metrics,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=batch.num_samples,
+        )
 
         if self.save_batch_val_metrics:
             self._save_batch_metrics(metrics, self.current_epoch, batch)
@@ -855,6 +535,7 @@ class CultioLitModel(LightningModule):
 
     def test_step(self, batch: Data, batch_idx: int = None) -> dict:
         """Executes one test step."""
+
         eval_metrics = self._shared_eval_step(batch, batch_idx)
 
         metrics = {
@@ -879,73 +560,81 @@ class CultioLitModel(LightningModule):
         return metrics
 
     def configure_scorer(self):
-        self.dist_mae = torchmetrics.MeanAbsoluteError()
-        self.dist_mse = torchmetrics.MeanSquaredError()
-        self.edge_f1 = torchmetrics.F1Score(num_classes=2, average="micro")
-        self.crop_f1 = torchmetrics.F1Score(num_classes=2, average="micro")
-        self.edge_mcc = torchmetrics.MatthewsCorrCoef(num_classes=2)
-        self.crop_mcc = torchmetrics.MatthewsCorrCoef(num_classes=2)
-        self.edge_dice = torchmetrics.Dice(num_classes=2, average="micro")
-        self.crop_dice = torchmetrics.Dice(num_classes=2, average="micro")
-        self.edge_jaccard = torchmetrics.JaccardIndex(
-            average="micro", num_classes=2
+        """The fβ value.
+
+        To put equal weight on precision and recall, set to 1. To emphasize
+        minimizing false positives, set to <1. To emphasize minimizing false
+        negatives, set to >1.
+        """
+
+        self.mae_scorer = torchmetrics.MeanAbsoluteError()
+        self.mse_scorer = torchmetrics.MeanSquaredError()
+        self.f_beta_scorer = torchmetrics.FBetaScore(
+            task="multiclass", num_classes=2, beta=2.0
         )
-        self.crop_jaccard = torchmetrics.JaccardIndex(
-            average="micro", num_classes=2
+        self.mcc_scorer = torchmetrics.MatthewsCorrCoef(
+            task="multiclass", num_classes=2
         )
-        if self.num_classes > 2:
-            self.crop_type_f1 = torchmetrics.F1Score(
-                num_classes=self.num_classes,
-                average="weighted",
-                ignore_index=0,
-            )
+
+    def calc_weights(self, counts: torch.Tensor) -> torch.Tensor:
+        """Calculates class weights."""
+
+        num_samples = counts.sum()
+        num_classes = len(counts)
+        class_weights = num_samples / (num_classes * counts)
+        weights = torch.nan_to_num(class_weights, nan=0, neginf=0, posinf=0)
+
+        return weights
 
     def configure_loss(self):
-        self.dist_loss = TanimotoDistLoss()
-        if self.deep_sup_dist:
-            self.dist_loss_3_1 = TanimotoDistLoss()
-            self.dist_loss_2_2 = TanimotoDistLoss()
-            self.dist_loss_1_3 = TanimotoDistLoss()
-        # Edge losses
-        self.edge_loss = TanimotoDistLoss()
-        if self.deep_sup_edge:
-            self.edge_loss_3_1 = TanimotoDistLoss()
-            self.edge_loss_2_2 = TanimotoDistLoss()
-            self.edge_loss_1_3 = TanimotoDistLoss()
-        # Crop mask losses
-        self.crop_loss = TanimotoDistLoss(
-            scale_pos_weight=self.scale_pos_weight
-        )
-        if self.deep_sup_mask:
-            self.crop_loss_3_1 = TanimotoDistLoss(
-                scale_pos_weight=self.scale_pos_weight
-            )
-            self.crop_loss_2_2 = TanimotoDistLoss(
-                scale_pos_weight=self.scale_pos_weight
-            )
-            self.crop_loss_1_3 = TanimotoDistLoss(
-                scale_pos_weight=self.scale_pos_weight
-            )
-        # Crop RNN losses
-        self.crop_star_l2_loss = TanimotoDistLoss()
-        self.crop_star_loss = TanimotoDistLoss()
-        # FIXME:
-        if self.num_classes > 2:
-            self.crop_type_star_loss = TanimotoDistLoss(
-                scale_pos_weight=self.scale_pos_weight
-            )
-            self.crop_type_loss = TanimotoDistLoss(
-                scale_pos_weight=self.scale_pos_weight
-            )
+        """Configures loss methods."""
+
+        # # Weights for crop AND edge
+        # crop_and_edge_counts = torch.zeros(2, device=self.class_counts.device)
+        # crop_and_edge_counts[0] = self.class_counts[0]
+        # crop_and_edge_counts[1] = self.class_counts[1:].sum()
+        # self.crop_and_edge_weights = self.calc_weights(crop_and_edge_counts)
+
+        # # Weights for crop OR edge
+        # self.crop_or_edge_weights = self.calc_weights(self.class_counts)
+
+        # # Weights for crop
+        # crop_counts = torch.zeros(2, device=self.class_counts.device)
+        # crop_counts[0] = self.class_counts[0]
+        # crop_counts[1] = self.class_counts[1]
+        # self.crop_weights = self.calc_weights(crop_counts)
+
+        # Main loss
+        self.reg_loss = LOSS_DICT[self.loss_name].get("regression")
+        self.cls_loss = LOSS_DICT[self.loss_name].get("classification")
 
     def configure_optimizers(self):
+        """Configures optimizers."""
+
         params_list = list(self.cultionet_model.parameters())
-        if self.optimizer == "AdamW":
+        interval = 'epoch'
+        if self.optimizer == "Adam":
+            optimizer = torch.optim.Adam(
+                params_list,
+                lr=self.learning_rate,
+                eps=self.eps,
+            )
+        elif self.optimizer == "AdamW":
             optimizer = torch.optim.AdamW(
                 params_list,
                 lr=self.learning_rate,
                 weight_decay=self.weight_decay,
                 eps=self.eps,
+                betas=(0.9, 0.98),
+            )
+        elif self.optimizer == "RAdam":
+            optimizer = torch.optim.RAdam(
+                params_list,
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+                decoupled_weight_decay=True,
+                eps=self.eps,
+                betas=(0.9, 0.99),
             )
         elif self.optimizer == "SGD":
             optimizer = torch.optim.SGD(
@@ -957,15 +646,23 @@ class CultioLitModel(LightningModule):
         else:
             raise NameError("Choose either 'AdamW' or 'SGD'.")
 
-        if self.lr_scheduler == "ExponentialLR":
-            model_lr_scheduler = optim_lr_scheduler.ExponentialLR(
-                optimizer, gamma=0.5
-            )
-        elif self.lr_scheduler == "CosineAnnealingLR":
+        if self.lr_scheduler == LearningRateSchedulers.COSINE_ANNEALING_LR:
             model_lr_scheduler = optim_lr_scheduler.CosineAnnealingLR(
                 optimizer, T_max=20, eta_min=1e-5, last_epoch=-1
             )
-        elif self.lr_scheduler == "StepLR":
+        elif self.lr_scheduler == LearningRateSchedulers.EXPONENTIAL_LR:
+            model_lr_scheduler = optim_lr_scheduler.ExponentialLR(
+                optimizer, gamma=0.5
+            )
+        elif self.lr_scheduler == LearningRateSchedulers.ONE_CYCLE_LR:
+            model_lr_scheduler = optim_lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=self.learning_rate,
+                epochs=self.trainer.max_epochs,
+                steps_per_epoch=self.trainer.estimated_stepping_batches,
+            )
+            interval = 'step'
+        elif self.lr_scheduler == LearningRateSchedulers.STEP_LR:
             model_lr_scheduler = optim_lr_scheduler.StepLR(
                 optimizer, step_size=self.steplr_step_size, gamma=0.5
             )
@@ -980,7 +677,228 @@ class CultioLitModel(LightningModule):
                 "scheduler": model_lr_scheduler,
                 "name": "lr_sch",
                 "monitor": "val_score",
-                "interval": "epoch",
+                "interval": interval,
                 "frequency": 1,
             },
         }
+
+
+class CultionetLitTransferModel(LightningModuleMixin):
+    """Transfer learning module for Cultionet."""
+
+    def __init__(
+        self,
+        pretrained_ckpt_file: T.Union[Path, str],
+        in_channels: int,
+        in_time: int,
+        hidden_channels: int = 64,
+        model_type: str = ModelTypes.TOWERUNET,
+        dropout: float = 0.2,
+        activation_type: str = "SiLU",
+        dilations: T.Union[int, T.Sequence[int]] = None,
+        res_block_type: str = ResBlockTypes.RESA,
+        attention_weights: str = AttentionTypes.NATTEN,
+        optimizer: str = "AdamW",
+        loss_name: str = LossTypes.TANIMOTO_COMPLEMENT,
+        learning_rate: float = 0.01,
+        lr_scheduler: str = LearningRateSchedulers.ONE_CYCLE_LR,
+        steplr_step_size: int = 5,
+        weight_decay: float = 1e-3,
+        eps: float = 1e-4,
+        ckpt_name: str = ModelNames.CKPT_TRANSFER_NAME.replace(".ckpt", ""),
+        model_name: str = "cultionet_transfer",
+        pool_by_max: bool = False,
+        batchnorm_first: bool = False,
+        class_counts: T.Optional[torch.Tensor] = None,
+        edge_class: T.Optional[int] = None,
+        scale_pos_weight: bool = False,
+        save_batch_val_metrics: bool = False,
+        finetune: T.Optional[str] = None,
+    ):
+        super().__init__()
+
+        self.save_hyperparameters()
+
+        self.optimizer = optimizer
+        self.loss_name = loss_name
+        self.learning_rate = learning_rate
+        self.lr_scheduler = lr_scheduler
+        self.steplr_step_size = steplr_step_size
+        self.weight_decay = weight_decay
+        self.eps = eps
+        self.ckpt_name = ckpt_name
+        self.model_name = model_name
+        self.in_time = in_time
+        self.class_counts = class_counts
+        self.scale_pos_weight = scale_pos_weight
+        self.save_batch_val_metrics = save_batch_val_metrics
+        self.finetune = finetune
+
+        if edge_class is not None:
+            self.edge_class = edge_class
+        else:
+            self.edge_class = 2
+
+        self.cultionet_model = CultionetLitModel.load_from_checkpoint(
+            checkpoint_path=str(pretrained_ckpt_file)
+        ).cultionet_model
+
+        if self.finetune != "all":
+
+            # Freeze all parameters if not finetuning the full model
+            self.freeze(self.cultionet_model)
+
+            if self.finetune == "fc":
+                # Unfreeze fully connected layers
+                for name, param in self.cultionet_model.named_parameters():
+                    if name.startswith("mask_model.final_"):
+                        param.requires_grad = True
+
+            else:
+
+                # Update the post-UNet layer with trainable parameters
+                mask_model_final_a = cunn.TowerUNetFinal(
+                    in_channels=self.cultionet_model.mask_model.final_a.in_channels,
+                    num_classes=self.cultionet_model.mask_model.final_a.num_classes,
+                    activation_type=activation_type,
+                )
+                mask_model_final_a.apply(init_conv_weights)
+                self.cultionet_model.mask_model.final_a = mask_model_final_a
+
+                mask_model_final_b = cunn.TowerUNetFinal(
+                    in_channels=self.cultionet_model.mask_model.final_b.in_channels,
+                    num_classes=self.cultionet_model.mask_model.final_b.num_classes,
+                    activation_type=activation_type,
+                    resample_factor=2,
+                )
+                mask_model_final_b.apply(init_conv_weights)
+                self.cultionet_model.mask_model.final_b = mask_model_final_b
+
+                mask_model_final_c = cunn.TowerUNetFinal(
+                    in_channels=self.cultionet_model.mask_model.final_c.in_channels,
+                    num_classes=self.cultionet_model.mask_model.final_c.num_classes,
+                    activation_type=activation_type,
+                    resample_factor=4,
+                )
+                mask_model_final_c.apply(init_conv_weights)
+                self.cultionet_model.mask_model.final_c = mask_model_final_c
+
+                mask_model_final_combine = cunn.TowerUNetFinalCombine(
+                    num_classes=self.cultionet_model.mask_model.final_combine.num_classes,
+                    edge_activation=self.cultionet_model.mask_model.final_combine.edge_activation,
+                    mask_activation=self.cultionet_model.mask_model.final_combine.mask_activation,
+                )
+                mask_model_final_combine.apply(init_conv_weights)
+                self.cultionet_model.mask_model.final_combine = (
+                    mask_model_final_combine
+                )
+
+        self.model_attr = f"{model_name}_{model_type}"
+        setattr(
+            self,
+            self.model_attr,
+            self.cultionet_model,
+        )
+
+        self.configure_loss()
+        self.configure_scorer()
+
+    @property
+    def is_transfer_model(self) -> bool:
+        return True
+
+    def freeze(self, layer):
+        for param in layer.parameters():
+            param.requires_grad = False
+
+    def unfreeze(self, layer):
+        for param in layer.parameters():
+            param.requires_grad = True
+
+        return layer
+
+
+class CultionetLitModel(LightningModuleMixin):
+    def __init__(
+        self,
+        in_channels: int,
+        in_time: int,
+        hidden_channels: int = 64,
+        model_type: str = ModelTypes.TOWERUNET,
+        dropout: float = 0.2,
+        activation_type: str = "SiLU",
+        dilations: T.Union[int, T.Sequence[int]] = None,
+        res_block_type: str = ResBlockTypes.RESA,
+        attention_weights: str = AttentionTypes.NATTEN,
+        optimizer: str = "AdamW",
+        loss_name: str = LossTypes.TANIMOTO_COMPLEMENT,
+        learning_rate: float = 0.01,
+        lr_scheduler: str = LearningRateSchedulers.ONE_CYCLE_LR,
+        steplr_step_size: int = 5,
+        weight_decay: float = 1e-3,
+        eps: float = 1e-4,
+        ckpt_name: str = "last",
+        model_name: str = "cultionet",
+        pool_by_max: bool = False,
+        batchnorm_first: bool = False,
+        class_counts: T.Optional[torch.Tensor] = None,
+        edge_class: T.Optional[int] = None,
+        scale_pos_weight: bool = False,
+        save_batch_val_metrics: bool = False,
+    ):
+        """Lightning model."""
+
+        super().__init__()
+
+        self.save_hyperparameters()
+
+        self.optimizer = optimizer
+        self.loss_name = loss_name
+        self.learning_rate = learning_rate
+        self.lr_scheduler = lr_scheduler
+        self.steplr_step_size = steplr_step_size
+        self.weight_decay = weight_decay
+        self.eps = eps
+        self.ckpt_name = ckpt_name
+        self.model_name = model_name
+        self.in_time = in_time
+        self.class_counts = class_counts
+        self.scale_pos_weight = scale_pos_weight
+        self.save_batch_val_metrics = save_batch_val_metrics
+
+        if edge_class is not None:
+            self.edge_class = edge_class
+        else:
+            self.edge_class = 2
+
+        self.model_attr = f"{model_name}_{model_type}"
+        setattr(
+            self,
+            self.model_attr,
+            CultioNet(
+                in_channels=in_channels,
+                in_time=in_time,
+                hidden_channels=hidden_channels,
+                model_type=model_type,
+                dropout=dropout,
+                activation_type=activation_type,
+                dilations=dilations,
+                res_block_type=res_block_type,
+                attention_weights=attention_weights,
+                pool_by_max=pool_by_max,
+                batchnorm_first=batchnorm_first,
+            ),
+        )
+
+        self.configure_loss()
+        self.configure_scorer()
+
+    @property
+    def is_transfer_model(self) -> bool:
+        return False
+
+    # def on_train_epoch_start(self):
+    #     # Get the current learning rate from the optimizer
+    #     weight_decay = self.optimizers().optimizer.param_groups[0]['weight_decay']
+    #     if (weight_decay != self.weight_decay) or (eps != self.eps):
+    #         self.configure_optimizers()

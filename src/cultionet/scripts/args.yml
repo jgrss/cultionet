@@ -1,34 +1,16 @@
-epilog: |
-  ########
-  Examples
-  ########
-
-  # Create training data
-  cultionet create --project-path /projects/data
-
-  # Spatial k-fold cross-validation using quadrant partitions on the dataset
-  cultionet skfoldcv -p . --splits 2 --val-frac 0.5 --processes 8 --epochs 1 --batch-size 4 --precision 16
-
-  # Train a model
-  cultionet train --project-path /projects/data
-
-  # Apply inference over an image
-  cultionet predict --project-path /projects/data -o estimates.tif
-
 dates:
   start_date:
     short: sd
     long: start-date
-    help: The predict start date (mm-dd)
+    help: The start date (mm-dd or yyyy-mm-dd for predictions)
     kwargs:
       default: 01-01
   end_date:
     short: ed
     long: end-date
-    help: The predict start date (mm-dd)
+    help: The end date (mm-dd or yyyy-mm-dd for predictions)
     kwargs:
       default: 01-01
-
 
 shared_image:
   gain:
@@ -85,7 +67,7 @@ shared_create:
     long: res
     help: The cell resolution
     kwargs:
-      default: !!null
+      default: 10.0
       type: '&float'
   feature_pattern:
     short: ''
@@ -106,44 +88,15 @@ shared_create:
     help: Whether to create a dataset for instance segmentation
     kwargs:
       action: store_true
+  add_year:
+    short: ''
+    long: add-year
+    help: The number of years to add to the year column to derive the end year
+    kwargs:
+      default: 0
+      type: '&int'
 
 create:
-  transforms:
-    short: tr
-    long: transforms
-    help: Augmentation transforms to apply
-    kwargs:
-      default:
-        - none
-        - fliplr
-        - flipud
-        - rot90
-        - rot180
-        - rot270
-        - tswarp
-        - tsnoise
-        - tsdrift
-        - tspeaks
-        - gaussian
-        - saltpepper
-        - speckle
-      choices:
-        - none
-        - fliplr
-        - flipud
-        - flipfb
-        - rot90
-        - rot180
-        - rot270
-        - tswarp
-        - tsnoise
-        - tsdrift
-        - tspeaks
-        - roll
-        - gaussian
-        - saltpepper
-        - speckle
-      nargs: '+'
   grid_size:
     short: gs
     long: grid-size
@@ -160,7 +113,7 @@ create:
     help: The data destination
     kwargs:
       default: train
-      choices: ['train', 'test']
+      choices: ['train', 'test', 'predict']
   crop_column:
     short: ''
     long: crop-column
@@ -182,15 +135,25 @@ create:
   replace_dict:
     short: ''
     long: replace-dict
-    help: A dictionary of crop class remappings
+    help: Crop class recodings (e.g., "61:0 141:0")
+  bbox_offsets:
+    short: ''
+    long: bbox_offsets
+    help: Additional grid bounding box offsets (e.g., 0,0 1000,0)
+  nonag_is_unknown:
+    short: ''
+    long: nonag-is-unknown
+    help: Whether the non-agricultural background is unknown
+    kwargs:
+      action: store_true
+  all_touched:
+    short: ''
+    long: all-touched
+    help: Whether to 'burn in' all pixels touched by geometries or only pixels whose center is within the polygon
+    kwargs:
+      action: store_true
 
 create_predict:
-  predict_year:
-    short: 'y'
-    long: year
-    help: The predict end year (yyyy)
-    kwargs:
-      type: '&int'
   window_size:
     short: w
     long: window-size
@@ -209,13 +172,6 @@ create_predict:
     short: ''
     long: ts-path
     help: A path with time series data (overrides the config regions)
-  chunksize:
-    short: ''
-    long: chunksize
-    help: The window chunksize for processing batches
-    kwargs:
-      default: 100
-      type: '&int'
 
 train_predict:
   model_type:
@@ -223,10 +179,9 @@ train_predict:
     long: model-type
     help: The model type
     kwargs:
-      default: 'ResUNet3Psi'
+      default: 'TowerUNet'
       choices:
-        - 'UNet3Psi'
-        - 'ResUNet3Psi'
+        - 'TowerUNet'
   activation_type:
     short: ''
     long: activation-type
@@ -234,18 +189,25 @@ train_predict:
     kwargs:
       default: 'SiLU'
   res_block_type:
-    short: ''
+    short: rb
     long: res-block-type
-    help: The residual block type (only relevant when --model-type=ResUNet3Psi)
+    help: The residual block type)
     kwargs:
-      default: 'res'
+      default: 'resa'
       choices: ['res', 'resa']
+  dropout:
+    short: ''
+    long: dropout
+    help: The dropout probability
+    kwargs:
+      default: 0.2
+      type: '&float'
   dilations:
     short: ''
     long: dilations
     help: The dilations to use
     kwargs:
-      default: [2]
+      default: [1, 2]
       nargs: '+'
       type: '&int'
   attention_weights:
@@ -253,14 +215,14 @@ train_predict:
     long: attention-weights
     help: The attention weights
     kwargs:
-      default: 'spatial_channel'
-      choices: ['spatial_channel', 'fractal', 'none']
-  filters:
+      default: 'natten'
+      choices: ['natten', 'spatial_channel']
+  hidden_channels:
     short: ''
-    long: filters
-    help: The number of model input filters
+    long: hidden-channels
+    help: The number of input hidden channels
     kwargs:
-      default: 32
+      default: 64
       type: '&int'
   device:
     short: ''
@@ -288,72 +250,48 @@ train_predict:
     long: batch-size
     help: The batch size
     kwargs:
-      default: 8
+      default: 4
       type: '&int'
   load_batch_workers:
     short: ''
     long: load-batch-workers
     help: The number of parallel batches to load
     kwargs:
-      default: 2
+      default: 0
       type: '&int'
   precision:
     short: ''
     long: precision
     help: The model data precision
     kwargs:
-      default: 16
-      type: '&int'
-  num_classes:
+      default: '16-mixed'
+  strategy:
     short: ''
-    long: num-classes
-    help: The number of classes (overrides file info)
+    long: strategy
+    help: The model distribution strategy
     kwargs:
-      default: !!null
-      type: '&int'
-
-maskrcnn:
-  resize_height:
+      default: 'ddp'
+      choices: ['ddp', 'ddp_spawn', 'fsdp', 'ddp_find_unused_parameters_true']
+  data_pattern:
     short: ''
-    long: resize-height
-    help: The image resize height
+    long: data-pattern
+    help: A glob pattern for data train files
     kwargs:
-      default: 201
-      type: '&int'
-  resize_width:
+      default: 'data*.pt'
+  log_transform:
     short: ''
-    long: resize-width
-    help: The image resize width
+    long: log-transform
+    help: Whether to log-transform the data
     kwargs:
-      default: 201
-      type: '&int'
-  min_image_size:
-    short: ''
-    long: min-image-size
-    help: The minimum image size
-    kwargs:
-      default: 100
-      type: '&int'
-  max_image_size:
-    short: ''
-    long: max-image-size
-    help: The maximum image size
-    kwargs:
-      default: 600
-      type: '&int'
-  trainable_backbone_layers:
-    short: ''
-    long: trainable-layers
-    help: The number of trainable backbone layers
-    kwargs:
-      default: 3
-      type: '&int'
+      action: store_true
 
 shared_partitions:
   spatial_partitions:
     short: ''
     long: spatial-partitions
     help: The spatial partitions for spatial k-fold cross-validation or regional training
+    kwargs:
+      default: 'yes'
   partition_column:
     short: ''
     long: partition-column
@@ -376,9 +314,16 @@ train:
   val_frac:
     short: ''
     long: val-frac
-    help: the validation fraction
+    help: The validation fraction
     kwargs:
       default: 0.2
+      type: '&float'
+  augment_prob:
+    short: ''
+    long: augment-prob
+    help: The augmentation probability
+    kwargs:
+      default: 0.5
       type: '&float'
   random_seed:
     short: ''
@@ -392,14 +337,7 @@ train:
     long: epochs
     help: The number of training epochs
     kwargs:
-      default: 30
-      type: '&int'
-  save_top_k:
-    short: ''
-    long: save-top-k
-    help: The number of model checkpoints to save (in addition to the last/best)
-    kwargs:
-      default: 1
+      default: 100
       type: '&int'
   threads:
     short: t
@@ -414,10 +352,10 @@ train:
     help: Whether to reset the model
     kwargs:
       action: store_true
-  expected_dim:
+  expected_time:
     short: ''
-    long: expected-dim
-    help: The expected X dimension (time x bands) of the training data
+    long: expected-time
+    help: The expected time dimension of the training data
     kwargs:
       default: !!null
       type: '&int'
@@ -453,18 +391,6 @@ train:
     help: The progress bar color for dimension checks
     kwargs:
       default: '#ffffff'
-  mean_color:
-    short: ''
-    long: mean-color
-    help: The progress bar color for means
-    kwargs:
-      default: '#ffffff'
-  sse_color:
-    short: ''
-    long: sse-color
-    help: The progress bar color for sum of squared errors
-    kwargs:
-      default: '#ffffff'
   auto_lr_find:
     short: ''
     long: lr-find
@@ -484,13 +410,6 @@ train:
     help: The gradient clip algorithm
     kwargs:
       default: 'norm'
-  patience:
-    short: ''
-    long: patience
-    help: The early stopping patience
-    kwargs:
-      default: 20
-      type: '&int'
   optimizer:
     short: ''
     long: optimizer
@@ -498,42 +417,46 @@ train:
     kwargs:
       default: 'AdamW'
       choices:
+        - 'Adam'
         - 'AdamW'
+        - 'RAdam'
         - 'SGD'
-  deep_sup_dist:
+  pool_by_max:
     short: ''
-    long: deep-sup-dist
-    help: Whether to use deep supervision for distances
+    long: pool-by-max
+    help: Whether to apply max pooling before convolution (otherwise, use strided convolution)
     kwargs:
       action: store_true
-  deep_sup_edge:
+  batchnorm_first:
     short: ''
-    long: deep-sup-edge
-    help: Whether to use deep supervision for edges
+    long: batchnorm-first
+    help: Whether to apply BN->Act->Conv, otherwise Conv->BN->Act
     kwargs:
       action: store_true
-  deep_sup_mask:
-    short: ''
-    long: deep-sup-mask
-    help: Whether to use deep supervision for masks
+  loss_name:
+    short: l
+    long: loss-name
+    help: The loss method name
     kwargs:
-      action: store_true
+      default: 'TanimotoComplementLoss'
+      choices: ['TanimotoDistLoss', 'TanimotoComplementLoss', 'TanimotoCombined']
   learning_rate:
     short: lr
     long: learning-rate
     help: The learning rate
     kwargs:
-      default: 1e-3
+      default: 0.01
       type: '&float'
   lr_scheduler:
     short: lrs
     long: lr-scheduler
     help: The learning rate scheduler
     kwargs:
-      default: 'CosineAnnealingLR'
+      default: 'OneCycleLR'
       choices:
-        - 'ExponentialLR'
         - 'CosineAnnealingLR'
+        - 'ExponentialLR'
+        - 'OneCycleLR'
         - 'StepLR'
   steplr_step_size:
     short: ''
@@ -553,7 +476,7 @@ train:
     long: weight-decay
     help: Sets the weight decay for Adam optimizer\'s regularization
     kwargs:
-      default: 0.01
+      default: 1e-3
       type: '&float'
   accumulate_grad_batches:
     short: agb
@@ -612,26 +535,23 @@ train:
     help: Whether to save batch validation metrics
     kwargs:
       action: store_true
-  refine_model:
-    short: ''
-    long: refine-model
-    help: Whether to refine a trained model
-    kwargs:
-      action: store_true
   skip_train:
     short: ''
     long: skip-train
     help: Whether to skip training
     kwargs:
       action: store_true
+  finetune:
+    short: ''
+    long: finetune
+    help: Layers to finetune (if None, do feature extraction)
+    kwargs:
+      default: !!null
+      choices:
+        - all
+        - fc
 
 predict:
-  predict_year:
-    short: 'y'
-    long: year
-    help: The predict end year (yyyy)
-    kwargs:
-      type: '&int'
   out_path:
     short: 'o'
     long: out-path
@@ -666,7 +586,7 @@ predict:
     long: padding
     help: The read padding around the window (padding is sliced off before writing)
     kwargs:
-      default: 101
+      default: 20
       type: '&int'
   mode:
     short: ''
@@ -687,15 +607,21 @@ predict:
     help: The compression algorithm to use
     kwargs:
       default: lzw
-  include_maskrcnn:
-    short: ''
-    long: include-maskrcnn
-    help: Whether to include Mask R-CNN
-    kwargs:
-      action: store_true
   delete_dataset:
     short: ''
     long: delete-dataset
     help: Whether to delete the prediction dataset
     kwargs:
       action: store_true
+
+train_transfer:
+  placeholder:
+    short: ''
+    long: placeholder
+    help: Help for placeholder
+
+predict_transfer:
+  placeholder:
+    short: ''
+    long: placeholder
+    help: Help for placeholder

@@ -1,17 +1,16 @@
 import typing as T
 
 import numpy as np
-from scipy.ndimage.measurements import label as nd_label
-from tsaug import AddNoise, Drift, TimeWarp
 import torch
+import torch.nn.functional as F
+from einops import rearrange
+from tsaug import AddNoise, Drift, TimeWarp
 
-from ..data.utils import LabeledData
+from ..data import Data
 
 
-def feature_stack_to_tsaug(
-    x: np.ndarray, ntime: int, nbands: int, nrows: int, ncols: int
-) -> np.ndarray:
-    """Reshapes from (T*C x H x W) -> (H*W x T X C)
+def feature_stack_to_tsaug(x: torch.Tensor) -> torch.Tensor:
+    """Reshapes from (1 x C x T x H x W) -> (H*W x T X C)
 
     where,
         T = time
@@ -19,24 +18,18 @@ def feature_stack_to_tsaug(
         H = height
         W = width
 
-    Args:
-        x: The array to reshape. The input shape is (T*C x H x W).
-        ntime: The number of array time periods (T).
-        nbands: The number of array bands/channels (C).
-        nrows: The number of array rows (H).
-        ncols: The number of array columns (W).
+    Parameters
+    ==========
+    x
+        The array to reshape. The input shape is (1 x C x T x H x W).
     """
-    return (
-        x.transpose(1, 2, 0)
-        .reshape(nrows * ncols, ntime * nbands)
-        .reshape(nrows * ncols, ntime, nbands)
-    )
+    return rearrange(x, '1 c t h w -> (h w) t c')
 
 
 def tsaug_to_feature_stack(
-    x: np.ndarray, nfeas: int, nrows: int, ncols: int
-) -> np.ndarray:
-    """Reshapes from (H*W x T X C) -> (T*C x H x W)
+    x: torch.Tensor, height: int, width: int
+) -> torch.Tensor:
+    """Reshapes from (H*W x T X C) -> (1 x C x T x H x W)
 
     where,
         T = time
@@ -44,179 +37,324 @@ def tsaug_to_feature_stack(
         H = height
         W = width
 
-    Args:
-        x: The array to reshape. The input shape is (H*W x T X C).
-        nfeas: The number of array features (time x channels).
-        nrows: The number of array rows (height).
-        ncols: The number of array columns (width).
+    Parameters
+    ==========
+    x
+        The array to reshape. The input shape is (H*W x T X C).
+    height
+        The number of array rows (height).
+    width
+        The number of array columns (width).
     """
-    return x.reshape(nrows * ncols, nfeas).T.reshape(nfeas, nrows, ncols)
-
-
-def get_prop_data(
-    ldata: LabeledData, p: T.Any, x: np.ndarray
-) -> T.Tuple[tuple, np.ndarray, np.ndarray]:
-    # Get the segment bounding box
-    min_row, min_col, max_row, max_col = p.bbox
-    bounds_slice = (slice(min_row, max_row), slice(min_col, max_col))
-    # Get the segment features within the bounds
-    xseg = x[(slice(0, None),) + bounds_slice].copy()
-    # Get the segments within the bounds
-    seg = ldata.segments[bounds_slice].copy()
-    # Get the segment mask
-    mask = np.uint8(seg == p.label)[np.newaxis]
-
-    return bounds_slice, xseg, mask
-
-
-def reinsert_prop(
-    x: np.ndarray,
-    bounds_slice: tuple,
-    mask: np.ndarray,
-    x_update: np.ndarray,
-    x_original: np.ndarray,
-) -> np.ndarray:
-    x[(slice(0, None),) + bounds_slice] = np.where(
-        mask == 1, x_update, x_original
+    return rearrange(
+        x,
+        '(h w) t c -> 1 c t h w',
+        h=height,
+        w=width,
     )
 
-    return x
+
+class SegmentParcel:
+    def __init__(
+        self,
+        coords_slices: tuple,
+        dims_slice: tuple,
+        xseg: torch.Tensor,
+    ):
+        self.coords_slices = coords_slices
+        self.dims_slice = dims_slice
+        self.xseg = xseg
+
+    @classmethod
+    def from_prop(cls, ldata: Data, p: T.Any) -> "SegmentParcel":
+        # Get the segment bounding box
+        min_row, min_col, max_row, max_col = p.bbox
+        coords_slices = (slice(0, None),) * 3
+        dims_slice = (
+            slice(min_row, max_row),
+            slice(min_col, max_col),
+        )
+
+        # Get the segment features within the bounds
+        xseg = ldata.x[coords_slices + dims_slice]
+
+        return cls(
+            coords_slices=coords_slices,
+            dims_slice=dims_slice,
+            xseg=xseg,
+        )
+
+
+def insert_parcel(
+    parcel_data: Data,
+    augmented: torch.Tensor,
+    segment_parcel: SegmentParcel,
+    prop: object,
+) -> Data:
+    parcel_data.x[
+        segment_parcel.coords_slices + segment_parcel.dims_slice
+    ] = torch.where(
+        rearrange(
+            torch.from_numpy(parcel_data.segments)[segment_parcel.dims_slice],
+            'h w -> 1 1 1 h w',
+        )
+        == prop.label,
+        augmented,
+        parcel_data.x[
+            segment_parcel.coords_slices + segment_parcel.dims_slice
+        ],
+    )
+
+    return parcel_data
 
 
 def augment_time(
-    ldata: LabeledData,
+    ldata: Data,
     p: T.Any,
-    x: np.ndarray,
-    ntime: int,
-    nbands: int,
     add_noise: bool,
     warper: T.Union[AddNoise, Drift, TimeWarp],
     aug: str,
 ) -> np.ndarray:
     """Applies temporal augmentation to a dataset."""
-    bounds_slice, xseg, mask = get_prop_data(ldata=ldata, p=p, x=x)
+    segment_parcel = SegmentParcel.from_prop(ldata=ldata, p=p)
 
-    # xseg shape = (ntime*nbands x nrows x ncols)
-    xseg_original = xseg.copy()
-    nfeas, nrows, ncols = xseg.shape
-    assert nfeas == int(
-        ntime * nbands
-    ), "The array feature dimensions do not match the expected shape."
+    (
+        num_batch,
+        num_channels,
+        num_time,
+        height,
+        width,
+    ) = segment_parcel.xseg.shape
 
-    # (H*W x T X C)
-    xseg = feature_stack_to_tsaug(xseg, ntime, nbands, nrows, ncols)
+    # (1 x C x T x H x W) -> (H*W x T X C)
+    xseg = feature_stack_to_tsaug(segment_parcel.xseg)
 
     if aug == "tspeaks":
-        new_indices = np.sort(
-            np.random.choice(
-                range(0, ntime * 2 - 8), replace=False, size=ntime
-            )
+        half_a = F.interpolate(
+            rearrange(xseg, 'b t c -> b c t'),
+            size=num_time // 2,
+            mode='linear',
         )
-        xseg = np.concatenate((xseg, xseg), axis=1)[:, 4:-4][:, new_indices]
+        half_b = F.interpolate(
+            rearrange(xseg, 'b t c -> b c t'),
+            size=num_time - half_a.shape[-1],
+            mode='linear',
+        )
+        xseg = rearrange(
+            torch.cat((half_a, half_b), dim=-1),
+            'b c t -> b t c',
+        )
+
     # Warp the segment
-    xseg = warper.augment(xseg)
+    xseg = warper.augment(xseg.numpy())
+
     if add_noise:
         noise_warper = AddNoise(scale=np.random.uniform(low=0.01, high=0.05))
         xseg = noise_warper.augment(xseg)
-    # Reshape back from (H*W x T x C) -> (T*C x H x W)
-    xseg = tsaug_to_feature_stack(xseg, nfeas, nrows, ncols).clip(0, 1)
 
-    # Insert back into full array
-    x = reinsert_prop(
-        x=x,
-        bounds_slice=bounds_slice,
-        mask=mask,
-        x_update=xseg,
-        x_original=xseg_original,
+    # Reshape back from (H*W x T x C) -> (1 x C x T x H x W)
+    xseg = tsaug_to_feature_stack(
+        torch.from_numpy(xseg), height=height, width=width
+    ).clip(0, 1)
+
+    return insert_parcel(
+        parcel_data=ldata,
+        augmented=xseg,
+        segment_parcel=segment_parcel,
+        prop=p,
     )
-
-    return x
 
 
 def roll_time(
-    ldata: LabeledData, p: T.Any, x: np.ndarray, ntime: int
-) -> np.ndarray:
-    bounds_slice, xseg, mask = get_prop_data(ldata=ldata, p=p, x=x)
-    xseg_original = xseg.copy()
+    ldata: Data,
+    p: object,
+    rng: T.Optional[np.random.Generator] = None,
+    random_seed: T.Optional[int] = None,
+) -> Data:
+    if rng is None:
+        rng = np.random.default_rng(random_seed)
+
+    segment_parcel = SegmentParcel.from_prop(ldata=ldata, p=p)
 
     # Get a temporal shift for the object
-    shift = np.random.choice(
-        range(-int(x.shape[0] * 0.25), int(x.shape[0] * 0.25) + 1), size=1
-    )[0]
-    # Shift time in each band separately
-    for b in range(0, xseg.shape[0], ntime):
-        # Get the slice for the current band, n time steps
-        xseg[b : b + ntime] = np.roll(xseg[b : b + ntime], shift=shift, axis=0)
-
-    # Insert back into full array
-    x = reinsert_prop(
-        x=x,
-        bounds_slice=bounds_slice,
-        mask=mask,
-        x_update=xseg,
-        x_original=xseg_original,
+    shift = rng.choice(
+        range(-int(ldata.num_time * 0.25), int(ldata.num_time * 0.25) + 1)
     )
 
-    return x
+    # Shift time
+    # (1 x C x T x H x W)
+    xseg = torch.roll(segment_parcel.xseg, shift, dims=2)
+
+    return insert_parcel(
+        parcel_data=ldata,
+        augmented=xseg,
+        segment_parcel=segment_parcel,
+        prop=p,
+    )
 
 
-def create_parcel_masks(
-    labels_array: np.ndarray, max_crop_class: int
-) -> T.Union[None, dict]:
-    """Creates masks for each instance.
+def interpolant(t):
+    return t * t * t * (t * (t * 6 - 15) + 10)
 
-    Reference:
-        https://torchtutorialstaging.z5.web.core.windows.net/intermediate/torchvision_tutorial.html
+
+def scale_min_max(
+    x: torch.Tensor,
+    in_range: tuple,
+    out_range: tuple,
+) -> torch.Tensor:
+    min_in, max_in = in_range
+    min_out, max_out = out_range
+
+    return (((max_out - min_out) * (x - min_in)) / (max_in - min_in)) + min_out
+
+
+def generate_perlin_noise_3d(
+    shape: T.Tuple[int, int, int],
+    res: T.Tuple[int, int, int],
+    tileable: T.Tuple[bool, bool, bool] = (
+        False,
+        False,
+        False,
+    ),
+    out_range: T.Optional[T.Tuple[float, float]] = None,
+    interpolant: T.Callable = interpolant,
+    rng: T.Optional[np.random.Generator] = None,
+    random_seed: T.Optional[int] = None,
+) -> torch.Tensor:
+    """Generates a 3D tensor of perlin noise.
+
+    Parameters
+    ==========
+    shape
+        The shape of the generated array (tuple of three ints). This must
+        be a multiple of res.
+    res
+        The number of periods of noise to generate along each
+        axis (tuple of three ints). Note shape must be a multiple of res.
+    tileable
+        If the noise should be tileable along each axis (tuple of three bools).
+        Defaults to (False, False, False).
+    interpolant
+        The interpolation function, defaults to t*t*t*(t*(t*6 - 15) + 10).
+
+    Returns
+    =======
+    A tensor with the generated noise.
+
+    Raises:
+        ValueError: If shape is not a multiple of res.
+
+    Source:
+        https://github.com/pvigier/perlin-numpy/tree/master
+
+        MIT License
+        Copyright (c) 2019 Pierre Vigier
     """
-    # Remove edges
-    mask = np.where(
-        (labels_array > 0) & (labels_array <= max_crop_class), 1, 0
+    if out_range is None:
+        out_range = (-0.1, 0.1)
+
+    if rng is None:
+        rng = np.random.default_rng(random_seed)
+
+    delta = (res[0] / shape[0], res[1] / shape[1], res[2] / shape[2])
+    d = (shape[0] // res[0], shape[1] // res[1], shape[2] // res[2])
+    grid = np.mgrid[
+        : res[0] : delta[0], : res[1] : delta[1], : res[2] : delta[2]
+    ]
+    grid = np.mgrid[
+        : res[0] : delta[0], : res[1] : delta[1], : res[2] : delta[2]
+    ]
+    grid = grid.transpose(1, 2, 3, 0) % 1
+
+    grid = torch.from_numpy(grid)
+
+    # Gradients
+    torch.manual_seed(rng.integers(low=0, high=2147483647))
+    theta = 2 * np.pi * torch.rand(res[0] + 1, res[1] + 1, res[2] + 1)
+    torch.manual_seed(rng.integers(low=0, high=2147483647))
+    phi = 2 * np.pi * torch.rand(res[0] + 1, res[1] + 1, res[2] + 1)
+    gradients = torch.stack(
+        (
+            torch.sin(phi) * torch.cos(theta),
+            torch.sin(phi) * torch.sin(theta),
+            torch.cos(phi),
+        ),
+        axis=3,
     )
-    mask = nd_label(mask)[0]
-    obj_ids = np.unique(mask)
-    # first id is the background, so remove it
-    obj_ids = obj_ids[1:]
-    # split the color-encoded mask into a set
-    # of binary masks
-    masks = mask == obj_ids[:, None, None]
 
-    # get bounding box coordinates for each mask
-    num_objs = len(obj_ids)
-    boxes = []
-    small_box_idx = []
-    for i in range(num_objs):
-        pos = np.where(masks[i])
-        xmin = np.min(pos[1])
-        xmax = np.max(pos[1])
-        ymin = np.min(pos[0])
-        ymax = np.max(pos[0])
-        # Fields too small
-        if (xmax - xmin == 0) or (ymax - ymin == 0):
-            small_box_idx.append(i)
-            continue
-        boxes.append([xmin, ymin, xmax, ymax])
+    if tileable[0]:
+        gradients[-1] = gradients[0]
+    if tileable[1]:
+        gradients[:, -1] = gradients[:, 0]
+    if tileable[2]:
+        gradients[..., -1] = gradients[..., 0]
 
-    if small_box_idx:
-        good_idx = np.array(
-            [
-                idx
-                for idx in range(0, masks.shape[0])
-                if idx not in small_box_idx
-            ]
+    gradients = (
+        gradients.repeat_interleave(d[0], 0)
+        .repeat_interleave(d[1], 1)
+        .repeat_interleave(d[2], 2)
+    )
+    g000 = gradients[: -d[0], : -d[1], : -d[2]]
+    g100 = gradients[d[0] :, : -d[1], : -d[2]]
+    g010 = gradients[: -d[0], d[1] :, : -d[2]]
+    g110 = gradients[d[0] :, d[1] :, : -d[2]]
+    g001 = gradients[: -d[0], : -d[1], d[2] :]
+    g101 = gradients[d[0] :, : -d[1], d[2] :]
+    g011 = gradients[: -d[0], d[1] :, d[2] :]
+    g111 = gradients[d[0] :, d[1] :, d[2] :]
+
+    # Ramps
+    n000 = torch.sum(
+        torch.stack((grid[..., 0], grid[..., 1], grid[..., 2]), dim=3) * g000,
+        dim=3,
+    )
+    n100 = torch.sum(
+        torch.stack((grid[..., 0] - 1, grid[..., 1], grid[..., 2]), dim=3)
+        * g100,
+        dim=3,
+    )
+    n010 = torch.sum(
+        torch.stack((grid[..., 0], grid[..., 1] - 1, grid[..., 2]), dim=3)
+        * g010,
+        dim=3,
+    )
+    n110 = torch.sum(
+        torch.stack((grid[..., 0] - 1, grid[..., 1] - 1, grid[..., 2]), dim=3)
+        * g110,
+        dim=3,
+    )
+    n001 = torch.sum(
+        torch.stack((grid[..., 0], grid[..., 1], grid[..., 2] - 1), dim=3)
+        * g001,
+        dim=3,
+    )
+    n101 = torch.sum(
+        torch.stack((grid[..., 0] - 1, grid[..., 1], grid[..., 2] - 1), dim=3)
+        * g101,
+        dim=3,
+    )
+    n011 = torch.sum(
+        torch.stack((grid[..., 0], grid[..., 1] - 1, grid[..., 2] - 1), dim=3)
+        * g011,
+        dim=3,
+    )
+    n111 = torch.sum(
+        torch.stack(
+            (grid[..., 0] - 1, grid[..., 1] - 1, grid[..., 2] - 1), dim=3
         )
-        masks = masks[good_idx]
-    # convert everything into arrays
-    boxes = torch.as_tensor(boxes, dtype=torch.float32)
-    if boxes.size(0) == 0:
-        return None
-    # there is only one class
-    labels = torch.ones((masks.shape[0],), dtype=torch.int64)
-    masks = torch.as_tensor(masks, dtype=torch.uint8)
+        * g111,
+        dim=3,
+    )
 
-    assert (
-        boxes.size(0) == labels.size(0) == masks.size(0)
-    ), "The tensor sizes do not match."
+    # Interpolation
+    t = interpolant(grid)
+    n00 = n000 * (1 - t[..., 0]) + t[..., 0] * n100
+    n10 = n010 * (1 - t[..., 0]) + t[..., 0] * n110
+    n01 = n001 * (1 - t[..., 0]) + t[..., 0] * n101
+    n11 = n011 * (1 - t[..., 0]) + t[..., 0] * n111
+    n0 = (1 - t[..., 1]) * n00 + t[..., 1] * n10
+    n1 = (1 - t[..., 1]) * n01 + t[..., 1] * n11
 
-    target = {"boxes": boxes, "labels": labels, "masks": masks}
+    x = (1 - t[..., 2]) * n0 + t[..., 2] * n1
 
-    return target
+    return scale_min_max(x, in_range=(-0.5, 0.5), out_range=out_range)

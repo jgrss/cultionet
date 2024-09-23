@@ -1,163 +1,106 @@
 import typing as T
-import warnings
 
-import numpy as np
+import einops
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.data import Data
-import torchmetrics
-
-from . import topological
-from ..models import model_utils
 
 
-def one_hot(targets: torch.Tensor, dims: int) -> torch.Tensor:
-    return F.one_hot(targets.contiguous().view(-1), dims).float()
+class LossPreprocessing(nn.Module):
+    def __init__(
+        self, transform_logits: bool = False, one_hot_targets: bool = True
+    ):
+        super().__init__()
 
-
-class LossPreprocessing(torch.nn.Module):
-    def __init__(self, inputs_are_logits: bool, apply_transform: bool):
-        super(LossPreprocessing, self).__init__()
-
-        self.inputs_are_logits = inputs_are_logits
-        self.apply_transform = apply_transform
-        self.sigmoid = torch.nn.Sigmoid()
+        self.transform_logits = transform_logits
+        self.one_hot_targets = one_hot_targets
 
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor = None
-    ) -> T.Tuple[torch.Tensor, T.Union[torch.Tensor, None]]:
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+    ) -> T.Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass to transform logits.
 
         If logits are single-dimension then they are transformed by Sigmoid. If
         logits are multi-dimension then they are transformed by Softmax.
         """
-        if self.inputs_are_logits:
-            if targets is not None:
-                if (len(targets.unique()) > inputs.size(1)) or (
-                    targets.unique().max() + 1 > inputs.size(1)
-                ):
-                    raise ValueError(
-                        "The targets should be ordered values of equal length to the inputs 2nd dimension."
-                    )
-            if self.apply_transform:
-                if inputs.shape[1] == 1:
-                    inputs = self.sigmoid(inputs)
-                else:
-                    inputs = F.softmax(inputs, dim=1, dtype=inputs.dtype)
+
+        if self.transform_logits:
+            if inputs.shape[1] == 1:
+                inputs = F.sigmoid(inputs).to(dtype=inputs.dtype)
+            else:
+                inputs = F.softmax(inputs, dim=1, dtype=inputs.dtype)
 
             inputs = inputs.clip(0, 1)
-            if targets is not None:
-                targets = one_hot(targets, dims=inputs.shape[1])
+
+        if self.one_hot_targets and (inputs.shape[1] > 1):
+
+            with torch.no_grad():
+                targets = einops.rearrange(
+                    F.one_hot(targets, num_classes=inputs.shape[1]),
+                    'b h w c -> b c h w',
+                )
 
         else:
-            inputs = inputs.unsqueeze(1)
-            targets = targets.unsqueeze(1)
+            if len(targets.shape) == 3:
+                targets = einops.rearrange(targets, 'b h w -> b 1 h w')
+
+        if mask is not None:
+
+            if len(mask.shape) == 3:
+                mask = einops.rearrange(mask, 'b h w -> b 1 h w')
+
+            # Apply a mask to zero-out weight
+            inputs = inputs * mask
+            targets = targets * mask
 
         return inputs, targets
 
 
-class TopologicalLoss(torch.nn.Module):
-    """
-    Reference:
-        https://arxiv.org/abs/1906.05404
-        https://arxiv.org/pdf/1906.05404.pdf
-        https://github.com/HuXiaoling/TopoLoss/blob/5cb98177de50a3694f5886137ff7c6f55fd51493/topoloss_pytorch.py
-    """
+class CombinedLoss(nn.Module):
+    def __init__(self, losses: T.List[T.Callable]):
+        super().__init__()
 
-    def __init__(self):
-        super(TopologicalLoss, self).__init__()
-
-        self.gc = model_utils.GraphToConv()
+        self.losses = losses
 
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor, data: Data
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        height = (
-            int(data.height) if data.batch is None else int(data.height[0])
-        )
-        width = int(data.width) if data.batch is None else int(data.width[0])
-        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
+        """Performs a single forward pass.
 
-        input_dims = inputs.shape[1]
-        # Probabilities are ether Sigmoid or Softmax
-        input_index = 0 if input_dims == 1 else 1
+        Parameters
+        ==========
+        inputs
+            Predictions from model (probabilities or labels), shaped (B, C, H, W).
+        targets
+            Ground truth values, shaped (B, C, H, W).
+        mask
+            Values to mask (0) or keep (1), shaped (B, 1, H, W).
 
-        inputs = self.gc(inputs, batch_size, height, width)
-        targets = self.gc(targets.unsqueeze(1), batch_size, height, width)
-        # Clone tensors before detaching from GPU
-        inputs_clone = inputs.clone()
-        targets_clone = targets.clone()
+        Returns
+        =======
+        Average distance loss (float)
+        """
 
-        topo_cp_weight_map = np.zeros(
-            inputs_clone[:, input_index].shape, dtype="float32"
-        )
-        topo_cp_ref_map = np.zeros(
-            inputs_clone[:, input_index].shape, dtype="float32"
-        )
-        topo_mask = np.zeros(inputs_clone[:, input_index].shape, dtype="uint8")
+        loss = 0.0
+        for loss_func in self.losses:
+            loss = loss + loss_func(
+                inputs=inputs,
+                targets=targets,
+                mask=mask,
+            )
 
-        # Detach from GPU for gudhi libary
-        inputs_clone = (
-            inputs_clone[:, input_index].float().cpu().detach().numpy()
-        )
-        targets_clone = targets_clone[:, 0].float().cpu().detach().numpy()
+        loss = loss / len(self.losses)
 
-        pd_lh, bcp_lh, dcp_lh, pairs_lh_pa = topological.critical_points(
-            inputs_clone
-        )
-        pd_gt, __, __, pairs_lh_gt = topological.critical_points(targets_clone)
-
-        if pairs_lh_pa and pairs_lh_gt:
-            for batch in range(0, batch_size):
-                if (pd_lh[batch].size > 0) and (pd_gt[batch].size > 0):
-                    (
-                        __,
-                        idx_holes_to_fix,
-                        idx_holes_to_remove,
-                    ) = topological.compute_dgm_force(
-                        pd_lh[batch], pd_gt[batch], pers_thresh=0.03
-                    )
-                    (
-                        topo_cp_weight_map[batch],
-                        topo_cp_ref_map[batch],
-                        topo_mask[batch],
-                    ) = topological.set_topology_weights(
-                        likelihood=inputs_clone[batch],
-                        topo_cp_weight_map=topo_cp_weight_map[batch],
-                        topo_cp_ref_map=topo_cp_ref_map[batch],
-                        topo_mask=topo_mask[batch],
-                        bcp_lh=bcp_lh[batch],
-                        dcp_lh=dcp_lh[batch],
-                        idx_holes_to_fix=idx_holes_to_fix,
-                        idx_holes_to_remove=idx_holes_to_remove,
-                        height=inputs.shape[-2],
-                        width=inputs.shape[-1],
-                    )
-
-        topo_cp_weight_map = torch.tensor(
-            topo_cp_weight_map, dtype=inputs.dtype, device=inputs.device
-        )
-        topo_cp_ref_map = torch.tensor(
-            topo_cp_ref_map, dtype=inputs.dtype, device=inputs.device
-        )
-        topo_mask = torch.tensor(topo_mask, dtype=bool, device=inputs.device)
-        if not topo_mask.any():
-            topo_loss = (
-                (inputs[:, input_index] * topo_cp_weight_map) - topo_cp_ref_map
-            ) ** 2
-        else:
-            topo_loss = (
-                (
-                    inputs[:, input_index][topo_mask]
-                    * topo_cp_weight_map[topo_mask]
-                )
-                - topo_cp_ref_map[topo_mask]
-            ) ** 2
-
-        return topo_loss.mean()
+        return loss
 
 
-class TanimotoComplementLoss(torch.nn.Module):
+class TanimotoComplementLoss(nn.Module):
     """Tanimoto distance loss.
 
     Adapted from publications and source code below:
@@ -192,68 +135,118 @@ class TanimotoComplementLoss(torch.nn.Module):
         self,
         smooth: float = 1e-5,
         depth: int = 5,
-        targets_are_labels: bool = True,
+        transform_logits: bool = False,
+        one_hot_targets: bool = True,
     ):
-        super(TanimotoComplementLoss, self).__init__()
+        super().__init__()
 
         self.smooth = smooth
         self.depth = depth
-        self.targets_are_labels = targets_are_labels
+        self.one_hot_targets = one_hot_targets
 
         self.preprocessor = LossPreprocessing(
-            inputs_are_logits=True, apply_transform=True
+            transform_logits=transform_logits,
+            one_hot_targets=one_hot_targets,
         )
 
+    def tanimoto_distance(
+        self,
+        y: torch.Tensor,
+        yhat: torch.Tensor,
+        dim: T.Optional[T.Tuple[int, ...]] = None,
+    ) -> torch.Tensor:
+        if dim is None:
+            dim = (1, 2, 3)
+
+        scale = 1.0 / self.depth
+
+        tpl = y * yhat
+        sq_sum = y**2 + yhat**2
+
+        tpl = tpl.sum(dim=dim)
+        sq_sum = sq_sum.sum(dim=dim)
+
+        denominator = 0.0
+        for d in range(0, self.depth):
+            a = 2.0**d
+            b = -(2.0 * a - 1.0)
+            denominator = denominator + torch.reciprocal(
+                ((a * sq_sum) + (b * tpl)) + self.smooth
+            )
+
+        numerator = tpl + self.smooth
+
+        if dim == (2, 3):
+            distance = ((numerator * denominator) * scale).sum(dim=1)
+        else:
+            distance = (numerator * denominator) * scale
+
+        loss = 1.0 - distance
+
+        return loss
+
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+        dim: T.Optional[T.Tuple[int, ...]] = None,
     ) -> torch.Tensor:
         """Performs a single forward pass.
 
-        Args:
-            inputs: Predictions from model (probabilities or labels).
-            targets: Ground truth values.
+        Parameters
+        ==========
+        inputs
+            Predictions from model (probabilities or labels), shaped (B, C, H, W).
+        targets
+            Ground truth values, shaped (B, C, H, W).
+        mask
+            Values to mask (0) or keep (1), shaped (B, H, W) or (B, 1, H, W).
 
-        Returns:
-            Tanimoto distance loss (float)
+        Returns
+        =======
+        Tanimoto distance loss (float)
         """
-        if self.targets_are_labels:
-            # Discrete targets
-            if inputs.shape[1] > 1:
-                # Softmax and One-hot encoding
-                inputs, targets = self.preprocessor(inputs, targets)
+        inputs, targets = self.preprocessor(
+            inputs=inputs, targets=targets, mask=mask
+        )
 
-        if len(inputs.shape) == 1:
-            inputs = inputs.unsqueeze(1)
-        if len(targets.shape) == 1:
-            targets = targets.unsqueeze(1)
+        loss1 = self.tanimoto_distance(targets, inputs, dim=dim)
+        loss2 = self.tanimoto_distance(1.0 - targets, 1.0 - inputs, dim=dim)
+        loss = (loss1 + loss2) * 0.5
 
-        length = inputs.shape[1]
-
-        def tanimoto(y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
-            scale = 1.0 / self.depth
-            tpl = (y * yhat).sum(dim=0)
-            numerator = tpl + self.smooth
-            sq_sum = (y**2 + yhat**2).sum(dim=0)
-            denominator = torch.zeros(length, dtype=inputs.dtype).to(
-                device=inputs.device
-            )
-            for d in range(0, self.depth):
-                a = 2**d
-                b = -(2.0 * a - 1.0)
-                denominator = denominator + torch.reciprocal(
-                    (a * sq_sum) + (b * tpl) + self.smooth
-                )
-
-            return numerator * denominator * scale
-
-        score = tanimoto(targets, inputs)
-        if inputs.shape[1] == 1:
-            score = (score + tanimoto(1.0 - targets, 1.0 - inputs)) * 0.5
-
-        return (1.0 - score).mean()
+        return loss.mean()
 
 
-class TanimotoDistLoss(torch.nn.Module):
+def tanimoto_dist(
+    ypred: torch.Tensor,
+    ytrue: torch.Tensor,
+    smooth: float,
+    dim: T.Optional[T.Tuple[int, ...]] = None,
+) -> torch.Tensor:
+    """Tanimoto distance."""
+
+    if dim is None:
+        dim = (1, 2, 3)
+
+    ytrue = ytrue.to(dtype=ypred.dtype)
+
+    tpl = ypred * ytrue
+    sq_sum = ypred**2 + ytrue**2
+
+    tpl = tpl.sum(dim=dim)
+    sq_sum = sq_sum.sum(dim=dim)
+
+    numerator = tpl + smooth
+    denominator = (sq_sum - tpl) + smooth
+    distance = numerator / denominator
+
+    loss = 1.0 - distance
+
+    return loss
+
+
+class TanimotoDistLoss(nn.Module):
     """Tanimoto distance loss.
 
     References:
@@ -294,325 +287,577 @@ class TanimotoDistLoss(torch.nn.Module):
     def __init__(
         self,
         smooth: float = 1e-5,
-        beta: T.Optional[float] = 0.999,
-        class_counts: T.Optional[torch.Tensor] = None,
-        scale_pos_weight: T.Optional[bool] = False,
-        transform_logits: T.Optional[bool] = False,
+        transform_logits: bool = False,
+        one_hot_targets: bool = True,
     ):
-        super(TanimotoDistLoss, self).__init__()
-
-        if scale_pos_weight and (class_counts is None):
-            warnings.warn(
-                "Cannot balance classes without class weights. Weights will be derived for each batch.",
-                UserWarning,
-            )
+        super().__init__()
 
         self.smooth = smooth
-        self.beta = beta
-        self.class_counts = class_counts
-        self.scale_pos_weight = scale_pos_weight
-        self.transform_logits = transform_logits
+
         self.preprocessor = LossPreprocessing(
-            inputs_are_logits=True, apply_transform=True
+            transform_logits=transform_logits,
+            one_hot_targets=one_hot_targets,
         )
 
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Performs a single forward pass.
 
-        Args:
-            inputs: Predictions from model (probabilities, logits or labels).
-            targets: Ground truth values.
+        Parameters
+        ==========
+        inputs
+            Predictions from model (probabilities or labels), shaped (B, C, H, W).
+        targets
+            Ground truth values, shaped (B, C, H, W).
+        mask
+            Values to mask (0) or keep (1), shaped (B, 1, H, W).
 
-        Returns:
-            Tanimoto distance loss (float)
+        Returns
+        =======
+        Tanimoto distance loss (float)
         """
-        if self.transform_logits:
-            if len(inputs.shape) == 1:
-                inputs, __ = self.preprocessor(inputs)
-            else:
-                if inputs.shape[1] == 1:
-                    inputs, __ = self.preprocessor(inputs)
-                else:
-                    inputs, targets = self.preprocessor(inputs, targets)
-        else:
-            if len(inputs.shape) > 1:
-                if inputs.shape[1] > 1:
-                    targets = one_hot(targets, dims=inputs.shape[1])
 
-        if len(inputs.shape) == 1:
-            inputs = inputs.unsqueeze(1)
-        if len(targets.shape) == 1:
-            targets = targets.unsqueeze(1)
+        inputs, targets = self.preprocessor(
+            inputs=inputs, targets=targets, mask=mask
+        )
 
-        def tanimoto_loss(yhat: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            y = y.to(dtype=yhat.dtype)
-            if self.scale_pos_weight:
-                if self.class_counts is None:
-                    class_counts = y.sum(dim=0)
-                else:
-                    class_counts = self.class_counts
-                effective_num = 1.0 - self.beta**class_counts
-                weights = (1.0 - self.beta) / effective_num
-                weights = weights / weights.sum() * class_counts.shape[0]
-            else:
-                weights = torch.ones(
-                    inputs.shape[1], dtype=inputs.dtype, device=inputs.device
-                )
-            # Reduce
-            tpl = (yhat * y).sum(dim=0)
-            sq_sum = (yhat**2 + y**2).sum(dim=0)
-            numerator = tpl * weights + self.smooth
-            denominator = (sq_sum - tpl) * weights + self.smooth
-            tanimoto = numerator / denominator
-            loss = 1.0 - tanimoto
-
-            return loss
-
-        loss = tanimoto_loss(inputs, targets)
-        if inputs.shape[1] == 1:
-            compl_loss = tanimoto_loss(1.0 - inputs, 1.0 - targets)
-            loss = (loss + compl_loss) * 0.5
+        loss1 = tanimoto_dist(
+            inputs,
+            targets,
+            smooth=self.smooth,
+        )
+        loss2 = tanimoto_dist(
+            1.0 - inputs,
+            1.0 - targets,
+            smooth=self.smooth,
+        )
+        loss = (loss1 + loss2) * 0.5
 
         return loss.mean()
 
 
-class CrossEntropyLoss(torch.nn.Module):
-    """Cross entropy loss."""
-
-    def __init__(
-        self,
-        weight: T.Optional[torch.Tensor] = None,
-        reduction: T.Optional[str] = "mean",
-        label_smoothing: T.Optional[float] = 0.1,
-    ):
-        super(CrossEntropyLoss, self).__init__()
-
-        self.loss_func = torch.nn.CrossEntropyLoss(
-            weight=weight, reduction=reduction, label_smoothing=label_smoothing
-        )
+class LogCoshLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
 
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Performs a single forward pass.
 
-        Args:
-            inputs: Predictions from model.
-            targets: Ground truth values.
+        Parameters
+        ==========
+        inputs
+            Predictions from model (real values), shaped (B, H, W) or (B, 1, H, W).
+        targets
+            Targets (real values), shaped (B, H, W) or (B, 1, H, W).
+        mask
+            Values to mask (0) or keep (1), shaped (B, H, W) or (B, 1, H, W).
 
-        Returns:
-            Loss (float)
+        Returns
+        =======
+        Log Hyperbolic Cosine loss (float)
         """
-        return self.loss_func(inputs, targets)
+
+        if len(inputs.shape) == 3:
+            inputs = einops.rearrange(inputs, 'b h w -> b 1 h w')
+
+        if len(targets.shape) == 3:
+            targets = einops.rearrange(targets, 'b h w -> b 1 h w')
+
+        loss = torch.log(torch.cosh(inputs - targets))
+
+        if mask is not None:
+
+            if len(mask.shape) == 3:
+                mask = einops.rearrange(mask, 'b h w -> b 1 h w')
+
+            loss = loss * mask
+            loss = loss.sum() / mask.sum()
+
+        else:
+            loss = loss.mean()
+
+        return loss
 
 
-class FocalLoss(torch.nn.Module):
-    """Focal loss.
+class ClassBalancedMSELoss(nn.Module):
+    r"""Class-balanced mean squared error loss.
+
+    License:
+        MIT License
+        Copyright (c) 2023 Adill Al-Ashgar
+
+    References:
+        @article{xia_etal_2024,
+            title={Crop field extraction from high resolution remote sensing images based on semantic edges and spatial structure map},
+            author={Xia, Liegang and Liu, Ruiyan and Su, Yishao and Mi, Shulin and Yang, Dezhi and Chen, Jun and Shen, Zhanfeng},
+            journal={Geocarto International},
+            volume={39},
+            number={1},
+            pages={2302176},
+            year={2024},
+            publisher={Taylor \& Francis},
+        }
+
+    Source:
+        https://github.com/Adillwma/ACB_MSE
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Parameters
+        ==========
+        inputs
+            Predictions (probabilities), shaped (B, H, W) or (B, 1, H, W).
+        targets
+            Ground truth values, shaped (B, H, W) or (B, 1, H, W).
+        mask
+            Values to mask (0) or keep (1), shaped (B, H, W) or (B, 1, H, W).
+        """
+
+        if len(inputs.shape) == 4:
+            inputs = einops.rearrange(inputs, 'b 1 h w -> b h w')
+
+        if len(targets.shape) == 4:
+            targets = einops.rearrange(targets, 'b 1 h w -> b h w')
+
+        if mask is not None:
+
+            if len(mask.shape) == 4:
+                mask = einops.rearrange(mask, 'b 1 h w -> b h w')
+
+            neg_mask = (targets <= 0.5) & (mask != 0)
+            pos_mask = (targets > 0.5) & (mask != 0)
+            target_count = mask.sum()
+
+        else:
+
+            neg_mask = targets <= 0.5
+            pos_mask = ~neg_mask
+            target_count = targets.nelement()
+
+        targets_neg = targets[neg_mask]
+        targets_pos = targets[pos_mask]
+
+        inputs_neg = inputs[neg_mask]
+        inputs_pos = inputs[pos_mask]
+
+        beta = pos_mask.sum() / target_count
+
+        assert 0 <= beta <= 1
+
+        neg_loss = torch.log(
+            torch.cosh(
+                torch.pow(inputs_neg - targets_neg.to(dtype=inputs.dtype), 2)
+            )
+        ).mean()
+
+        pos_loss = torch.log(
+            torch.cosh(
+                torch.pow(inputs_pos - targets_pos.to(dtype=inputs.dtype), 2)
+            )
+        ).mean()
+
+        if torch.isnan(neg_loss):
+            neg_loss = 0.0
+
+        if torch.isnan(pos_loss):
+            pos_loss = 0.0
+
+        loss = beta * neg_loss + (1.0 - beta) * pos_loss
+
+        return loss
+
+
+class BoundaryLoss(nn.Module):
+    """Boundary loss.
+
+    License:
+        MIT License
+        Copyright (c) 2023 Hoel Kervadec
 
     Reference:
-        https://www.kaggle.com/code/bigironsphere/loss-function-library-keras-pytorch/notebook
+        @inproceedings{kervadec_etal_2019,
+            title={Boundary loss for highly unbalanced segmentation},
+            author={Kervadec, Hoel and Bouchtiba, Jihene and Desrosiers, Christian and Granger, Eric and Dolz, Jose and Ayed, Ismail Ben},
+            booktitle={International conference on medical imaging with deep learning},
+            pages={285--296},
+            year={2019},
+            organization={PMLR},
+        }
+
+    Source:
+        https://github.com/LIVIAETS/boundary-loss/tree/108bd9892adca476e6cdf424124bc6268707498e
     """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Performs a single forward pass.
+
+        Parameters
+        ==========
+        inputs
+            Predictions from model (probabilities), shaped (B, 1, H, W).
+        targets
+            Target distance map, shaped (B, H, W) or (B, 1, H, W).
+        mask
+            Values to mask (0) or keep (1), shaped (B, H, W) or (B, 1, H, W).
+
+        Returns
+        =======
+        Boundary loss (float)
+        """
+
+        if len(targets.shape) == 3:
+            targets = einops.rearrange(targets, 'b h w -> b 1 h w')
+
+        if mask is not None:
+            if len(mask.shape) == 3:
+                mask = einops.rearrange(mask, 'b h w -> b 1 h w')
+
+            # Apply a mask to zero-out weight
+            inputs = inputs * mask
+            targets = targets * mask
+
+        hadamard_product = torch.einsum('bchw, bchw -> bchw', inputs, targets)
+
+        if mask is not None:
+            hadamard_mean = hadamard_product.sum() / mask.sum()
+        else:
+            hadamard_mean = hadamard_product.mean()
+
+        return 1.0 - hadamard_mean
+
+
+class SoftSkeleton(nn.Module):
+    """Soft skeleton.
+
+    License:
+        MIT License
+        Copyright (c) 2021 Johannes C. Paetzold and Suprosanna Shit
+
+    Reference:
+        @inproceedings{shit_etal_2021,
+            title={clDice-a novel topology-preserving loss function for tubular structure segmentation},
+            author={Shit, Suprosanna and Paetzold, Johannes C and Sekuboyina, Anjany and Ezhov, Ivan and Unger, Alexander and Zhylka, Andrey and Pluim, Josien PW and Bauer, Ulrich and Menze, Bjoern H},
+            booktitle={Proceedings of the IEEE/CVF conference on computer vision and pattern recognition},
+            pages={16560--16569},
+            year={2021},
+        }
+
+    Source:
+        https://github.com/jocpae/clDice/tree/master
+    """
+
+    def __init__(self, num_iter: int):
+        super().__init__()
+
+        self.num_iter = num_iter
+
+    def soft_erode(self, img: torch.Tensor) -> torch.Tensor:
+        if len(img.shape) == 4:
+
+            p1 = -F.max_pool2d(
+                -img, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0)
+            )
+            p2 = -F.max_pool2d(
+                -img, kernel_size=(1, 3), stride=(1, 1), padding=(0, 1)
+            )
+
+            eroded = torch.min(p1, p2)
+
+        elif len(img.shape) == 5:
+
+            p1 = -F.max_pool3d(
+                -img,
+                kernel_size=(3, 1, 1),
+                stride=(1, 1, 1),
+                padding=(1, 0, 0),
+            )
+            p2 = -F.max_pool3d(
+                -img,
+                kernel_size=(1, 3, 1),
+                stride=(1, 1, 1),
+                padding=(0, 1, 0),
+            )
+            p3 = -F.max_pool3d(
+                -img,
+                kernel_size=(1, 1, 3),
+                stride=(1, 1, 1),
+                padding=(0, 0, 1),
+            )
+
+            eroded = torch.min(torch.min(p1, p2), p3)
+
+        return eroded
+
+    def soft_dilate(self, img: torch.Tensor) -> torch.Tensor:
+        if len(img.shape) == 4:
+            dilated = F.max_pool2d(
+                img, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+            )
+        elif len(img.shape) == 5:
+            dilated = F.max_pool3d(
+                img, kernel_size=(3, 3, 3), stride=(1, 1, 1), padding=(1, 1, 1)
+            )
+
+        return dilated
+
+    def soft_open(self, img: torch.Tensor) -> torch.Tensor:
+        return self.soft_dilate(self.soft_erode(img))
+
+    def soft_skeleton(self, img: torch.Tensor) -> torch.Tensor:
+        img1 = self.soft_open(img)
+        skeleton = F.relu(img - img1)
+
+        for j in range(self.num_iter):
+            img = self.soft_erode(img)
+            img1 = self.soft_open(img)
+            delta = F.relu(img - img1)
+            skeleton = skeleton + F.relu(delta - skeleton * delta)
+
+        return skeleton
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.soft_skeleton(x)
+
+
+class CLDiceLoss(nn.Module):
+    """Centerline Dice loss.
+
+    License:
+        MIT License
+        Copyright (c) 2021 Johannes C. Paetzold and Suprosanna Shit
+
+    Reference:
+        @inproceedings{shit_etal_2021,
+            title={clDice-a novel topology-preserving loss function for tubular structure segmentation},
+            author={Shit, Suprosanna and Paetzold, Johannes C and Sekuboyina, Anjany and Ezhov, Ivan and Unger, Alexander and Zhylka, Andrey and Pluim, Josien PW and Bauer, Ulrich and Menze, Bjoern H},
+            booktitle={Proceedings of the IEEE/CVF conference on computer vision and pattern recognition},
+            pages={16560--16569},
+            year={2021},
+        }
+
+    Source:
+        https://github.com/jocpae/clDice/tree/master
+    """
+
+    def __init__(self, smooth: float = 1.0, num_iter: int = 10):
+        super().__init__()
+
+        self.smooth = smooth
+
+        self.soft_skeleton = SoftSkeleton(num_iter=num_iter)
+
+    def precision_recall(
+        self, skeleton: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
+        return ((skeleton * mask).sum() + self.smooth) / (
+            skeleton.sum() + self.smooth
+        )
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        transform_logits: bool = True,
+        mask: T.Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Performs a single forward pass.
+
+        Parameters
+        ==========
+        inputs
+            Predictions from model (probabilities), shaped (B, 1, H, W).
+        targets
+            Binary targets, where background is 0 and targets are 1, shaped (B, H, W).
+        mask
+            Values to mask (0) or keep (1), shaped (B, 1, H, W).
+
+        Returns
+        =======
+        Centerline Dice loss (float)
+        """
+
+        targets = einops.rearrange(targets, 'b h w -> b 1 h w')
+
+        if transform_logits:
+            inputs = F.softmax(inputs, dim=1)[:, [1]]
+
+        # Get the predicted label
+        y_pred = (inputs > 0.5).long()
+
+        # Add background
+        # TODO: this could be optional
+        pred_background = (1 - y_pred).abs()
+        y_pred = torch.cat((pred_background, y_pred), dim=1)
+
+        true_background = (1 - targets).abs()
+        y_true = torch.cat((true_background, targets), dim=1)
+
+        if mask is not None:
+            y_true = y_true * mask
+            y_pred = y_pred * mask
+
+        pred_skeleton = self.soft_skeleton(y_pred.to(dtype=inputs.dtype))
+        true_skeleton = self.soft_skeleton(y_true.to(dtype=inputs.dtype))
+
+        topo_precision = self.precision_recall(pred_skeleton, y_true)
+        topo_recall = self.precision_recall(true_skeleton, y_pred)
+
+        cl_dice = 1.0 - 2.0 * (topo_precision * topo_recall) / (
+            topo_precision + topo_recall
+        )
+
+        return cl_dice
+
+
+class TverskyLoss(nn.Module):
+    """Tversky loss."""
 
     def __init__(
         self,
-        alpha: float = 0.8,
-        gamma: float = 2.0,
-        weight: T.Optional[torch.Tensor] = None,
-        label_smoothing: T.Optional[float] = 0.1,
+        alpha: float = 0.4,
+        beta: float = 0.6,
+        smooth: float = 1.0,
+        transform_logits: bool = False,
+        one_hot_targets: bool = True,
     ):
-        super(FocalLoss, self).__init__()
+        super().__init__()
 
         self.alpha = alpha
-        self.gamma = gamma
+        self.beta = beta
+        self.smooth = smooth
 
         self.preprocessor = LossPreprocessing(
-            inputs_are_logits=True, apply_transform=True
-        )
-        self.cross_entropy_loss = torch.nn.CrossEntropyLoss(
-            weight=weight, reduction="none", label_smoothing=label_smoothing
+            transform_logits=transform_logits,
+            one_hot_targets=one_hot_targets,
         )
 
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
-    ) -> torch.Tensor:
-        inputs, targets = self.preprocessor(inputs, targets)
-        ce_loss = self.cross_entropy_loss(inputs, targets.half())
-        ce_exp = torch.exp(-ce_loss)
-        focal_loss = self.alpha * (1.0 - ce_exp) ** self.gamma * ce_loss
-
-        return focal_loss.mean()
-
-
-class QuantileLoss(torch.nn.Module):
-    """Loss function for quantile regression.
-
-    Reference:
-        https://pytorch-forecasting.readthedocs.io/en/latest/_modules/pytorch_forecasting/metrics.html#QuantileLoss
-
-    THE MIT License
-
-    Copyright 2020 Jan Beitner
-    """
-
-    def __init__(self, quantiles: T.Tuple[float, float, float]):
-        super(QuantileLoss, self).__init__()
-
-        self.quantiles = quantiles
-
-    def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+        dim: T.Optional[T.Tuple[int, ...]] = None,
     ) -> torch.Tensor:
         """Performs a single forward pass.
 
-        Args:
-            inputs: Predictions from model (probabilities, logits or labels).
-            targets: Ground truth values.
+        Parameters
+        ==========
+        inputs
+            Predictions from model (probabilities), shaped (B, H, W) or (B, 1, H, W).
+        targets
+            Target labels, shaped (B, H, W) or (B, 1, H, W).
+        mask
+            Values to mask (0) or keep (1), shaped (B, H, W) or (B, 1, H, W).
 
-        Returns:
-            Quantile loss (float)
+        Returns
+        =======
+        Tversky loss (float)
         """
-        losses = []
-        for i, q in enumerate(self.quantiles):
-            errors = targets - inputs[:, i]
-            losses.append(torch.max((q - 1) * errors, q * errors).unsqueeze(1))
-        loss = torch.cat(losses, dim=1).sum(dim=1).mean()
 
-        return loss
+        if dim is None:
+            dim = (1, 2, 3)
 
-
-class WeightedL1Loss(torch.nn.Module):
-    """Weighted L1Loss loss."""
-
-    def __init__(self):
-        super(WeightedL1Loss, self).__init__()
-
-    def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
-    ) -> torch.Tensor:
-        """Performs a single forward pass.
-
-        Args:
-            inputs: Predictions from model.
-            targets: Ground truth values.
-
-        Returns:
-            Loss (float)
-        """
-        inputs = inputs.contiguous().view(-1)
-        targets = targets.contiguous().view(-1)
-
-        mae = torch.abs(inputs - targets)
-        weight = inputs + targets
-        loss = (mae * weight).mean()
-
-        return loss
-
-
-class MSELoss(torch.nn.Module):
-    """MSE loss."""
-
-    def __init__(self):
-        super(MSELoss, self).__init__()
-
-        self.loss_func = torch.nn.MSELoss()
-
-    def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor
-    ) -> torch.Tensor:
-        """Performs a single forward pass.
-
-        Args:
-            inputs: Predictions from model.
-            targets: Ground truth values.
-
-        Returns:
-            Loss (float)
-        """
-        return self.loss_func(
-            inputs.contiguous().view(-1), targets.contiguous().view(-1)
+        inputs, targets = self.preprocessor(
+            inputs=inputs, targets=targets, mask=mask
         )
 
+        if mask is not None:
 
-class BoundaryLoss(torch.nn.Module):
-    """Boundary (surface) loss.
+            if len(mask.shape) == 3:
+                mask = einops.rearrange(mask, 'b h w -> b 1 h w')
 
-    Reference:
-        https://github.com/LIVIAETS/boundary-loss
-    """
+            inputs = inputs * mask
+            targets = targets * mask
 
-    def __init__(self):
-        super(BoundaryLoss, self).__init__()
+        tp = (inputs * targets).sum(dim=dim)
+        fp = ((1 - targets) * inputs).sum(dim=dim)
+        fn = (targets * (1 - inputs)).sum(dim=dim)
 
-        self.gc = model_utils.GraphToConv()
-
-    def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor, data: Data
-    ) -> torch.Tensor:
-        """Performs a single forward pass.
-
-        Args:
-            inputs: Predicted probabilities.
-            targets: Ground truth inverse distance transform, where distances
-                along edges are 1.
-            data: Data object used to extract dimensions.
-
-        Returns:
-            Loss (float)
-        """
-        height = (
-            int(data.height) if data.batch is None else int(data.height[0])
+        tversky = (tp + self.smooth) / (
+            tp + self.alpha * fp + self.beta * fn + self.smooth
         )
-        width = int(data.width) if data.batch is None else int(data.width[0])
-        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
-        inputs = self.gc(inputs.unsqueeze(1), batch_size, height, width)
-        targets = self.gc(targets.unsqueeze(1), batch_size, height, width)
+        loss = 1.0 - tversky
 
-        return torch.einsum("bchw, bchw -> bchw", inputs, targets).mean()
+        return loss.mean()
 
 
-class MultiScaleSSIMLoss(torch.nn.Module):
-    """Multi-scale Structural Similarity Index Measure loss."""
+class FocalTverskyLoss(nn.Module):
+    """Focal Tversky loss."""
 
-    def __init__(self):
-        super(MultiScaleSSIMLoss, self).__init__()
+    def __init__(
+        self,
+        alpha: float = 0.2,
+        beta: float = 0.8,
+        gamma: float = 2.0,
+        smooth: float = 1.0,
+    ):
+        super().__init__()
 
-        self.gc = model_utils.GraphToConv()
-        self.msssim = torchmetrics.MultiScaleStructuralSimilarityIndexMeasure(
-            gaussian_kernel=False,
-            kernel_size=3,
-            data_range=1.0,
-            k1=1e-4,
-            k2=9e-4,
+        self.gamma = gamma
+
+        self.tversky_loss = TverskyLoss(
+            alpha=alpha,
+            beta=beta,
+            smooth=smooth,
         )
 
     def forward(
-        self, inputs: torch.Tensor, targets: torch.Tensor, data: Data
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        mask: T.Optional[torch.Tensor] = None,
+        dim: T.Optional[T.Tuple[int, ...]] = None,
     ) -> torch.Tensor:
         """Performs a single forward pass.
 
-        Args:
-            inputs: Predicted probabilities.
-            targets: Ground truth inverse distance transform, where distances
-                along edges are 1.
-            data: Data object used to extract dimensions.
+        Parameters
+        ==========
+        inputs
+            Predictions from model (probabilities), shaped (B, H, W) or (B, 1, H, W).
+        targets
+            Target labels, shaped (B, H, W) or (B, 1, H, W).
+        mask
+            Values to mask (0) or keep (1), shaped (B, H, W) or (B, 1, H, W).
 
-        Returns:
-            Loss (float)
+        Returns
+        =======
+        Focal Tversky loss (float)
         """
-        height = (
-            int(data.height) if data.batch is None else int(data.height[0])
-        )
-        width = int(data.width) if data.batch is None else int(data.width[0])
-        batch_size = 1 if data.batch is None else data.batch.unique().size(0)
 
-        inputs = self.gc(inputs.unsqueeze(1), batch_size, height, width)
-        targets = self.gc(targets.unsqueeze(1), batch_size, height, width).to(
-            dtype=inputs.dtype
+        tversky_loss = self.tversky_loss(
+            inputs=inputs,
+            targets=targets,
+            mask=mask,
+            dim=dim,
         )
 
-        loss = 1.0 - self.msssim(inputs, targets)
+        loss = torch.pow(tversky_loss, self.gamma)
 
-        return loss
+        return loss.mean()
