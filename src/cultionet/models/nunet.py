@@ -9,7 +9,6 @@ import typing as T
 import torch
 
 from . import model_utils
-from . import kernels
 from .base_layers import (
     AttentionGate,
     DoubleConv,
