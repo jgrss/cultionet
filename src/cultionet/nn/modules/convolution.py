@@ -1,22 +1,21 @@
+import logging
 import typing as T
 
+import natten
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
-
-try:
-    import natten
-
-    is_natten_post_017 = hasattr(natten, "context")
-except ImportError:
-    natten = None
 
 from cultionet.enums import AttentionTypes, ResBlockTypes
 
 from ..functional import check_upsample
 from .activations import SetActivation
 from .attention import SpatialChannelAttention
+
+# logging.getLogger("natten").setLevel(logging.ERROR)
+# natten.use_fused_na(True)
+# natten.use_kv_parallelism_in_fused_na(True)
 
 
 class DepthwiseSeparableConv(nn.Module):
@@ -138,33 +137,29 @@ class ResConvBlock2d(nn.Module):
 
         assert num_blocks > 0, "There must be at least one block."
 
-        if in_channels != out_channels:
-            self.residual_conv = nn.Conv2d(
+        conv_layers = []
+
+        conv_layers.append(
+            ConvBlock2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
-                kernel_size=1,
-                padding=0,
+                kernel_size=kernel_size,
+                padding=0 if kernel_size == 1 else kernel_size // 2,
+                dilation=1,
+                activation_type=activation_type,
+                add_activation=True,
+                batchnorm_first=batchnorm_first,
             )
-        else:
-            self.residual_conv = nn.Identity()
+        )
 
-        conv_layers = []
-        for layer_idx in range(num_blocks):
-            layer_in_channels = in_channels if layer_idx == 0 else out_channels
-
-            if layer_idx == 0:
-                layer_padding = 0 if kernel_size == 1 else max(1, dilation - 1)
-                layer_dilation = (
-                    1 if kernel_size == 1 else max(1, dilation - 1)
-                )
-
+        for _ in range(num_blocks - 1):
             conv_layers.append(
                 ConvBlock2d(
-                    in_channels=layer_in_channels,
+                    in_channels=out_channels,
                     out_channels=out_channels,
                     kernel_size=kernel_size,
-                    padding=layer_padding,
-                    dilation=layer_dilation,
+                    padding=0 if kernel_size == 1 else max(1, dilation - 1),
+                    dilation=1 if kernel_size == 1 else max(1, dilation - 1),
                     activation_type=activation_type,
                     add_activation=True,
                     batchnorm_first=batchnorm_first,
@@ -173,31 +168,10 @@ class ResConvBlock2d(nn.Module):
 
         self.block = nn.ModuleList(conv_layers)
 
-        self.full_skip_conv = nn.Conv2d(
-            in_channels=out_channels,
-            out_channels=out_channels,
-            kernel_size=1,
-            padding=0,
-        )
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
-        # Identity or skip convolution
-        skip = self.residual_conv(x)
-
-        # Nested residual
-        for i, layer in enumerate(self.block):
-            if i == 0:
-                x = skip + layer(x)
-            else:
-                x = x + layer(x)
-
-        # x --> layer --> add --> layer --> add --> out --> add
-        # |                ^                 ^               ^
-        # |___layer skip___|___layer skip____|               |
-        # |                                                  ^
-        # |_________________full skip________________________|
-        x = skip + self.full_skip_conv(x)
+        for layer in self.block:
+            x = layer(x)
 
         return x
 
@@ -332,8 +306,8 @@ class ResidualAConv(nn.Module):
         natten_num_heads: int = 8,
         natten_kernel_size: int = 3,
         natten_dilation: int = 1,
-        natten_attn_drop: float = 0.1,
-        natten_proj_drop: float = 0.1,
+        natten_attn_drop: float = 0.0,
+        natten_proj_drop: float = 0.0,
     ):
         super().__init__()
 
@@ -343,12 +317,11 @@ class ResidualAConv(nn.Module):
         self.attention_weights = attention_weights
 
         if in_channels != out_channels:
-            self.skip = ConvBlock2d(
+            self.skip = nn.Conv2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=1,
                 padding=0,
-                add_activation=False,
             )
         else:
             self.skip = nn.Identity()
@@ -362,12 +335,6 @@ class ResidualAConv(nn.Module):
 
             if self.attention_weights == AttentionTypes.NATTEN:
 
-                extra_kwargs = (
-                    {"rel_pos_bias": True}
-                    if is_natten_post_017
-                    else {"bias": True}
-                )
-
                 self.attention_conv = nn.Sequential(
                     Rearrange('b c h w -> b h w c'),
                     nn.LayerNorm(out_channels),
@@ -376,22 +343,19 @@ class ResidualAConv(nn.Module):
                         num_heads=natten_num_heads,
                         kernel_size=natten_kernel_size,
                         dilation=natten_dilation,
+                        rel_pos_bias=False,
                         qkv_bias=True,
-                        qk_scale=None,
                         attn_drop=natten_attn_drop,
                         proj_drop=natten_proj_drop,
-                        **extra_kwargs,
                     ),
+                    nn.LayerNorm(out_channels),
                     Rearrange('b h w c -> b c h w'),
                 )
 
             else:
 
-                self.gamma = nn.Parameter(torch.ones(1, requires_grad=True))
-
                 self.attention_conv = SpatialChannelAttention(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
+                    in_channels=out_channels,
                     activation_type=activation_type,
                 )
 
@@ -413,18 +377,20 @@ class ResidualAConv(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.skip(x)
 
+        if self.attention_weights is not None:
+            skip = out
+
         # Resunet-a block takes the same input and
         # sums multiple outputs with varying dilations.
         for layer in self.res_modules:
             out = out + layer(x)
 
         if self.attention_weights is not None:
+            attention_out = self.attention_conv(skip)
             if self.attention_weights == AttentionTypes.NATTEN:
-                # LayerNorm -> Attention
-                out = self.attention_conv(out)
+                out = out + attention_out
             else:
-                attention = self.attention_conv(x)
-                out = out * (1.0 + self.gamma * attention)
+                out = out * attention_out
 
         return out
 
