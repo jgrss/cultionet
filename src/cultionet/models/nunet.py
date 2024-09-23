@@ -8,37 +8,11 @@ import typing as T
 
 import torch
 import torch.nn as nn
-from einops import rearrange
 from einops.layers.torch import Rearrange
 
 from .. import nn as cunn
 from ..enums import AttentionTypes, ResBlockTypes
 from ..layers.weights import init_conv_weights
-
-
-class DepthwiseSeparableConv(nn.Module):
-    def __init__(
-        self, in_channels: int, hidden_channels: int, out_channels: int
-    ):
-        super().__init__()
-
-        self.separable = nn.Sequential(
-            nn.Conv2d(
-                in_channels,
-                hidden_channels,
-                kernel_size=3,
-                padding=1,
-                groups=in_channels,
-            ),
-            nn.Conv2d(
-                hidden_channels,
-                out_channels,
-                kernel_size=1,
-            ),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.separable(x)
 
 
 class PreTimeReduction(nn.Module):
@@ -49,98 +23,43 @@ class PreTimeReduction(nn.Module):
         out_channels: int,
         activation_type: str,
         batchnorm_first: bool,
-        dropout: float = 0.1,
     ):
         super().__init__()
 
-        # Reduce time to 1
-        self.reduce_time = nn.Sequential(
-            # Randomly drop time steps
-            Rearrange('b c t h w -> b t c h w'),
-            nn.Dropout3d(p=dropout),
-            Rearrange('b t c h w -> b c t h w'),
+        time_kernel_size = 5
+        remaining_time = (
+            (in_time - time_kernel_size + 1) - time_kernel_size + 1
+        )
+
+        self.seq = nn.Sequential(
             nn.Conv3d(
                 in_channels=in_channels,
                 out_channels=in_channels,
-                kernel_size=(in_time, 1, 1),
+                kernel_size=(time_kernel_size, 1, 1),
                 padding=0,
-                bias=False,
             ),
-            Rearrange('b c t h w -> b (c t) h w'),
-            nn.BatchNorm2d(in_channels),
-            cunn.SetActivation(activation_type),
-        )
-
-        # Reduce channels to 1
-        self.reduce_channels = nn.Sequential(
-            # Randomly drop channels
-            nn.Dropout3d(p=dropout),
             nn.Conv3d(
                 in_channels=in_channels,
-                out_channels=1,
-                kernel_size=(1, 3, 3),
-                padding=(0, 1, 1),
-                bias=False,
+                out_channels=in_channels,
+                kernel_size=(time_kernel_size, 1, 1),
+                padding=0,
             ),
+            nn.Conv3d(
+                in_channels=in_channels,
+                out_channels=in_channels,
+                kernel_size=(remaining_time, 1, 1),
+                padding=0,
+            ),
+            # c = channels; t = 1
             Rearrange('b c t h w -> b (c t) h w'),
-            nn.BatchNorm2d(in_time),
-            cunn.SetActivation(activation_type),
-        )
-
-        self.channels_to_stack = cunn.ConvBlock2d(
-            in_channels=in_channels,
-            out_channels=in_channels * in_time,
-            kernel_size=3,
-            padding=1,
-            add_activation=True,
-            activation_type=activation_type,
-            batchnorm_first=batchnorm_first,
-        )
-
-        self.time_to_stack = cunn.ConvBlock2d(
-            in_channels=in_time,
-            out_channels=in_channels * in_time,
-            kernel_size=3,
-            padding=1,
-            add_activation=True,
-            activation_type=activation_type,
-            batchnorm_first=batchnorm_first,
-        )
-
-        self.channels_stack_to_hidden = cunn.ConvBlock2d(
-            in_channels=in_channels * in_time,
-            out_channels=out_channels,
-            kernel_size=3,
-            padding=1,
-            add_activation=True,
-            activation_type=activation_type,
-            batchnorm_first=batchnorm_first,
-        )
-
-        self.time_stack_to_hidden = cunn.ConvBlock2d(
-            in_channels=in_channels * in_time,
-            out_channels=out_channels,
-            kernel_size=3,
-            padding=1,
-            add_activation=True,
-            activation_type=activation_type,
-            batchnorm_first=batchnorm_first,
-        )
-
-        self.stream_to_hidden = cunn.ConvBlock2d(
-            in_channels=in_channels * in_time,
-            out_channels=out_channels,
-            kernel_size=3,
-            padding=1,
-            add_activation=True,
-            activation_type=activation_type,
-            batchnorm_first=batchnorm_first,
-        )
-
-        self.layer_norm = nn.Sequential(
-            cunn.SqueezeAndExcitation(
-                in_channels=out_channels,
-                squeeze_channels=out_channels // 2,
+            cunn.ConvBlock2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding=0,
+                add_activation=True,
+                activation_type=activation_type,
+                batchnorm_first=batchnorm_first,
             ),
             Rearrange('b c h w -> b h w c'),
             nn.LayerNorm(out_channels),
@@ -149,72 +68,12 @@ class PreTimeReduction(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Args:
-            x: Input, shaped (B, C, T, H, W).
+        Parameters
+        ==========
+        x
+            Input, shaped (B, C, T, H, W).
         """
-
-        # Reduce time to 1 and squeeze
-        # -> (B, C, H, W)
-        x_channels = self.reduce_time(x)
-
-        # Reduce channels to 1 and squeeze
-        # -> (B, T, H, W)
-        x_time = self.reduce_channels(x)
-
-        # C -> (C x T)
-        x_channels = self.channels_to_stack(x_channels)
-        # T -> (C x T)
-        x_time = self.time_to_stack(x_time)
-
-        # Stack time and channels
-        x_stream = rearrange(x, 'b c t h w -> b (c t) h w')
-
-        # Fuse
-        x_stream = x_stream + x_channels + x_time
-
-        # (C x T) -> H
-        x_stream = self.stream_to_hidden(x_stream)
-        x_channels = self.channels_stack_to_hidden(x_channels)
-        x_time = self.time_stack_to_hidden(x_time)
-
-        # Fuse
-        x_stream = x_stream + x_channels + x_time
-
-        return self.layer_norm(x_stream)
-
-
-class ReduceTimeToOne(nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        num_time: int,
-        activation_type: str = 'SiLU',
-    ):
-        super().__init__()
-
-        self.conv = nn.Sequential(
-            nn.Conv3d(
-                in_channels=in_channels,
-                out_channels=out_channels,
-                kernel_size=(num_time, 1, 1),
-                padding=0,
-                bias=False,
-            ),
-            Rearrange('b c t h w -> b (c t) h w'),
-            nn.BatchNorm2d(out_channels),
-            cunn.SetActivation(activation_type=activation_type),
-            DepthwiseSeparableConv(
-                in_channels=out_channels,
-                hidden_channels=out_channels,
-                out_channels=out_channels,
-            ),
-            nn.BatchNorm2d(out_channels),
-            cunn.SetActivation(activation_type=activation_type),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.conv(x)
+        return self.seq(x)
 
 
 class TowerUNet(nn.Module):
@@ -249,15 +108,6 @@ class TowerUNet(nn.Module):
             hidden_channels * 8,  # d
         ]
         up_channels = int(hidden_channels * len(channels))
-
-        # self.pre_unet = torch.compile(
-        #     PreUnet3Psi(
-        #         in_channels=in_channels,
-        #         in_time=in_time,
-        #         out_channels=channels[0],
-        #         activation_type=activation_type,
-        #     )
-        # )
 
         self.pre_unet = torch.compile(
             PreTimeReduction(
@@ -349,11 +199,6 @@ class TowerUNet(nn.Module):
         # Initial temporal reduction and convolutions to
         # hidden dimensions
         embeddings = self.pre_unet(x)
-
-        if torch.isnan(embeddings).any():
-            import ipdb
-
-            ipdb.set_trace()
 
         encoded = self.encoder(embeddings)
         decoded = self.decoder(encoded)
